@@ -1,0 +1,19 @@
+# Build output
+build/
+.build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Generated Xcode project (regenerated from project.yml via xcodegen)
+ProtonPhotos.xcodeproj/
+
+# Vendored SDK clone (re-clone via: git clone --branch 0.15.0 https://github.com/ProtonDriveApps/sdk-swift Vendor/sdk-swift)
+Vendor/
+
+# macOS
+.DS_Store
+
+# SwiftPM
+Packages/*/.build/
+*.resolved

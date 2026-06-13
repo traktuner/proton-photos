@@ -1,0 +1,59 @@
+name: ProtonPhotos
+options:
+  bundleIdPrefix: me.protonphotos.mac
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEAD_CODE_STRIPPING: YES
+    ENABLE_HARDENED_RUNTIME: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+
+packages:
+  ProtonDriveSDK:
+    path: Vendor/sdk-swift
+  ProtonPhotosKit:
+    path: Packages/ProtonPhotosKit
+
+targets:
+  ProtonPhotos:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: App
+    dependencies:
+      - package: ProtonDriveSDK
+        product: ProtonDriveSDK
+      - package: ProtonPhotosKit
+        product: PhotosCore
+      - package: ProtonPhotosKit
+        product: DesignSystem
+      - package: ProtonPhotosKit
+        product: ProtonAuth
+      - package: ProtonPhotosKit
+        product: MediaCache
+      - package: ProtonPhotosKit
+        product: TimelineFeature
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.protonphotos.mac
+        PRODUCT_NAME: ProtonPhotos
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.photography"
+        INFOPLIST_KEY_NSPrincipalClass: NSApplication
+        CODE_SIGN_ENTITLEMENTS: App/ProtonPhotos.entitlements
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        OTHER_CODE_SIGN_FLAGS: "--options runtime"
+        # The SDK's linker flags reference the bootstrapper .o files via a path that only
+        # exists for *remote* SwiftPM checkouts. Since we vendor sdk-swift as a local path
+        # package, point the linker at the real Resources directory.
+        LIBRARY_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/Vendor/sdk-swift/Resources
