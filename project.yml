@@ -7,18 +7,25 @@ options:
 
 settings:
   base:
-    SWIFT_VERSION: "6.0"
+    # Swift 5 language mode (compiler is still 6.3): ProtonCore exposes a global `var CryptoGo`
+    # that Swift 6 language mode rejects. The feature package opts into stricter checks itself.
+    SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
     DEAD_CODE_STRIPPING: YES
     ENABLE_HARDENED_RUNTIME: YES
-    SWIFT_STRICT_CONCURRENCY: complete
+    # App-glue code interops with ProtonCore/SDK types that aren't Sendable-annotated.
+    # The pure feature modules (ProtonPhotosKit) keep their own stricter checking.
+    SWIFT_STRICT_CONCURRENCY: minimal
 
 packages:
   ProtonDriveSDK:
     path: Vendor/sdk-swift
   ProtonPhotosKit:
     path: Packages/ProtonPhotosKit
+  ProtonCore:
+    url: https://github.com/ProtonMail/protoncore_ios.git
+    exactVersion: 37.0.1
 
 targets:
   ProtonPhotos:
@@ -40,6 +47,16 @@ targets:
         product: MediaCache
       - package: ProtonPhotosKit
         product: TimelineFeature
+      - package: ProtonCore
+        product: ProtonCoreDataModel
+      - package: ProtonCore
+        product: ProtonCoreCrypto
+      - package: ProtonCore
+        product: ProtonCoreCryptoGoInterface
+      - package: ProtonCore
+        product: ProtonCoreCryptoPatchedGoImplementation
+      - package: ProtonCore
+        product: ProtonCoreKeyManager
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.protonphotos.mac

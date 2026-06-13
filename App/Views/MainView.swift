@@ -5,16 +5,17 @@ import TimelineFeature
 
 struct MainView: View {
     let model: AppModel
+    let backend: any PhotosBackend
+
     @State private var timelineModel: TimelineViewModel
 
-    init(model: AppModel) {
+    init(model: AppModel, backend: any PhotosBackend) {
         self.model = model
-        // Placeholder data source for now; swapped for the SDK-backed repository in Phase 2.
-        let repo = PlaceholderPhotosRepository()
+        self.backend = backend
         _timelineModel = State(
             initialValue: TimelineViewModel(
-                repository: repo,
-                thumbnails: repo,
+                repository: backend,
+                thumbnails: backend,
                 cache: ThumbnailCache()
             )
         )

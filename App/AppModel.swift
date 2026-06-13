@@ -1,9 +1,13 @@
 import Foundation
 import AppKit
+import PhotosCore
 import ProtonAuth
+import ProtonCoreCryptoPatchedGoImplementation
 
-/// Root application state + composition. Owns the session lifecycle and wires the
-/// concrete service implementations into the feature modules.
+typealias PhotosBackend = PhotosRepository & ThumbnailProvider
+
+/// Root application state + composition. Owns the session lifecycle and builds the SDK-backed
+/// services once the user is signed in.
 @MainActor
 @Observable
 final class AppModel {
@@ -14,16 +18,31 @@ final class AppModel {
         case signedIn(ProtonSession)
     }
 
+    enum BackendState {
+        case idle
+        case preparing(String)
+        case ready(any PhotosBackend)
+        case failed(String)
+    }
+
     private(set) var auth: AuthState = .checking
+    private(set) var backend: BackendState = .idle
 
     private let store = SessionKeychainStore()
     private let authenticator = ProtonForkAuthenticator()
     private var signInTask: Task<Void, Never>?
+    private var backendTask: Task<Void, Never>?
+
+    init() {
+        // Wire ProtonCore's CryptoGo to the patched GopenPGP implementation before any crypto runs.
+        injectDefaultCryptoImplementation()
+    }
 
     /// Restore a persisted session on launch.
     func bootstrap() {
         if let session = store.load() {
             auth = .signedIn(session)
+            prepareBackend(session)
         } else {
             auth = .signedOut(error: nil)
         }
@@ -36,15 +55,12 @@ final class AppModel {
             guard let self else { return }
             do {
                 let session = try await authenticator.authenticate(
-                    openURL: { url in
-                        Task { @MainActor in NSWorkspace.shared.open(url) }
-                    },
-                    onProgress: { progress in
-                        Task { @MainActor [weak self] in self?.apply(progress) }
-                    }
+                    openURL: { url in Task { @MainActor in NSWorkspace.shared.open(url) } },
+                    onProgress: { progress in Task { @MainActor [weak self] in self?.apply(progress) } }
                 )
                 store.save(session)
                 auth = .signedIn(session)
+                prepareBackend(session)
             } catch is CancellationError {
                 auth = .signedOut(error: nil)
             } catch {
@@ -60,18 +76,37 @@ final class AppModel {
     }
 
     func signOut() {
+        backendTask?.cancel()
+        backend = .idle
         store.clear()
         auth = .signedOut(error: nil)
     }
 
+    func retryBackend() {
+        if case let .signedIn(session) = auth { prepareBackend(session) }
+    }
+
+    private func prepareBackend(_ session: ProtonSession) {
+        backendTask?.cancel()
+        backend = .preparing("Building your library…")
+        backendTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let bridge = try await DriveSDKBridge(session: session, store: store)
+                backend = .ready(bridge)
+            } catch is CancellationError {
+                // ignore
+            } catch {
+                backend = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            }
+        }
+    }
+
     private func apply(_ progress: ProtonForkAuthenticator.Progress) {
         switch progress {
-        case .requestingLink:
-            auth = .authenticating(status: "Requesting sign-in link…")
-        case .waitingForBrowser:
-            auth = .authenticating(status: "Waiting for you to sign in in your browser…")
-        case .finalizing:
-            auth = .authenticating(status: "Finishing sign-in…")
+        case .requestingLink: auth = .authenticating(status: "Requesting sign-in link…")
+        case .waitingForBrowser: auth = .authenticating(status: "Waiting for you to sign in in your browser…")
+        case .finalizing: auth = .authenticating(status: "Finishing sign-in…")
         }
     }
 }
