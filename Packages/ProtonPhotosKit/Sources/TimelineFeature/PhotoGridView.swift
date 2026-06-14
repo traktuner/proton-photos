@@ -36,18 +36,27 @@ struct PhotoGridView: NSViewRepresentable {
             withIdentifier: DateHeaderView.identifier
         )
 
-        let magnify = NSMagnificationGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleMagnify(_:)))
-        collectionView.addGestureRecognizer(magnify)
-
         let scrollView = NSScrollView()
         scrollView.documentView = collectionView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
         scrollView.contentView.postsBoundsChangedNotifications = true
+        // Native, GPU-smooth pinch zoom centred on the cursor. We re-justify the grid to the new
+        // density only when the live magnify ends (see the notification below).
+        scrollView.allowsMagnification = true
+        scrollView.minMagnification = 0.5
+        scrollView.maxMagnification = 3.0
 
         context.coordinator.collectionView = collectionView
         context.coordinator.layout = layout
+        context.coordinator.scrollView = scrollView
         context.coordinator.baseRowHeight = baseRowHeight
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.didEndLiveMagnify(_:)),
+            name: NSScrollView.didEndLiveMagnifyNotification,
+            object: scrollView
+        )
         context.coordinator.apply(sections: sections, sectionAspects: sectionAspects)
         return scrollView
     }
@@ -69,9 +78,9 @@ struct PhotoGridView: NSViewRepresentable {
         var parent: PhotoGridView
         weak var collectionView: NSCollectionView?
         weak var layout: JustifiedCollectionLayout?
+        weak var scrollView: NSScrollView?
         var baseRowHeight: CGFloat = 168
         var isPinching = false
-        private var startRowHeight: CGFloat = 168
         private var sections: [TimelineSection] = []
         private var sectionItemCounts: [Int] = []
 
@@ -122,21 +131,21 @@ struct PhotoGridView: NSViewRepresentable {
 
         // MARK: Pinch zoom
 
-        @objc func handleMagnify(_ recognizer: NSMagnificationGestureRecognizer) {
-            guard let layout else { return }
-            switch recognizer.state {
-            case .began:
-                isPinching = true
-                startRowHeight = layout.rowHeight
-            case .changed:
-                let proposed = startRowHeight * (1 + recognizer.magnification)
-                layout.rowHeight = min(max(proposed, baseRowHeight * 0.5), baseRowHeight * 2.6)
-            case .ended, .cancelled, .failed:
-                isPinching = false
-                parent.cellZoom = layout.rowHeight / baseRowHeight
-            default:
-                break
+        /// During the pinch, NSScrollView magnifies the whole grid as one surface (GPU, cursor-
+        /// anchored). When it ends, fold that magnification into the layout's row height so the grid
+        /// re-justifies to the new density, and reset magnification to 1 — the cell size is
+        /// unchanged across the swap, only the row packing updates.
+        @objc func didEndLiveMagnify(_ note: Notification) {
+            guard let scrollView, let layout else { return }
+            let magnification = scrollView.magnification
+            guard abs(magnification - 1) > 0.02 else {
+                scrollView.magnification = 1
+                return
             }
+            let newZoom = min(max((layout.rowHeight / baseRowHeight) * magnification, 0.5), 2.6)
+            layout.rowHeight = baseRowHeight * newZoom
+            scrollView.magnification = 1
+            parent.cellZoom = newZoom
         }
     }
 }
