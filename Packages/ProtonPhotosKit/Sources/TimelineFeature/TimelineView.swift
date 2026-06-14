@@ -6,10 +6,7 @@ import MediaCache
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var cellZoom: CGFloat
-    /// Live visual zoom during a pinch (applied to the whole scroll viewport, so it stays lazy);
-    /// the grid re-packs once on release. Anchored at the pinch location ("zoom in place").
-    @State private var liveScale: CGFloat = 1
-    @State private var pinchAnchor: UnitPoint = .center
+    @State private var pinchStartZoom: CGFloat?
     private let aspects: AspectRegistry
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
 
@@ -68,28 +65,21 @@ public struct TimelineView: View {
                 }
                 .padding(.bottom, 16)
             }
-            .scaleEffect(liveScale, anchor: pinchAnchor)   // live zoom on the viewport (stays lazy)
-            .clipped()
             .gesture(pinch)
         }
     }
 
-    /// Live, continuous pinch zoom: scale the viewport in place while pinching, then commit the new
-    /// cell size on release so the grid re-packs (exactly like Apple Photos).
+    /// Continuous pinch zoom: drives the justified row height live, so the grid re-justifies to the
+    /// full width as you pinch (cells smoothly grow/shrink and reflow) — both zoom in and out. The
+    /// final layout is wherever you release; nothing snaps.
     private var pinch: some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                pinchAnchor = value.startAnchor
-                liveScale = min(max(value.magnification, 0.4), 3.0)
+                let start = pinchStartZoom ?? cellZoom
+                if pinchStartZoom == nil { pinchStartZoom = start }
+                cellZoom = min(max(start * value.magnification, 0.5), 2.5)
             }
-            .onEnded { value in
-                let factor = min(max(value.magnification, 0.4), 3.0)
-                // Animate the re-pack: cells fly to their new justified positions (no abrupt jump).
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
-                    cellZoom = min(max(cellZoom * factor, 0.5), 2.5)
-                    liveScale = 1
-                }
-            }
+            .onEnded { _ in pinchStartZoom = nil }
     }
 
     private func sectionHeader(_ title: String) -> some View {
