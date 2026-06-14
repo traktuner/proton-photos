@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import QuartzCore
 import PhotosCore
 import MediaCache
 
@@ -82,6 +83,11 @@ struct PhotoGridView: NSViewRepresentable {
         var baseRowHeight: CGFloat = 168
         var isPinching = false
         private var sections: [TimelineSection] = []
+        private var displayLink: CADisplayLink?
+        private var settleStart: CFTimeInterval = 0
+        private let settleDuration: CFTimeInterval = 0.42
+        private var settleMagnification: CGFloat = 1
+        private var settleRowHeight: CGFloat = 168
         private var sectionItemCounts: [Int] = []
 
         init(_ parent: PhotoGridView) { self.parent = parent }
@@ -135,17 +141,41 @@ struct PhotoGridView: NSViewRepresentable {
         /// anchored). When it ends, fold that magnification into the layout's row height so the grid
         /// re-justifies to the new density, and reset magnification to 1 — the cell size is
         /// unchanged across the swap, only the row packing updates.
-        @objc func didEndLiveMagnify(_ note: Notification) {
+        @MainActor @objc func didEndLiveMagnify(_ note: Notification) {
             guard let scrollView, let layout else { return }
             let magnification = scrollView.magnification
             guard abs(magnification - 1) > 0.02 else {
                 scrollView.magnification = 1
                 return
             }
-            let newZoom = min(max((layout.rowHeight / baseRowHeight) * magnification, 0.5), 2.6)
-            layout.rowHeight = baseRowHeight * newZoom
-            scrollView.magnification = 1
-            parent.cellZoom = newZoom
+            // Animate the settle: geometrically unwind magnification to 1 while growing the row
+            // height, so the visual size stays constant and the grid continuously re-justifies into
+            // the new density (cells reorganise smoothly — no snap, no size bulge).
+            settleMagnification = magnification
+            settleRowHeight = layout.rowHeight
+            settleStart = CACurrentMediaTime()
+            displayLink?.invalidate()
+            let link = collectionView?.displayLink(target: self, selector: #selector(stepSettle(_:)))
+            link?.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+
+        @MainActor @objc private func stepSettle(_ link: CADisplayLink) {
+            guard let scrollView, let layout else { link.invalidate(); displayLink = nil; return }
+            let t = min(1, max(0, (CACurrentMediaTime() - settleStart) / settleDuration))
+            let eased = 1 - pow(1 - t, 3)                                   // ease-out cubic
+            let m = Double(settleMagnification)
+            scrollView.magnification = CGFloat(pow(m, 1 - eased))           // M → 1
+            layout.rowHeight = CGFloat(Double(settleRowHeight) * pow(m, eased))  // old → old·M
+
+            if t >= 1 {
+                scrollView.magnification = 1
+                let finalRowHeight = min(max(settleRowHeight * settleMagnification, baseRowHeight * 0.5), baseRowHeight * 2.6)
+                layout.rowHeight = finalRowHeight
+                parent.cellZoom = finalRowHeight / baseRowHeight
+                link.invalidate()
+                displayLink = nil
+            }
         }
     }
 }
