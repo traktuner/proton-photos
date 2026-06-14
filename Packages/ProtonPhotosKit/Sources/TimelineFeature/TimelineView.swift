@@ -6,7 +6,6 @@ import MediaCache
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var cellZoom: CGFloat
-    @State private var pinchStartZoom: CGFloat?
     private let aspects: AspectRegistry
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
 
@@ -22,10 +21,6 @@ public struct TimelineView: View {
         self.onOpen = onOpen
     }
 
-    private let spacing: CGFloat = 2
-    /// Base justified row height; scaled by the pinch zoom.
-    private let baseRowHeight: CGFloat = 168
-
     public var body: some View {
         Group {
             switch model.state {
@@ -36,63 +31,25 @@ public struct TimelineView: View {
             case let .failed(message):
                 errorState(message)
             case let .loaded(sections):
-                grid(sections)
+                // Precompute aspect ratios here (MainActor). Reading the registry establishes the
+                // observation dependency, so the grid re-justifies as ratios are learned.
+                let _ = aspects.version
+                let sectionAspects = sections.map { section in
+                    section.items.map { min(max(aspects.aspect(for: $0.uid), 0.45), 3.2) }
+                }
+                PhotoGridView(
+                    sections: sections,
+                    allItems: model.allItems,
+                    feed: model.feed,
+                    sectionAspects: sectionAspects,
+                    cellZoom: $cellZoom,
+                    onOpen: onOpen
+                )
+                .ignoresSafeArea(edges: .bottom)
             }
         }
         .background(ProtonColor.backgroundNorm)
         .task { await model.load() }
-    }
-
-    private func grid(_ sections: [TimelineSection]) -> some View {
-        GeometryReader { _ in
-            let rowHeight = baseRowHeight * cellZoom
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14, pinnedViews: [.sectionHeaders]) {
-                    ForEach(sections) { section in
-                        Section {
-                            JustifiedSection(
-                                items: section.items,
-                                targetHeight: rowHeight,
-                                spacing: spacing,
-                                feed: model.feed,
-                                aspects: aspects
-                            ) { item in onOpen(item, model.allItems) }
-                            .padding(.horizontal, spacing)
-                        } header: {
-                            sectionHeader(section.title)
-                        }
-                    }
-                }
-                .padding(.bottom, 16)
-            }
-            .gesture(pinch)
-        }
-    }
-
-    /// Continuous pinch zoom: drives the justified row height live, so the grid re-justifies to the
-    /// full width as you pinch (cells smoothly grow/shrink and reflow) — both zoom in and out. The
-    /// final layout is wherever you release; nothing snaps.
-    private var pinch: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                let start = pinchStartZoom ?? cellZoom
-                if pinchStartZoom == nil { pinchStartZoom = start }
-                cellZoom = min(max(start * value.magnification, 0.5), 2.5)
-            }
-            .onEnded { _ in pinchStartZoom = nil }
-    }
-
-    private func sectionHeader(_ title: String) -> some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(ProtonColor.textNorm)
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial)
     }
 
     private var emptyState: some View {
@@ -129,152 +86,5 @@ public struct TimelineView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-    }
-}
-
-/// One day's photos laid out as justified rows (uniform row height, aspect-preserving widths),
-/// exactly like Apple Photos. Aspect ratios come from `AspectRegistry` (square until learned).
-private struct JustifiedSection: View {
-    let items: [PhotoItem]
-    let targetHeight: CGFloat
-    let spacing: CGFloat
-    let feed: ThumbnailFeed
-    let aspects: AspectRegistry
-    let onOpen: (PhotoItem) -> Void
-
-    var body: some View {
-        _ = aspects.version   // re-lay out as aspect ratios are learned
-        let ratios = items.map { min(max(aspects.aspect(for: $0.uid), 0.45), 3.2) }
-        return JustifiedLayout(targetHeight: targetHeight, spacing: spacing, aspects: ratios) {
-            ForEach(items) { item in
-                PhotoThumbnailCell(item: item, feed: feed)
-                    .clipShape(RoundedRectangle(cornerRadius: 1, style: .continuous))
-                    .onTapGesture { onOpen(item) }
-            }
-        }
-    }
-}
-
-/// Justified rows as a single `Layout` (all cells are direct children) so SwiftUI can animate each
-/// cell flying to its new position when the row height changes. `animatableData` interpolates the
-/// height so the re-pack on pinch-release is smooth.
-private struct JustifiedLayout: Layout {
-    var targetHeight: CGFloat
-    var spacing: CGFloat
-    var aspects: [CGFloat]
-
-    var animatableData: CGFloat {
-        get { targetHeight }
-        set { targetHeight = newValue }
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
-        let width = proposal.width ?? 600
-        let rows = rows(width: width)
-        let height = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(0, rows.count - 1))
-        return CGSize(width: width, height: height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
-        let rows = rows(width: bounds.width)
-        var y = bounds.minY
-        var index = 0
-        for row in rows {
-            var x = bounds.minX
-            for width in row.widths where index < subviews.count {
-                subviews[index].place(
-                    at: CGPoint(x: x, y: y),
-                    anchor: .topLeading,
-                    proposal: ProposedViewSize(width: width, height: row.height)
-                )
-                x += width + spacing
-                index += 1
-            }
-            y += row.height + spacing
-        }
-    }
-
-    private struct Row { var widths: [CGFloat]; var height: CGFloat }
-
-    private func rows(width: CGFloat) -> [Row] {
-        var result: [Row] = []
-        var run: [CGFloat] = []
-        var sum: CGFloat = 0
-        for aspect in aspects {
-            run.append(aspect); sum += aspect
-            let rowWidth = sum * targetHeight + spacing * CGFloat(run.count - 1)
-            if rowWidth >= width {
-                let height = (width - spacing * CGFloat(run.count - 1)) / max(sum, 0.001)
-                result.append(Row(widths: run.map { $0 * height }, height: height))
-                run.removeAll(); sum = 0
-            }
-        }
-        if !run.isEmpty {
-            result.append(Row(widths: run.map { $0 * targetHeight }, height: targetHeight))
-        }
-        return result
-    }
-}
-
-/// A single grid cell. Loads its thumbnail from the shared feed (cache-first) and fills its slot.
-struct PhotoThumbnailCell: View {
-    let item: PhotoItem
-    let feed: ThumbnailFeed
-
-    @State private var image: NSImage?
-
-    var body: some View {
-        Group {
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.medium)
-                    .scaledToFill()
-            } else {
-                ProtonColor.backgroundStrong
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)   // fill the justified slot from the parent
-        .clipped()
-        .overlay(alignment: .bottomTrailing) { videoBadge }
-        .overlay(alignment: .topTrailing) { liveBadge }
-        .contentShape(Rectangle())
-        .task(id: item.uid) {
-                while !Task.isCancelled {
-                    if let img = await feed.cachedImage(for: item.uid) {
-                        image = img
-                        return
-                    }
-                    await feed.requestPriority(item.uid)
-                    try? await Task.sleep(for: .milliseconds(120))
-                }
-            }
-    }
-
-    @ViewBuilder private var videoBadge: some View {
-        if item.isVideo {
-            HStack(spacing: 3) {
-                Image(systemName: "video.fill").font(.system(size: 9))
-                if let d = item.durationSeconds { Text(Self.duration(d)).font(.system(size: 10, weight: .medium)) }
-            }
-            .foregroundStyle(.white)
-            .shadow(radius: 1)
-            .padding(5)
-        }
-    }
-
-    @ViewBuilder private var liveBadge: some View {
-        if item.isLivePhoto {
-            Image(systemName: "livephoto")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white)
-                .shadow(radius: 1)
-                .padding(5)
-        }
-    }
-
-    private static func duration(_ seconds: Double) -> String {
-        let s = Int(seconds.rounded())
-        return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
