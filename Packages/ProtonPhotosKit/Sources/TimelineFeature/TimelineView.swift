@@ -47,8 +47,7 @@ public struct TimelineView: View {
     }
 
     private func grid(_ sections: [TimelineSection]) -> some View {
-        GeometryReader { geo in
-            let width = max(120, geo.size.width - spacing * 2)
+        GeometryReader { _ in
             let rowHeight = baseRowHeight * cellZoom
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14, pinnedViews: [.sectionHeaders]) {
@@ -56,7 +55,6 @@ public struct TimelineView: View {
                         Section {
                             JustifiedSection(
                                 items: section.items,
-                                width: width,
                                 targetHeight: rowHeight,
                                 spacing: spacing,
                                 feed: model.feed,
@@ -86,8 +84,11 @@ public struct TimelineView: View {
             }
             .onEnded { value in
                 let factor = min(max(value.magnification, 0.4), 3.0)
-                cellZoom = min(max(cellZoom * factor, 0.5), 2.5)
-                liveScale = 1     // committed row height == the scaled size → seamless, then re-packs
+                // Animate the re-pack: cells fly to their new justified positions (no abrupt jump).
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+                    cellZoom = min(max(cellZoom * factor, 0.5), 2.5)
+                    liveScale = 1
+                }
             }
     }
 
@@ -145,7 +146,6 @@ public struct TimelineView: View {
 /// exactly like Apple Photos. Aspect ratios come from `AspectRegistry` (square until learned).
 private struct JustifiedSection: View {
     let items: [PhotoItem]
-    let width: CGFloat
     let targetHeight: CGFloat
     let spacing: CGFloat
     let feed: ThumbnailFeed
@@ -154,60 +154,75 @@ private struct JustifiedSection: View {
 
     var body: some View {
         _ = aspects.version   // re-lay out as aspect ratios are learned
-        let rows = Self.layout(items, width: width, targetHeight: targetHeight, spacing: spacing, aspects: aspects)
-        return VStack(alignment: .leading, spacing: spacing) {
-            ForEach(rows.indices, id: \.self) { i in
-                HStack(spacing: spacing) {
-                    ForEach(rows[i]) { cell in
-                        PhotoThumbnailCell(item: cell.item, feed: feed)
-                            .frame(width: cell.width, height: cell.height)
-                            .clipShape(RoundedRectangle(cornerRadius: 1, style: .continuous))
-                            .onTapGesture { onOpen(cell.item) }
-                    }
-                }
+        let ratios = items.map { min(max(aspects.aspect(for: $0.uid), 0.45), 3.2) }
+        return JustifiedLayout(targetHeight: targetHeight, spacing: spacing, aspects: ratios) {
+            ForEach(items) { item in
+                PhotoThumbnailCell(item: item, feed: feed)
+                    .clipShape(RoundedRectangle(cornerRadius: 1, style: .continuous))
+                    .onTapGesture { onOpen(item) }
             }
         }
     }
+}
 
-    struct Cell: Identifiable {
-        let item: PhotoItem
-        let width: CGFloat
-        let height: CGFloat
-        var id: PhotoUID { item.uid }
+/// Justified rows as a single `Layout` (all cells are direct children) so SwiftUI can animate each
+/// cell flying to its new position when the row height changes. `animatableData` interpolates the
+/// height so the re-pack on pinch-release is smooth.
+private struct JustifiedLayout: Layout {
+    var targetHeight: CGFloat
+    var spacing: CGFloat
+    var aspects: [CGFloat]
+
+    var animatableData: CGFloat {
+        get { targetHeight }
+        set { targetHeight = newValue }
     }
 
-    /// Greedy justified packing: fill each row to `width`, then scale the row's height so it fits
-    /// exactly. The final (partial) row keeps the target height (left-aligned), like Apple.
-    @MainActor
-    static func layout(_ items: [PhotoItem], width: CGFloat, targetHeight: CGFloat, spacing: CGFloat, aspects: AspectRegistry) -> [[Cell]] {
-        var rows: [[Cell]] = []
-        var run: [(PhotoItem, CGFloat)] = []
-        var aspectSum: CGFloat = 0
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let width = proposal.width ?? 600
+        let rows = rows(width: width)
+        let height = rows.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: width, height: height)
+    }
 
-        func aspect(_ item: PhotoItem) -> CGFloat {
-            min(max(aspects.aspect(for: item.uid), 0.45), 3.2)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        let rows = rows(width: bounds.width)
+        var y = bounds.minY
+        var index = 0
+        for row in rows {
+            var x = bounds.minX
+            for width in row.widths where index < subviews.count {
+                subviews[index].place(
+                    at: CGPoint(x: x, y: y),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(width: width, height: row.height)
+                )
+                x += width + spacing
+                index += 1
+            }
+            y += row.height + spacing
         }
+    }
 
-        for item in items {
-            let a = aspect(item)
-            run.append((item, a))
-            aspectSum += a
-            let rowWidth = aspectSum * targetHeight + spacing * CGFloat(run.count - 1)
+    private struct Row { var widths: [CGFloat]; var height: CGFloat }
+
+    private func rows(width: CGFloat) -> [Row] {
+        var result: [Row] = []
+        var run: [CGFloat] = []
+        var sum: CGFloat = 0
+        for aspect in aspects {
+            run.append(aspect); sum += aspect
+            let rowWidth = sum * targetHeight + spacing * CGFloat(run.count - 1)
             if rowWidth >= width {
-                rows.append(justify(run, width: width, spacing: spacing))
-                run.removeAll(); aspectSum = 0
+                let height = (width - spacing * CGFloat(run.count - 1)) / max(sum, 0.001)
+                result.append(Row(widths: run.map { $0 * height }, height: height))
+                run.removeAll(); sum = 0
             }
         }
         if !run.isEmpty {
-            rows.append(run.map { Cell(item: $0.0, width: $0.1 * targetHeight, height: targetHeight) })
+            result.append(Row(widths: run.map { $0 * targetHeight }, height: targetHeight))
         }
-        return rows
-    }
-
-    private static func justify(_ run: [(PhotoItem, CGFloat)], width: CGFloat, spacing: CGFloat) -> [Cell] {
-        let aspectSum = run.reduce(0) { $0 + $1.1 }
-        let height = (width - spacing * CGFloat(run.count - 1)) / max(aspectSum, 0.001)
-        return run.map { Cell(item: $0.0, width: $0.1 * height, height: height) }
+        return result
     }
 }
 
