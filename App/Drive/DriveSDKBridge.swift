@@ -11,6 +11,7 @@ import ProtonDriveSDK
 actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader, FullMediaProvider {
     private let photosClient: ProtonPhotosClient
     private let driveSession: DriveSession
+    private let rateLimit = RateLimitGate()
     private var photosRoot: SDKNodeUid?
 
     init(session: ProtonSession, store: SessionKeychainStore) async throws {
@@ -37,7 +38,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
 
         self.photosClient = try await ProtonPhotosClient(
             configuration: config,
-            httpClient: SDKHttpClient(driveSession: driveSession),
+            httpClient: SDKHttpClient(driveSession: driveSession, rateLimit: rateLimit),
             accountClient: accountClient,
             logCallback: { _ in },
             featureFlagProviderCallback: { _, completion in completion(false) },

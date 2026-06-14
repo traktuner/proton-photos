@@ -6,9 +6,11 @@ import ProtonDriveSDK
 final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
     private let driveSession: DriveSession
     private let urlSession: URLSession
+    private let rateLimit: RateLimitGate
 
-    init(driveSession: DriveSession) {
+    init(driveSession: DriveSession, rateLimit: RateLimitGate) {
         self.driveSession = driveSession
+        self.rateLimit = rateLimit
         let cfg = URLSessionConfiguration.default
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.urlSession = URLSession(configuration: cfg)
@@ -71,11 +73,13 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         applyHeaders(&req, headers: headers)   // storage URLs are pre-signed; no auth headers
         if !content.isEmpty { req.httpBody = content }
 
+        await rateLimit.waitIfNeeded()
         do {
             let (bytes, response) = try await urlSession.bytes(for: req)
             guard let http = response as? HTTPURLResponse else {
                 return .failure(NSError(domain: "ProtonPhotos.SDKHttpClient", code: -4))
             }
+            if http.statusCode == 429 { rateLimit.penalize(seconds: Self.retryAfter(http)) }
             return .success(HttpClientStream(
                 stream: downloadStreamCreator(bytes),
                 headers: Self.headerPairs(http),
@@ -88,11 +92,19 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
 
     // MARK: - Helpers
 
-    private func perform(_ request: URLRequest, retryOn401: Bool) async -> Result<HttpClientResponse, NSError> {
+    private func perform(_ request: URLRequest, retryOn401: Bool, retryOn429: Bool = true) async -> Result<HttpClientResponse, NSError> {
+        await rateLimit.waitIfNeeded()
         do {
             let (data, response) = try await urlSession.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 return .failure(NSError(domain: "ProtonPhotos.SDKHttpClient", code: -1))
+            }
+            if http.statusCode == 429 {
+                rateLimit.penalize(seconds: Self.retryAfter(http))
+                if retryOn429 {
+                    await rateLimit.waitIfNeeded()
+                    return await perform(request, retryOn401: retryOn401, retryOn429: false)
+                }
             }
             if http.statusCode == 401, retryOn401, await driveSession.refreshToken() {
                 var retry = request
@@ -105,6 +117,13 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         } catch {
             return .failure(error as NSError)
         }
+    }
+
+    private static func retryAfter(_ http: HTTPURLResponse) -> Double {
+        if let value = http.value(forHTTPHeaderField: "Retry-After"), let seconds = Double(value) {
+            return seconds
+        }
+        return 10
     }
 
     private func applyAuthAndHeaders(_ req: inout URLRequest, headers: [(String, [String])]) {
