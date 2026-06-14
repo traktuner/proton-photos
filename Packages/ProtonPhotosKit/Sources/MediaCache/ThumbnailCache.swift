@@ -30,6 +30,16 @@ public actor ThumbnailCache {
         FileManager.default.fileExists(atPath: directory.appendingPathComponent(Self.key(uid)).path)
     }
 
+    /// Direct disk read/write (no in-memory layer). `nonisolated` so the thumbnail feed, which has
+    /// its own decoded-image cache, can use these without actor hops.
+    public nonisolated func diskData(for uid: PhotoUID) -> Data? {
+        try? Data(contentsOf: directory.appendingPathComponent(Self.key(uid)))
+    }
+
+    public nonisolated func storeToDisk(_ data: Data, for uid: PhotoUID) {
+        try? data.write(to: directory.appendingPathComponent(Self.key(uid)), options: .atomic)
+    }
+
     public func store(_ data: Data, for uid: PhotoUID) {
         let key = Self.key(uid)
         memory.setObject(data as NSData, forKey: key as NSString)

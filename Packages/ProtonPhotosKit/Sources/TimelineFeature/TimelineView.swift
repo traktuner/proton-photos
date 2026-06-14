@@ -44,7 +44,6 @@ public struct TimelineView: View {
                         LazyVGrid(columns: columns, spacing: spacing) {
                             ForEach(section.items) { item in
                                 PhotoThumbnailCell(item: item, feed: model.feed)
-                                    .onAppear { model.cellAppeared(item.uid) }
                                     .onTapGesture { onOpen(item, section.items) }
                             }
                         }
@@ -132,7 +131,16 @@ struct PhotoThumbnailCell: View {
             .overlay(alignment: .topTrailing) { liveBadge }
             .contentShape(Rectangle())
             .task(id: item.uid) {
-                if image == nil { image = await feed.image(for: item.uid) }
+                // Poll the cache while asking the (bounded) feed to prioritise this on-screen
+                // thumbnail. The loop ends automatically when the cell scrolls off (task cancel).
+                while !Task.isCancelled {
+                    if let img = await feed.cachedImage(for: item.uid) {
+                        image = img
+                        return
+                    }
+                    await feed.requestPriority(item.uid)
+                    try? await Task.sleep(for: .milliseconds(120))
+                }
             }
     }
 
