@@ -6,7 +6,8 @@ import MediaCache
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var cellZoom: CGFloat
-    @State private var pinchStart: CGFloat?
+    /// Visual zoom applied live during a pinch; the real grid relayout only happens on release.
+    @State private var liveScale: CGFloat = 1
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
 
     public init(
@@ -62,7 +63,7 @@ public struct TimelineView: View {
                 }
             }
             .padding(.bottom, 16)
-            .animation(.smooth(duration: 0.28), value: cellZoom)
+            .scaleEffect(liveScale, anchor: .center)   // smooth visual zoom during the gesture
         }
         .gesture(pinch)
     }
@@ -70,11 +71,17 @@ public struct TimelineView: View {
     private var pinch: some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                let start = pinchStart ?? cellZoom
-                if pinchStart == nil { pinchStart = start }
-                cellZoom = min(max(start * value.magnification, 0.55), 2.4)
+                // Visual-only zoom; dampened so a small pinch doesn't fly through zoom levels.
+                liveScale = min(max(1 + (value.magnification - 1) * 0.85, 0.5), 2.6)
             }
-            .onEnded { _ in pinchStart = nil }
+            .onEnded { _ in
+                // Commit the layout once, with a dead-zone to ignore accidental small pinches.
+                let deadZone: CGFloat = 0.18
+                if abs(liveScale - 1) > deadZone {
+                    cellZoom = min(max(cellZoom * liveScale, 0.5), 2.4)
+                }
+                liveScale = 1   // sizes match the committed layout → seamless, no stutter
+            }
     }
 
     private func sectionHeader(_ title: String) -> some View {
