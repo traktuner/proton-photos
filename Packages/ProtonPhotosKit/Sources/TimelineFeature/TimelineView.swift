@@ -6,6 +6,10 @@ import MediaCache
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var cellZoom: CGFloat
+    /// Live visual zoom during a pinch (applied to the whole scroll viewport, so it stays lazy);
+    /// the grid re-packs once on release. Anchored at the pinch location ("zoom in place").
+    @State private var liveScale: CGFloat = 1
+    @State private var pinchAnchor: UnitPoint = .center
     private let aspects: AspectRegistry
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
 
@@ -66,19 +70,24 @@ public struct TimelineView: View {
                 }
                 .padding(.bottom, 16)
             }
+            .scaleEffect(liveScale, anchor: pinchAnchor)   // live zoom on the viewport (stays lazy)
+            .clipped()
             .gesture(pinch)
         }
     }
 
-    /// Pinch commits the zoom once on release (no live relayout → no scroll stutter), with a
-    /// generous threshold so small/accidental pinches don't change the layout.
+    /// Live, continuous pinch zoom: scale the viewport in place while pinching, then commit the new
+    /// cell size on release so the grid re-packs (exactly like Apple Photos).
     private var pinch: some Gesture {
         MagnifyGesture()
+            .onChanged { value in
+                pinchAnchor = value.startAnchor
+                liveScale = min(max(value.magnification, 0.4), 3.0)
+            }
             .onEnded { value in
-                guard abs(value.magnification - 1) > 0.2 else { return }
-                withAnimation(.smooth(duration: 0.3)) {
-                    cellZoom = min(max(cellZoom * value.magnification, 0.5), 2.2)
-                }
+                let factor = min(max(value.magnification, 0.4), 3.0)
+                cellZoom = min(max(cellZoom * factor, 0.5), 2.5)
+                liveScale = 1     // committed row height == the scaled size → seamless, then re-packs
             }
     }
 
