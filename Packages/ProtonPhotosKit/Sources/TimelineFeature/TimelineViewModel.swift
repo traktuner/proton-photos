@@ -13,6 +13,9 @@ public final class TimelineViewModel {
     }
 
     public private(set) var state: State = .loading
+    /// Flat, chronological list of every photo — used so the viewer can page through the whole
+    /// library, not just the day that was tapped.
+    public private(set) var allItems: [PhotoItem] = []
 
     private let repository: PhotosRepository
     public let feed: ThumbnailFeed
@@ -27,10 +30,10 @@ public final class TimelineViewModel {
         state = .loading
         do {
             let sections = try await repository.loadTimeline()
+            allItems = sections.flatMap(\.items)
             state = sections.isEmpty ? .empty : .loaded(sections)
             // Background fill of the whole library (visible cells reprioritise via requestPriority).
-            let uids = sections.flatMap { $0.items.map(\.uid) }
-            await feed.startPrefetch(uids)
+            await feed.startPrefetch(allItems.map(\.uid))
         } catch is CancellationError {
             // ignore
         } catch {

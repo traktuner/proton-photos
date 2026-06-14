@@ -6,8 +6,6 @@ import MediaCache
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var cellZoom: CGFloat
-    /// Visual zoom applied live during a pinch; the real grid relayout only happens on release.
-    @State private var liveScale: CGFloat = 1
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
 
     public init(
@@ -23,9 +21,8 @@ public struct TimelineView: View {
     private let spacing: CGFloat = 2
     private let baseCell: CGFloat = 116
 
-    private var columns: [GridItem] {
-        let minimum = baseCell * cellZoom
-        return [GridItem(.adaptive(minimum: minimum, maximum: minimum * 1.45), spacing: spacing)]
+    private func columnCount(for width: CGFloat) -> Int {
+        max(3, Int((width / (baseCell * cellZoom)).rounded()))
     }
 
     public var body: some View {
@@ -46,41 +43,42 @@ public struct TimelineView: View {
     }
 
     private func grid(_ sections: [TimelineSection]) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14, pinnedViews: [.sectionHeaders]) {
-                ForEach(sections) { section in
-                    Section {
-                        LazyVGrid(columns: columns, spacing: spacing) {
-                            ForEach(section.items) { item in
-                                PhotoThumbnailCell(item: item, feed: model.feed)
-                                    .onTapGesture { onOpen(item, section.items) }
+        GeometryReader { geo in
+            let columns = Array(
+                repeating: GridItem(.flexible(), spacing: spacing),
+                count: columnCount(for: geo.size.width)
+            )
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14, pinnedViews: [.sectionHeaders]) {
+                    ForEach(sections) { section in
+                        Section {
+                            LazyVGrid(columns: columns, spacing: spacing) {
+                                ForEach(section.items) { item in
+                                    PhotoThumbnailCell(item: item, feed: model.feed)
+                                        .onTapGesture { onOpen(item, model.allItems) }
+                                }
                             }
+                            .padding(.horizontal, spacing)
+                        } header: {
+                            sectionHeader(section.title)
                         }
-                        .padding(.horizontal, spacing)
-                    } header: {
-                        sectionHeader(section.title)
                     }
                 }
+                .padding(.bottom, 16)
             }
-            .padding(.bottom, 16)
-            .scaleEffect(liveScale, anchor: .center)   // smooth visual zoom during the gesture
+            .gesture(pinch)
         }
-        .gesture(pinch)
     }
 
+    /// Pinch commits the zoom once on release (no live relayout → no scroll stutter), with a
+    /// generous threshold so small/accidental pinches don't change the layout.
     private var pinch: some Gesture {
         MagnifyGesture()
-            .onChanged { value in
-                // Visual-only zoom; dampened so a small pinch doesn't fly through zoom levels.
-                liveScale = min(max(1 + (value.magnification - 1) * 0.85, 0.5), 2.6)
-            }
-            .onEnded { _ in
-                // Commit the layout once, with a dead-zone to ignore accidental small pinches.
-                let deadZone: CGFloat = 0.18
-                if abs(liveScale - 1) > deadZone {
-                    cellZoom = min(max(cellZoom * liveScale, 0.5), 2.4)
+            .onEnded { value in
+                guard abs(value.magnification - 1) > 0.2 else { return }
+                withAnimation(.smooth(duration: 0.3)) {
+                    cellZoom = min(max(cellZoom * value.magnification, 0.5), 2.2)
                 }
-                liveScale = 1   // sizes match the committed layout → seamless, no stutter
             }
     }
 

@@ -10,8 +10,6 @@ public struct PhotoViewerView: View {
     private let onClose: () -> Void
 
     @State private var hovering = false
-    @State private var scale: CGFloat = 1
-    @State private var lastScale: CGFloat = 1
 
     public init(model: PhotoViewerModel, onClose: @escaping () -> Void) {
         _model = State(initialValue: model)
@@ -35,7 +33,6 @@ public struct PhotoViewerView: View {
         }
         .onAppear { model.start() }
         .onHover { hovering = $0 }
-        .onChange(of: model.current.uid) { resetZoom() }
     }
 
     @ViewBuilder private var content: some View {
@@ -43,43 +40,13 @@ public struct PhotoViewerView: View {
             VideoPlayer(player: AVPlayer(url: videoURL))
                 .ignoresSafeArea()
         } else if let image = model.image {
-            GeometryReader { geo in
-                ScrollView([.horizontal, .vertical]) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .interpolation(.high)
-                        .scaledToFit()
-                        .frame(width: geo.size.width * scale, height: geo.size.height * scale)
-                        .gesture(magnify)
-                        .onTapGesture(count: 2) { toggleZoom() }
-                }
-                .scrollIndicators(.hidden)
-                .scrollDisabled(scale <= 1.01)              // only pan when zoomed in
-                .scrollClipDisabled()
-                .animation(.interactiveSpring(duration: 0.25), value: scale)
-            }
+            ZoomableImageView(image: image)   // native pinch-zoom-at-cursor + two-finger pan
+                .ignoresSafeArea()
         }
     }
 
-    private var magnify: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in scale = min(max(lastScale * value.magnification, 1), 6) }
-            .onEnded { _ in
-                lastScale = scale
-                if scale <= 1 { resetZoom() }
-            }
-    }
-
-    private func toggleZoom() {
-        withAnimation(.snappy(duration: 0.25)) {
-            if scale > 1 { scale = 1 } else { scale = 2.5 }
-            lastScale = scale
-        }
-    }
-
-    private func resetZoom() { scale = 1; lastScale = 1 }
-    private func goPrevious() { resetZoom(); model.previous() }
-    private func goNext() { resetZoom(); model.next() }
+    private func goPrevious() { model.previous() }
+    private func goNext() { model.next() }
 
     // MARK: Controls + shortcuts
 
