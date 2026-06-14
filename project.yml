@@ -47,6 +47,8 @@ targets:
         product: MediaCache
       - package: ProtonPhotosKit
         product: TimelineFeature
+      - package: ProtonPhotosKit
+        product: PhotoViewerFeature
       - package: ProtonCore
         product: ProtonCoreDataModel
       - package: ProtonCore

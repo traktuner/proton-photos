@@ -30,8 +30,12 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
 
         let result = await perform(req, retryOn401: true)
         switch result {
-        case let .success(resp): DebugLog.log("driveApi \(method) \(url.absoluteString) -> \(resp.statusCode)")
-        case let .failure(err): DebugLog.log("driveApi \(method) \(url.absoluteString) -> ERR \(err.code)")
+        case let .success(resp) where resp.statusCode >= 400:
+            DebugLog.log("driveApi \(method) \(url.absoluteString) -> \(resp.statusCode)")
+        case let .failure(err):
+            DebugLog.log("driveApi \(method) \(url.absoluteString) -> ERR \(err.code)")
+        default:
+            break
         }
         return result
     }

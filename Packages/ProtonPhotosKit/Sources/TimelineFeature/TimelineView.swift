@@ -1,15 +1,23 @@
 import SwiftUI
 import PhotosCore
 import DesignSystem
+import MediaCache
 
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
+    /// Called when a photo is activated (opened). The host provides the viewer.
+    private let onOpen: (PhotoItem, [PhotoItem]) -> Void
 
-    public init(model: TimelineViewModel) {
+    public init(model: TimelineViewModel, onOpen: @escaping (PhotoItem, [PhotoItem]) -> Void = { _, _ in }) {
         _model = State(initialValue: model)
+        self.onOpen = onOpen
     }
 
-    private let columns = [GridItem(.adaptive(minimum: 116, maximum: 160), spacing: 3)]
+    // Apple-Photos-like grid: equal square cells, uniform hairline gaps.
+    private let spacing: CGFloat = 2
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: 104, maximum: 150), spacing: spacing)]
+    }
 
     public var body: some View {
         Group {
@@ -30,21 +38,23 @@ public struct TimelineView: View {
 
     private func grid(_ sections: [TimelineSection]) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
                 ForEach(sections) { section in
                     Section {
-                        LazyVGrid(columns: columns, spacing: 3) {
+                        LazyVGrid(columns: columns, spacing: spacing) {
                             ForEach(section.items) { item in
-                                PhotoThumbnailCell(item: item, model: model)
+                                PhotoThumbnailCell(item: item, feed: model.feed)
+                                    .onAppear { model.cellAppeared(item.uid) }
+                                    .onTapGesture { onOpen(item, section.items) }
                             }
                         }
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, spacing)
                     } header: {
                         sectionHeader(section.title)
                     }
                 }
             }
-            .padding(.vertical, 12)
+            .padding(.bottom, 16)
         }
     }
 
@@ -57,7 +67,7 @@ public struct TimelineView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(ProtonColor.backgroundNorm.opacity(0.92))
+        .background(.ultraThinMaterial)
     }
 
     private var emptyState: some View {
@@ -97,72 +107,55 @@ public struct TimelineView: View {
     }
 }
 
-/// A single grid cell. Loads its thumbnail lazily and overlays media badges.
+/// A single uniform square grid cell. Loads its thumbnail from the shared feed (cache-first).
 struct PhotoThumbnailCell: View {
     let item: PhotoItem
-    let model: TimelineViewModel
+    let feed: ThumbnailFeed
 
     @State private var image: NSImage?
 
     var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(ProtonColor.backgroundStrong)
-            if let image {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                ProtonSpinner(size: 18, lineWidth: 2)
-            }
-            badges
-        }
-        .aspectRatio(1, contentMode: .fill)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-        .contentShape(Rectangle())
-        .task(id: item.uid) {
-            guard image == nil else { return }
-            if let data = await model.thumbnailData(for: item.uid),
-               let nsImage = NSImage(data: data) {
-                image = nsImage
-            }
-        }
-    }
-
-    @ViewBuilder private var badges: some View {
-        VStack {
-            HStack {
-                Spacer()
-                if item.isLivePhoto {
-                    badge("livephoto")
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.medium)
+                        .scaledToFill()
+                } else {
+                    ProtonColor.backgroundStrong
                 }
             }
-            Spacer()
-            HStack {
-                Spacer()
-                if item.isVideo {
-                    HStack(spacing: 3) {
-                        Image(systemName: "video.fill").font(.system(size: 9))
-                        if let d = item.durationSeconds {
-                            Text(Self.duration(d)).font(.system(size: 10, weight: .medium))
-                        }
-                    }
-                    .foregroundStyle(.white)
-                    .shadow(radius: 1)
-                    .padding(5)
-                }
+            .clipped()
+            .overlay(alignment: .bottomTrailing) { videoBadge }
+            .overlay(alignment: .topTrailing) { liveBadge }
+            .contentShape(Rectangle())
+            .task(id: item.uid) {
+                if image == nil { image = await feed.image(for: item.uid) }
             }
-        }
-        .padding(2)
     }
 
-    private func badge(_ systemName: String) -> some View {
-        Image(systemName: systemName)
-            .font(.system(size: 11, weight: .semibold))
+    @ViewBuilder private var videoBadge: some View {
+        if item.isVideo {
+            HStack(spacing: 3) {
+                Image(systemName: "video.fill").font(.system(size: 9))
+                if let d = item.durationSeconds { Text(Self.duration(d)).font(.system(size: 10, weight: .medium)) }
+            }
             .foregroundStyle(.white)
             .shadow(radius: 1)
             .padding(5)
+        }
+    }
+
+    @ViewBuilder private var liveBadge: some View {
+        if item.isLivePhoto {
+            Image(systemName: "livephoto")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .shadow(radius: 1)
+                .padding(5)
+        }
     }
 
     private static func duration(_ seconds: Double) -> String {

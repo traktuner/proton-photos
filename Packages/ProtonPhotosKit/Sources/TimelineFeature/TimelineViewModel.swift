@@ -15,36 +15,49 @@ public final class TimelineViewModel {
     public private(set) var state: State = .loading
 
     private let repository: PhotosRepository
-    private let thumbnails: ThumbnailProvider
-    private let cache: ThumbnailCache
+    public let feed: ThumbnailFeed
 
-    public init(repository: PhotosRepository, thumbnails: ThumbnailProvider, cache: ThumbnailCache) {
+    private var flatUIDs: [PhotoUID] = []
+    private var indexByUID: [PhotoUID: Int] = [:]
+    private var latestVisibleIndex = 0
+    private var focusTask: Task<Void, Never>?
+
+    public init(repository: PhotosRepository, feed: ThumbnailFeed) {
         self.repository = repository
-        self.thumbnails = thumbnails
-        self.cache = cache
+        self.feed = feed
+    }
+
+    /// Called as cells appear. Coalesces scroll position and tells the feed to prioritise the
+    /// on-screen window plus a look-ahead buffer, so a far jump loads instantly.
+    public func cellAppeared(_ uid: PhotoUID) {
+        guard let index = indexByUID[uid] else { return }
+        latestVisibleIndex = index
+        focusTask?.cancel()
+        focusTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(80))
+            guard let self, !Task.isCancelled else { return }
+            let center = self.latestVisibleIndex
+            let start = max(0, center - 40)
+            let end = min(self.flatUIDs.count, center + 240)
+            guard start < end else { return }
+            await self.feed.focus(Array(self.flatUIDs[start ..< end]))
+        }
     }
 
     public func load() async {
+        if case .loaded = state { return }   // load once
         state = .loading
         do {
             let sections = try await repository.loadTimeline()
             state = sections.isEmpty ? .empty : .loaded(sections)
+            // Index the flat order for scroll-based prioritisation, then start prefetch.
+            flatUIDs = sections.flatMap { $0.items.map(\.uid) }
+            indexByUID = Dictionary(uniqueKeysWithValues: flatUIDs.enumerated().map { ($1, $0) })
+            await feed.startPrefetch(flatUIDs)
         } catch is CancellationError {
             // ignore
         } catch {
             state = .failed(error.localizedDescription)
-        }
-    }
-
-    /// Returns thumbnail bytes, hitting the cache first and falling back to the SDK.
-    public func thumbnailData(for uid: PhotoUID) async -> Data? {
-        if let cached = await cache.data(for: uid) { return cached }
-        do {
-            let data = try await thumbnails.thumbnail(for: uid)
-            await cache.store(data, for: uid)
-            return data
-        } catch {
-            return nil
         }
     }
 }

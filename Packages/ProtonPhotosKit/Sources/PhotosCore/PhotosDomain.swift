@@ -69,6 +69,23 @@ public protocol ThumbnailProvider: Sendable {
     func thumbnail(for uid: PhotoUID) async throws -> Data
 }
 
+/// Bulk thumbnail loading — streams results as the SDK decrypts/downloads them, so the whole
+/// library can be filled in the background as fast as the connection allows.
+public protocol ThumbnailBatchLoader: Sendable {
+    func loadThumbnails(
+        for uids: [PhotoUID],
+        onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
+    ) async
+}
+
+/// Loads the full-resolution image/video file for a photo to a local URL (for the viewer).
+public protocol FullMediaProvider: Sendable {
+    /// Larger preview image bytes (shown immediately in the viewer before the original arrives).
+    func preview(for uid: PhotoUID) async throws -> Data
+    /// Downloads the original file to a temporary URL.
+    func downloadOriginal(for uid: PhotoUID) async throws -> URL
+}
+
 /// Authentication lifecycle, abstracted away from the concrete fork mechanism.
 public protocol AuthenticationService: Sendable {
     var isSignedIn: Bool { get async }

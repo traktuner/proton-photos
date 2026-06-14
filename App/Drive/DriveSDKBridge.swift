@@ -8,7 +8,7 @@ import ProtonDriveSDK
 ///
 /// Everything SDK-specific is isolated here so feature modules stay SDK-agnostic and new SDK
 /// capabilities (albums, sharing, upload) can be added without touching the UI layer.
-actor DriveSDKBridge: PhotosRepository, ThumbnailProvider {
+actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader, FullMediaProvider {
     private let photosClient: ProtonPhotosClient
     private let driveSession: DriveSession
     private var photosRoot: SDKNodeUid?
@@ -64,11 +64,56 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider {
     // MARK: - ThumbnailProvider
 
     func thumbnail(for uid: PhotoUID) async throws -> Data {
+        try await singleThumbnail(uid, type: .thumbnail)
+    }
+
+    // MARK: - ThumbnailBatchLoader
+
+    func loadThumbnails(
+        for uids: [PhotoUID],
+        onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
+    ) async {
+        let sdkUids = uids.map { SDKNodeUid(volumeID: $0.volumeID, nodeID: $0.nodeID) }
+        try? await photosClient.downloadThumbnails(
+            photoUids: sdkUids,
+            type: .thumbnail,
+            cancellationToken: UUID(),
+            onThumbnailDownloaded: { result in
+                if case let .success(item?) = result, case let .success(data) = item.result {
+                    onLoaded(PhotoUID(volumeID: item.fileUid.volumeID, nodeID: item.fileUid.nodeID), data)
+                }
+            }
+        )
+    }
+
+    // MARK: - FullMediaProvider
+
+    func preview(for uid: PhotoUID) async throws -> Data {
+        try await singleThumbnail(uid, type: .preview)
+    }
+
+    func downloadOriginal(for uid: PhotoUID) async throws -> URL {
+        let sdkUid = SDKNodeUid(volumeID: uid.volumeID, nodeID: uid.nodeID)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ProtonPhotos/originals", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dest = dir.appendingPathComponent("\(uid.nodeID.replacingOccurrences(of: "/", with: "_"))")
+        if FileManager.default.fileExists(atPath: dest.path) { return dest }
+        _ = try await photosClient.download(
+            photoUid: sdkUid,
+            destinationUrl: dest,
+            cancellationToken: UUID(),
+            progressCallback: { _ in },
+            onRetriableErrorReceived: { _ in }
+        )
+        return dest
+    }
+
+    private func singleThumbnail(_ uid: PhotoUID, type: ThumbnailData.ThumbnailType) async throws -> Data {
         let sdkUid = SDKNodeUid(volumeID: uid.volumeID, nodeID: uid.nodeID)
         let box = DataBox()
         try await photosClient.downloadThumbnails(
             photoUids: [sdkUid],
-            type: .thumbnail,
+            type: type,
             cancellationToken: UUID(),
             onThumbnailDownloaded: { result in
                 if case let .success(item?) = result, case let .success(data) = item.result {
@@ -76,9 +121,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider {
                 }
             }
         )
-        guard let data = box.value else {
-            throw CocoaError(.fileReadUnknown)
-        }
+        guard let data = box.value else { throw CocoaError(.fileReadUnknown) }
         return data
     }
 

@@ -5,7 +5,7 @@ import PhotosCore
 /// Keeps decoded thumbnails resident for smooth scrolling and survives relaunch.
 public actor ThumbnailCache {
     private let memory = NSCache<NSString, NSData>()
-    private let directory: URL
+    private nonisolated let directory: URL
     private let fileManager = FileManager.default
 
     public init(namespace: String = "thumbnails") {
@@ -22,6 +22,12 @@ public actor ThumbnailCache {
         guard let data = try? Data(contentsOf: url) else { return nil }
         memory.setObject(data as NSData, forKey: key as NSString)
         return data
+    }
+
+    /// Cheap on-disk existence check (no read/decode) — used to skip already-fetched thumbnails.
+    /// `nonisolated`: touches only the immutable `directory` and the global file manager.
+    public nonisolated func has(_ uid: PhotoUID) -> Bool {
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent(Self.key(uid)).path)
     }
 
     public func store(_ data: Data, for uid: PhotoUID) {

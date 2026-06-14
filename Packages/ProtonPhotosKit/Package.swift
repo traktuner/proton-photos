@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "ProtonAuth", targets: ["ProtonAuth"]),
         .library(name: "MediaCache", targets: ["MediaCache"]),
         .library(name: "TimelineFeature", targets: ["TimelineFeature"]),
+        .library(name: "PhotoViewerFeature", targets: ["PhotoViewerFeature"]),
     ],
     targets: [
         .target(name: "PhotosCore"),
@@ -21,6 +22,10 @@ let package = Package(
         .target(name: "MediaCache", dependencies: ["PhotosCore"]),
         .target(
             name: "TimelineFeature",
+            dependencies: ["PhotosCore", "DesignSystem", "MediaCache"]
+        ),
+        .target(
+            name: "PhotoViewerFeature",
             dependencies: ["PhotosCore", "DesignSystem", "MediaCache"]
         ),
     ]
