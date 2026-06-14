@@ -5,18 +5,26 @@ import MediaCache
 
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
-    /// Called when a photo is activated (opened). The host provides the viewer.
+    @Binding private var cellZoom: CGFloat
+    @State private var pinchStart: CGFloat?
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
 
-    public init(model: TimelineViewModel, onOpen: @escaping (PhotoItem, [PhotoItem]) -> Void = { _, _ in }) {
+    public init(
+        model: TimelineViewModel,
+        cellZoom: Binding<CGFloat> = .constant(1),
+        onOpen: @escaping (PhotoItem, [PhotoItem]) -> Void = { _, _ in }
+    ) {
         _model = State(initialValue: model)
+        _cellZoom = cellZoom
         self.onOpen = onOpen
     }
 
-    // Apple-Photos-like grid: equal square cells, uniform hairline gaps.
     private let spacing: CGFloat = 2
+    private let baseCell: CGFloat = 116
+
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 104, maximum: 150), spacing: spacing)]
+        let minimum = baseCell * cellZoom
+        return [GridItem(.adaptive(minimum: minimum, maximum: minimum * 1.45), spacing: spacing)]
     }
 
     public var body: some View {
@@ -38,7 +46,7 @@ public struct TimelineView: View {
 
     private func grid(_ sections: [TimelineSection]) -> some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16, pinnedViews: [.sectionHeaders]) {
+            LazyVStack(alignment: .leading, spacing: 14, pinnedViews: [.sectionHeaders]) {
                 ForEach(sections) { section in
                     Section {
                         LazyVGrid(columns: columns, spacing: spacing) {
@@ -54,18 +62,31 @@ public struct TimelineView: View {
                 }
             }
             .padding(.bottom, 16)
+            .animation(.smooth(duration: 0.28), value: cellZoom)
         }
+        .gesture(pinch)
+    }
+
+    private var pinch: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let start = pinchStart ?? cellZoom
+                if pinchStart == nil { pinchStart = start }
+                cellZoom = min(max(start * value.magnification, 0.55), 2.4)
+            }
+            .onEnded { _ in pinchStart = nil }
     }
 
     private func sectionHeader(_ title: String) -> some View {
         HStack {
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(ProtonColor.textNorm)
             Spacer()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.ultraThinMaterial)
     }
 
@@ -131,8 +152,6 @@ struct PhotoThumbnailCell: View {
             .overlay(alignment: .topTrailing) { liveBadge }
             .contentShape(Rectangle())
             .task(id: item.uid) {
-                // Poll the cache while asking the (bounded) feed to prioritise this on-screen
-                // thumbnail. The loop ends automatically when the cell scrolls off (task cancel).
                 while !Task.isCancelled {
                     if let img = await feed.cachedImage(for: item.uid) {
                         image = img

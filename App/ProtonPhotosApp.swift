@@ -12,7 +12,6 @@ struct ProtonPhotosApp: App {
                 .preferredColorScheme(.dark)
                 .task { model.bootstrap() }
         }
-        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1080, height: 720)
     }
 }
