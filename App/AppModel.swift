@@ -97,6 +97,7 @@ final class AppModel {
             } catch is CancellationError {
                 // ignore
             } catch {
+                DebugLog.log("backend prepare FAILED: \(error)")
                 backend = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
             }
         }

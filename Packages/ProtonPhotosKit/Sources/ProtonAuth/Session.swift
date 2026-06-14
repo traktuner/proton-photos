@@ -31,9 +31,19 @@ public struct SessionKeychainStore: Sendable {
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return try? JSONDecoder().decode(ProtonSession.self, from: data)
+        if SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+           let data = item as? Data,
+           let session = try? JSONDecoder().decode(ProtonSession.self, from: data) {
+            return session
+        }
+        #if DEBUG
+        // Dev fallback: the Keychain ACL is tied to the app's code signature, which changes on
+        // every local rebuild. A plaintext file keeps the session across rebuilds while iterating.
+        if let url = devFileURL, let data = try? Data(contentsOf: url) {
+            return try? JSONDecoder().decode(ProtonSession.self, from: data)
+        }
+        #endif
+        return nil
     }
 
     public func save(_ session: ProtonSession) {
@@ -43,11 +53,27 @@ public struct SessionKeychainStore: Sendable {
         attrs[kSecValueData as String] = data
         attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         SecItemAdd(attrs as CFDictionary, nil)
+        #if DEBUG
+        if let url = devFileURL {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: url, options: .atomic)
+        }
+        #endif
     }
 
     public func clear() {
         SecItemDelete(baseQuery as CFDictionary)
+        #if DEBUG
+        if let url = devFileURL { try? FileManager.default.removeItem(at: url) }
+        #endif
     }
+
+    #if DEBUG
+    private var devFileURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("ProtonPhotos/dev-session.json")
+    }
+    #endif
 
     private var baseQuery: [String: Any] {
         [

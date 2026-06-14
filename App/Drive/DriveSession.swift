@@ -25,6 +25,13 @@ final class DriveSession: @unchecked Sendable {
     var current: ProtonSession { lock.withLock { session } }
     var keyPassword: String { lock.withLock { session.keyPassword } }
 
+    /// Builds an absolute API URL. Uses string concatenation rather than
+    /// `URL.appendingPathComponent`, which would percent-encode `?`/`&` in the query string.
+    func makeURL(_ path: String) -> URL {
+        let p = path.hasPrefix("/") ? path : "/" + path
+        return URL(string: config.baseURL.absoluteString + p) ?? config.baseURL
+    }
+
     /// Auth headers for an arbitrary request (used by the SDK HTTP client too).
     func authHeaders() -> [String: String] {
         let s = current
@@ -43,7 +50,7 @@ final class DriveSession: @unchecked Sendable {
     }
 
     private func authedData(path: String, method: String, retryOn401: Bool = true) async throws -> Data {
-        var req = URLRequest(url: config.baseURL.appendingPathComponent(path))
+        var req = URLRequest(url: makeURL(path))
         req.httpMethod = method
         for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
 
@@ -77,7 +84,7 @@ final class DriveSession: @unchecked Sendable {
 
     private func performRefresh() async -> Bool {
         let s = current
-        var req = URLRequest(url: config.baseURL.appendingPathComponent("/auth/v4/refresh"))
+        var req = URLRequest(url: makeURL("/auth/v4/refresh"))
         req.httpMethod = "POST"
         req.setValue(config.appVersion, forHTTPHeaderField: "x-pm-appversion")
         req.setValue(s.uid, forHTTPHeaderField: "x-pm-uid")
@@ -116,11 +123,34 @@ struct AccountData {
 
 extension DriveSession {
     /// Fetches the user's keys and addresses needed to build the SDK `AccountClient`.
+    /// We decode minimal DTOs (ProtonCore's own `Codable` is stricter than the live API) and
+    /// construct `ProtonCoreDataModel.Key`/`Address` via their public initialisers.
     func fetchAccountData() async throws -> AccountData {
         async let users: UsersResponse = getJSON("/core/v4/users", as: UsersResponse.self)
         async let addresses: AddressesResponse = getJSON("/core/v4/addresses", as: AddressesResponse.self)
         let (u, a) = try await (users, addresses)
-        return AccountData(userKeys: u.user.keys, addresses: a.addresses)
+        return AccountData(
+            userKeys: u.user.keys.map(Self.makeKey),
+            addresses: a.addresses.map(Self.makeAddress)
+        )
+    }
+
+    private static func makeKey(_ d: CoreKeyDTO) -> Key {
+        Key(keyID: d.id, privateKey: d.privateKey, keyFlags: d.flags ?? 0,
+            token: d.token, signature: d.signature, activation: nil,
+            active: d.active ?? 1, version: d.version ?? 0, primary: d.primary ?? 0)
+    }
+
+    private static func makeAddress(_ d: CoreAddressDTO) -> Address {
+        Address(
+            addressID: d.id, domainID: d.domainID, email: d.email,
+            send: Address.AddressSendReceive(rawValue: d.send ?? 1) ?? .active,
+            receive: Address.AddressSendReceive(rawValue: d.receive ?? 1) ?? .active,
+            status: Address.AddressStatus(rawValue: d.status ?? 1) ?? .enabled,
+            type: Address.AddressType(rawValue: d.type ?? 1) ?? .protonDomain,
+            order: d.order ?? 0, displayName: d.displayName ?? "", signature: d.signature ?? "",
+            hasKeys: d.hasKeys ?? (d.keys.isEmpty ? 0 : 1), keys: d.keys.map(makeKey)
+        )
     }
 }
 
@@ -128,12 +158,47 @@ private struct UsersResponse: Decodable {
     let user: UserBody
     enum CodingKeys: String, CodingKey { case user = "User" }
     struct UserBody: Decodable {
-        let keys: [Key]
+        let keys: [CoreKeyDTO]
         enum CodingKeys: String, CodingKey { case keys = "Keys" }
     }
 }
 
 private struct AddressesResponse: Decodable {
-    let addresses: [Address]
+    let addresses: [CoreAddressDTO]
     enum CodingKeys: String, CodingKey { case addresses = "Addresses" }
+}
+
+private struct CoreKeyDTO: Decodable {
+    let id: String
+    let privateKey: String
+    let token: String?
+    let signature: String?
+    let primary: Int?
+    let active: Int?
+    let flags: Int?
+    let version: Int?
+    enum CodingKeys: String, CodingKey {
+        case id = "ID", privateKey = "PrivateKey", token = "Token", signature = "Signature"
+        case primary = "Primary", active = "Active", flags = "Flags", version = "Version"
+    }
+}
+
+private struct CoreAddressDTO: Decodable {
+    let id: String
+    let domainID: String?
+    let email: String
+    let send: Int?
+    let receive: Int?
+    let status: Int?
+    let type: Int?
+    let order: Int?
+    let displayName: String?
+    let signature: String?
+    let hasKeys: Int?
+    let keys: [CoreKeyDTO]
+    enum CodingKeys: String, CodingKey {
+        case id = "ID", domainID = "DomainID", email = "Email", send = "Send", receive = "Receive"
+        case status = "Status", type = "Type", order = "Order", displayName = "DisplayName"
+        case signature = "Signature", hasKeys = "HasKeys", keys = "Keys"
+    }
 }

@@ -17,9 +17,12 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider {
         let driveSession = DriveSession(session: session, store: store)
         self.driveSession = driveSession
 
+        DebugLog.log("bridge: fetching account data…")
         // Build the account client (fetch + decrypt the user's keys) up front.
         let account = try await driveSession.fetchAccountData()
+        DebugLog.log("bridge: account ok — \(account.addresses.count) addresses, \(account.userKeys.count) user keys")
         let accountClient = try SDKAccountClientBuilder.build(account: account, keyPassword: session.keyPassword)
+        DebugLog.log("bridge: account client built (\(accountClient.unlockedByKeyID.count) unlocked keys)")
 
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ProtonPhotos/sdk", isDirectory: true)
@@ -40,14 +43,22 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider {
             featureFlagProviderCallback: { _, completion in completion(false) },
             recordMetricEventCallback: { _ in }
         )
+        DebugLog.log("bridge: ProtonPhotosClient created ✓")
     }
 
     // MARK: - PhotosRepository
 
     func loadTimeline() async throws -> [TimelineSection] {
-        let root = try await resolvePhotosRoot()
-        let items = try await photosClient.enumerateTimeline(in: root)
-        return Self.group(items)
+        do {
+            let root = try await resolvePhotosRoot()
+            DebugLog.log("timeline: photos root \(root.volumeID.prefix(8))…/\(root.nodeID.prefix(8))… — enumerating")
+            let items = try await photosClient.enumerateTimeline(in: root)
+            DebugLog.log("timeline: enumerated \(items.count) items ✓")
+            return Self.group(items)
+        } catch {
+            DebugLog.log("timeline: FAILED — \(error)")
+            throw error
+        }
     }
 
     // MARK: - ThumbnailProvider

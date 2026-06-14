@@ -22,13 +22,18 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         content: Data,
         headers: [(String, [String])]
     ) async -> Result<HttpClientResponse, NSError> {
-        let url = driveSession.config.baseURL.appendingPathComponent(relativePath)
+        let url = Self.driveURL(relativePath, makeURL: driveSession.makeURL)
         var req = URLRequest(url: url)
         req.httpMethod = method
         applyAuthAndHeaders(&req, headers: headers)
         if !content.isEmpty { req.httpBody = content }
 
-        return await perform(req, retryOn401: true)
+        let result = await perform(req, retryOn401: true)
+        switch result {
+        case let .success(resp): DebugLog.log("driveApi \(method) \(url.absoluteString) -> \(resp.statusCode)")
+        case let .failure(err): DebugLog.log("driveApi \(method) \(url.absoluteString) -> ERR \(err.code)")
+        }
+        return result
     }
 
     // MARK: Storage upload (absolute url)
@@ -107,6 +112,26 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         for (name, values) in headers {
             req.setValue(values.joined(separator: ", "), forHTTPHeaderField: name)
         }
+    }
+
+    /// The SDK hands us a Drive-API `relativePath` of the form `"<servicePrefix>/<absolute URL>"`,
+    /// e.g. `"drive/https://drive-api.proton.me/v2/shares/photos"`. The real endpoint inserts the
+    /// service prefix into the host path: `https://drive-api.proton.me/drive/v2/shares/photos`.
+    /// We reconstruct that; clean relative paths fall back to `makeURL`.
+    static func driveURL(_ relativePath: String, makeURL: (String) -> URL) -> URL {
+        guard let schemeRange = relativePath.range(of: "https://") ?? relativePath.range(of: "http://"),
+              let embedded = URL(string: String(relativePath[schemeRange.lowerBound...])),
+              let scheme = embedded.scheme, let host = embedded.host
+        else {
+            return makeURL(relativePath)
+        }
+        let prefix = relativePath[relativePath.startIndex..<schemeRange.lowerBound]
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var combined = "\(scheme)://\(host)"
+        if !prefix.isEmpty { combined += "/\(prefix)" }
+        combined += embedded.path.hasPrefix("/") ? embedded.path : "/\(embedded.path)"
+        if let query = embedded.query, !query.isEmpty { combined += "?\(query)" }
+        return URL(string: combined) ?? makeURL(relativePath)
     }
 
     private static func headerPairs(_ http: HTTPURLResponse) -> [(String, [String])] {
