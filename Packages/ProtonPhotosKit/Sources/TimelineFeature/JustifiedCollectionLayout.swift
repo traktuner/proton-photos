@@ -21,7 +21,9 @@ final class JustifiedCollectionLayout: NSCollectionViewLayout {
     override func prepare() {
         super.prepare()
         guard let collectionView else { return }
-        width = collectionView.bounds.width
+        let newWidth = collectionView.bounds.width
+        guard newWidth > 1 else { return }        // ignore transient/zero-width passes
+        width = newWidth
         items.removeAll(keepingCapacity: true)
         headers.removeAll(keepingCapacity: true)
 
@@ -41,7 +43,8 @@ final class JustifiedCollectionLayout: NSCollectionViewLayout {
             var sum: CGFloat = 0
 
             func flush(justified: Bool) {
-                let h = justified ? (width - spacing * CGFloat(run.count - 1)) / max(sum, 0.001) : rowHeight
+                let rawH = justified ? (width - spacing * CGFloat(run.count - 1)) / max(sum, 0.001) : rowHeight
+                let h = max(1, min(rawH, 4000))   // never emit zero/NaN/huge frames
                 var x: CGFloat = 0
                 for a in run {
                     let w = a * h
@@ -71,10 +74,8 @@ final class JustifiedCollectionLayout: NSCollectionViewLayout {
     override func layoutAttributesForElements(in rect: NSRect) -> [NSCollectionViewLayoutAttributes] {
         var result: [NSCollectionViewLayoutAttributes] = []
 
-        // Headers are sticky → cheap to scan (one per section).
-        let collectionTop = enclosingClipBounds()?.minY ?? rect.minY
         for header in headers where header.frame.maxY >= rect.minY && header.frame.minY <= rect.maxY {
-            result.append(stickyHeader(header, top: collectionTop))
+            result.append(header)
         }
 
         guard !items.isEmpty else { return result }
@@ -101,27 +102,12 @@ final class JustifiedCollectionLayout: NSCollectionViewLayout {
         at indexPath: IndexPath
     ) -> NSCollectionViewLayoutAttributes? {
         guard indexPath.section < headers.count else { return nil }
-        return stickyHeader(headers[indexPath.section], top: enclosingClipBounds()?.minY ?? 0)
+        return headers[indexPath.section]
     }
 
-    override func shouldInvalidateLayout(forBoundsChange newBounds: NSRect) -> Bool { true }
-
-    // MARK: - Sticky headers
-
-    private func enclosingClipBounds() -> NSRect? {
-        (collectionView?.enclosingScrollView?.contentView)?.bounds
-    }
-
-    private func stickyHeader(_ base: NSCollectionViewLayoutAttributes, top: CGFloat) -> NSCollectionViewLayoutAttributes {
-        guard let copy = base.copy() as? NSCollectionViewLayoutAttributes else { return base }
-        let section = base.indexPath?.section ?? 0
-        let sectionTop = base.frame.minY
-        let nextTop = section + 1 < headers.count ? headers[section + 1].frame.minY : contentHeight
-        var frame = base.frame
-        let pinnedY = min(max(top, sectionTop), nextTop - headerHeight)
-        frame.origin.y = pinnedY
-        copy.frame = frame
-        copy.zIndex = 10
-        return copy
+    /// Only re-justify when the WIDTH changes — never on vertical scroll or magnification (which
+    /// previously invalidated the layout mid-magnify and crashed with invalid attributes).
+    override func shouldInvalidateLayout(forBoundsChange newBounds: NSRect) -> Bool {
+        newBounds.width != width
     }
 }
