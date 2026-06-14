@@ -6,7 +6,7 @@ import PackageDescription
 // (HttpClient/AccountClient/Bridge) lives in the app target instead.
 let package = Package(
     name: "ProtonPhotosKit",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("26.0")],
     products: [
         .library(name: "PhotosCore", targets: ["PhotosCore"]),
         .library(name: "DesignSystem", targets: ["DesignSystem"]),

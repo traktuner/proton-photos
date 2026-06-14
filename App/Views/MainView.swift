@@ -28,7 +28,6 @@ struct MainView: View {
                 let index = items.firstIndex(of: item) ?? 0
                 viewerModel = PhotoViewerModel(items: items, index: index, feed: feed, media: backend)
             }
-            .ignoresSafeArea(edges: .top)
             .navigationTitle("Library")
             .toolbar { toolbarContent }
         }

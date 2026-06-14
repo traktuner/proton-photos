@@ -3,8 +3,8 @@ import AVKit
 import PhotosCore
 import DesignSystem
 
-/// Full-screen photo/video viewer: shows the best available image sharp (no blur) with a Proton
-/// loading spinner while the full original downloads, then enables pinch-to-zoom + pan.
+/// Full-screen photo/video viewer: shows the best available image sharp (no blur) with a Liquid
+/// Glass loading indicator while the full original downloads, then pinch-to-zoom + two-finger pan.
 public struct PhotoViewerView: View {
     @State private var model: PhotoViewerModel
     private let onClose: () -> Void
@@ -12,8 +12,6 @@ public struct PhotoViewerView: View {
     @State private var hovering = false
     @State private var scale: CGFloat = 1
     @State private var lastScale: CGFloat = 1
-    @State private var offset: CGSize = .zero
-    @State private var lastOffset: CGSize = .zero
 
     public init(model: PhotoViewerModel, onClose: @escaping () -> Void) {
         _model = State(initialValue: model)
@@ -26,15 +24,14 @@ public struct PhotoViewerView: View {
 
             content
 
-            // Loading indicator: full original still downloading (and not a video).
             if model.videoURL == nil && !model.isSharp {
-                ProtonSpinner(size: 36, lineWidth: 3)
-                    .padding(20)
-                    .background(.ultraThinMaterial, in: Circle())
+                ProtonSpinner(size: 30, lineWidth: 2.5)
+                    .padding(16)
+                    .glassEffect(in: Circle())
             }
 
             controls
-            shortcuts   // window-level key handling — works the instant the viewer opens
+            shortcuts
         }
         .onAppear { model.start() }
         .onHover { hovering = $0 }
@@ -46,22 +43,23 @@ public struct PhotoViewerView: View {
             VideoPlayer(player: AVPlayer(url: videoURL))
                 .ignoresSafeArea()
         } else if let image = model.image {
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.high)
-                .scaledToFit()
-                .scaleEffect(scale)
-                .offset(offset)
-                .gesture(magnify)
-                .simultaneousGesture(pan)
-                .onTapGesture(count: 2) { toggleZoom() }
+            GeometryReader { geo in
+                ScrollView([.horizontal, .vertical]) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: geo.size.width * scale, height: geo.size.height * scale)
+                        .gesture(magnify)
+                        .onTapGesture(count: 2) { toggleZoom() }
+                }
+                .scrollIndicators(.hidden)
+                .scrollDisabled(scale <= 1.01)              // only pan when zoomed in
+                .scrollClipDisabled()
                 .animation(.interactiveSpring(duration: 0.25), value: scale)
-                .animation(.interactiveSpring(duration: 0.25), value: offset)
-                .animation(.easeInOut(duration: 0.2), value: image)
+            }
         }
     }
-
-    // MARK: Gestures
 
     private var magnify: some Gesture {
         MagnifyGesture()
@@ -72,24 +70,14 @@ public struct PhotoViewerView: View {
             }
     }
 
-    private var pan: some Gesture {
-        DragGesture()
-            .onChanged { value in
-                guard scale > 1 else { return }
-                offset = CGSize(width: lastOffset.width + value.translation.width,
-                                height: lastOffset.height + value.translation.height)
-            }
-            .onEnded { _ in lastOffset = offset }
-    }
-
     private func toggleZoom() {
-        if scale > 1 { resetZoom() } else { scale = 2.5; lastScale = 2.5 }
+        withAnimation(.snappy(duration: 0.25)) {
+            if scale > 1 { scale = 1 } else { scale = 2.5 }
+            lastScale = scale
+        }
     }
 
-    private func resetZoom() {
-        scale = 1; lastScale = 1; offset = .zero; lastOffset = .zero
-    }
-
+    private func resetZoom() { scale = 1; lastScale = 1 }
     private func goPrevious() { resetZoom(); model.previous() }
     private func goNext() { resetZoom(); model.next() }
 
@@ -117,8 +105,6 @@ public struct PhotoViewerView: View {
         .animation(.easeInOut(duration: 0.15), value: hovering)
     }
 
-    /// Hidden buttons give us reliable, focus-independent keyboard handling from the moment the
-    /// viewer appears (no need to click a control first).
     private var shortcuts: some View {
         ZStack {
             Button("", action: goPrevious).keyboardShortcut(.leftArrow, modifiers: [])
@@ -136,9 +122,9 @@ public struct PhotoViewerView: View {
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: size, height: size)
-                .background(.ultraThinMaterial, in: Circle())
         }
         .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: Circle())
         .opacity(enabled ? 1 : 0.25)
         .disabled(!enabled)
     }
