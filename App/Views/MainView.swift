@@ -13,18 +13,21 @@ struct MainView: View {
     @State private var viewerModel: PhotoViewerModel?
     @State private var cellZoom: CGFloat = 1
     private let feed: ThumbnailFeed
+    private let aspects: AspectRegistry
 
     init(model: AppModel, backend: any PhotosBackend) {
         self.model = model
         self.backend = backend
-        let feed = ThumbnailFeed(cache: ThumbnailCache(), loader: backend)
+        let aspects = AspectRegistry()
+        self.aspects = aspects
+        let feed = ThumbnailFeed(cache: ThumbnailCache(), loader: backend, aspects: aspects)
         self.feed = feed
         _timelineModel = State(initialValue: TimelineViewModel(repository: backend, feed: feed))
     }
 
     var body: some View {
         NavigationStack {
-            TimelineView(model: timelineModel, cellZoom: $cellZoom) { item, items in
+            TimelineView(model: timelineModel, aspects: aspects, cellZoom: $cellZoom) { item, items in
                 let index = items.firstIndex(of: item) ?? 0
                 viewerModel = PhotoViewerModel(items: items, index: index, feed: feed, media: backend)
             }

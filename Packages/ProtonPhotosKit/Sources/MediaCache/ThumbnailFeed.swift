@@ -13,6 +13,7 @@ import PhotosCore
 public actor ThumbnailFeed {
     private nonisolated let cache: ThumbnailCache
     private nonisolated let loader: ThumbnailBatchLoader
+    private nonisolated let aspects: AspectRegistry
     private let decoded = NSCache<NSString, NSImage>()
     private let targetPixels: CGFloat
     private nonisolated let concurrency: Int
@@ -28,12 +29,14 @@ public actor ThumbnailFeed {
     public init(
         cache: ThumbnailCache,
         loader: ThumbnailBatchLoader,
+        aspects: AspectRegistry,
         targetPixels: CGFloat = 320,
         concurrency: Int = 10,
         batch: Int = 8
     ) {
         self.cache = cache
         self.loader = loader
+        self.aspects = aspects
         self.targetPixels = targetPixels
         self.concurrency = concurrency
         self.batch = batch
@@ -48,6 +51,7 @@ public actor ThumbnailFeed {
         if let img = decoded.object(forKey: key) { return img }
         if let data = cache.diskData(for: uid), let img = Self.downsample(data, max: targetPixels) {
             decoded.setObject(img, forKey: key)
+            aspects.record(uid, aspect: img.size.width / max(img.size.height, 1))
             return img
         }
         return nil

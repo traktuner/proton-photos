@@ -6,24 +6,24 @@ import MediaCache
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var cellZoom: CGFloat
+    private let aspects: AspectRegistry
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
 
     public init(
         model: TimelineViewModel,
+        aspects: AspectRegistry,
         cellZoom: Binding<CGFloat> = .constant(1),
         onOpen: @escaping (PhotoItem, [PhotoItem]) -> Void = { _, _ in }
     ) {
         _model = State(initialValue: model)
+        self.aspects = aspects
         _cellZoom = cellZoom
         self.onOpen = onOpen
     }
 
     private let spacing: CGFloat = 2
-    private let baseCell: CGFloat = 116
-
-    private func columnCount(for width: CGFloat) -> Int {
-        max(3, Int((width / (baseCell * cellZoom)).rounded()))
-    }
+    /// Base justified row height; scaled by the pinch zoom.
+    private let baseRowHeight: CGFloat = 168
 
     public var body: some View {
         Group {
@@ -44,20 +44,20 @@ public struct TimelineView: View {
 
     private func grid(_ sections: [TimelineSection]) -> some View {
         GeometryReader { geo in
-            let columns = Array(
-                repeating: GridItem(.flexible(), spacing: spacing),
-                count: columnCount(for: geo.size.width)
-            )
+            let width = max(120, geo.size.width - spacing * 2)
+            let rowHeight = baseRowHeight * cellZoom
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14, pinnedViews: [.sectionHeaders]) {
                     ForEach(sections) { section in
                         Section {
-                            LazyVGrid(columns: columns, spacing: spacing) {
-                                ForEach(section.items) { item in
-                                    PhotoThumbnailCell(item: item, feed: model.feed)
-                                        .onTapGesture { onOpen(item, model.allItems) }
-                                }
-                            }
+                            JustifiedSection(
+                                items: section.items,
+                                width: width,
+                                targetHeight: rowHeight,
+                                spacing: spacing,
+                                feed: model.feed,
+                                aspects: aspects
+                            ) { item in onOpen(item, model.allItems) }
                             .padding(.horizontal, spacing)
                         } header: {
                             sectionHeader(section.title)
@@ -132,7 +132,77 @@ public struct TimelineView: View {
     }
 }
 
-/// A single uniform square grid cell. Loads its thumbnail from the shared feed (cache-first).
+/// One day's photos laid out as justified rows (uniform row height, aspect-preserving widths),
+/// exactly like Apple Photos. Aspect ratios come from `AspectRegistry` (square until learned).
+private struct JustifiedSection: View {
+    let items: [PhotoItem]
+    let width: CGFloat
+    let targetHeight: CGFloat
+    let spacing: CGFloat
+    let feed: ThumbnailFeed
+    let aspects: AspectRegistry
+    let onOpen: (PhotoItem) -> Void
+
+    var body: some View {
+        _ = aspects.version   // re-lay out as aspect ratios are learned
+        let rows = Self.layout(items, width: width, targetHeight: targetHeight, spacing: spacing, aspects: aspects)
+        return VStack(alignment: .leading, spacing: spacing) {
+            ForEach(rows.indices, id: \.self) { i in
+                HStack(spacing: spacing) {
+                    ForEach(rows[i]) { cell in
+                        PhotoThumbnailCell(item: cell.item, feed: feed)
+                            .frame(width: cell.width, height: cell.height)
+                            .clipShape(RoundedRectangle(cornerRadius: 1, style: .continuous))
+                            .onTapGesture { onOpen(cell.item) }
+                    }
+                }
+            }
+        }
+    }
+
+    struct Cell: Identifiable {
+        let item: PhotoItem
+        let width: CGFloat
+        let height: CGFloat
+        var id: PhotoUID { item.uid }
+    }
+
+    /// Greedy justified packing: fill each row to `width`, then scale the row's height so it fits
+    /// exactly. The final (partial) row keeps the target height (left-aligned), like Apple.
+    @MainActor
+    static func layout(_ items: [PhotoItem], width: CGFloat, targetHeight: CGFloat, spacing: CGFloat, aspects: AspectRegistry) -> [[Cell]] {
+        var rows: [[Cell]] = []
+        var run: [(PhotoItem, CGFloat)] = []
+        var aspectSum: CGFloat = 0
+
+        func aspect(_ item: PhotoItem) -> CGFloat {
+            min(max(aspects.aspect(for: item.uid), 0.45), 3.2)
+        }
+
+        for item in items {
+            let a = aspect(item)
+            run.append((item, a))
+            aspectSum += a
+            let rowWidth = aspectSum * targetHeight + spacing * CGFloat(run.count - 1)
+            if rowWidth >= width {
+                rows.append(justify(run, width: width, spacing: spacing))
+                run.removeAll(); aspectSum = 0
+            }
+        }
+        if !run.isEmpty {
+            rows.append(run.map { Cell(item: $0.0, width: $0.1 * targetHeight, height: targetHeight) })
+        }
+        return rows
+    }
+
+    private static func justify(_ run: [(PhotoItem, CGFloat)], width: CGFloat, spacing: CGFloat) -> [Cell] {
+        let aspectSum = run.reduce(0) { $0 + $1.1 }
+        let height = (width - spacing * CGFloat(run.count - 1)) / max(aspectSum, 0.001)
+        return run.map { Cell(item: $0.0, width: $0.1 * height, height: height) }
+    }
+}
+
+/// A single grid cell. Loads its thumbnail from the shared feed (cache-first) and fills its slot.
 struct PhotoThumbnailCell: View {
     let item: PhotoItem
     let feed: ThumbnailFeed
@@ -140,23 +210,22 @@ struct PhotoThumbnailCell: View {
     @State private var image: NSImage?
 
     var body: some View {
-        Color.clear
-            .aspectRatio(1, contentMode: .fit)
-            .overlay {
-                if let image {
-                    Image(nsImage: image)
-                        .resizable()
-                        .interpolation(.medium)
-                        .scaledToFill()
-                } else {
-                    ProtonColor.backgroundStrong
-                }
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.medium)
+                    .scaledToFill()
+            } else {
+                ProtonColor.backgroundStrong
             }
-            .clipped()
-            .overlay(alignment: .bottomTrailing) { videoBadge }
-            .overlay(alignment: .topTrailing) { liveBadge }
-            .contentShape(Rectangle())
-            .task(id: item.uid) {
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)   // fill the justified slot from the parent
+        .clipped()
+        .overlay(alignment: .bottomTrailing) { videoBadge }
+        .overlay(alignment: .topTrailing) { liveBadge }
+        .contentShape(Rectangle())
+        .task(id: item.uid) {
                 while !Task.isCancelled {
                     if let img = await feed.cachedImage(for: item.uid) {
                         image = img
