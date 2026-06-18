@@ -25,7 +25,11 @@ packages:
     path: Packages/ProtonPhotosKit
   ProtonCore:
     url: https://github.com/ProtonMail/protoncore_ios.git
-    exactVersion: 37.0.1
+    # Must match the version pinned by Vendor/sdk-swift's own Package.swift (currently 0.17.1 → 37.3.0).
+    # sdk-swift 0.16.0/0.17.0 shipped an xcframework needing newer GoLibs crypto symbols
+    # (_pgp_key_unlock / _pgp_reader_destroy) while still pinning 37.0.1 → link failure; 0.17.1 fixes
+    # the inconsistency by bumping to 37.3.0, which exports them.
+    exactVersion: 37.3.0
 
 targets:
   ProtonPhotos:
