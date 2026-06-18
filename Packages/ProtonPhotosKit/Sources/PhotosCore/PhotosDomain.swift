@@ -16,34 +16,43 @@ public struct PhotoUID: Hashable, Sendable, Codable {
 
 /// One item on the photo timeline. Kept intentionally lightweight — heavy data
 /// (full image/video) is loaded lazily through the providers below.
-public struct PhotoItem: Identifiable, Hashable, Sendable {
+public struct PhotoItem: Identifiable, Hashable, Sendable, Codable {
     public let uid: PhotoUID
     public let captureTime: Date
     public let mediaType: String        // e.g. "image/jpeg", "video/quicktime"
     public let isLivePhoto: Bool
+    /// For a Live Photo, the node ID (same volume) of the paired video file.
+    public let relatedVideoID: String?
     public let durationSeconds: Double?  // for videos
 
     public var id: PhotoUID { uid }
 
     public var isVideo: Bool { mediaType.hasPrefix("video/") }
 
+    /// The paired video's identifier, for Live Photo playback.
+    public var relatedVideoUID: PhotoUID? {
+        relatedVideoID.map { PhotoUID(volumeID: uid.volumeID, nodeID: $0) }
+    }
+
     public init(
         uid: PhotoUID,
         captureTime: Date,
         mediaType: String,
         isLivePhoto: Bool = false,
+        relatedVideoID: String? = nil,
         durationSeconds: Double? = nil
     ) {
         self.uid = uid
         self.captureTime = captureTime
         self.mediaType = mediaType
         self.isLivePhoto = isLivePhoto
+        self.relatedVideoID = relatedVideoID
         self.durationSeconds = durationSeconds
     }
 }
 
 /// A date-grouped run of photos, like the macOS Photos app day/month headers.
-public struct TimelineSection: Identifiable, Sendable {
+public struct TimelineSection: Identifiable, Sendable, Codable {
     public let id: String          // stable key, e.g. "2026-06-13"
     public let date: Date
     public let title: String
@@ -62,6 +71,13 @@ public struct TimelineSection: Identifiable, Sendable {
 /// Source of timeline metadata.
 public protocol PhotosRepository: Sendable {
     func loadTimeline() async throws -> [TimelineSection]
+    /// Last-known timeline persisted to disk, for instant startup (nil if none). `loadTimeline()`
+    /// then refreshes in the background — stale-while-revalidate, so there's no spinner on relaunch.
+    func cachedTimeline() async -> [TimelineSection]?
+}
+
+public extension PhotosRepository {
+    func cachedTimeline() async -> [TimelineSection]? { nil }
 }
 
 /// Loads thumbnail image bytes for a photo (small grid preview).
@@ -84,6 +100,15 @@ public protocol FullMediaProvider: Sendable {
     func preview(for uid: PhotoUID) async throws -> Data
     /// Downloads the original file to a temporary URL.
     func downloadOriginal(for uid: PhotoUID) async throws -> URL
+    /// Downloads the original, reporting download progress (0…1) — used to show a progress
+    /// indicator while a large video downloads.
+    func downloadOriginal(for uid: PhotoUID, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL
+}
+
+public extension FullMediaProvider {
+    func downloadOriginal(for uid: PhotoUID, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL {
+        try await downloadOriginal(for: uid)
+    }
 }
 
 /// Authentication lifecycle, abstracted away from the concrete fork mechanism.

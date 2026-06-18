@@ -62,7 +62,8 @@ public struct ProtonLoadingView: View {
 
     public var body: some View {
         VStack(spacing: 16) {
-            ProtonSpinner(size: 34, lineWidth: 3.5)
+            ProgressView()
+                .controlSize(.large)
             if let caption {
                 Text(caption)
                     .font(.system(size: 13))

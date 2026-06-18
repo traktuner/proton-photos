@@ -36,6 +36,10 @@ public actor ThumbnailCache {
         try? Data(contentsOf: directory.appendingPathComponent(Self.key(uid)))
     }
 
+    public nonisolated func diskURL(for uid: PhotoUID) -> URL {
+        directory.appendingPathComponent(Self.key(uid))
+    }
+
     public nonisolated func storeToDisk(_ data: Data, for uid: PhotoUID) {
         try? data.write(to: directory.appendingPathComponent(Self.key(uid)), options: .atomic)
     }
@@ -50,6 +54,29 @@ public actor ThumbnailCache {
         memory.removeAllObjects()
         try? fileManager.removeItem(at: directory)
         try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    public nonisolated func diskCoverage(for uids: [PhotoUID]) -> (present: Int, total: Int, percent: Double) {
+        let total = uids.count
+        guard total > 0 else { return (0, 0, 1) }
+        let present = uids.reduce(0) { $0 + (has($1) ? 1 : 0) }
+        return (present, total, Double(present) / Double(total))
+    }
+
+    public nonisolated func diskFileCount() -> Int {
+        (try? FileManager.default.contentsOfDirectory(atPath: directory.path).count) ?? 0
+    }
+
+    public nonisolated func diskSizeBytes() -> Int64 {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+        return urls.reduce(Int64(0)) { total, url in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return total + Int64(size)
+        }
     }
 
     private static func key(_ uid: PhotoUID) -> String {

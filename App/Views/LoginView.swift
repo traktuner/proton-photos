@@ -44,7 +44,7 @@ struct LoginView: View {
         switch model.auth {
         case let .authenticating(status):
             VStack(spacing: 16) {
-                ProtonSpinner(size: 30, lineWidth: 3)
+                ProgressView().controlSize(.large)
                 Text(status)
                     .font(.system(size: 13))
                     .foregroundStyle(ProtonColor.textWeak)
@@ -61,7 +61,7 @@ struct LoginView: View {
                 } label: {
                     Text("Sign in with Proton")
                 }
-                .buttonStyle(.proton)
+                .buttonStyle(.glassProminent)
 
                 if case let .signedOut(error?) = model.auth {
                     Text(error)

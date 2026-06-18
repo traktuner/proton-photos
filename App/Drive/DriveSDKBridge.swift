@@ -1,4 +1,6 @@
 import Foundation
+import AVFoundation
+import SQLite3
 import PhotosCore
 import ProtonAuth
 import ProtonDriveSDK
@@ -8,11 +10,17 @@ import ProtonDriveSDK
 ///
 /// Everything SDK-specific is isolated here so feature modules stay SDK-agnostic and new SDK
 /// capabilities (albums, sharing, upload) can be added without touching the UI layer.
-actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader, FullMediaProvider {
+actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader, FullMediaProvider, VideoStreamProvider, PhotoMetadataProvider, PhotoLibraryProvider, FavoritesProvider, TrashProvider, LibraryStatsProvider {
     private let photosClient: ProtonPhotosClient
     private let driveSession: DriveSession
     private let rateLimit = RateLimitGate()
     private var photosRoot: SDKNodeUid?
+    private var photosShareID: String?
+    /// SQLite-backed timeline cache (faster cold-start than JSON at 20k+; sets up for windowing).
+    private let timelineStore: PhotoTimelineStore?
+    /// Drive key-derivation + block decryption for video streaming (built once at sign-in).
+    private let crypto: DriveCrypto
+    private var streamSource: PhotoVideoStreamSource?
 
     init(session: ProtonSession, store: SessionKeychainStore) async throws {
         let driveSession = DriveSession(session: session, store: store)
@@ -25,9 +33,16 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         let accountClient = try SDKAccountClientBuilder.build(account: account, keyPassword: session.keyPassword)
         DebugLog.log("bridge: account client built (\(accountClient.unlockedByKeyID.count) unlocked keys)")
 
+        // Crypto for streaming: the same address keys, kept as (armored, passphrase) so we can
+        // derive share/node keys and the per-file content session key on demand.
+        self.crypto = DriveCrypto(account: account, keyPassword: session.keyPassword)
+
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ProtonPhotos/sdk", isDirectory: true)
         try? FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
+        // Persisted timeline (per account) for instant startup — now SQLite (v3) for a faster cold
+        // start at 20k+ photos than decoding a multi-MB JSON blob.
+        self.timelineStore = PhotoTimelineStore(url: caches.appendingPathComponent("timeline-v3-\(session.uid).sqlite"))
 
         let config = ProtonDriveClientConfiguration(
             baseURL: "https://drive-api.proton.me/",   // trailing slash required by the C# core
@@ -53,13 +68,41 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         do {
             let root = try await resolvePhotosRoot()
             DebugLog.log("timeline: photos root \(root.volumeID.prefix(8))…/\(root.nodeID.prefix(8))… — enumerating")
+            // Loading path stays on the SDK's enumerateTimeline — it's SQLite-cached and fast. We
+            // deliberately do NOT swap in the direct photos-listing endpoint here: that would do a
+            // full uncached re-pagination every launch (a performance regression). The Live Photo
+            // metadata (Tags/RelatedPhotos) the SDK currently drops will arrive natively once the
+            // SDK reaches feature parity — PhotoItem already carries `isLivePhoto`/`relatedVideoID`,
+            // so that switch is zero-effort. `DriveSession.fetchPhotosList` stays available as the
+            // ready fallback for when we want to enrich without waiting for the SDK.
             let items = try await photosClient.enumerateTimeline(in: root)
             DebugLog.log("timeline: enumerated \(items.count) items ✓")
-            return Self.group(items)
+            let sections = Self.group(items)
+            writeTimelineCache(sections)
+            return sections
         } catch {
             DebugLog.log("timeline: FAILED — \(error)")
             throw error
         }
+    }
+
+    /// Last-known timeline from disk, for instant startup (no spinner). Reads from SQLite — then
+    /// `loadTimeline()` refreshes in the background.
+    func cachedTimeline() -> [TimelineSection]? {
+        guard let items = timelineStore?.load(), !items.isEmpty else { return nil }
+        DebugLog.log("timeline: served \(items.count) items from SQLite cache ✓")
+        return [TimelineSection(id: "all", date: items.first?.captureTime ?? .distantPast, title: "", items: items)]
+    }
+
+    private func writeTimelineCache(_ sections: [TimelineSection]) {
+        timelineStore?.save(sections.flatMap(\.items))
+    }
+
+    // MARK: - LibraryStatsProvider
+
+    /// Rows persisted in the local SQLite timeline store — surfaced as "metadata rows" in Settings.
+    func metadataRowCount() async -> Int {
+        timelineStore?.count() ?? 0
     }
 
     // MARK: - ThumbnailProvider
@@ -94,16 +137,20 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     }
 
     func downloadOriginal(for uid: PhotoUID) async throws -> URL {
+        try await downloadOriginal(for: uid, onProgress: { _ in })
+    }
+
+    func downloadOriginal(for uid: PhotoUID, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL {
         let sdkUid = SDKNodeUid(volumeID: uid.volumeID, nodeID: uid.nodeID)
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ProtonPhotos/originals", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let dest = dir.appendingPathComponent("\(uid.nodeID.replacingOccurrences(of: "/", with: "_"))")
-        if FileManager.default.fileExists(atPath: dest.path) { return dest }
+        if FileManager.default.fileExists(atPath: dest.path) { onProgress(1); return dest }
         _ = try await photosClient.download(
             photoUid: sdkUid,
             destinationUrl: dest,
             cancellationToken: UUID(),
-            progressCallback: { _ in },
+            progressCallback: { onProgress($0.fractionCompleted) },
             onRetriableErrorReceived: { _ in }
         )
         return dest
@@ -136,34 +183,250 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         }
         let root = SDKNodeUid(volumeID: share.volumeID, nodeID: share.linkID)
         photosRoot = root
+        photosShareID = share.shareID
         return root
+    }
+
+    /// Lazily builds (and caches) the streaming/metadata source once the photos share id is known.
+    private func fileSource() async throws -> PhotoVideoStreamSource {
+        _ = try await resolvePhotosRoot()   // ensures photosShareID is populated
+        guard let shareID = photosShareID else { throw DriveBridgeError.noPhotosShare }
+        if let streamSource { return streamSource }
+        let source = PhotoVideoStreamSource(session: driveSession, crypto: crypto, shareID: shareID)
+        streamSource = source
+        return source
+    }
+
+    // MARK: - PhotoLibraryProvider
+
+    func albums() async throws -> [PhotoAlbum] {
+        let root = try await resolvePhotosRoot()
+        let source = try await fileSource()
+        let raw = try await driveSession.fetchAlbums(volumeID: root.volumeID)
+        var result: [PhotoAlbum] = []
+        for a in raw {
+            let title = (try? await source.nodeName(linkID: a.linkID)) ?? "Album"
+            result.append(PhotoAlbum(id: a.linkID, title: title ?? "Album",
+                                     photoCount: a.photoCount ?? 0, coverLinkID: a.coverLinkID))
+        }
+        return result
+    }
+
+    func timeline(filter: PhotoFilter) async throws -> [TimelineSection] {
+        switch filter {
+        case .all:
+            return try await loadTimeline()
+        case .tag(let tag):
+            let root = try await resolvePhotosRoot()
+            let entries = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: tag.rawValue)
+            return Self.group(entries, volumeID: root.volumeID)
+        case .album(let id, _):
+            let root = try await resolvePhotosRoot()
+            let entries = try await driveSession.fetchAlbumPhotos(volumeID: root.volumeID, albumLinkID: id)
+            return Self.group(entries, volumeID: root.volumeID)
+        case .trash:
+            let root = try await resolvePhotosRoot()
+            let links = try await driveSession.listTrash(volumeID: root.volumeID).filter { $0.type == 2 }
+            let photos = links
+                .map { PhotoItem(uid: PhotoUID(volumeID: root.volumeID, nodeID: $0.linkID),
+                                 captureTime: Date(timeIntervalSince1970: $0.captureTime),
+                                 mediaType: ($0.mimeType?.hasPrefix("video/") == true) ? "video/quicktime" : "image/jpeg") }
+                .sorted { $0.captureTime < $1.captureTime }
+            return [TimelineSection(id: "trash", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]
+        }
+    }
+
+    // MARK: - FavoritesProvider
+
+    func favoriteUIDs() async throws -> Set<PhotoUID> {
+        let root = try await resolvePhotosRoot()
+        let entries = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: 0)
+        return Set(entries.map { PhotoUID(volumeID: root.volumeID, nodeID: $0.linkID) })
+    }
+
+    func setFavorite(_ uid: PhotoUID, _ favorite: Bool) async throws {
+        let root = try await resolvePhotosRoot()
+        try await driveSession.setFavorite(volumeID: root.volumeID, linkID: uid.nodeID, favorite)
+    }
+
+    // MARK: - TrashProvider
+
+    func trash(_ uids: [PhotoUID]) async throws {
+        let root = try await resolvePhotosRoot()
+        try await driveSession.trash(volumeID: root.volumeID, linkIDs: uids.map(\.nodeID))
+    }
+
+    func restore(_ uids: [PhotoUID]) async throws {
+        let root = try await resolvePhotosRoot()
+        try await driveSession.restore(volumeID: root.volumeID, linkIDs: uids.map(\.nodeID))
+    }
+
+    /// Builds timeline sections from direct-listing entries (tag filters + album contents).
+    private static func group(_ entries: [PhotosListEntry], volumeID: String) -> [TimelineSection] {
+        let photos = entries
+            .map { e -> PhotoItem in
+                PhotoItem(
+                    uid: PhotoUID(volumeID: volumeID, nodeID: e.linkID),
+                    captureTime: Date(timeIntervalSince1970: e.captureTime),
+                    mediaType: e.tags.contains(2) ? "video/quicktime" : "image/jpeg",
+                    isLivePhoto: e.isLivePhoto,
+                    relatedVideoID: e.relatedVideoLinkID
+                )
+            }
+            .sorted { $0.captureTime < $1.captureTime }
+        return [TimelineSection(id: "filtered", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]
+    }
+
+    // MARK: - PhotoMetadataProvider
+
+    func metadata(for uid: PhotoUID) async throws -> PhotoMetadata {
+        let source = try await fileSource()
+        let raw = try await source.fileMetadata(linkID: uid.nodeID)
+        let xa = raw.xattr
+        var mod: Date?
+        if let s = xa?.common?.modificationTime {
+            mod = ISO8601DateFormatter().date(from: s)
+        }
+        return PhotoMetadata(
+            filename: raw.filename,
+            mimeType: raw.mimeType,
+            fileSize: raw.size ?? xa?.common?.size,
+            pixelWidth: xa?.media?.width,
+            pixelHeight: xa?.media?.height,
+            device: xa?.camera?.device,
+            durationSeconds: xa?.media?.duration,
+            modificationTime: mod,
+            latitude: xa?.location?.latitude,
+            longitude: xa?.location?.longitude
+        )
+    }
+
+    // MARK: - VideoStreamProvider
+
+    func makeStreamingAsset(for uid: PhotoUID) async throws -> StreamingVideoAsset {
+        let source = try await fileSource()
+
+        // Throws `.notAVideo` cheaply for images, so the viewer falls back to its image path.
+        let prepared = try await source.prepare(linkID: uid.nodeID)
+        let loader = ProtonVideoResourceLoader(prepared: prepared, source: source, crypto: crypto)
+        // Unique per-item URL so AVFoundation never reuses a cached asset/loader across videos.
+        let host = uid.nodeID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "stream"
+        let asset = AVURLAsset(url: URL(string: "protonvideo://\(host)")!)
+        let queue = DispatchQueue(label: "me.proton.photos.video-loader")
+        asset.resourceLoader.setDelegate(loader, queue: queue)
+        return StreamingVideoAsset(asset: asset, retaining: loader)
     }
 
     // MARK: - Mapping
 
     private static func group(_ items: [PhotoTimelineItem]) -> [TimelineSection] {
-        let calendar = Calendar.current
         let photos = items
             .map { PhotoItem(uid: PhotoUID(volumeID: $0.nodeUid.volumeID, nodeID: $0.nodeUid.nodeID),
                              captureTime: Date(timeIntervalSince1970: $0.captureTime),
                              mediaType: "image/jpeg") }
-            .sorted { $0.captureTime > $1.captureTime }
+            // Ascending (oldest first): oldest at the top, newest at the BOTTOM — like Apple Photos.
+            // The grid opens scrolled to the bottom so the newest photos are shown first.
+            .sorted { $0.captureTime < $1.captureTime }
 
-        let keyFormatter = DateFormatter(); keyFormatter.dateFormat = "yyyy-MM-dd"
-        let titleFormatter = DateFormatter(); titleFormatter.dateStyle = .full; titleFormatter.timeStyle = .none
+        // ONE continuous section — no per-day/month breaks. Apple's "All Photos" is a single
+        // uninterrupted justified run, which also keeps pinch-zoom smooth (no divider lines to
+        // disturb the re-justify) and makes thumbnail sizing consistent across the whole library.
+        return [TimelineSection(id: "all", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]
+    }
+}
 
-        var order: [String] = []
-        var buckets: [String: [PhotoItem]] = [:]
-        for photo in photos {
-            let day = calendar.startOfDay(for: photo.captureTime)
-            let key = keyFormatter.string(from: day)
-            if buckets[key] == nil { order.append(key); buckets[key] = [] }
-            buckets[key]?.append(photo)
+/// SQLite-backed timeline cache. One row per photo (the lightweight metadata we already hold);
+/// loading is an indexed ordered scan, which cold-starts faster than decoding a multi-MB JSON blob
+/// and is the foundation for windowed loading later. Single-threaded (owned by the bridge actor).
+final class PhotoTimelineStore {
+    private var db: OpaquePointer?
+    private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)   // SQLITE_TRANSIENT
+
+    init?(url: URL) {
+        let setupStart = Date()
+        guard sqlite3_open(url.path, &db) == SQLITE_OK else { sqlite3_close(db); return nil }
+        sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA busy_timeout=3000;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA cache_size=-8192;", nil, nil, nil)
+        sqlite3_exec(db, "PRAGMA mmap_size=268435456;", nil, nil, nil)
+        let create = """
+        CREATE TABLE IF NOT EXISTS photos(
+          node TEXT PRIMARY KEY, vol TEXT, t REAL, mime TEXT, live INTEGER, relvid TEXT
+        );
+        """
+        guard sqlite3_exec(db, create, nil, nil, nil) == SQLITE_OK else { return nil }
+        sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_photos_t ON photos(t ASC);", nil, nil, nil)
+        sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_photos_vol_node ON photos(vol, node);", nil, nil, nil)
+        PhotoDiagnostics.shared.recordDBQuery(
+            queryName: "timeline.sqlite.setup",
+            durationMs: Date().timeIntervalSince(setupStart) * 1000,
+            rowsReturned: 0
+        )
+    }
+
+    deinit { sqlite3_close(db) }
+
+    /// Cheap indexed count for the cache-status surface.
+    func count() -> Int {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM photos;", -1, &stmt, nil) == SQLITE_OK else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
+    }
+
+    func load() -> [PhotoItem] {
+        let start = Date()
+        var stmt: OpaquePointer?
+        let sql = "SELECT node, vol, t, mime, live, relvid FROM photos ORDER BY t ASC;"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var items: [PhotoItem] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let nodeC = sqlite3_column_text(stmt, 0), let volC = sqlite3_column_text(stmt, 1) else { continue }
+            let mime = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "image/jpeg"
+            let relvid = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
+            items.append(PhotoItem(
+                uid: PhotoUID(volumeID: String(cString: volC), nodeID: String(cString: nodeC)),
+                captureTime: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 2)),
+                mediaType: mime,
+                isLivePhoto: sqlite3_column_int(stmt, 4) != 0,
+                relatedVideoID: relvid
+            ))
         }
-        return order.map { key in
-            let date = buckets[key]!.first!.captureTime
-            return TimelineSection(id: key, date: date, title: titleFormatter.string(from: date), items: buckets[key]!)
+        PhotoDiagnostics.shared.recordDBQuery(
+            queryName: "timeline.load.orderedByCaptureTime",
+            durationMs: Date().timeIntervalSince(start) * 1000,
+            rowsReturned: items.count
+        )
+        return items
+    }
+
+    func save(_ items: [PhotoItem]) {
+        let start = Date()
+        sqlite3_exec(db, "BEGIN;", nil, nil, nil)
+        sqlite3_exec(db, "DELETE FROM photos;", nil, nil, nil)
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO photos(node,vol,t,mime,live,relvid) VALUES(?,?,?,?,?,?);", -1, &stmt, nil) == SQLITE_OK {
+            for item in items {
+                sqlite3_reset(stmt)
+                sqlite3_bind_text(stmt, 1, item.uid.nodeID, -1, transient)
+                sqlite3_bind_text(stmt, 2, item.uid.volumeID, -1, transient)
+                sqlite3_bind_double(stmt, 3, item.captureTime.timeIntervalSince1970)
+                sqlite3_bind_text(stmt, 4, item.mediaType, -1, transient)
+                sqlite3_bind_int(stmt, 5, item.isLivePhoto ? 1 : 0)
+                if let rel = item.relatedVideoID { sqlite3_bind_text(stmt, 6, rel, -1, transient) }
+                else { sqlite3_bind_null(stmt, 6) }
+                sqlite3_step(stmt)
+            }
+            sqlite3_finalize(stmt)
         }
+        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+        PhotoDiagnostics.shared.recordDBQuery(
+            queryName: "timeline.save.replaceAll",
+            durationMs: Date().timeIntervalSince(start) * 1000,
+            rowsReturned: items.count
+        )
     }
 }
 

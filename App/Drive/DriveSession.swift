@@ -49,17 +49,27 @@ final class DriveSession: @unchecked Sendable {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    private func authedData(path: String, method: String, retryOn401: Bool = true) async throws -> Data {
+    /// Authenticated write request (POST/PUT/DELETE) with an optional JSON body.
+    @discardableResult
+    func send(_ path: String, method: String, body: [String: Any]? = nil) async throws -> Data {
+        try await authedData(path: path, method: method, body: body)
+    }
+
+    private func authedData(path: String, method: String, body: [String: Any]? = nil, retryOn401: Bool = true) async throws -> Data {
         var req = URLRequest(url: makeURL(path))
         req.httpMethod = method
         for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
+        if let body {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
 
         let (data, response) = try await urlSession.data(for: req)
         guard let http = response as? HTTPURLResponse else { throw ProtonAuthError.invalidResponse }
 
         if http.statusCode == 401, retryOn401 {
             if await refreshToken() {
-                return try await authedData(path: path, method: method, retryOn401: false)
+                return try await authedData(path: path, method: method, body: body, retryOn401: false)
             }
         }
         guard (200...299).contains(http.statusCode) else {
@@ -112,6 +122,184 @@ private struct RefreshResponse: Decodable {
     let accessToken: String?
     let refreshToken: String?
     enum CodingKeys: String, CodingKey { case accessToken = "AccessToken"; case refreshToken = "RefreshToken" }
+}
+
+// MARK: - Photos listing (Live Photo / video metadata)
+
+/// One photo as returned by the direct `/drive/volumes/{volumeID}/photos` endpoint — carries the
+/// `Tags` + `RelatedPhotos` that the SDK's `enumerateTimeline` wrapper drops.
+struct PhotosListEntry: Decodable {
+    let linkID: String
+    let captureTime: Double
+    let tags: [Int]
+    let relatedPhotos: [Related]
+
+    struct Related: Decodable {
+        let linkID: String
+        enum CodingKeys: String, CodingKey { case linkID = "LinkID" }
+    }
+    enum CodingKeys: String, CodingKey {
+        case linkID = "LinkID"; case captureTime = "CaptureTime"
+        case tags = "Tags"; case relatedPhotos = "RelatedPhotos"
+    }
+
+    /// Server-side PhotoTag: livePhotos = 3.
+    var isLivePhoto: Bool { tags.contains(3) }
+    /// The paired video file for a Live Photo (first related node).
+    var relatedVideoLinkID: String? { relatedPhotos.first?.linkID }
+}
+
+private struct PhotosListResponse: Decodable {
+    let photos: [PhotosListEntry]
+    enum CodingKeys: String, CodingKey { case photos = "Photos" }
+}
+
+extension DriveSession {
+    /// Fetches raw encrypted block bytes from storage for video streaming. Two patterns:
+    ///  • `token != nil` → hit `url` (a BareURL) with the `pm-storage-token` header and NO session
+    ///    auth (the web client pattern).
+    ///  • `token == nil` → `url` is a pre-signed full URL, fetched with normal session auth headers.
+    /// A fresh `URLSession.shared` request is used so the JSON `Accept` header isn't sent to the CDN.
+    func fetchBlock(url: String, token: String?) async throws -> Data {
+        guard let u = URL(string: url) else { throw ProtonAuthError.invalidResponse }
+        var req = URLRequest(url: u)
+        req.httpMethod = "GET"
+        if let token {
+            req.setValue(token, forHTTPHeaderField: "pm-storage-token")
+        } else {
+            for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
+        }
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw ProtonAuthError.invalidResponse }
+        guard (200...299).contains(http.statusCode) else {
+            throw ProtonAuthError.apiError(code: http.statusCode, message: "block fetch HTTP \(http.statusCode)")
+        }
+        return data
+    }
+
+    /// Enumerates the photos listing for a volume via the direct REST endpoint (cursor pagination),
+    /// returning the per-photo `Tags` + `RelatedPhotos` the SDK wrapper omits. Pass `tag` for a
+    /// server-side smart filter (Favorites/Videos/Selfies/…) — the API filters by a single tag.
+    func fetchPhotosList(volumeID: String, tag: Int? = nil, pageSize: Int = 500) async throws -> [PhotosListEntry] {
+        var all: [PhotosListEntry] = []
+        var cursor: String?
+        while true {
+            var path = "/drive/volumes/\(volumeID)/photos?PageSize=\(pageSize)"
+            if let tag { path += "&Tag=\(tag)" }
+            if let cursor { path += "&PreviousPageLastLinkID=\(cursor)" }
+            let page = try await getJSON(path, as: PhotosListResponse.self)
+            all.append(contentsOf: page.photos)
+            guard page.photos.count == pageSize, let last = page.photos.last?.linkID else { break }
+            cursor = last
+        }
+        return all
+    }
+
+    /// Favorite (POST) or un-favorite (DELETE the favorites tag 0) a photo. Volume-keyed.
+    func setFavorite(volumeID: String, linkID: String, _ favorite: Bool) async throws {
+        if favorite {
+            try await send("/drive/photos/volumes/\(volumeID)/links/\(linkID)/favorite", method: "POST")
+        } else {
+            try await send("/drive/photos/volumes/\(volumeID)/links/\(linkID)/tags", method: "DELETE", body: ["Tags": [0]])
+        }
+    }
+
+    /// Moves photos to trash (batch). Volume-keyed, on the `v2` path.
+    func trash(volumeID: String, linkIDs: [String]) async throws {
+        try await send("/drive/v2/volumes/\(volumeID)/trash_multiple", method: "POST", body: ["LinkIDs": linkIDs])
+    }
+
+    /// Restores photos from trash (batch).
+    func restore(volumeID: String, linkIDs: [String]) async throws {
+        try await send("/drive/v2/volumes/\(volumeID)/trash/restore_multiple", method: "PUT", body: ["LinkIDs": linkIDs])
+    }
+
+    /// Lists trashed links (offset pagination). Callers filter to photo files.
+    func listTrash(volumeID: String, pageSize: Int = 150) async throws -> [TrashLink] {
+        var all: [TrashLink] = []
+        var page = 0
+        while true {
+            let r = try await getJSON("/drive/volumes/\(volumeID)/trash?Page=\(page)&PageSize=\(pageSize)", as: TrashResponse.self)
+            all.append(contentsOf: r.links)
+            if r.links.count < pageSize { break }
+            page += 1
+        }
+        return all
+    }
+
+    /// Lists the user's owned photo albums (AnchorID cursor pagination). Names are NOT included here
+    /// — they're decrypted separately from each album's link metadata.
+    func fetchAlbums(volumeID: String) async throws -> [AlbumListEntry] {
+        var all: [AlbumListEntry] = []
+        var anchor: String?
+        repeat {
+            var path = "/drive/photos/volumes/\(volumeID)/albums"
+            if let anchor { path += "?AnchorID=\(anchor)" }
+            let page = try await getJSON(path, as: AlbumsListResponse.self)
+            all.append(contentsOf: page.albums)
+            anchor = page.more == true ? page.anchorID : nil
+        } while anchor != nil
+        return all
+    }
+
+    /// Lists the photos contained in an album (same per-photo shape as the timeline).
+    func fetchAlbumPhotos(volumeID: String, albumLinkID: String) async throws -> [PhotosListEntry] {
+        var all: [PhotosListEntry] = []
+        var anchor: String?
+        repeat {
+            var path = "/drive/photos/volumes/\(volumeID)/albums/\(albumLinkID)/children?Desc=1"
+            if let anchor { path += "&AnchorID=\(anchor)" }
+            let page = try await getJSON(path, as: AlbumPhotosResponse.self)
+            all.append(contentsOf: page.photos)
+            anchor = page.more == true ? page.anchorID : nil
+        } while anchor != nil
+        return all
+    }
+}
+
+struct TrashLink: Decodable {
+    let linkID: String
+    let type: Int
+    let createTime: Double?
+    let mimeType: String?
+    let photoProperties: PhotoProps?
+    struct PhotoProps: Decodable {
+        let captureTime: Double?
+        enum CodingKeys: String, CodingKey { case captureTime = "CaptureTime" }
+    }
+    enum CodingKeys: String, CodingKey {
+        case linkID = "LinkID", type = "Type", createTime = "CreateTime",
+             mimeType = "MIMEType", photoProperties = "PhotoProperties"
+    }
+    var captureTime: Double { photoProperties?.captureTime ?? createTime ?? 0 }
+}
+
+private struct TrashResponse: Decodable {
+    let links: [TrashLink]
+    enum CodingKeys: String, CodingKey { case links = "Links" }
+}
+
+struct AlbumListEntry: Decodable {
+    let linkID: String
+    let photoCount: Int?
+    let coverLinkID: String?
+    enum CodingKeys: String, CodingKey {
+        case linkID = "LinkID", photoCount = "PhotoCount", coverLinkID = "CoverLinkID"
+    }
+}
+
+private struct AlbumsListResponse: Decodable {
+    let albums: [AlbumListEntry]
+    let anchorID: String?
+    let more: Bool?
+    enum CodingKeys: String, CodingKey { case albums = "Albums", anchorID = "AnchorID", more = "More" }
+}
+
+private struct AlbumPhotosResponse: Decodable {
+    let photos: [PhotosListEntry]
+    let anchorID: String?
+    let more: Bool?
+    enum CodingKeys: String, CodingKey { case photos = "Photos", anchorID = "AnchorID", more = "More" }
 }
 
 // MARK: - Account data (users / addresses)

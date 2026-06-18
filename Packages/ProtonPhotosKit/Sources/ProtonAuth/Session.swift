@@ -27,6 +27,16 @@ public struct SessionKeychainStore: Sendable {
     }
 
     public func load() -> ProtonSession? {
+        #if DEBUG
+        // Dev: read the plaintext file FIRST and skip the Keychain entirely. The Keychain ACL is
+        // bound to the app's code signature, which changes on every local rebuild — so touching the
+        // Keychain would pop a "ProtonPhotos was modified" prompt on every launch. The file keeps the
+        // session across rebuilds with no prompt.
+        if let url = devFileURL, let data = try? Data(contentsOf: url),
+           let session = try? JSONDecoder().decode(ProtonSession.self, from: data) {
+            return session
+        }
+        #endif
         var query = baseQuery
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -36,35 +46,32 @@ public struct SessionKeychainStore: Sendable {
            let session = try? JSONDecoder().decode(ProtonSession.self, from: data) {
             return session
         }
-        #if DEBUG
-        // Dev fallback: the Keychain ACL is tied to the app's code signature, which changes on
-        // every local rebuild. A plaintext file keeps the session across rebuilds while iterating.
-        if let url = devFileURL, let data = try? Data(contentsOf: url) {
-            return try? JSONDecoder().decode(ProtonSession.self, from: data)
-        }
-        #endif
         return nil
     }
 
     public func save(_ session: ProtonSession) {
         guard let data = try? JSONEncoder().encode(session) else { return }
+        #if DEBUG
+        // Dev: persist to the file only — never write to the Keychain (see load()).
+        if let url = devFileURL {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? data.write(to: url, options: .atomic)
+        }
+        return
+        #else
         SecItemDelete(baseQuery as CFDictionary)
         var attrs = baseQuery
         attrs[kSecValueData as String] = data
         attrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         SecItemAdd(attrs as CFDictionary, nil)
-        #if DEBUG
-        if let url = devFileURL {
-            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? data.write(to: url, options: .atomic)
-        }
         #endif
     }
 
     public func clear() {
-        SecItemDelete(baseQuery as CFDictionary)
         #if DEBUG
         if let url = devFileURL { try? FileManager.default.removeItem(at: url) }
+        #else
+        SecItemDelete(baseQuery as CFDictionary)
         #endif
     }
 

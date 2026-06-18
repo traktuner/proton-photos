@@ -5,19 +5,34 @@ import MediaCache
 
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
-    @Binding private var cellZoom: CGFloat
+    @Binding private var level: Int
     private let aspects: AspectRegistry
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
+    private let proxy: GridProxy?
+    private let selectionMode: Bool
+    private let onSelectionChange: (Set<PhotoUID>) -> Void
+    private let media: FullMediaProvider?
+    private let favoriteUIDs: Set<PhotoUID>
 
     public init(
         model: TimelineViewModel,
         aspects: AspectRegistry,
-        cellZoom: Binding<CGFloat> = .constant(1),
+        level: Binding<Int> = .constant(2),
+        proxy: GridProxy? = nil,
+        selectionMode: Bool = false,
+        media: FullMediaProvider? = nil,
+        favoriteUIDs: Set<PhotoUID> = [],
+        onSelectionChange: @escaping (Set<PhotoUID>) -> Void = { _ in },
         onOpen: @escaping (PhotoItem, [PhotoItem]) -> Void = { _, _ in }
     ) {
         _model = State(initialValue: model)
         self.aspects = aspects
-        _cellZoom = cellZoom
+        _level = level
+        self.proxy = proxy
+        self.selectionMode = selectionMode
+        self.media = media
+        self.favoriteUIDs = favoriteUIDs
+        self.onSelectionChange = onSelectionChange
         self.onOpen = onOpen
     }
 
@@ -42,8 +57,13 @@ public struct TimelineView: View {
                     allItems: model.allItems,
                     feed: model.feed,
                     sectionAspects: sectionAspects,
-                    cellZoom: $cellZoom,
-                    onOpen: onOpen
+                    level: $level,
+                    onOpen: onOpen,
+                    proxy: proxy,
+                    selectionMode: selectionMode,
+                    onSelectionChange: onSelectionChange,
+                    favoriteUIDs: favoriteUIDs,
+                    media: media
                 )
                 .ignoresSafeArea(edges: .bottom)
             }
@@ -81,7 +101,7 @@ public struct TimelineView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
             Button("Retry") { Task { await model.load() } }
-                .buttonStyle(.proton)
+                .buttonStyle(.glassProminent)
                 .frame(width: 140)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

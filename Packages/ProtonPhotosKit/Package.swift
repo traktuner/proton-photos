@@ -14,6 +14,8 @@ let package = Package(
         .library(name: "MediaCache", targets: ["MediaCache"]),
         .library(name: "TimelineFeature", targets: ["TimelineFeature"]),
         .library(name: "PhotoViewerFeature", targets: ["PhotoViewerFeature"]),
+        // Isolated Grid-Zoom V3 prototype (synthetic tiles, no Proton data). See GridZoomV3Lab.
+        .library(name: "GridZoomV3", targets: ["GridZoomV3"]),
     ],
     targets: [
         .target(name: "PhotosCore"),
@@ -28,5 +30,12 @@ let package = Package(
             name: "PhotoViewerFeature",
             dependencies: ["PhotosCore", "DesignSystem", "MediaCache"]
         ),
+        .testTarget(
+            name: "TimelineFeatureTests",
+            dependencies: ["TimelineFeature", "MediaCache", "PhotosCore"]
+        ),
+        // Pure prototype: AppKit renderer + SwiftUI shell + pure layout engine. No Proton deps.
+        .target(name: "GridZoomV3"),
+        .testTarget(name: "GridZoomV3Tests", dependencies: ["GridZoomV3"]),
     ]
 )
