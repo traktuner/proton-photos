@@ -18,6 +18,9 @@ public final class GridProxy {
     /// Scrolls the grid so the photo is vertically centred (used before a fly-back-to-cell close).
     public var scrollToItem: ((PhotoItem) -> Void)?
 
+    /// Scrolls to the newest timeline position. The grid is ordered oldest at top, newest at bottom.
+    public var scrollToLatest: (() -> Void)?
+
     /// The `+` toolbar button: one discrete zoom-IN step (bigger thumbnails). Wired to the SAME
     /// `zoomInStep` the trackpad pinch-in calls, so the button and pinch are identical by construction.
     public var zoomIn: (() -> Void)?

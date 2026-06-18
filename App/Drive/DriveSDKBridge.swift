@@ -4,6 +4,7 @@ import SQLite3
 import PhotosCore
 import ProtonAuth
 import ProtonDriveSDK
+import UploadFeature
 
 /// Bridges the feature modules to the Proton Drive SDK. Owns the `ProtonPhotosClient`, wires in
 /// our HTTP + account clients, resolves the photos root, and adapts SDK types to `PhotosCore`.
@@ -77,7 +78,16 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             // ready fallback for when we want to enrich without waiting for the SDK.
             let items = try await photosClient.enumerateTimeline(in: root)
             DebugLog.log("timeline: enumerated \(items.count) items ✓")
-            let sections = Self.group(items)
+            let videoNodeIDs: Set<String>
+            do {
+                let videos = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: 2)
+                videoNodeIDs = Set(videos.map(\.linkID))
+                DebugLog.log("timeline: video tag enrichment found \(videoNodeIDs.count) videos")
+            } catch {
+                videoNodeIDs = []
+                DebugLog.log("timeline: video tag enrichment skipped — \(error)")
+            }
+            let sections = Self.group(items, videoNodeIDs: videoNodeIDs)
             writeTimelineCache(sections)
             return sections
         } catch {
@@ -307,7 +317,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         let source = try await fileSource()
 
         // Throws `.notAVideo` cheaply for images, so the viewer falls back to its image path.
-        let prepared = try await source.prepare(linkID: uid.nodeID)
+        let prepared = try await source.prepare(uid: uid)
         let loader = ProtonVideoResourceLoader(prepared: prepared, source: source, crypto: crypto)
         // Unique per-item URL so AVFoundation never reuses a cached asset/loader across videos.
         let host = uid.nodeID.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "stream"
@@ -319,11 +329,11 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
 
     // MARK: - Mapping
 
-    private static func group(_ items: [PhotoTimelineItem]) -> [TimelineSection] {
+    private static func group(_ items: [PhotoTimelineItem], videoNodeIDs: Set<String> = []) -> [TimelineSection] {
         let photos = items
             .map { PhotoItem(uid: PhotoUID(volumeID: $0.nodeUid.volumeID, nodeID: $0.nodeUid.nodeID),
                              captureTime: Date(timeIntervalSince1970: $0.captureTime),
-                             mediaType: "image/jpeg") }
+                             mediaType: videoNodeIDs.contains($0.nodeUid.nodeID) ? "video/quicktime" : "image/jpeg") }
             // Ascending (oldest first): oldest at the top, newest at the BOTTOM — like Apple Photos.
             // The grid opens scrolled to the bottom so the newest photos are shown first.
             .sorted { $0.captureTime < $1.captureTime }
@@ -427,6 +437,64 @@ final class PhotoTimelineStore {
             durationMs: Date().timeIntervalSince(start) * 1000,
             rowsReturned: items.count
         )
+    }
+}
+
+// MARK: - PhotoUploading (UploadFeature seam)
+
+/// Library upload via the SDK's `ProtonPhotosClient`. The SDK resolves the photos root itself, encrypts
+/// + streams blocks (through `SDKHttpClient.requestUploadToStorage`), and returns the new node id. The
+/// queue/state-machine lives in the pure `UploadManager`; this is just the transport.
+extension DriveSDKBridge: PhotoUploading {
+    nonisolated var capabilities: UploadBackendCapabilities {
+        // The SDK exposes operation-level pause/resume, but we drive uploads through the `uploadPhoto`
+        // convenience (no held operation), so in-flight pause isn't wired: queued items pause at the
+        // queue level; cancelled/failed items retry from the start (honestly, not byte-resumed).
+        UploadBackendCapabilities(
+            canUpload: true,
+            supportsCancel: true,
+            supportsPauseResume: false,
+            supportsResumeAcrossRelaunch: false
+        )
+    }
+
+    func upload(
+        _ request: PhotoUploadRequest,
+        onProgress: @Sendable @escaping (UploadProgress) -> Void
+    ) async throws -> PhotoUID {
+        onProgress(UploadProgress(phase: .preparing))
+        let isVideo = request.mediaType.hasPrefix("video/")
+        let thumbnails = UploadMediaProcessor.thumbnails(for: request.fileURL, isVideo: isVideo)
+        onProgress(UploadProgress(phase: .uploading, fraction: 0))
+        do {
+            let ids = try await photosClient.uploadPhoto(
+                name: request.name,
+                fileURL: request.fileURL,
+                fileSize: request.fileSize,
+                modificationDate: request.modificationDate,
+                captureTime: request.captureTime,
+                mainPhotoUid: nil,
+                mediaType: request.mediaType,
+                thumbnails: thumbnails,
+                tags: [],                       // let the server classify; avoids tag-mapping upload failures
+                additionalMetadata: [],
+                expectedSHA1: nil,
+                cancellationToken: request.cancellationToken,
+                progressCallback: { p in
+                    onProgress(UploadProgress(phase: .uploading, fraction: p.fractionCompleted))
+                },
+                onRetriableErrorReceived: { _ in }
+            )
+            DebugLog.log("[Upload] completed node=\(ids.nodeUid.nodeID.prefix(8))… file=\(request.name)")
+            return PhotoUID(volumeID: ids.nodeUid.volumeID, nodeID: ids.nodeUid.nodeID)
+        } catch {
+            DebugLog.log("[Upload] FAILED file=\(request.name) err=\(error)")
+            throw UploadError.backend((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+        }
+    }
+
+    func cancel(token: UUID) async {
+        try? await photosClient.cancelUpload(with: token)
     }
 }
 

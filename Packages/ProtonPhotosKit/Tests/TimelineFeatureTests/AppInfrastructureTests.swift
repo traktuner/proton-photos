@@ -128,16 +128,17 @@ struct AppInfrastructureTests {
 
     @Test func videoStateMachineTransitions() {
         #expect(VideoPlayerItemStatus.readyToPlay.nextState(error: nil) == .playing)
-        #expect(VideoPlayerItemStatus.failed.nextState(error: "boom") == .failed("boom"))
+        #expect(VideoPlayerItemStatus.failed.nextState(error: .decryptionFailed) == .failed(.decryptionFailed))
         #expect(VideoPlayerItemStatus.unknown.nextState(error: nil) == nil)   // keep current state
 
         #expect(VideoViewerState.downloading(0.42).progress == 0.42)
         #expect(VideoViewerState.playing.progress == 1)
         #expect(VideoViewerState.resolving.isBusy)
         #expect(VideoViewerState.downloading(0.1).isBusy)
-        #expect(!VideoViewerState.playing.isBusy)            // no infinite spinner once playing
-        #expect(!VideoViewerState.failed("x").isBusy)        // …or once failed
-        #expect(VideoViewerState.failed("x").errorMessage == "x")
+        #expect(VideoViewerState.buffering(nil).isBusy)
+        #expect(!VideoViewerState.playing.isBusy)                       // no infinite spinner once playing
+        #expect(!VideoViewerState.failed(.timedOut).isBusy)            // …or once failed
+        #expect(VideoViewerState.failed(.networkUnavailable).errorMessage == VideoPlaybackError.networkUnavailable.userMessage)
         #expect(VideoViewerState.ready.errorMessage == nil)
     }
 

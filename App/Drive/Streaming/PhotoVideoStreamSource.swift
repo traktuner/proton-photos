@@ -8,26 +8,40 @@ enum StreamingError: Error { case noRevision, noXAttr }
 /// One block's fetch info + its position in the *cleartext* file (from XAttr block sizes), so the
 /// resource loader can map a requested byte range to the blocks it needs.
 struct VideoBlock: Sendable {
+    let index: Int           // 1-based revision block index (matches the cache key + ClearBlock)
     let url: String          // BareURL (with token) or a pre-signed full URL
     let token: String?       // storage token for the `pm-storage-token` header; nil if `url` is pre-signed
     let clearOffset: Int     // byte offset of this block in the decrypted file
     let clearSize: Int       // decrypted byte length of this block
 }
 
-/// Everything needed to serve a streaming video: total size, the per-block map, the content session
-/// key, and the content UTI. The session key is a gopenpgp object reused across block decrypts.
+/// Everything needed to serve a streaming video: the item uid (cache key), total size, the per-block
+/// map, the content session key, and the content UTI. The session key is a gopenpgp object reused
+/// across block decrypts.
 final class PreparedVideo: @unchecked Sendable {
+    let uid: PhotoUID
     let totalSize: Int
     let contentTypeUTI: String
     let blocks: [VideoBlock]
     let sessionKey: CryptoSessionKey
+    /// Pure range→slice mapper (cleartext coordinates) shared with the resource loader.
+    let blockMap: VideoBlockMap
+    private let byIndex: [Int: VideoBlock]
 
-    init(totalSize: Int, contentTypeUTI: String, blocks: [VideoBlock], sessionKey: CryptoSessionKey) {
+    init(uid: PhotoUID, totalSize: Int, contentTypeUTI: String, blocks: [VideoBlock], sessionKey: CryptoSessionKey) {
+        self.uid = uid
         self.totalSize = totalSize
         self.contentTypeUTI = contentTypeUTI
         self.blocks = blocks
         self.sessionKey = sessionKey
+        self.blockMap = VideoBlockMap(
+            blocks: blocks.map { ClearBlock(index: $0.index, clearOffset: $0.clearOffset, clearSize: $0.clearSize) },
+            totalSize: totalSize
+        )
+        self.byIndex = Dictionary(blocks.map { ($0.index, $0) }, uniquingKeysWith: { a, _ in a })
     }
+
+    func block(at index: Int) -> VideoBlock? { byIndex[index] }
 }
 
 /// Resolves the Drive key chain for a file and prepares its block map for streaming. Caches the
@@ -47,9 +61,10 @@ actor PhotoVideoStreamSource {
         self.shareID = shareID
     }
 
-    /// Resolves keys + block map for the file `linkID`. Throws `.notAVideo` cheaply (before any key
+    /// Resolves keys + block map for the file `uid`. Throws `.notAVideo` cheaply (before any key
     /// derivation) if the link isn't a video, so the viewer can fall back to the image path.
-    func prepare(linkID: String) async throws -> PreparedVideo {
+    func prepare(uid: PhotoUID) async throws -> PreparedVideo {
+        let linkID = uid.nodeID
         let link = try await fetchLink(linkID)
         guard (link.mimeType ?? "").hasPrefix("video/") else { throw VideoStreamError.notAVideo }
         guard let fp = link.fileProperties, let rev = fp.activeRevision else { throw StreamingError.noRevision }
@@ -69,6 +84,7 @@ actor PhotoVideoStreamSource {
                 ? xattr.common.blockSizes[info.index - 1] : 0
             let bare = info.bareURL
             blocks.append(VideoBlock(
+                index: info.index,
                 url: bare ?? info.url ?? "",
                 token: bare != nil ? info.token : nil,
                 clearOffset: offset,
@@ -79,7 +95,8 @@ actor PhotoVideoStreamSource {
         // Prefer the authoritative total from XAttr; fall back to the summed block sizes.
         let total = xattr.common.size > 0 ? xattr.common.size : offset
         let uti = UTType(mimeType: link.mimeType ?? "") ?? .movie
-        return PreparedVideo(totalSize: total, contentTypeUTI: uti.identifier, blocks: blocks, sessionKey: sessionKey)
+        return PreparedVideo(uid: uid, totalSize: total, contentTypeUTI: uti.identifier,
+                             blocks: blocks, sessionKey: sessionKey)
     }
 
     /// Encrypted bytes for one block — called by the resource loader on demand.

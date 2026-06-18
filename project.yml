@@ -37,14 +37,7 @@ targets:
     platform: macOS
     deploymentTarget: "26.0"
     sources:
-      - path: App
-        # Self-contained zoom-grid prototypes that need an Obj-C bridging header (not configured here)
-        # to see `PPApplePrivatePinchFilter`. Unreferenced by the shipping app and currently
-        # non-compiling WIP — excluded so the project always builds. Re-include once the bridging
-        # header is wired up in this manifest.
-        excludes:
-          - "PrivateAppleGrid/**"
-          - "ProtonPhotos-Bridging-Header.h"
+      - App
     dependencies:
       - package: ProtonDriveSDK
         product: ProtonDriveSDK
@@ -60,6 +53,10 @@ targets:
         product: TimelineFeature
       - package: ProtonPhotosKit
         product: PhotoViewerFeature
+      - package: ProtonPhotosKit
+        product: AlbumsFeature
+      - package: ProtonPhotosKit
+        product: UploadFeature
       - package: ProtonPhotosKit
         product: GridZoomV3
       - package: ProtonCore

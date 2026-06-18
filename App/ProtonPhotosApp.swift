@@ -20,11 +20,41 @@ struct ProtonPhotosApp: App {
         .defaultSize(width: 1080, height: 720)
         .windowToolbarStyle(.unified)
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("Upload Photos…") {
+                    NotificationCenter.default.post(
+                        name: .protonPhotosUploadPhotos,
+                        object: nil,
+                        userInfo: uploadCommandUserInfo(trigger: .menu)
+                    )
+                }
+                .keyboardShortcut("u", modifiers: [.command])
+                Button("Upload Folder…") {
+                    NotificationCenter.default.post(
+                        name: .protonPhotosUploadFolder,
+                        object: nil,
+                        userInfo: uploadCommandUserInfo(trigger: .menu)
+                    )
+                }
+                .keyboardShortcut("u", modifiers: [.command, .shift])
+                Divider()
+                Button("Show Uploads") {
+                    NotificationCenter.default.post(
+                        name: .protonPhotosShowUploadQueue,
+                        object: nil,
+                        userInfo: uploadCommandUserInfo(trigger: .menu)
+                    )
+                }
+            }
             CommandGroup(after: .sidebar) {
                 Button("Toggle Sidebar") {
                     NotificationCenter.default.post(name: .protonPhotosToggleSidebar, object: nil)
                 }
                 .keyboardShortcut("s", modifiers: [.command, .option])
+                Button("Refresh Library") {
+                    NotificationCenter.default.post(name: .protonPhotosRefreshLibrary, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
             }
             // Debug ▸ open the isolated Grid-Zoom V3 prototype (synthetic tiles, no Proton data).
             CommandMenu("Debug") {
@@ -99,8 +129,12 @@ struct RootView: View {
 
     @ViewBuilder private var signedIn: some View {
         switch model.backend {
-        case let .ready(backend):
-            MainView(model: model, backend: backend)
+        case .ready:
+            if let facade = model.facade {
+                MainView(model: model, facade: facade)
+            } else {
+                ProtonLoadingView(caption: "Building your library…")
+            }
         case let .failed(message):
             BackendErrorView(message: message, retry: { model.retryBackend() }, signOut: { model.signOut() })
         case .preparing, .idle:

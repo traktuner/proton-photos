@@ -1,23 +1,47 @@
 import Foundation
 import AVFoundation
+import PhotosCore
 
-/// Serves a Proton video to AVFoundation via range requests: maps each requested byte range to the
-/// blocks that cover it, fetches + decrypts only those blocks, and responds with the exact window.
-/// A small LRU cache of decrypted blocks keeps sequential playback from re-fetching. AVFoundation
-/// calls the delegate on the queue we hand to `setDelegate(_:queue:)`; the per-request work runs in
-/// a detached Task so the queue never blocks on the network.
+/// Serves a Proton video to AVFoundation via range requests — the native equivalent of Proton Drive
+/// Web's streaming service worker. AVFoundation issues byte-range loading requests against the custom
+/// `protonvideo://` URL; we map each requested range to the cleartext blocks that cover it (pure
+/// `VideoBlockMap`), fetch only those encrypted blocks (disk cache → network), decrypt them, and
+/// respond with the exact window — in file order so the data is contiguous.
+///
+/// Robustness mirrors the web client: byte-range access is advertised so AVFoundation can seek;
+/// obsolete requests are cancelled on seek (`didCancel`); a small LRU of decrypted blocks plus the
+/// on-disk encrypted cache keep sequential playback and seek-back from re-fetching.
 final class ProtonVideoResourceLoader: NSObject, AVAssetResourceLoaderDelegate, @unchecked Sendable {
     private let prepared: PreparedVideo
     private let source: PhotoVideoStreamSource
     private let crypto: DriveCrypto
+    private let cache: VideoByteRangeCache
     private let decryptedCache = NSCache<NSNumber, NSData>()
 
-    init(prepared: PreparedVideo, source: PhotoVideoStreamSource, crypto: DriveCrypto) {
+    // In-flight serving tasks, keyed by the loading request, so a seek can cancel obsolete prefetch.
+    private let lock = NSLock()
+    private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    private var prefetchTasks: [Int: Task<Void, Never>] = [:]
+    private let forwardPrefetchBlockCount = 4
+
+    init(prepared: PreparedVideo, source: PhotoVideoStreamSource, crypto: DriveCrypto,
+         cache: VideoByteRangeCache = .shared) {
         self.prepared = prepared
         self.source = source
         self.crypto = crypto
+        self.cache = cache
         super.init()
-        decryptedCache.countLimit = 12   // ~ up to 12 decrypted blocks held for sequential reads
+        decryptedCache.countLimit = 12   // ~12 decrypted blocks held for sequential reads
+    }
+
+    deinit {
+        let activeTasks = lock.withLock {
+            let activeTasks = Array(tasks.values) + Array(prefetchTasks.values)
+            tasks.removeAll()
+            prefetchTasks.removeAll()
+            return activeTasks
+        }
+        activeTasks.forEach { $0.cancel() }
     }
 
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader,
@@ -31,48 +55,144 @@ final class ProtonVideoResourceLoader: NSObject, AVAssetResourceLoaderDelegate, 
             loadingRequest.finishLoading()
             return true
         }
-        Task { [weak self] in
+        let key = ObjectIdentifier(loadingRequest)
+        let task = Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.serve(dataRequest)
-                loadingRequest.finishLoading()
+                try await self.serve(dataRequest, request: loadingRequest)
+                if !Task.isCancelled { loadingRequest.finishLoading() }
+            } catch is CancellationError {
+                // Seek cancelled this request — leave it; AVFoundation will re-ask if needed.
             } catch {
-                loadingRequest.finishLoading(with: error as NSError)
+                if !Task.isCancelled {
+                    loadingRequest.finishLoading(with: error as NSError)
+                }
             }
+            self.lock.withLock { _ = self.tasks.removeValue(forKey: key) }
         }
+        lock.withLock { tasks[key] = task }
         return true
     }
 
-    private func serve(_ dataRequest: AVAssetResourceLoadingDataRequest) async throws {
+    func resourceLoader(_ resourceLoader: AVAssetResourceLoader,
+                        didCancel loadingRequest: AVAssetResourceLoadingRequest) {
+        let key = ObjectIdentifier(loadingRequest)
+        let task = lock.withLock { tasks.removeValue(forKey: key) }
+        task?.cancel()
+        PhotoDiagnostics.shared.emit("VideoStream", [
+            "uid": uidKey, "strategy": "range", "cancelled": "true",
+        ])
+    }
+
+    // MARK: - Serving
+
+    private func serve(_ dataRequest: AVAssetResourceLoadingDataRequest,
+                       request: AVAssetResourceLoadingRequest) async throws {
+        let offset = Int(dataRequest.currentOffset)
         let total = prepared.totalSize
-        var pos = Int(dataRequest.currentOffset)
-        let reqEnd = min(Int(dataRequest.requestedOffset) + dataRequest.requestedLength, total)
+        // `requestsAllDataToEndOfResource` ⇒ serve to EOF; otherwise the explicit requested length.
+        let length = dataRequest.requestsAllDataToEndOfResource
+            ? total - offset
+            : Int(dataRequest.requestedOffset) + dataRequest.requestedLength - offset
+        let slices = prepared.blockMap.slices(offset: offset, length: max(0, length))
+        let requestedEnd = min(total, offset + max(0, length))
+        scheduleForwardPrefetch(afterClearOffset: requestedEnd, reason: "requestStart")
 
-        for block in prepared.blocks {
-            guard block.clearSize > 0 else { continue }
-            let bStart = block.clearOffset
-            let bEnd = block.clearOffset + block.clearSize
-            if bEnd <= pos { continue }       // entirely before the window
-            if bStart >= reqEnd { break }     // past the window — blocks are ordered
+        var served = 0
+        var cacheHits = 0
+        var cacheMisses = 0
+        for slice in slices {
+            try Task.checkCancellation()
+            guard let block = prepared.block(at: slice.blockIndex) else { continue }
+            let (clear, hit) = try await decryptedBlock(block)
+            if hit { cacheHits += 1 } else { cacheMisses += 1 }
+            let from = slice.inBlock.lower
+            let to = min(slice.inBlock.upper, clear.count)
+            guard from < to else { continue }
+            dataRequest.respond(with: clear.subdata(in: from..<to))
+            served += to - from
+        }
+        scheduleForwardPrefetch(afterClearOffset: offset + served, reason: "requestServed")
 
-            let clear = try await decryptedBlock(block)
-            let from = max(pos, bStart) - bStart
-            let to = min(reqEnd, bEnd) - bStart
-            if from < to, from < clear.count {
-                let slice = clear.subdata(in: from..<min(to, clear.count))
-                dataRequest.respond(with: slice)
-                pos += slice.count
-            }
-            if pos >= reqEnd { break }
+        PhotoDiagnostics.shared.emit("VideoStream", [
+            "uid": uidKey,
+            "strategy": "range",
+            "contentLength": "\(total)",
+            "contentType": prepared.contentTypeUTI,
+            "rangeRequested": "\(offset)-\(offset + max(0, length))",
+            "rangeServed": "\(offset)-\(offset + served)",
+            "cacheHit": "\(cacheHits)",
+            "cacheMiss": "\(cacheMisses)",
+            "bytesServed": "\(served)",
+        ])
+    }
+
+    /// Decrypted bytes for a block + whether it came from a cache (in-memory or disk). Network is the
+    /// last resort; fetched encrypted bytes are persisted so reopen / seek-back reuses them.
+    private func decryptedBlock(_ block: VideoBlock) async throws -> (Data, hit: Bool) {
+        let key = NSNumber(value: block.index)
+        if let cached = decryptedCache.object(forKey: key) { return (cached as Data, true) }
+
+        var hit = true
+        let encrypted: Data
+        if let disk = cache.encryptedBlock(uid: prepared.uid, block: block.index) {
+            encrypted = disk
+        } else {
+            hit = false
+            encrypted = try await source.encryptedBlockData(block)
+            cache.store(uid: prepared.uid, block: block.index, encrypted: encrypted)
+        }
+        let clear = try crypto.decryptBlock(encrypted, sessionKey: prepared.sessionKey)
+        decryptedCache.setObject(clear as NSData, forKey: key)
+        return (clear, hit)
+    }
+
+    /// Starts warming the blocks immediately after the range AVFoundation just requested. This matters
+    /// on reopen/resume: the first requested range may be fully cached and play instantly, but without
+    /// read-ahead the next uncached block is only requested when playback reaches the edge.
+    private func scheduleForwardPrefetch(afterClearOffset clearOffset: Int, reason: String) {
+        let candidates = prepared.blocks
+            .filter { $0.clearSize > 0 && $0.clearOffset + $0.clearSize > clearOffset }
+            .prefix(forwardPrefetchBlockCount)
+        guard !candidates.isEmpty else { return }
+        for block in candidates {
+            schedulePrefetch(block, reason: reason)
         }
     }
 
-    private func decryptedBlock(_ block: VideoBlock) async throws -> Data {
-        let key = NSNumber(value: block.clearOffset)
-        if let cached = decryptedCache.object(forKey: key) { return cached as Data }
-        let encrypted = try await source.encryptedBlockData(block)
-        let clear = try crypto.decryptBlock(encrypted, sessionKey: prepared.sessionKey)
-        decryptedCache.setObject(clear as NSData, forKey: key)
-        return clear
+    private func schedulePrefetch(_ block: VideoBlock, reason: String) {
+        let key = NSNumber(value: block.index)
+        guard decryptedCache.object(forKey: key) == nil else { return }
+
+        let scheduled = lock.withLock { () -> Bool in
+            guard prefetchTasks[block.index] == nil else { return false }
+            prefetchTasks[block.index] = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let (_, hit) = try await self.decryptedBlock(block)
+                    PhotoDiagnostics.shared.emit("VideoStream", [
+                        "uid": self.uidKey,
+                        "strategy": "prefetch",
+                        "block": "\(block.index)",
+                        "reason": reason,
+                        "cacheHit": "\(hit)",
+                    ], throttleSeconds: 0.5)
+                } catch is CancellationError {
+                } catch {
+                    PhotoDiagnostics.shared.emit("VideoStream", [
+                        "uid": self.uidKey,
+                        "strategy": "prefetch",
+                        "block": "\(block.index)",
+                        "reason": reason,
+                        "error": "\(error)",
+                    ], throttleSeconds: 0.5)
+                }
+                self.lock.withLock { _ = self.prefetchTasks.removeValue(forKey: block.index) }
+            }
+            return true
+        }
+        guard scheduled else { return }
     }
+
+    private var uidKey: String { "\(prepared.uid.volumeID)~\(prepared.uid.nodeID)" }
 }

@@ -12,6 +12,7 @@ public struct TimelineView: View {
     private let selectionMode: Bool
     private let onSelectionChange: (Set<PhotoUID>) -> Void
     private let media: FullMediaProvider?
+    private let metadataProvider: PhotoMetadataProvider?
     private let favoriteUIDs: Set<PhotoUID>
 
     public init(
@@ -21,6 +22,7 @@ public struct TimelineView: View {
         proxy: GridProxy? = nil,
         selectionMode: Bool = false,
         media: FullMediaProvider? = nil,
+        metadataProvider: PhotoMetadataProvider? = nil,
         favoriteUIDs: Set<PhotoUID> = [],
         onSelectionChange: @escaping (Set<PhotoUID>) -> Void = { _ in },
         onOpen: @escaping (PhotoItem, [PhotoItem]) -> Void = { _, _ in }
@@ -31,6 +33,7 @@ public struct TimelineView: View {
         self.proxy = proxy
         self.selectionMode = selectionMode
         self.media = media
+        self.metadataProvider = metadataProvider
         self.favoriteUIDs = favoriteUIDs
         self.onSelectionChange = onSelectionChange
         self.onOpen = onOpen
@@ -63,7 +66,8 @@ public struct TimelineView: View {
                     selectionMode: selectionMode,
                     onSelectionChange: onSelectionChange,
                     favoriteUIDs: favoriteUIDs,
-                    media: media
+                    media: media,
+                    metadataProvider: metadataProvider
                 )
                 .ignoresSafeArea(edges: .bottom)
             }

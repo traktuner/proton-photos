@@ -4,10 +4,9 @@ import CoreGraphics
 /// (`GridSpriteTransitionView`), so corners/cropping match at rest, during the pinch, in the target
 /// fill, and in the settle preview — one source of truth, no drift between the two render paths.
 enum GridVisualConstants {
-    /// Subtle, CONSISTENT thumbnail corner radius (points). Applied to real cells AND overlay sprites
-    /// so a thumbnail looks the same whether or not a zoom overlay is active. Kept small (3) so the dense
-    /// nearly-gapless levels don't read as dark cracks between thumbnails.
-    static let thumbnailCornerRadius: CGFloat = 3
+    /// Shared thumbnail corner radius in points. The reference capture's rounded image corner measures
+    /// about 20-22 px, which is 10-11 pt on a Retina screenshot, so the live grid and Metal overlay use 11.
+    static let thumbnailCornerRadius: CGFloat = 11
 }
 
 /// How a zoom level fits a photo into its (square) cell.

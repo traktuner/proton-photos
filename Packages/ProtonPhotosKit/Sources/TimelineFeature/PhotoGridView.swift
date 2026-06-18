@@ -21,6 +21,8 @@ struct PhotoGridView: NSViewRepresentable {
     var favoriteUIDs: Set<PhotoUID> = []
     /// Full-media provider used to write the original file when a photo is dragged to Finder.
     var media: FullMediaProvider?
+    /// Metadata provider used to resolve video duration badges for visible video thumbnails.
+    var metadataProvider: PhotoMetadataProvider?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -52,6 +54,9 @@ struct PhotoGridView: NSViewRepresentable {
         // delivers the very first tiny trackpad delta straight to the session.
         collectionView.onMagnify = { [weak coordinator = context.coordinator] event in
             coordinator?.handleRawMagnify(event)
+        }
+        collectionView.onItemDoubleClick = { [weak coordinator = context.coordinator] indexPath in
+            coordinator?.handleDoubleClick(at: indexPath)
         }
         NotificationCenter.default.addObserver(
             context.coordinator, selector: #selector(Coordinator.userDidScroll),
@@ -112,6 +117,9 @@ struct PhotoGridView: NSViewRepresentable {
         private var selectionMode = false
         private var selectedUIDs: Set<PhotoUID> = []
         private var favoriteUIDs: Set<PhotoUID> = []
+        private var durationByUID: [PhotoUID: Double] = [:]
+        private var durationLookupCompleted: Set<PhotoUID> = []
+        private var durationTasks: [PhotoUID: Task<Void, Never>] = [:]
         let promiseHandler = FilePromiseHandler()
         // Month/year labels shown on the square (zoomed-out) levels.
         private var monthMarkers: [(index: Int, text: String)] = []
@@ -229,10 +237,16 @@ struct PhotoGridView: NSViewRepresentable {
         init(_ parent: PhotoGridView) {
             self.parent = parent
             super.init()
+            // `queue: nil` ⇒ the block runs SYNCHRONOUSLY on the posting thread. The sidebar hints are
+            // always posted from the main thread (MainView's drag gesture / toggle), so begin/end bracket
+            // the drag exactly the way AppKit's `willStartLiveResize` / `didEndLiveResize` bracket a window
+            // resize: the anchor is captured BEFORE the first width change, in the same run-loop turn. An
+            // async (`queue: .main`) hop here let the first width tick open an implicit session and capture
+            // the anchor one frame late — the only real timing divergence from the window-resize path.
             resizeHintObserver = NotificationCenter.default.addObserver(
                 forName: .protonPhotosGridResizeHint,
                 object: nil,
-                queue: .main
+                queue: nil
             ) { [weak self] note in
                 let reason = note.userInfo?["reason"] as? String
                 let phase = note.userInfo?["phase"] as? String
@@ -246,7 +260,8 @@ struct PhotoGridView: NSViewRepresentable {
             let nc = NotificationCenter.default
             resizeWindowObservers.forEach(nc.removeObserver)
             if let resizeHintObserver { nc.removeObserver(resizeHintObserver) }
-            resizeCommitWork?.cancel()
+            resizeIdleWork?.cancel()
+            durationTasks.values.forEach { $0.cancel() }
         }
 
         func apply(sections: [TimelineSection], sectionAspects: [[CGFloat]]) {
@@ -259,9 +274,11 @@ struct PhotoGridView: NSViewRepresentable {
             // bounds-change invalidation, which is enough.
             guard structureChanged || aspectsChanged else { return }
 
-            if gridZoomBusy {
+            // During grid zoom OR an active resize, never reload/relayout against the live grid — hold the
+            // change and replay it when the interaction ends (resize: `endResize` → `applyDeferredIfNeeded`).
+            if gridZoomBusy || resizeStabilizer.shouldDeferReload() {
                 deferredApply = (sections, sectionAspects)
-                logGridZoom("defer apply during gridZoomBusy=\(gridZoomBusy) settling=\(isGridZoomSettling) structure=\(structureChanged) aspects=\(aspectsChanged)")
+                logGridZoom("defer apply busy=\(gridZoomBusy) resizing=\(resizeStabilizer.isResizing) structure=\(structureChanged) aspects=\(aspectsChanged)")
                 return
             }
 
@@ -345,53 +362,33 @@ struct PhotoGridView: NSViewRepresentable {
 
         @objc func userDidScroll() { stickToBottom = false }
 
-        // MARK: - Resize/sidebar frozen-surface transition
+        // MARK: - Resize / sidebar stabilizer (native relayout — real grid always visible)
 
-        private enum ResizeVisualAnchor {
-            case item(indexPath: IndexPath, unitPoint: CGPoint, viewportPoint: CGPoint, kind: GridResizeAnchorKind)
-            case content(GridResizeAnchor)
-
-            var gridAnchor: GridResizeAnchor {
-                switch self {
-                case .item(_, _, let viewportPoint, let kind):
-                    return GridResizeAnchor(kind: kind, viewportPoint: viewportPoint, contentPoint: .zero)
-                case .content(let anchor):
-                    return anchor
-                }
-            }
-        }
-
-        private let resizeCoordinator = GridResizeTransitionCoordinator()
-        private var resizeVisualAnchor: ResizeVisualAnchor?
-        private var resizeOverlayHost: FlippedOverlayView?
-        private var resizeOverlayLayer: CALayer?
-        private var resizeOverlaySerial = 0
-        nonisolated(unsafe) private var resizeCommitWork: DispatchWorkItem?
+        /// Replaces the rejected snapshot-overlay path. We let `NSCollectionView` do its native
+        /// width-driven relayout (the grid is never hidden, never snapshotted, alpha stays 1), and only
+        /// (a) disable implicit animations so cells don't fly, and (b) re-pin the captured anchor on each
+        /// width change so the visible region stays put. There is no overlay, no commit, no fade — so no
+        /// path can leave a black region.
+        private let resizeStabilizer = GridResizeStabilizer()
+        private var resizeAnchor: ResizeAnchor?
+        private var resizeAnchorUID: PhotoUID?
+        private var resizeSourceContentHeight: CGFloat = 0
+        private var lastResizeAnchorError: CGPoint = .zero
+        nonisolated(unsafe) private var resizeIdleWork: DispatchWorkItem?
         private var resizeWindow: NSWindow?
         nonisolated(unsafe) private var resizeWindowObservers: [NSObjectProtocol] = []
         nonisolated(unsafe) private var resizeHintObserver: NSObjectProtocol?
-        private var pendingResizeReason: GridResizeTransitionReason?
+        private var pendingResizeReason: GridResizeReason?
         private var isWindowLiveResizing = false
         private var lastGridWidth: CGFloat = 0
-        private var lastViewportSize: CGSize = .zero
         private var isReanchoring = false
+        private var didLogResizeMode = false
 
-        /// On genuine user scroll, continue prefetching and remembering user intent. During a resize
-        /// transaction this deliberately does NOT chase anchors: the transaction's frozen anchor is the
-        /// single source of truth until commit.
+        /// Clip-bounds changes fire on scroll AND on resize. This keeps only the scroll-ahead prefetch;
+        /// the width-driven re-anchor is driven from `gridFrameChanged` (the collection view's own frame),
+        /// and prefetch is skipped while we're re-anchoring to avoid feeding our own scroll back in.
         @MainActor @objc func clipBoundsChanged() {
             guard !gridZoomBusy else { return }
-            if let clip = scrollView?.contentView {
-                let size = clip.bounds.size
-                if lastViewportSize == .zero {
-                    lastViewportSize = size
-                    return
-                }
-                if abs(size.width - lastViewportSize.width) > 0.5 || abs(size.height - lastViewportSize.height) > 0.5 {
-                    lastViewportSize = size
-                    handleResizeViewportChange(reason: currentResizeReason())
-                }
-            }
             prefetchAhead()
         }
 
@@ -421,11 +418,11 @@ struct PhotoGridView: NSViewRepresentable {
             Task { for uid in targets { await feed.requestPriority(uid, priority: .nearViewportScrollAhead) } }
         }
 
-        /// On ANY width change (window resize AND sidebar slide), re-pin the scroll to the photo that
-        /// was visible BEFORE the resize. The real collection view may relayout underneath, but it is
-        /// masked by the resize overlay until the debounce commit restores the anchor and fades out.
+        /// On a WIDTH change (window resize AND sidebar slide/toggle), keep the captured anchor pinned to
+        /// the same on-screen point. The real collection view relayouts natively underneath — it is NEVER
+        /// hidden or snapshotted; we just disable implicit animations and re-pin the scroll origin.
         @MainActor @objc func gridFrameChanged() {
-            guard let cv = collectionView else { return }
+            guard let cv = collectionView, !gridZoomBusy else { return }
             let w = cv.bounds.width
             if lastGridWidth == 0 {
                 lastGridWidth = w
@@ -433,7 +430,11 @@ struct PhotoGridView: NSViewRepresentable {
             }
             guard abs(w - lastGridWidth) > 0.5 else { return }
             lastGridWidth = w
-            handleResizeViewportChange(reason: currentResizeReason())
+            // A width change with no explicit begin (e.g. a programmatic relayout) still preserves the
+            // region: open an implicit session and capture the anchor in the current layout.
+            if !resizeStabilizer.isResizing { beginResize(reason: currentResizeReason()) }
+            reanchorDuringResize()
+            resetResizeIdleTimer()
         }
 
         @MainActor func ensureResizeWindowObservers() {
@@ -442,6 +443,8 @@ struct PhotoGridView: NSViewRepresentable {
             resizeWindowObservers.forEach(nc.removeObserver)
             resizeWindowObservers.removeAll()
             resizeWindow = window
+            // Native AppKit live-resize hooks bracket the session. The actual re-anchor is driven from the
+            // collection view's own frame change (`gridFrameChanged`); these just open/keep/close it.
             resizeWindowObservers.append(nc.addObserver(
                 forName: NSWindow.willStartLiveResizeNotification,
                 object: window,
@@ -449,7 +452,7 @@ struct PhotoGridView: NSViewRepresentable {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.isWindowLiveResizing = true
-                    self?.beginResizeTransaction(reason: .windowResize)
+                    self?.beginResize(reason: .windowResize)   // capture anchor BEFORE the first width change
                 }
             })
             resizeWindowObservers.append(nc.addObserver(
@@ -458,7 +461,8 @@ struct PhotoGridView: NSViewRepresentable {
                 queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.handleResizeViewportChange(reason: .windowResize)
+                    guard let self else { return }
+                    if self.resizeStabilizer.isResizing { self.resetResizeIdleTimer() }
                 }
             })
             resizeWindowObservers.append(nc.addObserver(
@@ -468,295 +472,179 @@ struct PhotoGridView: NSViewRepresentable {
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.isWindowLiveResizing = false
-                    self?.handleResizeViewportChange(reason: .windowResize)
+                    self?.endResize()
                 }
             })
         }
 
         @MainActor private func handleResizeHint(reasonRaw raw: String?, phase: String?) {
-            guard let raw,
-                  let reason = GridResizeTransitionReason(rawValue: raw) else { return }
+            guard let raw, let reason = GridResizeReason(rawValue: raw) else { return }
             pendingResizeReason = reason
-            if phase == "begin" {
-                beginResizeTransaction(reason: reason)
-            } else {
-                handleResizeViewportChange(reason: reason)
+            switch phase {
+            case "begin": beginResize(reason: reason)
+            case "end": endResize()
+            default: if resizeStabilizer.isResizing { resetResizeIdleTimer() }
             }
         }
 
-        @MainActor private func currentResizeReason() -> GridResizeTransitionReason {
+        @MainActor private func currentResizeReason() -> GridResizeReason {
             if isWindowLiveResizing { return .windowResize }
             return pendingResizeReason ?? .sidebarDrag
         }
 
-        @MainActor private func handleResizeViewportChange(reason: GridResizeTransitionReason) {
+        // MARK: Stabilizer lifecycle
+
+        @MainActor private func beginResize(reason: GridResizeReason) {
             guard !gridZoomBusy else { return }
-            guard resizeCoordinator.activeTransaction != nil else {
-                beginResizeTransaction(reason: reason)
-                return
+            pendingResizeReason = reason
+            logResizeModeOnce()
+            // Proof line: every cause — windowResize, sidebarDrag, sidebarToggle — enters resize through
+            // THIS one method (and the one `reanchorDuringResize` / `endResize` below it). There is no
+            // separate manual-sidebar path. Asserted by `SidebarDragUsesSharedResizePathTest`.
+            logGridResize("sharedPath=true reason=\(reason.rawValue)")
+            if resizeStabilizer.isResizing {
+                resizeStabilizer.update(reason: reason)
+            } else {
+                if let clip = scrollView?.contentView, let layout {
+                    resizeAnchor = captureAnchor()
+                    resizeSourceContentHeight = layout.collectionViewContentSize.height
+                    lastGridWidth = collectionView?.bounds.width ?? lastGridWidth
+                    logResizeBegin(reason: reason, viewport: clip.bounds.size, contentOrigin: clip.bounds.origin)
+                }
+                resizeStabilizer.begin(reason: reason)
             }
-            if case .committing = resizeCoordinator.state {
-                resizeOverlayLayer?.removeAllAnimations()
-                resizeOverlayLayer?.opacity = 1
-                collectionView?.alphaValue = 0
-            }
-            guard let viewportSize = scrollView?.contentView.bounds.size else { return }
-            let now = CACurrentMediaTime()
-            resizeCoordinator.noteSizeChange(
-                targetViewportSize: viewportSize,
-                sidebarWidth: nil,
-                now: now
-            )
-            updateResizeOverlayFrame()
-            scheduleResizeCommit()
+            resetResizeIdleTimer()
         }
 
-        @MainActor private func beginResizeTransaction(reason: GridResizeTransitionReason) {
-            guard !gridZoomBusy else { return }
-            guard resizeCoordinator.activeTransaction == nil else {
-                handleResizeViewportChange(reason: reason)
-                return
-            }
-            guard let cv = collectionView, let clip = scrollView?.contentView, let scrollView else { return }
-            let sourceViewport = clip.bounds.size
-            guard sourceViewport.width > 1, sourceViewport.height > 1 else { return }
-            cv.layoutSubtreeIfNeeded()
-
-            let visible = cv.visibleRect
-            guard let rep = cv.bitmapImageRepForCachingDisplay(in: visible) else { return }
-            cv.cacheDisplay(in: visible, to: rep)
-            guard let snapshot = rep.cgImage else { return }
-
-            let visualAnchor = captureResizeAnchor()
-            resizeVisualAnchor = visualAnchor
-            let anchor = resolvedGridResizeAnchor(from: visualAnchor)
-
-            resizeOverlayHost?.removeFromSuperview()
-            let host = FlippedOverlayView(frame: clip.frame)
-            host.wantsLayer = true
-            host.layer?.masksToBounds = true
-            host.layer?.backgroundColor = NSColor.clear.cgColor
-            scrollView.addSubview(host, positioned: .above, relativeTo: nil)
-
-            let layer = CALayer()
-            layer.contents = snapshot
-            layer.contentsGravity = .resize
-            layer.contentsScale = cv.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-            layer.minificationFilter = .linear
-            layer.magnificationFilter = .linear
-            layer.frame = CGRect(origin: .zero, size: sourceViewport)
-            host.layer?.addSublayer(layer)
-            resizeOverlayHost = host
-            resizeOverlayLayer = layer
-            resizeOverlaySerial += 1
-
-            let now = CACurrentMediaTime()
-            let transaction = resizeCoordinator.begin(
-                reason: reason,
-                sourceViewportSize: sourceViewport,
-                sourceContentOrigin: clip.bounds.origin,
-                sourceVisibleRect: visible,
-                sourceSnapshotSize: CGSize(width: CGFloat(snapshot.width) / layer.contentsScale, height: CGFloat(snapshot.height) / layer.contentsScale),
-                sourceSnapshotFrame: CGRect(origin: .zero, size: sourceViewport),
-                anchor: anchor,
-                sidebarWidth: nil,
-                now: now,
-                overlayID: resizeOverlaySerial
-            )
-            cv.alphaValue = 0
-            updateResizeOverlayFrame()
-            scheduleResizeCommit()
-            logGridResize(
-                "state=begin reason=\(reason.rawValue) sourceViewport=\(sizeLog(sourceViewport)) targetViewport=\(sizeLog(transaction.pendingTargetViewportSize)) anchor=\(anchorLog(anchor)) snapshotSize=\(sizeLog(transaction.sourceSnapshotSize)) overlayScale=1.00 commitDebounceMs=\(Int(GridResizeTransitionCoordinator.defaultDebounce * 1000))"
-            )
-        }
-
-        @MainActor private func updateResizeOverlayFrame() {
-            guard let host = resizeOverlayHost, let overlay = resizeOverlayLayer,
-                  let clip = scrollView?.contentView,
-                  let transaction = resizeCoordinator.activeTransaction else { return }
-            host.frame = clip.frame
-            let transform = GridResizeTransitionCoordinator.overlayTransform(
-                sourceViewportSize: transaction.sourceViewportSize,
-                targetViewportSize: clip.bounds.size,
-                anchor: transaction.anchor
-            )
-            overlay.frame = transform.frame
-        }
-
-        @MainActor private func scheduleResizeCommit() {
-            resizeCommitWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                MainActor.assumeIsolated { self?.commitResizeIfSettled() }
-            }
-            resizeCommitWork = work
-            DispatchQueue.main.asyncAfter(
-                deadline: .now() + GridResizeTransitionCoordinator.defaultDebounce,
-                execute: work
-            )
-        }
-
-        @MainActor private func commitResizeIfSettled() {
-            let now = CACurrentMediaTime()
-            guard resizeCoordinator.readyToCommit(now: now) else {
-                scheduleResizeCommit()
-                return
-            }
-            guard let transaction = resizeCoordinator.beginCommit(),
-                  let cv = collectionView,
-                  let clip = scrollView?.contentView,
-                  let layout else {
-                cleanupResizeOverlay()
-                resizeCoordinator.cleanup()
-                return
-            }
-
+        /// The whole resize "trick": relayout natively (grid visible), then re-pin the anchor's content
+        /// point under its original viewport point. Wrapped in a zero-duration, actions-disabled
+        /// transaction so no cell animates and nothing flickers.
+        @MainActor private func reanchorDuringResize() {
+            guard !gridZoomBusy,
+                  let cv = collectionView, let clip = scrollView?.contentView, let layout,
+                  let anchor = resizeAnchor else { return }
             let before = clip.bounds.origin
             let layoutStart = CACurrentMediaTime()
             isReanchoring = true
-            layout.invalidateLayout()
-            cv.layoutSubtreeIfNeeded()
-            let commitResult = commitResizeAnchor(transaction: transaction)
-            cv.layoutSubtreeIfNeeded()
-            updateMonthLabels()
-            isReanchoring = false
-            let layoutMs = (CACurrentMediaTime() - layoutStart) * 1000
-            let after = clip.bounds.origin
-            cv.alphaValue = 1
-
-            logGridResize(
-                "state=commit reason=\(transaction.reason.rawValue) finalViewport=\(sizeLog(clip.bounds.size)) scrollOriginBefore=\(pointLog(before)) scrollOriginAfter=\(pointLog(after)) anchorError=\(pointLog(commitResult.anchorError)) layoutMs=\(fmt(layoutMs)) fadeDuration=\(fmt(GridResizeTransitionCoordinator.defaultFadeDuration))"
-            )
-            fadeResizeOverlay(transactionID: transaction.id)
-        }
-
-        @MainActor private func commitResizeAnchor(transaction: GridResizeTransaction) -> GridResizeCommitResult {
-            guard let clip = scrollView?.contentView, let layout else {
-                return GridResizeCommitResult(scrollOrigin: .zero, anchorError: .zero)
-            }
-            let viewport = clip.bounds.size
-            let viewportPoint = CGPoint(
-                x: min(max(transaction.anchor.viewportPoint.x, 0), viewport.width),
-                y: min(max(transaction.anchor.viewportPoint.y, 0), viewport.height)
-            )
-            let targetContentPoint: CGPoint
-            if let resizeVisualAnchor {
-                switch resizeVisualAnchor {
-                case .item(let indexPath, let unitPoint, _, _):
-                    if let attrs = layout.layoutAttributesForItem(at: indexPath) {
-                        targetContentPoint = CGPoint(
-                            x: attrs.frame.minX + unitPoint.x * attrs.frame.width,
-                            y: attrs.frame.minY + unitPoint.y * attrs.frame.height
-                        )
-                    } else {
-                        targetContentPoint = transaction.anchor.contentPoint
-                    }
-                case .content(let anchor):
-                    targetContentPoint = anchor.contentPoint
+            withoutImplicitAnimations {
+                layout.invalidateLayout()
+                cv.layoutSubtreeIfNeeded()
+                let viewport = clip.bounds.size
+                if stickToBottom {
+                    // The user is parked on the newest photos — keep the bottom pinned, not a mid item.
+                    let maxY = max(0, layout.collectionViewContentSize.height - viewport.height)
+                    clip.setBoundsOrigin(NSPoint(x: 0, y: maxY))
+                    lastResizeAnchorError = .zero
+                } else {
+                    let targetContentPoint = resolveTargetContentPoint(for: anchor, viewport: viewport)
+                    let solution = computeScrollOriginPreservingResizeAnchor(
+                        targetContentPoint: targetContentPoint,
+                        anchorViewportPoint: clampViewport(anchor.viewportPoint, to: viewport),
+                        contentSize: layout.collectionViewContentSize,
+                        viewportSize: viewport
+                    )
+                    clip.setBoundsOrigin(solution.scrollOrigin)
+                    lastResizeAnchorError = solution.anchorError
                 }
-            } else {
-                targetContentPoint = transaction.anchor.contentPoint
+                scrollView?.reflectScrolledClipView(clip)
             }
-            let result = GridResizeTransitionCoordinator.preservedScrollOrigin(
-                sourceAnchorContentPoint: targetContentPoint,
-                targetAnchorViewportPoint: viewportPoint,
-                targetContentSize: layout.collectionViewContentSize,
-                targetViewportSize: viewport
-            )
-            clip.setBoundsOrigin(result.scrollOrigin)
-            scrollView?.reflectScrolledClipView(clip)
-            return result
+            isReanchoring = false
+            updateMonthLabels()
+            let layoutMs = (CACurrentMediaTime() - layoutStart) * 1000
+            logResizeChange(before: before, after: clip.bounds.origin, viewport: clip.bounds.size, layoutMs: layoutMs)
         }
 
-        @MainActor private func fadeResizeOverlay(transactionID: Int) {
-            guard let overlay = resizeOverlayLayer else {
-                finishResizeTransition(transactionID: transactionID)
+        @MainActor private func resetResizeIdleTimer() {
+            resizeIdleWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated { self?.endResize() }
+            }
+            resizeIdleWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + GridResizeStabilizer.idleTimeout, execute: work)
+        }
+
+        @MainActor private func endResize() {
+            resizeIdleWork?.cancel()
+            resizeIdleWork = nil
+            guard resizeStabilizer.isResizing else {
+                resizeAnchor = nil; resizeAnchorUID = nil; pendingResizeReason = nil
                 return
             }
-            let fade = CABasicAnimation(keyPath: "opacity")
-            fade.fromValue = 1
-            fade.toValue = 0
-            fade.duration = GridResizeTransitionCoordinator.defaultFadeDuration
-            fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            fade.isRemovedOnCompletion = false
-            fade.fillMode = .forwards
-            CATransaction.begin()
-            CATransaction.setCompletionBlock { [weak self] in
-                MainActor.assumeIsolated {
-                    self?.finishResizeTransition(transactionID: transactionID)
-                }
-            }
-            overlay.add(fade, forKey: "gridResizeFade")
-            CATransaction.commit()
-        }
-
-        @MainActor private func finishResizeTransition(transactionID: Int) {
-            guard case let .committing(transaction) = resizeCoordinator.state,
-                  transaction.id == transactionID else { return }
-            cleanupResizeOverlay()
-            resizeCoordinator.finishCommit()
+            let reason = resizeStabilizer.reason ?? currentResizeReason()
+            reanchorDuringResize()                       // one final, settled pin
+            let visibleCells = collectionView?.visibleItems().count ?? 0
+            resizeStabilizer.end()
+            resizeAnchor = nil
+            resizeAnchorUID = nil
             pendingResizeReason = nil
-            logGridResize("state=end removedOverlay=true")
+            isWindowLiveResizing = false
+            applyDeferredIfNeeded()                       // replay any structure change held during resize
+            logResizeEnd(reason: reason, viewport: scrollView?.contentView.bounds.size ?? .zero, visibleCells: visibleCells)
         }
 
-        @MainActor private func cleanupResizeOverlay() {
-            resizeCommitWork?.cancel()
-            resizeCommitWork = nil
-            resizeOverlayLayer?.removeAllAnimations()
-            resizeOverlayHost?.removeFromSuperview()
-            resizeOverlayHost = nil
-            resizeOverlayLayer = nil
-            resizeVisualAnchor = nil
-            collectionView?.alphaValue = 1
-            isReanchoring = false
-        }
+        // MARK: Anchor capture + resolution
 
-        @MainActor private func captureResizeAnchor() -> ResizeVisualAnchor {
+        @MainActor private func captureAnchor() -> ResizeAnchor {
+            resizeAnchorUID = nil
             guard let cv = collectionView, let clip = scrollView?.contentView, let layout else {
-                return .content(GridResizeAnchor(kind: .content, viewportPoint: .zero, contentPoint: .zero))
+                return ResizeAnchor(kind: .content, viewportPoint: .zero, contentPoint: .zero)
             }
             let viewport = clip.bounds.size
-            let mousePoint = mouseViewportPoint(in: clip)
-            if let mousePoint {
-                let contentPoint = CGPoint(x: clip.bounds.origin.x + mousePoint.x, y: clip.bounds.origin.y + mousePoint.y)
+            // 1. Mouse inside the viewport.
+            if let mouse = mouseViewportPoint(in: clip) {
+                let contentPoint = CGPoint(x: clip.bounds.origin.x + mouse.x, y: clip.bounds.origin.y + mouse.y)
                 if let ip = cv.indexPathForItem(at: contentPoint),
+                   ip.section < sections.count, ip.item < sections[ip.section].items.count,
                    let attrs = layout.layoutAttributesForItem(at: ip) {
-                    return .item(indexPath: ip, unitPoint: unitPoint(contentPoint, in: attrs.frame), viewportPoint: mousePoint, kind: .mouse)
+                    let uid = sections[ip.section].items[ip.item].uid
+                    resizeAnchorUID = uid
+                    return ResizeAnchor(kind: .mouse, viewportPoint: mouse, contentPoint: contentPoint,
+                                        uid: key(for: uid), localPoint: unitPoint(contentPoint, in: attrs.frame))
                 }
-                return .content(GridResizeAnchor(kind: .mouse, viewportPoint: mousePoint, contentPoint: contentPoint))
+                return ResizeAnchor(kind: .mouse, viewportPoint: mouse, contentPoint: contentPoint)
             }
-
-            if let selected = selectedUIDs.compactMap({ indexByUID[$0] }).first(where: { indexPath in
-                guard let attrs = layout.layoutAttributesForItem(at: indexPath) else { return false }
+            // 2. A selected, visible item's centre.
+            if let selected = selectedUIDs.compactMap({ indexByUID[$0] }).first(where: { ip in
+                guard let attrs = layout.layoutAttributesForItem(at: ip) else { return false }
                 return clip.documentVisibleRect.intersects(attrs.frame)
-            }), let attrs = layout.layoutAttributesForItem(at: selected) {
+            }), selected.section < sections.count, selected.item < sections[selected.section].items.count,
+               let attrs = layout.layoutAttributesForItem(at: selected) {
                 let contentPoint = CGPoint(x: attrs.frame.midX, y: attrs.frame.midY)
                 let viewportPoint = CGPoint(x: contentPoint.x - clip.bounds.origin.x, y: contentPoint.y - clip.bounds.origin.y)
-                return .item(indexPath: selected, unitPoint: CGPoint(x: 0.5, y: 0.5), viewportPoint: viewportPoint, kind: .selectedItem)
+                let uid = sections[selected.section].items[selected.item].uid
+                resizeAnchorUID = uid
+                return ResizeAnchor(kind: .selectedItem, viewportPoint: viewportPoint, contentPoint: contentPoint,
+                                    uid: key(for: uid), localPoint: CGPoint(x: 0.5, y: 0.5))
             }
-
+            // 3. The viewport-centre content point (resolved to an item when possible).
             let viewportPoint = CGPoint(x: viewport.width / 2, y: viewport.height / 2)
             let contentPoint = CGPoint(x: clip.bounds.origin.x + viewportPoint.x, y: clip.bounds.origin.y + viewportPoint.y)
             if let ip = cv.indexPathForItem(at: contentPoint),
+               ip.section < sections.count, ip.item < sections[ip.section].items.count,
                let attrs = layout.layoutAttributesForItem(at: ip) {
-                return .item(indexPath: ip, unitPoint: unitPoint(contentPoint, in: attrs.frame), viewportPoint: viewportPoint, kind: .viewportCenter)
+                let uid = sections[ip.section].items[ip.item].uid
+                resizeAnchorUID = uid
+                return ResizeAnchor(kind: .viewportCenter, viewportPoint: viewportPoint, contentPoint: contentPoint,
+                                    uid: key(for: uid), localPoint: unitPoint(contentPoint, in: attrs.frame))
             }
-            return .content(GridResizeAnchor(kind: .viewportCenter, viewportPoint: viewportPoint, contentPoint: contentPoint))
+            return ResizeAnchor(kind: .content, viewportPoint: viewportPoint, contentPoint: contentPoint)
         }
 
-        @MainActor private func resolvedGridResizeAnchor(from visual: ResizeVisualAnchor) -> GridResizeAnchor {
-            guard let layout else { return visual.gridAnchor }
-            switch visual {
-            case .item(let indexPath, let unitPoint, let viewportPoint, let kind):
-                let attrs = layout.layoutAttributesForItem(at: indexPath)
-                let contentPoint = CGPoint(
-                    x: (attrs?.frame.minX ?? 0) + unitPoint.x * (attrs?.frame.width ?? 0),
-                    y: (attrs?.frame.minY ?? 0) + unitPoint.y * (attrs?.frame.height ?? 0)
-                )
-                return GridResizeAnchor(kind: kind, viewportPoint: viewportPoint, contentPoint: contentPoint)
-            case .content(let anchor):
-                return anchor
+        /// Where the anchored item's content point lands at the CURRENT width. For a uid anchor, look up
+        /// the relayouted frame (exact). For the content fallback (cursor in a gap / empty grid), scale the
+        /// vertical position by the content-height change so it tracks the same relative spot.
+        @MainActor private func resolveTargetContentPoint(for anchor: ResizeAnchor, viewport: CGSize) -> CGPoint {
+            guard let layout else { return anchor.contentPoint }
+            if let uid = resizeAnchorUID, let ip = indexByUID[uid],
+               let attrs = layout.layoutAttributesForItem(at: ip) {
+                let local = anchor.localPoint ?? CGPoint(x: 0.5, y: 0.5)
+                return CGPoint(x: attrs.frame.minX + local.x * attrs.frame.width,
+                               y: attrs.frame.minY + local.y * attrs.frame.height)
             }
+            let newH = layout.collectionViewContentSize.height
+            let oldH = resizeSourceContentHeight > 1 ? resizeSourceContentHeight : newH
+            let fracY = anchor.contentPoint.y / max(oldH, 1)
+            return CGPoint(x: anchor.contentPoint.x, y: fracY * newH)
         }
 
         @MainActor private func mouseViewportPoint(in clip: NSClipView) -> CGPoint? {
@@ -774,10 +662,62 @@ struct PhotoGridView: NSViewRepresentable {
             )
         }
 
+        private func clampViewport(_ point: CGPoint, to viewport: CGSize) -> CGPoint {
+            CGPoint(x: min(max(point.x, 0), viewport.width), y: min(max(point.y, 0), viewport.height))
+        }
+
+        /// Zero-duration, actions-disabled relayout + scroll so the grid does NOT animate individual cells
+        /// and nothing flickers during resize.
+        @MainActor private func withoutImplicitAnimations(_ body: () -> Void) {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                context.allowsImplicitAnimation = false
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
+                body()
+                CATransaction.commit()
+            }
+        }
+
+        // MARK: Resize logging
+
         private func logGridResize(_ message: String) {
             #if DEBUG
             print("[GridResize] \(message)")
             #endif
+        }
+
+        @MainActor private func logResizeModeOnce() {
+            guard !didLogResizeMode else { return }
+            didLogResizeMode = true
+            logGridResize("mode=realGridVisible oldOverlayPathUsed=false")
+        }
+
+        @MainActor private func logResizeBegin(reason: GridResizeReason, viewport: CGSize, contentOrigin: CGPoint) {
+            logGridResize("phase=begin reason=\(reason.rawValue) viewport=\(sizeLog(viewport)) contentOrigin=\(pointLog(contentOrigin)) anchor=\(anchorDescription(resizeAnchor))")
+        }
+
+        @MainActor private func logResizeChange(before: CGPoint, after: CGPoint, viewport: CGSize, layoutMs: Double) {
+            let visibleCells = collectionView?.visibleItems().count ?? 0
+            let totalAssets = sectionItemCounts.reduce(0, +)
+            let blackoutRisk = visibleCells == 0 && totalAssets > 0
+            let reason = resizeStabilizer.reason ?? currentResizeReason()
+            let alpha = collectionView?.alphaValue ?? 1
+            let hidden = collectionView?.isHidden ?? false
+            if blackoutRisk {
+                logGridResize("ERROR phase=change reason=\(reason.rawValue) blackoutRisk=true visibleCells=0 totalAssets=\(totalAssets) collectionAlpha=\(fmt(alpha)) collectionHidden=\(hidden)")
+            }
+            // Visibility invariant (identical for every reason): the real grid is NEVER hidden or faded and
+            // NEVER uses the rejected snapshot/overlay path. A violation during a sidebar drag is exactly the
+            // "grid goes black" failure, so surface it loudly.
+            if hidden || alpha != 1 {
+                logGridResize("ERROR phase=change reason=\(reason.rawValue) invariantViolated collectionHidden=\(hidden) collectionAlpha=\(fmt(alpha)) oldOverlayPathUsed=\(resizeStabilizer.usesSnapshotOverlay)")
+            }
+            logGridResize("phase=change reason=\(reason.rawValue) viewport=\(sizeLog(viewport)) contentOriginBefore=\(pointLog(before)) contentOriginAfter=\(pointLog(after)) anchorError=\(pointLog(lastResizeAnchorError)) layoutMs=\(fmt(layoutMs)) visibleCells=\(visibleCells) collectionAlpha=\(fmt(alpha)) collectionHidden=\(hidden) oldOverlayPathUsed=\(resizeStabilizer.usesSnapshotOverlay) reloadDuringResize=\(resizeStabilizer.reloadDuringResizeCount) blackoutRisk=\(blackoutRisk)")
+        }
+
+        @MainActor private func logResizeEnd(reason: GridResizeReason, viewport: CGSize, visibleCells: Int) {
+            logGridResize("phase=end reason=\(reason.rawValue) viewport=\(sizeLog(viewport)) anchorError=\(pointLog(lastResizeAnchorError)) visibleCells=\(visibleCells) reloadDuringResize=\(resizeStabilizer.reloadDuringResizeCount) framePersisted=\(reason == .windowResize)")
         }
 
         private func sizeLog(_ size: CGSize) -> String {
@@ -788,8 +728,9 @@ struct PhotoGridView: NSViewRepresentable {
             "(\(fmt(point.x)),\(fmt(point.y)))"
         }
 
-        private func anchorLog(_ anchor: GridResizeAnchor) -> String {
-            "\(anchor.kind.rawValue):viewport=\(pointLog(anchor.viewportPoint)):content=\(pointLog(anchor.contentPoint))"
+        private func anchorDescription(_ anchor: ResizeAnchor?) -> String {
+            guard let anchor else { return "none" }
+            return "\(anchor.kind.rawValue):viewport=\(pointLog(anchor.viewportPoint)):content=\(pointLog(anchor.contentPoint)):uid=\(anchor.uid ?? "none")"
         }
 
         // MARK: - Shared-element transition support
@@ -807,6 +748,7 @@ struct PhotoGridView: NSViewRepresentable {
             guard let proxy else { return }
             proxy.windowFrameForItem = { [weak self] item in self?.windowFrame(for: item) }
             proxy.scrollToItem = { [weak self] item in self?.scrollToItem(item) }
+            proxy.scrollToLatest = { [weak self] in self?.scrollToLatest() }
             // The + / − buttons call the SAME discrete step functions the trackpad pinch calls.
             proxy.zoomIn = { [weak self] in self?.zoomInStep() }
             proxy.zoomOut = { [weak self] in self?.zoomOutStep() }
@@ -837,6 +779,11 @@ struct PhotoGridView: NSViewRepresentable {
             cv.layoutSubtreeIfNeeded()
         }
 
+        private func scrollToLatest() {
+            stickToBottom = true
+            pinToBottom()
+        }
+
         // MARK: Data source
 
         func numberOfSections(in collectionView: NSCollectionView) -> Int { sections.count }
@@ -863,9 +810,38 @@ struct PhotoGridView: NSViewRepresentable {
             let item = collectionView.makeItem(withIdentifier: PhotoGridItem.identifier, for: indexPath) as! PhotoGridItem
             let photo = sections[indexPath.section].items[indexPath.item]
             item.configure(photo: photo, feed: parent.feed, cropMode: currentCropMode)
+            if let duration = durationByUID[photo.uid] {
+                item.setDuration(duration)
+            } else {
+                requestDurationIfNeeded(for: photo, indexPath: indexPath)
+            }
             item.setChecked(selectedUIDs.contains(photo.uid), mode: selectionMode)
             item.setFavorite(favoriteUIDs.contains(photo.uid))
             return item
+        }
+
+        private func requestDurationIfNeeded(for photo: PhotoItem, indexPath: IndexPath) {
+            guard photo.isVideo, photo.durationSeconds == nil,
+                  durationLookupCompleted.contains(photo.uid) == false,
+                  durationTasks[photo.uid] == nil,
+                  let metadataProvider = parent.metadataProvider else { return }
+            let uid = photo.uid
+            durationTasks[uid] = Task { [weak self, metadataProvider] in
+                let duration = try? await metadataProvider.metadata(for: uid).durationSeconds
+                await MainActor.run {
+                    guard let self else { return }
+                    self.durationTasks[uid] = nil
+                    self.durationLookupCompleted.insert(uid)
+                    guard let duration, duration > 0, duration.isFinite else { return }
+                    self.durationByUID[uid] = duration
+                    if let item = self.collectionView?.item(at: indexPath) as? PhotoGridItem,
+                       indexPath.section < self.sections.count,
+                       indexPath.item < self.sections[indexPath.section].items.count,
+                       self.sections[indexPath.section].items[indexPath.item].uid == uid {
+                        item.setDuration(duration)
+                    }
+                }
+            }
         }
 
         func setFavorites(_ set: Set<PhotoUID>) {
@@ -885,14 +861,25 @@ struct PhotoGridView: NSViewRepresentable {
             guard let indexPath = indexPaths.first,
                   indexPath.section < sections.count, indexPath.item < sections[indexPath.section].items.count else { return }
             let photo = sections[indexPath.section].items[indexPath.item]
-            collectionView.deselectItems(at: indexPaths)   // we drive both opening and selection ourselves
-            if selectionMode {
+            let decision = GridInteractionPolicy.decision(click: .single, selectionMode: selectionMode)
+            logGridInteraction(type: "single", uid: photo.uid, openViewer: decision.opensViewer)
+            if decision.togglesSelection {
+                collectionView.deselectItems(at: indexPaths)   // custom checkmark badge is the selected state
                 if selectedUIDs.contains(photo.uid) { selectedUIDs.remove(photo.uid) } else { selectedUIDs.insert(photo.uid) }
                 (collectionView.item(at: indexPath) as? PhotoGridItem)?.setChecked(selectedUIDs.contains(photo.uid), mode: true)
                 parent.onSelectionChange(selectedUIDs)
-            } else {
+            } else if decision.opensViewer {
                 parent.onOpen(photo, parent.allItems)
             }
+        }
+
+        func handleDoubleClick(at indexPath: IndexPath) {
+            guard indexPath.section < sections.count, indexPath.item < sections[indexPath.section].items.count else { return }
+            let photo = sections[indexPath.section].items[indexPath.item]
+            let decision = GridInteractionPolicy.decision(click: .double, selectionMode: selectionMode)
+            logGridInteraction(type: "double", uid: photo.uid, openViewer: decision.opensViewer)
+            guard decision.opensViewer else { return }
+            parent.onOpen(photo, parent.allItems)
         }
 
         // MARK: Selection mode
@@ -1796,6 +1783,18 @@ struct PhotoGridView: NSViewRepresentable {
                 "maxFramePrepareMs": fmt(prepareStats.max),
                 "p95FramePrepareMs": fmt(prepareStats.p95),
             ], throttleSeconds: 0.10)
+            PhotoDiagnostics.shared.emit("MetalPerf", [
+                "frame": "\(gridZoomPerfFrame)",
+                "spriteCount": "\(sprites.count)",
+                "drawCalls": "\(max(0, renderStats.pageCount))",
+                "atlasRebuild": "\(renderStats.atlasBuildCount > 0)",
+                "vertexBufferRebuild": "\(renderStats.vertexBuildCount > 0)",
+                "textureUploads": "\(renderStats.textureUploadCount)",
+                "cpuPrepareMs": fmt(prepareMs),
+                "gpuDrawableWaitMs": "0.00",
+                "allocBytes": "\(renderStats.perFrameAllocationBytes)",
+                "placeholderCount": "\(renderStats.placeholderTextureUsed)",
+            ], throttleSeconds: 0.10)
             PhotoDiagnostics.shared.emitThumbHealthSummary(phase: "pinchChanged", reset: true, throttleSeconds: 0.50)
             PhotoDiagnostics.shared.emitGridZoomHotPath(reset: false, throttleSeconds: 0.50)
 
@@ -2148,9 +2147,7 @@ struct PhotoGridView: NSViewRepresentable {
 
         /// Fast: the live cell's decoded layer thumbnail (a CGImage), or nil if the cell isn't realized.
         @MainActor private func liveLayerImage(at indexPath: IndexPath) -> CGImage? {
-            guard let contents = (collectionView?.item(at: indexPath) as? PhotoGridItem)?.view.layer?.contents else { return nil }
-            let cf = contents as CFTypeRef
-            return CFGetTypeID(cf) == CGImage.typeID ? (contents as! CGImage) : nil
+            (collectionView?.item(at: indexPath) as? PhotoGridItem)?.thumbnailImage
         }
 
         @MainActor private func buildSpriteTransition(
@@ -2789,6 +2786,12 @@ struct PhotoGridView: NSViewRepresentable {
             "\(uid.volumeID)~\(uid.nodeID)"
         }
 
+        private func logGridInteraction(type: String, uid: PhotoUID, openViewer: Bool) {
+            #if DEBUG
+            print("[GridInteraction] click type=\(type) uid=\(key(for: uid)) openViewer=\(openViewer)")
+            #endif
+        }
+
         private func spriteKey(role: String, key: String) -> String {
             "\(role):\(key)"
         }
@@ -3109,6 +3112,19 @@ private final class ResultBox: @unchecked Sendable {
 /// drives begin/changed/ended; `event.magnification` is the per-event delta (accumulated by the handler).
 final class MagnifyingCollectionView: NSCollectionView {
     var onMagnify: ((NSEvent) -> Void)?
+    var onItemDoubleClick: ((IndexPath) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            let point = convert(event.locationInWindow, from: nil)
+            if let indexPath = indexPathForItem(at: point) {
+                onItemDoubleClick?(indexPath)
+                return
+            }
+        }
+        super.mouseDown(with: event)
+    }
+
     override func magnify(with event: NSEvent) {
         onMagnify?(event)
         // Intentionally NOT calling super — we own the zoom; the scroll view's own magnification is off.

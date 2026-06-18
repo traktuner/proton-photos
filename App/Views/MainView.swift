@@ -6,10 +6,13 @@ import DesignSystem
 import MediaCache
 import TimelineFeature
 import PhotoViewerFeature
+import UploadFeature
 
 struct MainView: View {
     let model: AppModel
+    let facade: ProtonClientFacade
     let backend: any PhotosBackend
+    @Bindable var uploadCoordinator: UploadCoordinator
 
     @State private var timelineModel: TimelineViewModel
     @State private var viewerModel: PhotoViewerModel?
@@ -27,14 +30,19 @@ struct MainView: View {
     @State private var isExporting = false
     // Favorites (read from server so iOS favorites show up; toggle writes back).
     @State private var favorites: Set<PhotoUID> = []
+    @State private var uploadRefreshTask: Task<Void, Never>?
+    @State private var uploadRefreshMessage: String?
+    @State private var uploadRefreshBusy = false
     private let tuning = AnimationTuning.shared
     @Environment(\.openWindow) private var openWindow
     private let feed: ThumbnailFeed
     private let aspects: AspectRegistry
 
-    init(model: AppModel, backend: any PhotosBackend) {
+    init(model: AppModel, facade: ProtonClientFacade) {
         self.model = model
-        self.backend = backend
+        self.facade = facade
+        self.backend = facade.backend
+        self.uploadCoordinator = facade.uploadCoordinator
         let aspects = AspectRegistry()
         self.aspects = aspects
         let feed = ThumbnailFeed(cache: ThumbnailCache(), loader: backend, aspects: aspects)
@@ -55,14 +63,16 @@ struct MainView: View {
                         .clipped()
                         .allowsHitTesting(sidebarOpen)
                     SidebarResizeHandle(width: $sidebarWidth) { dragging in
+                        // The width change is the cause; the grid viewport change goes through the SAME
+                        // stabilizer as a window resize (.sidebarDrag begin/end). The handle emits the
+                        // [Sidebar] dragBegin/dragChanged/dragEnd lines itself.
                         postGridResizeHint(reason: .sidebarDrag, phase: dragging ? "begin" : "end")
-                        logSidebar(dragging: dragging)
                     }
                     .frame(width: sidebarOpen ? 8 : 0)
                     .opacity(sidebarOpen ? 1 : 0)
                     .allowsHitTesting(sidebarOpen)
                     TimelineView(model: timelineModel, aspects: aspects, level: $level, proxy: gridProxy,
-                                 selectionMode: selectionMode, media: backend, favoriteUIDs: favorites,
+                                 selectionMode: selectionMode, media: backend, metadataProvider: backend, favoriteUIDs: favorites,
                                  onSelectionChange: { selectedUIDs = $0 }) { item, items in
                         openPhoto(item, items)
                     }
@@ -77,12 +87,41 @@ struct MainView: View {
                 openWindow(id: "anim-tuning")             // dev: live animation tuning panel
                 attachOfflineManager()
             }
-            .onChange(of: selection) { _, newValue in Task { await timelineModel.select(newValue) } }
+            .onChange(of: selection) { _, newValue in
+                Task {
+                    await timelineModel.select(newValue)
+                    if newValue == .all {
+                        DispatchQueue.main.async {
+                            gridProxy.scrollToLatest?()
+                        }
+                    }
+                }
+            }
             .onChange(of: timelineModel.allItems.count) { _, count in
                 OfflineLibraryManager.shared.liveAssetCount = count
             }
             .onReceive(NotificationCenter.default.publisher(for: .protonPhotosToggleSidebar)) { _ in
                 toggleSidebar()
+            }
+            .task { await uploadCoordinator.start() }
+            .onReceive(NotificationCenter.default.publisher(for: .protonPhotosUploadPhotos)) { notification in
+                performUploadUIAction("uploadPhotos", trigger: uploadTrigger(from: notification))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .protonPhotosUploadFolder)) { notification in
+                performUploadUIAction("uploadFolder", trigger: uploadTrigger(from: notification))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .protonPhotosShowUploadQueue)) { notification in
+                performUploadUIAction("showQueue", trigger: uploadTrigger(from: notification))
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .protonPhotosRefreshLibrary)) { _ in
+                refreshLibraryManually()
+            }
+            .onChange(of: uploadCoordinator.completedUploadRevision) { _, _ in
+                guard let completed = uploadCoordinator.latestCompletedUpload else { return }
+                scheduleUploadRefresh(completed)
+            }
+            .sheet(isPresented: $uploadCoordinator.isDestinationSheetPresented) {
+                UploadDestinationSheet(coordinator: uploadCoordinator)
             }
 
             // The viewer is hidden while a zoom transition is animating (the overlay stands in).
@@ -105,9 +144,40 @@ struct MainView: View {
                 .glassEffect(in: RoundedRectangle(cornerRadius: 16))
             }
 
+            uploadRefreshBanner
+
         }
         .coordinateSpace(name: "root")
         .animation(.easeInOut(duration: 0.22), value: sidebarOpen)
+        .popover(isPresented: $uploadCoordinator.isQueueVisible, arrowEdge: .top) {
+            UploadQueuePanel(coordinator: uploadCoordinator)
+        }
+    }
+
+    @ViewBuilder private var uploadRefreshBanner: some View {
+        if let uploadRefreshMessage {
+            VStack {
+                Spacer()
+                HStack(spacing: 8) {
+                    if uploadRefreshBusy {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: uploadRefreshMessage == "Uploaded" || uploadRefreshMessage == "Library refreshed" ? "checkmark.circle.fill" : "exclamationmark.circle")
+                            .foregroundStyle(uploadRefreshMessage == "Uploaded" || uploadRefreshMessage == "Library refreshed" ? .green : .secondary)
+                    }
+                    Text(uploadRefreshMessage)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
+                .padding(.bottom, 20)
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
 
     // MARK: - Zoom transition
@@ -214,7 +284,126 @@ struct MainView: View {
 
     private func loadAlbums() async {
         albums = (try? await backend.albums()) ?? []
+        uploadCoordinator.albums = albums          // feed the upload destination picker
         favorites = (try? await backend.favoriteUIDs()) ?? []
+    }
+
+    // MARK: - Upload
+
+    private func performUploadUIAction(_ action: String, trigger: UploadUITrigger) {
+        logUploadUI(action: action, trigger: trigger)
+        switch action {
+        case "uploadPhotos":
+            presentUploadPhotos()
+        case "uploadFolder":
+            presentUploadFolder()
+        case "showQueue":
+            uploadCoordinator.isQueueVisible = true
+        default:
+            break
+        }
+    }
+
+    private func presentUploadPhotos() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image, .movie]
+        panel.message = "Choose photos or videos to upload"
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+        uploadCoordinator.chooseDestination(files: panel.urls)
+    }
+
+    private func presentUploadFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a folder to upload (media is discovered recursively)"
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        uploadCoordinator.chooseDestination(folder: folder)
+    }
+
+    private func scheduleUploadRefresh(_ event: UploadCompletedEvent) {
+        uploadRefreshTask?.cancel()
+        uploadRefreshTask = Task { await runUploadRefresh(event) }
+    }
+
+    @MainActor private func runUploadRefresh(_ event: UploadCompletedEvent) async {
+        uploadRefreshBusy = true
+        uploadRefreshMessage = "Upload complete, refreshing library…"
+        let schedule = TimelineRefreshRetrySchedule.uploadDefault.delays
+        for (attempt, delay) in schedule.enumerated() {
+            guard !Task.isCancelled else { return }
+            if delay > .zero {
+                uploadRefreshMessage = "Upload complete, waiting for library refresh…"
+                try? await Task.sleep(for: delay)
+            }
+            let result = await timelineModel.refreshAfterUpload(uploadedUID: event.uploadedUID)
+            OfflineLibraryManager.shared.liveAssetCount = timelineModel.allItems.count
+            if event.destination.usesAlbum {
+                await loadAlbums()
+            }
+            logUploadRefresh(upload: event, attempt: attempt, result: result)
+            if let found = result.foundItem {
+                uploadRefreshBusy = false
+                uploadRefreshMessage = "Uploaded"
+                gridProxy.scrollToItem?(found)
+                clearUploadRefreshMessage(after: .seconds(2))
+                return
+            }
+        }
+        uploadRefreshBusy = false
+        uploadRefreshMessage = "Upload completed, but the library has not indexed it yet. Use Refresh Library."
+    }
+
+    private func refreshLibraryManually() {
+        Task { await performManualLibraryRefresh() }
+    }
+
+    @MainActor private func performManualLibraryRefresh() async {
+        uploadRefreshBusy = true
+        uploadRefreshMessage = "Refreshing library…"
+        let result = await timelineModel.refreshLibrary()
+        OfflineLibraryManager.shared.liveAssetCount = timelineModel.allItems.count
+        await loadAlbums()
+        logUploadRefresh(uploadedNode: "-", attempt: 0, result: result)
+        uploadRefreshBusy = false
+        uploadRefreshMessage = result.errorMessage == nil ? "Library refreshed" : "Library refresh failed"
+        clearUploadRefreshMessage(after: .seconds(2))
+    }
+
+    private func clearUploadRefreshMessage(after delay: Duration) {
+        Task { @MainActor in
+            try? await Task.sleep(for: delay)
+            guard !uploadRefreshBusy else { return }
+            uploadRefreshMessage = nil
+        }
+    }
+
+    private func logUploadUI(action: String, trigger: UploadUITrigger) {
+        let line = "[UploadUI] action=\(action) trigger=\(trigger.rawValue)"
+        DebugLog.log(line)
+        #if DEBUG
+        print(line)
+        #endif
+    }
+
+    private func logUploadRefresh(upload: UploadCompletedEvent, attempt: Int, result: TimelineRefreshResult) {
+        logUploadRefresh(uploadedNode: upload.uploadedUID.nodeID, attempt: attempt, result: result)
+    }
+
+    private func logUploadRefresh(uploadedNode: String, attempt: Int, result: TimelineRefreshResult) {
+        let line = """
+        [UploadRefresh] uploadedNode=\(uploadedNode) attempt=\(attempt) found=\(result.found) \
+        timelineCountBefore=\(result.timelineCountBefore) timelineCountAfter=\(result.timelineCountAfter) \
+        filter=\(result.filterDescription) elapsedMs=\(Int(result.elapsedMs)) error=\(result.errorMessage ?? "-")
+        """
+        DebugLog.log(line)
+        #if DEBUG
+        print(line)
+        #endif
     }
 
     // MARK: - Favorites / trash
@@ -256,57 +445,116 @@ struct MainView: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            Button { toggleSidebar() } label: { Image(systemName: "sidebar.left") }
-                .help("Toggle sidebar")
-        }
-        ToolbarItemGroup(placement: .primaryAction) {
-            if selectionMode {
-                if selection == .trash {
-                    Button { restoreSelected() } label: {
-                        Label("\(selectedUIDs.count)", systemImage: "arrow.uturn.backward")
-                    }
-                    .disabled(selectedUIDs.isEmpty)
-                    .help("Restore from trash")
-                } else {
-                    Button { downloadSelected() } label: {
-                        Label("\(selectedUIDs.count)", systemImage: "square.and.arrow.down")
-                    }
-                    .disabled(selectedUIDs.isEmpty || isExporting)
-                    .help(selectedUIDs.count > 1 ? "Download \(selectedUIDs.count) originals as ZIP" : "Download original")
-                    Button { trashSelected() } label: { Image(systemName: "trash") }
-                        .disabled(selectedUIDs.isEmpty)
-                        .help("Move to trash")
+        if let viewerModel {
+            ToolbarItem(placement: .navigation) {
+                Button { closePhoto() } label: {
+                    Label("Back", systemImage: "chevron.left")
                 }
-                Button("Done") { selectionMode = false; selectedUIDs = [] }
-            } else {
-                Button { selectionMode = true } label: { Image(systemName: "checkmark.circle") }
-                    .help("Select photos")
-                Button { gridProxy.zoomOut?() } label: { Image(systemName: "minus") }
-                    .help("Smaller thumbnails")
-                    .disabled(level >= 5)
-                Button { gridProxy.zoomIn?() } label: { Image(systemName: "plus") }
-                    .help("Larger thumbnails")
-                    .disabled(level <= 0)
-                Menu {
-                    Button("Sign out", role: .destructive) { model.signOut() }
+                .help("Back to library")
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    Task { await performExport([viewerModel.current]) }
                 } label: {
-                    Image(systemName: "person.crop.circle")
+                    Image(systemName: "square.and.arrow.down")
+                }
+                .disabled(isExporting)
+                .help("Export original")
+
+                Button { toggleFavorite(viewerModel.current.uid) } label: {
+                    Image(systemName: favorites.contains(viewerModel.current.uid) ? "heart.fill" : "heart")
+                }
+                .help(favorites.contains(viewerModel.current.uid) ? "Remove favorite" : "Favorite")
+
+                Button { onTrashViewerItem(viewerModel.current) } label: {
+                    Image(systemName: "trash")
+                }
+                .help("Move to trash")
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) { viewerModel.toggleInfo() }
+                } label: {
+                    Image(systemName: viewerModel.showInfo ? "info.circle.fill" : "info.circle")
+                }
+                .help("Info")
+            }
+        } else {
+            ToolbarItem(placement: .navigation) {
+                Button { toggleSidebar() } label: { Image(systemName: "sidebar.left") }
+                    .help("Toggle sidebar")
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                if selectionMode {
+                    if selection == .trash {
+                        Button { restoreSelected() } label: {
+                            Label("\(selectedUIDs.count)", systemImage: "arrow.uturn.backward")
+                        }
+                        .disabled(selectedUIDs.isEmpty)
+                        .help("Restore from trash")
+                    } else {
+                        Button { downloadSelected() } label: {
+                            Label("\(selectedUIDs.count)", systemImage: "square.and.arrow.down")
+                        }
+                        .disabled(selectedUIDs.isEmpty || isExporting)
+                        .help(selectedUIDs.count > 1 ? "Download \(selectedUIDs.count) originals as ZIP" : "Download original")
+                        Button { trashSelected() } label: { Image(systemName: "trash") }
+                            .disabled(selectedUIDs.isEmpty)
+                            .help("Move to trash")
+                    }
+                    Button("Done") { selectionMode = false; selectedUIDs = [] }
+                } else {
+                    uploadToolbarMenu
+                    Button { selectionMode = true } label: { Image(systemName: "checkmark.circle") }
+                        .help("Select photos")
+                    ControlGroup {
+                        Button { gridProxy.zoomOut?() } label: { Image(systemName: "minus") }
+                            .help("Smaller thumbnails")
+                            .disabled(level >= 5)
+                        Button { gridProxy.zoomIn?() } label: { Image(systemName: "plus") }
+                            .help("Larger thumbnails")
+                            .disabled(level <= 0)
+                    }
+                    Menu {
+                        Button("Sign out", role: .destructive) { model.signOut() }
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                    }
                 }
             }
         }
+    }
+
+    private var uploadToolbarMenu: some View {
+        Menu {
+            Button("Upload Photos…") { performUploadUIAction("uploadPhotos", trigger: .toolbar) }
+                .disabled(!uploadCoordinator.uploadCapabilities.canUpload)
+            Button("Upload Folder…") { performUploadUIAction("uploadFolder", trigger: .toolbar) }
+                .disabled(!uploadCoordinator.uploadCapabilities.canUpload)
+            Divider()
+            Button("Show Uploads") { performUploadUIAction("showQueue", trigger: .toolbar) }
+        } label: {
+            Label("Upload", systemImage: "square.and.arrow.up")
+        }
+        .help("Upload photos or a folder")
+    }
+
+    private func onTrashViewerItem(_ item: PhotoItem) {
+        trashPhotos([item])
+        closePhoto()
     }
 
     private func toggleSidebar() {
         postGridResizeHint(reason: .sidebarToggle, phase: "begin")
         withAnimation(.easeInOut(duration: 0.22)) {
             sidebarOpen.toggle()
+        } completion: {
+            postGridResizeHint(reason: .sidebarToggle, phase: "end")
         }
         SidebarPersistence.saveVisible(sidebarOpen)
         logSidebar(dragging: false)
     }
 
-    private func postGridResizeHint(reason: GridResizeTransitionReason, phase: String) {
+    private func postGridResizeHint(reason: GridResizeReason, phase: String) {
         NotificationCenter.default.post(
             name: .protonPhotosGridResizeHint,
             object: nil,
@@ -402,11 +650,18 @@ struct MainView: View {
 
 
 /// Draggable divider between the sidebar and the grid (Deliverable 4). Updates the bound width live
-/// (clamped to `SidebarMetrics`) and persists it on release. Shows the resize cursor on hover.
+/// (clamped to `SidebarMetrics`) and persists it ONCE on release — never per drag tick. The width
+/// change is the *only* thing the handle does to the grid: it never mutates grid layout directly. The
+/// resulting viewport-width change is reported to the shared `GridResizeStabilizer` via the
+/// `onDraggingChanged` callback (`.sidebarDrag` begin/end), so a manual drag is just a window resize
+/// with a different cause. Shows the resize cursor on hover.
 private struct SidebarResizeHandle: View {
     @Binding var width: CGFloat
     var onDraggingChanged: (Bool) -> Void = { _ in }
     @State private var dragStart: CGFloat?
+    #if DEBUG
+    @State private var lastLoggedWidth: CGFloat = -1
+    #endif
 
     var body: some View {
         Rectangle()
@@ -423,16 +678,40 @@ private struct SidebarResizeHandle: View {
                         let base = dragStart ?? width
                         if dragStart == nil {
                             dragStart = base
-                            onDraggingChanged(true)
+                            onDraggingChanged(true)            // → beginResize(reason:.sidebarDrag) (shared path)
+                            logDrag(event: "dragBegin", raw: base, clamped: base)
                         }
-                        width = SidebarMetrics.clamp(base + value.translation.width)
+                        let raw = base + value.translation.width
+                        let clamped = SidebarMetrics.clamp(raw)
+                        width = clamped                         // clamped live; the grid relayouts via the frame change
+                        logDragChanged(raw: raw, clamped: clamped)
                     }
                     .onEnded { _ in
                         dragStart = nil
-                        SidebarPersistence.saveWidth(width)
-                        onDraggingChanged(false)
+                        SidebarPersistence.saveWidth(width)     // persist ONCE on release (clamped in saveWidth)
+                        onDraggingChanged(false)                // → endResize() (shared path)
+                        logDrag(event: "dragEnd", raw: width, clamped: width, persisted: true)
                     }
             )
+    }
+
+    private func logDrag(event: String, raw: CGFloat, clamped: CGFloat, persisted: Bool = false) {
+        #if DEBUG
+        if persisted {
+            print("[Sidebar] event=\(event) width=\(Int(clamped)) persisted=true")
+        } else {
+            print("[Sidebar] event=\(event) width=\(Int(clamped))")
+        }
+        #endif
+    }
+
+    /// Throttled so a 120 Hz drag doesn't flood the log: emit only when the clamped width moved ≥ 1 pt.
+    private func logDragChanged(raw: CGFloat, clamped: CGFloat) {
+        #if DEBUG
+        guard abs(clamped - lastLoggedWidth) >= 1 else { return }
+        lastLoggedWidth = clamped
+        print("[Sidebar] event=dragChanged width=\(Int(raw)) clampedWidth=\(Int(clamped))")
+        #endif
     }
 }
 
