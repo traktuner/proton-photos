@@ -32,6 +32,12 @@ public enum ViewerChromeLayout {
         )
     }
 
+    /// Stable inspector width for a given content area (the region already below the opaque top bar).
+    /// Clamped to 320…380 pt and never wider than the content, so it animates in/out without resizing.
+    public static func clampedInspectorWidth(in content: CGRect, width: CGFloat = inspectorWidth) -> CGFloat {
+        min(max(width, 320), min(380, content.width))
+    }
+
     public static func inspectorOverlapsToolbar(
         container: CGRect,
         toolbarHeight: CGFloat = toolbarHeight,

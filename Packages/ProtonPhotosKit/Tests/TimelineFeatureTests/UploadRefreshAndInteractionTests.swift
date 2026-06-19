@@ -47,28 +47,39 @@ final class UploadRefreshAndInteractionTests: XCTestCase {
         XCTAssertEqual(schedule.delays, [.zero, .seconds(1), .seconds(3), .seconds(8), .seconds(18)])
     }
 
-    func testSingleClickDoesNotOpenViewer() {
+    func testSingleClickSelectsAndDoesNotOpenViewer() {
         let decision = GridInteractionPolicy.decision(click: .single, selectionMode: false)
         XCTAssertFalse(decision.opensViewer)
-        XCTAssertFalse(decision.togglesSelection)
+        XCTAssertEqual(decision.selection, .replace)
     }
 
     func testDoubleClickOpensViewer() {
         let decision = GridInteractionPolicy.decision(click: .double, selectionMode: false)
         XCTAssertTrue(decision.opensViewer)
-        XCTAssertFalse(decision.togglesSelection)
+        XCTAssertEqual(decision.selection, .none)
+    }
+
+    func testCmdClickTogglesSelection() {
+        let decision = GridInteractionPolicy.decision(click: .single, modifiers: .command, selectionMode: false)
+        XCTAssertFalse(decision.opensViewer)
+        XCTAssertEqual(decision.selection, .toggle)
+    }
+
+    func testShiftClickRangeSelects() {
+        let decision = GridInteractionPolicy.decision(click: .single, modifiers: .shift, selectionMode: false)
+        XCTAssertFalse(decision.opensViewer)
+        XCTAssertEqual(decision.selection, .range)
     }
 
     func testSelectionModeSingleClickTogglesSelection() {
         let decision = GridInteractionPolicy.decision(click: .single, selectionMode: true)
         XCTAssertFalse(decision.opensViewer)
-        XCTAssertTrue(decision.togglesSelection)
+        XCTAssertEqual(decision.selection, .toggle)
     }
 
-    func testSelectionModeDoubleClickDoesNotOpenViewer() {
+    func testDoubleClickOpensViewerEvenInSelectionMode() {
         let decision = GridInteractionPolicy.decision(click: .double, selectionMode: true)
-        XCTAssertFalse(decision.opensViewer)
-        XCTAssertFalse(decision.togglesSelection)
+        XCTAssertTrue(decision.opensViewer)
     }
 }
 

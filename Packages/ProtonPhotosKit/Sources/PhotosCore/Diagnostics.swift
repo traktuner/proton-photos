@@ -206,6 +206,9 @@ public struct ThumbnailHealthCounters: Sendable, Equatable {
 public struct GridZoomHotPathCounters: Sendable, Equatable {
     public var dbQueryDuringPinch = 0
     public var diskReadDuringPinch = 0
+    /// Cheap `cache.has(_)` existence probes during a pinch — NOT actual byte reads. Split out from
+    /// `diskReadDuringPinch` so the "disk read" stat reflects real `diskData(_)` reads only.
+    public var diskPresenceCheckDuringPinch = 0
     public var decodeDuringPinch = 0
     public var networkRequestDuringPinch = 0
     public var mainThreadDecodeDuringPinch = 0
@@ -420,6 +423,13 @@ public final class PhotoDiagnostics: @unchecked Sendable {
         lock.withLock { hotPath.diskReadDuringPinch += 1 }
     }
 
+    /// Records a cheap on-disk *presence* check (`cache.has`), distinct from an actual byte read, so
+    /// presence probes don't inflate the `diskReadDuringPinch` stat.
+    public func recordDiskPresenceCheckDuringPinch() {
+        guard isActivePinch() else { return }
+        lock.withLock { hotPath.diskPresenceCheckDuringPinch += 1 }
+    }
+
     public func recordNetworkRequestDuringPinch() {
         guard isActivePinch() else { return }
         lock.withLock { hotPath.networkRequestDuringPinch += 1 }
@@ -486,9 +496,37 @@ public final class PhotoDiagnostics: @unchecked Sendable {
         emit("GridZoomHotPath", [
             "dbQueryDuringPinch": "\(s.dbQueryDuringPinch)",
             "diskReadDuringPinch": "\(s.diskReadDuringPinch)",
+            "diskPresenceCheckDuringPinch": "\(s.diskPresenceCheckDuringPinch)",
             "decodeDuringPinch": "\(s.decodeDuringPinch)",
             "networkRequestDuringPinch": "\(s.networkRequestDuringPinch)",
             "mainThreadDecodeDuringPinch": "\(s.mainThreadDecodeDuringPinch)",
+        ], throttleSeconds: throttleSeconds)
+    }
+
+    // MARK: - Small perf pass counters
+
+    /// Records `value` as the new running maximum for `key` (used for "…Max" gauges like the polling
+    /// backoff ceiling and the peak concurrent duration lookups). Stored alongside the plain counters.
+    public func recordMax(_ key: String, _ value: Int) {
+        lock.withLock {
+            if value > counters[key, default: 0] { counters[key] = value }
+        }
+    }
+
+    /// Snapshot of the small-perf-pass counters (Parts 1–9). Throttle-safe; intended for an occasional
+    /// debug dump, not per-frame logging.
+    public func emitPerfSmallPass(throttleSeconds: TimeInterval = 0) {
+        emit("PerfSmallPass", [
+            "photoGridItemPolls": "\(counter("perf.photoGridItemPolls"))",
+            "photoGridItemPollBackoffMax": "\(counter("perf.photoGridItemPollBackoffMax"))",
+            "placeholderDirectFill": "\(counter("perf.placeholderDirectFill"))",
+            "displayedRectCacheHit": "\(counter("perf.displayedRectCacheHit"))",
+            "displayedRectCacheMiss": "\(counter("perf.displayedRectCacheMiss"))",
+            "badgeLayoutSkipped": "\(counter("perf.badgeLayoutSkipped"))",
+            "videoBlockMapBinarySearch": "true",
+            "videoPrefetchScheduled": "\(counter("perf.videoPrefetchScheduled"))",
+            "videoPrefetchDeduped": "\(counter("perf.videoPrefetchDeduped"))",
+            "durationLookupActiveMax": "\(counter("perf.durationLookupActiveMax"))",
         ], throttleSeconds: throttleSeconds)
     }
 

@@ -40,6 +40,10 @@ public final class PhotoViewerModel {
     public var showInfo = false
     public private(set) var metadata: PhotoMetadata?
 
+    /// Reverse-geocoded place/POI name for the current item's GPS, if any — drives the viewer top-bar
+    /// "named location" headline. Resolved lazily (debounced) so flicking past photos doesn't geocode.
+    public private(set) var placeName: String?
+
     private let feed: ThumbnailFeed
     private let media: FullMediaProvider
     private let streamer: VideoStreamProvider?
@@ -47,6 +51,7 @@ public final class PhotoViewerModel {
     private let previewCache: ThumbnailCache?
     private var loadTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
+    private var placeTask: Task<Void, Never>?
 
     public init(items: [PhotoItem], index: Int, feed: ThumbnailFeed, media: FullMediaProvider,
                 streamer: VideoStreamProvider? = nil, metadataProvider: PhotoMetadataProvider? = nil,
@@ -84,6 +89,30 @@ public final class PhotoViewerModel {
         }
     }
 
+    /// Resolves the GPS → place-name headline for `item`. Debounced so rapid arrow navigation doesn't
+    /// fire a metadata fetch + geocode for every photo flicked past; reuses already-loaded metadata when
+    /// the info panel is open. Geocoded names are cached per coordinate in `PlaceNameResolver`.
+    private func resolvePlaceName(for item: PhotoItem) {
+        placeTask?.cancel()
+        placeName = nil
+        guard let metadataProvider else { return }
+        placeTask = Task { [metadataProvider] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled, self.current == item else { return }
+            let meta: PhotoMetadata?
+            if let loaded = self.metadata, self.current == item {
+                meta = loaded
+            } else {
+                meta = try? await metadataProvider.metadata(for: item.uid)
+            }
+            guard !Task.isCancelled, self.current == item,
+                  let meta, meta.hasLocation, let lat = meta.latitude, let lon = meta.longitude else { return }
+            let name = await PlaceNameResolver.shared.placeName(latitude: lat, longitude: lon)
+            guard !Task.isCancelled, self.current == item else { return }
+            self.placeName = name
+        }
+    }
+
     public var current: PhotoItem { items[index] }
     public var canGoNext: Bool { index < items.count - 1 }
     public var canGoPrevious: Bool { index > 0 }
@@ -95,6 +124,7 @@ public final class PhotoViewerModel {
     public func stop() {
         loadTask?.cancel()
         metadataTask?.cancel()
+        placeTask?.cancel()
         video.teardown()
     }
 
@@ -124,6 +154,7 @@ public final class PhotoViewerModel {
         originalProgress = 0
         isLoadingOriginal = false
         if showInfo { loadMetadata() }   // keep the open panel in sync when navigating
+        resolvePlaceName(for: item)      // top-bar POI headline (debounced; skips photos flicked past)
 
         // Instant: if we already have the sharp original cached, show it — no spinner, no network.
         if let cached = Self.fullImageCache.object(forKey: Self.cacheKey(item.uid)) {

@@ -23,6 +23,9 @@ final class ProtonVideoResourceLoader: NSObject, AVAssetResourceLoaderDelegate, 
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     private var prefetchTasks: [Int: Task<Void, Never>] = [:]
     private let forwardPrefetchBlockCount = 4
+    /// Clear offset the forward read-ahead window was last scheduled from. Lets a repeated request for
+    /// the same position skip re-scanning the block map; a seek (any other offset) still re-schedules.
+    private var lastForwardPrefetchOffset = -1
 
     init(prepared: PreparedVideo, source: PhotoVideoStreamSource, crypto: DriveCrypto,
          cache: VideoByteRangeCache = .shared) {
@@ -95,8 +98,6 @@ final class ProtonVideoResourceLoader: NSObject, AVAssetResourceLoaderDelegate, 
             ? total - offset
             : Int(dataRequest.requestedOffset) + dataRequest.requestedLength - offset
         let slices = prepared.blockMap.slices(offset: offset, length: max(0, length))
-        let requestedEnd = min(total, offset + max(0, length))
-        scheduleForwardPrefetch(afterClearOffset: requestedEnd, reason: "requestStart")
 
         var served = 0
         var cacheHits = 0
@@ -147,13 +148,30 @@ final class ProtonVideoResourceLoader: NSObject, AVAssetResourceLoaderDelegate, 
         return (clear, hit)
     }
 
-    /// Starts warming the blocks immediately after the range AVFoundation just requested. This matters
+    /// Starts warming the blocks immediately after the bytes AVFoundation just consumed. This matters
     /// on reopen/resume: the first requested range may be fully cached and play instantly, but without
     /// read-ahead the next uncached block is only requested when playback reaches the edge.
+    ///
+    /// Driven from a single point (after serving) since served bytes reflect actual progress. The
+    /// read-ahead set is found with a binary search instead of a linear filter over every block, and a
+    /// repeat at the same `clearOffset` is skipped wholesale (a seek changes the offset and re-schedules).
     private func scheduleForwardPrefetch(afterClearOffset clearOffset: Int, reason: String) {
-        let candidates = prepared.blocks
-            .filter { $0.clearSize > 0 && $0.clearOffset + $0.clearSize > clearOffset }
-            .prefix(forwardPrefetchBlockCount)
+        let advanced = lock.withLock { () -> Bool in
+            guard clearOffset != lastForwardPrefetchOffset else { return false }
+            lastForwardPrefetchOffset = clearOffset
+            return true
+        }
+        guard advanced else {
+            PhotoDiagnostics.shared.increment("perf.videoPrefetchDeduped")
+            PhotoDiagnostics.shared.emit("VideoStream", [
+                "uid": uidKey, "strategy": "prefetch", "reason": reason,
+                "scheduled": "false", "deduped": "true",
+            ], throttleSeconds: 0.5)
+            return
+        }
+        let candidates = prepared.blockMap
+            .forwardBlocks(afterClearOffset: clearOffset, count: forwardPrefetchBlockCount)
+            .compactMap { prepared.block(at: $0.index) }
         guard !candidates.isEmpty else { return }
         for block in candidates {
             schedulePrefetch(block, reason: reason)
@@ -162,7 +180,10 @@ final class ProtonVideoResourceLoader: NSObject, AVAssetResourceLoaderDelegate, 
 
     private func schedulePrefetch(_ block: VideoBlock, reason: String) {
         let key = NSNumber(value: block.index)
-        guard decryptedCache.object(forKey: key) == nil else { return }
+        guard decryptedCache.object(forKey: key) == nil else {
+            PhotoDiagnostics.shared.increment("perf.videoPrefetchDeduped")
+            return
+        }
 
         let scheduled = lock.withLock { () -> Bool in
             guard prefetchTasks[block.index] == nil else { return false }
@@ -191,7 +212,15 @@ final class ProtonVideoResourceLoader: NSObject, AVAssetResourceLoaderDelegate, 
             }
             return true
         }
-        guard scheduled else { return }
+        if scheduled {
+            PhotoDiagnostics.shared.increment("perf.videoPrefetchScheduled")
+            PhotoDiagnostics.shared.emit("VideoStream", [
+                "uid": uidKey, "strategy": "prefetch", "reason": reason,
+                "block": "\(block.index)", "scheduled": "true", "deduped": "false",
+            ], throttleSeconds: 0.5)
+        } else {
+            PhotoDiagnostics.shared.increment("perf.videoPrefetchDeduped")
+        }
     }
 
     private var uidKey: String { "\(prepared.uid.volumeID)~\(prepared.uid.nodeID)" }

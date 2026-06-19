@@ -73,6 +73,43 @@ public final class TimelineViewModel {
         self.feed = feed
     }
 
+    // MARK: - Memoized section aspect ratios
+
+    @ObservationIgnored private var aspectsCacheVersion = -1
+    @ObservationIgnored private var aspectsCacheToken = 0
+    @ObservationIgnored private var aspectsCacheValue: [[CGFloat]] = []
+
+    /// Per-section clamped aspect ratios for the justified layout, memoized on (registry version,
+    /// section structure). Recomputing this in `TimelineView.body` on every SwiftUI re-render did one
+    /// dictionary lookup + string-key allocation PER PHOTO; a sidebar-width drag re-evaluates the body
+    /// each tick, so for a large library that 20k-element rebuild ran every frame and starved the main
+    /// thread — the grid jumped and the divider stuttered. A window resize changes no SwiftUI state, so
+    /// it never paid this, which is exactly why it felt smooth. The cache makes the two paths equal.
+    public func sectionAspects(for sections: [TimelineSection], registry: AspectRegistry) -> [[CGFloat]] {
+        let token = Self.structureToken(sections)
+        if aspectsCacheVersion == registry.version, aspectsCacheToken == token {
+            return aspectsCacheValue
+        }
+        let value = sections.map { section in
+            section.items.map { min(max(registry.aspect(for: $0.uid), 0.45), 3.2) }
+        }
+        aspectsCacheVersion = registry.version
+        aspectsCacheToken = token
+        aspectsCacheValue = value
+        return value
+    }
+
+    /// Cheap structural fingerprint (O(#sections), not O(#photos)): section count + per-section counts
+    /// + the first/last uid, so a same-count reload with different content still invalidates the cache.
+    private static func structureToken(_ sections: [TimelineSection]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(sections.count)
+        for section in sections { hasher.combine(section.items.count) }
+        if let first = sections.first?.items.first { hasher.combine(first.uid) }
+        if let last = sections.last?.items.last { hasher.combine(last.uid) }
+        return hasher.finalize()
+    }
+
     /// Switches what the grid shows. `.all` reuses the cached/SDK timeline; tag & album views load
     /// from the direct endpoints. No-op if already showing that filter.
     public func select(_ newFilter: PhotoFilter) async {

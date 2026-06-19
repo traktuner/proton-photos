@@ -24,6 +24,9 @@ struct MainView: View {
     // Shared-element zoom transition (photo ↔ its grid cell).
     @State private var gridProxy = GridProxy()
     @State private var zoom: ZoomTransition?
+    // Real height of the native window toolbar (its top safe-area inset). The viewer lays its media out
+    // below this, so the open/close zoom must fly the photo into the SAME region to avoid a shrink/jump.
+    @State private var topBarInset: CGFloat = 0
     // Selection + export.
     @State private var selectionMode = false
     @State private var selectedUIDs: Set<PhotoUID> = []
@@ -78,14 +81,21 @@ struct MainView: View {
                     }
                     .ignoresSafeArea(.container, edges: .top)   // photos scroll under the glass toolbar
                 }
-                .navigationTitle(title)
+                .navigationTitle(viewerModel == nil ? title : "")
                 .toolbar { toolbarContent }
-                .toolbarBackground(.automatic, for: .windowToolbar)
+                // Viewer: opaque, warm top bar matching the media background. Grid: default glass material
+                // that appears as photos scroll under it.
+                .toolbarBackground(viewerModel != nil
+                                   ? AnyShapeStyle(ViewerVisualConstants.backgroundColor)
+                                   : AnyShapeStyle(.bar),
+                                   for: .windowToolbar)
+                .toolbarBackground(viewerModel != nil ? .visible : .automatic, for: .windowToolbar)
             }
             .task { await loadAlbums() }
             .onAppear {
                 openWindow(id: "anim-tuning")             // dev: live animation tuning panel
                 attachOfflineManager()
+                publishMetalGridLabData()
             }
             .onChange(of: selection) { _, newValue in
                 Task {
@@ -99,6 +109,7 @@ struct MainView: View {
             }
             .onChange(of: timelineModel.allItems.count) { _, count in
                 OfflineLibraryManager.shared.liveAssetCount = count
+                publishMetalGridLabData()
             }
             .onReceive(NotificationCenter.default.publisher(for: .protonPhotosToggleSidebar)) { _ in
                 toggleSidebar()
@@ -138,7 +149,7 @@ struct MainView: View {
             if isExporting {
                 VStack(spacing: 10) {
                     ProgressView().controlSize(.large).tint(.white)
-                    Text("Preparing download…").font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
+                    Text("Preparing…").font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
                 }
                 .padding(22)
                 .glassEffect(in: RoundedRectangle(cornerRadius: 16))
@@ -147,6 +158,15 @@ struct MainView: View {
             uploadRefreshBanner
 
         }
+        .background(
+            // Reads the real top safe-area inset (= native toolbar height) so the zoom transition and the
+            // viewer agree on exactly where the media sits below the opaque top bar.
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { topBarInset = geo.safeAreaInsets.top }
+                    .onChange(of: geo.safeAreaInsets.top) { _, new in topBarInset = new }
+            }
+        )
         .coordinateSpace(name: "root")
         .animation(.easeInOut(duration: 0.22), value: sidebarOpen)
         .popover(isPresented: $uploadCoordinator.isQueueVisible, arrowEdge: .top) {
@@ -191,10 +211,15 @@ struct MainView: View {
 
     @ViewBuilder private func zoomOverlay(_ z: ZoomTransition) -> some View {
         GeometryReader { geo in
-            let full = fitRect(z.image, in: geo.size)
+            // Full-window coords (this layer ignores the safe area, matching the window-space cell frames).
+            // The expanded target is the media region BELOW the opaque top bar, identical to where the
+            // viewer will render the photo — so handing off to the viewer causes no shrink/jump.
+            let contentRect = CGRect(x: 0, y: topBarInset,
+                                     width: geo.size.width, height: max(0, geo.size.height - topBarInset))
+            let full = fitRect(z.image, in: contentRect)
             let frame = z.expanded ? full : z.cellFrame
             ZStack {
-                Color.black.opacity(z.expanded ? 1 : 0)
+                ViewerVisualConstants.backgroundColor.opacity(z.expanded ? 1 : 0)
                 Image(nsImage: z.image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -210,6 +235,7 @@ struct MainView: View {
         // Need the cell's on-screen frame and a thumbnail to fly; otherwise just open directly.
         guard let cell = gridProxy.windowFrameForItem?(item), let img = feed.memoryImage(for: item.uid) else {
             viewerModel = makeViewer(item, items)
+            logViewerToolbar(mode: "viewer")
             return
         }
         zoom = ZoomTransition(item: item, image: img, cellFrame: cell, expanded: false)
@@ -218,6 +244,7 @@ struct MainView: View {
                 zoom?.expanded = true
             } completion: {
                 viewerModel = makeViewer(item, items)
+                logViewerToolbar(mode: "viewer")
                 zoom = nil
             }
         }
@@ -228,6 +255,7 @@ struct MainView: View {
         let item = vm.current
         // Fly back to the photo's ACTUAL cell. If it scrolled off-screen (user navigated), close
         // instantly rather than centre-scrolling (which made it always shrink into the middle).
+        logViewerToolbar(mode: "grid")
         guard let img = vm.image, let cell = gridProxy.windowFrameForItem?(item) else {
             viewerModel = nil
             return
@@ -262,6 +290,14 @@ struct MainView: View {
         }
     }
 
+    /// Hands the live timeline sections + shared thumbnail feed to the (separate-window) Metal Grid Lab
+    /// so it can render the REAL library. Read-only — does not touch the production grid.
+    private func publishMetalGridLabData() {
+        if case .loaded(let sections) = timelineModel.state {
+            MetalGridLabBridge.shared.publish(sections: sections, feed: feed)
+        }
+    }
+
     /// Aspect-fit rect of `image` centred in `size` — the photo's fullscreen frame.
     private func fitRect(_ image: NSImage, in size: CGSize) -> CGRect {
         let ia = image.size.width / max(image.size.height, 1)
@@ -269,6 +305,13 @@ struct MainView: View {
         var w = size.width, h = size.height
         if ia > ra { h = w / ia } else { w = h * ia }
         return CGRect(x: (size.width - w) / 2, y: (size.height - h) / 2, width: w, height: h)
+    }
+
+    /// Aspect-fit rect of `image` centred within an arbitrary `rect` (used to fit inside the media region
+    /// below the top bar, not the whole window).
+    private func fitRect(_ image: NSImage, in rect: CGRect) -> CGRect {
+        let fitted = fitRect(image, in: rect.size)
+        return fitted.offsetBy(dx: rect.minX, dy: rect.minY)
     }
 
     // MARK: - Chrome
@@ -452,14 +495,41 @@ struct MainView: View {
                 }
                 .help("Back to library")
             }
+            // Apple-Photos centered two-line metadata in a pill: location/POI (or date) over the
+            // secondary line, both inside a capsule padded comfortably larger than the text.
+            ToolbarItem(placement: .principal) {
+                let t = viewerTitle(viewerModel)
+                VStack(spacing: 1) {
+                    Text(t.line1)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(t.line2)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(1)
+                }
+                .multilineTextAlignment(.center)
+                .fixedSize()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(.white.opacity(0.09), in: Capsule())
+            }
             ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) { viewerModel.toggleInfo() }
+                } label: {
+                    Image(systemName: viewerModel.showInfo ? "info.circle.fill" : "info.circle")
+                }
+                .help("Info")
+
                 Button {
                     Task { await performExport([viewerModel.current]) }
                 } label: {
                     Image(systemName: "square.and.arrow.down")
                 }
                 .disabled(isExporting)
-                .help("Export original")
+                .help("Download original")
 
                 Button { toggleFavorite(viewerModel.current.uid) } label: {
                     Image(systemName: favorites.contains(viewerModel.current.uid) ? "heart.fill" : "heart")
@@ -470,55 +540,53 @@ struct MainView: View {
                     Image(systemName: "trash")
                 }
                 .help("Move to trash")
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.22)) { viewerModel.toggleInfo() }
-                } label: {
-                    Image(systemName: viewerModel.showInfo ? "info.circle.fill" : "info.circle")
-                }
-                .help("Info")
             }
         } else {
             ToolbarItem(placement: .navigation) {
                 Button { toggleSidebar() } label: { Image(systemName: "sidebar.left") }
                     .help("Toggle sidebar")
             }
+            // No explicit "select mode": click / ⌘-click / ⇧-click / drag-marquee select directly, double
+            // click opens. The toolbar is stable — the download (or restore) + trash actions are always
+            // present and just enable when something is selected.
             ToolbarItemGroup(placement: .primaryAction) {
-                if selectionMode {
-                    if selection == .trash {
-                        Button { restoreSelected() } label: {
+                uploadToolbarMenu
+                if selection == .trash {
+                    Button { restoreSelected() } label: {
+                        if selectedUIDs.isEmpty {
+                            Image(systemName: "arrow.uturn.backward")
+                        } else {
                             Label("\(selectedUIDs.count)", systemImage: "arrow.uturn.backward")
                         }
-                        .disabled(selectedUIDs.isEmpty)
-                        .help("Restore from trash")
-                    } else {
-                        Button { downloadSelected() } label: {
+                    }
+                    .disabled(selectedUIDs.isEmpty)
+                    .help("Restore from trash")
+                } else {
+                    Button { downloadSelected() } label: {
+                        if selectedUIDs.isEmpty {
+                            Image(systemName: "square.and.arrow.down")
+                        } else {
                             Label("\(selectedUIDs.count)", systemImage: "square.and.arrow.down")
                         }
-                        .disabled(selectedUIDs.isEmpty || isExporting)
-                        .help(selectedUIDs.count > 1 ? "Download \(selectedUIDs.count) originals as ZIP" : "Download original")
-                        Button { trashSelected() } label: { Image(systemName: "trash") }
-                            .disabled(selectedUIDs.isEmpty)
-                            .help("Move to trash")
                     }
-                    Button("Done") { selectionMode = false; selectedUIDs = [] }
-                } else {
-                    uploadToolbarMenu
-                    Button { selectionMode = true } label: { Image(systemName: "checkmark.circle") }
-                        .help("Select photos")
-                    ControlGroup {
-                        Button { gridProxy.zoomOut?() } label: { Image(systemName: "minus") }
-                            .help("Smaller thumbnails")
-                            .disabled(level >= 5)
-                        Button { gridProxy.zoomIn?() } label: { Image(systemName: "plus") }
-                            .help("Larger thumbnails")
-                            .disabled(level <= 0)
-                    }
-                    Menu {
-                        Button("Sign out", role: .destructive) { model.signOut() }
-                    } label: {
-                        Image(systemName: "person.crop.circle")
-                    }
+                    .disabled(selectedUIDs.isEmpty || isExporting)
+                    .help(selectedUIDs.count > 1 ? "Download \(selectedUIDs.count) photos as ZIP" : "Download original")
+                    Button { trashSelected() } label: { Image(systemName: "trash") }
+                        .disabled(selectedUIDs.isEmpty)
+                        .help("Move to trash")
+                }
+                ControlGroup {
+                    Button { gridProxy.zoomOut?() } label: { Image(systemName: "minus") }
+                        .help("Smaller thumbnails")
+                        .disabled(level >= 5)
+                    Button { gridProxy.zoomIn?() } label: { Image(systemName: "plus") }
+                        .help("Larger thumbnails")
+                        .disabled(level <= 0)
+                }
+                Menu {
+                    Button("Sign out", role: .destructive) { model.signOut() }
+                } label: {
+                    Image(systemName: "person.crop.circle")
                 }
             }
         }
@@ -533,7 +601,7 @@ struct MainView: View {
             Divider()
             Button("Show Uploads") { performUploadUIAction("showQueue", trigger: .toolbar) }
         } label: {
-            Label("Upload", systemImage: "square.and.arrow.up")
+            Label("Upload", systemImage: "tray.and.arrow.up")
         }
         .help("Upload photos or a folder")
     }
@@ -541,6 +609,29 @@ struct MainView: View {
     private func onTrashViewerItem(_ item: PhotoItem) {
         trashPhotos([item])
         closePhoto()
+    }
+
+    /// Center-title metadata for the viewer top bar. `placeName` is the reverse-geocoded POI/location
+    /// headline (nil until resolved or when the photo has no GPS); the filename fallback is best-effort
+    /// (only populated while the Info panel is open).
+    private func viewerTitle(_ vm: PhotoViewerModel) -> ViewerTitle {
+        ViewerTitleFormatter.make(
+            captureDate: vm.current.captureTime,
+            index: vm.index,
+            total: vm.items.count,
+            locationName: vm.placeName,
+            filename: vm.metadata?.filename
+        )
+    }
+
+    /// Proof line for the spec: the Library/sidebar toggle is suppressed in viewer mode and restored in
+    /// grid mode (the toolbar content is conditional on `viewerModel != nil`).
+    private func logViewerToolbar(mode: String) {
+        let line = "[ViewerToolbar] mode=\(mode) sidebarToggleVisible=\(mode == "grid")"
+        DebugLog.log(line)
+        #if DEBUG
+        print(line)
+        #endif
     }
 
     private func toggleSidebar() {
@@ -577,6 +668,8 @@ struct MainView: View {
         Task { await performExport(items) }
     }
 
+    /// Downloads the original(s): a single item goes through a Save panel; multiple originals are
+    /// downloaded into a temp folder and zipped into one archive the user picks a destination for.
     @MainActor private func performExport(_ items: [PhotoItem]) async {
         isExporting = true
         defer { isExporting = false }
@@ -605,23 +698,6 @@ struct MainView: View {
         }
     }
 
-    private func defaultName(_ item: PhotoItem, ext: String) -> String {
-        let e = ext.isEmpty ? "jpg" : ext
-        return "\(item.uid.nodeID.prefix(8)).\(e)"
-    }
-
-    private func uniqueName(_ name: String, used: inout Set<String>) -> String {
-        guard used.contains(name) else { used.insert(name); return name }
-        let url = URL(fileURLWithPath: name)
-        let stem = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension
-        var i = 2
-        while true {
-            let candidate = ext.isEmpty ? "\(stem) \(i)" : "\(stem) \(i).\(ext)"
-            if !used.contains(candidate) { used.insert(candidate); return candidate }
-            i += 1
-        }
-    }
-
     private func saveSingle(src: URL, suggestedName: String) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedName
@@ -646,6 +722,24 @@ struct MainView: View {
         }
         NSWorkspace.shared.activateFileViewerSelecting([dest])
     }
+
+    private func defaultName(_ item: PhotoItem, ext: String) -> String {
+        let e = ext.isEmpty ? "jpg" : ext
+        return "\(item.uid.nodeID.prefix(8)).\(e)"
+    }
+
+    private func uniqueName(_ name: String, used: inout Set<String>) -> String {
+        guard used.contains(name) else { used.insert(name); return name }
+        let url = URL(fileURLWithPath: name)
+        let stem = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension
+        var i = 2
+        while true {
+            let candidate = ext.isEmpty ? "\(stem) \(i)" : "\(stem) \(i).\(ext)"
+            if !used.contains(candidate) { used.insert(candidate); return candidate }
+            i += 1
+        }
+    }
+
 }
 
 
@@ -673,7 +767,12 @@ private struct SidebarResizeHandle: View {
                 if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
             }
             .gesture(
-                DragGesture(minimumDistance: 1)
+                // Measure the drag in GLOBAL (screen) space, not the handle's local space. The handle
+                // moves right/left as the sidebar widens/narrows; a `.local` translation is therefore
+                // measured against a coordinate system that shifts with the drag, so the reported delta
+                // fights itself — the divider lags and never "locks" to the cursor. Global space is fixed,
+                // so `base + translation.width` tracks the mouse 1:1.
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
                         let base = dragStart ?? width
                         if dragStart == nil {

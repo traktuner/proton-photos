@@ -50,7 +50,8 @@ public struct PhotoViewerView: View {
 
     public var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            // Warm Apple-Photos background fills the whole window (behind the now-opaque top bar too).
+            ViewerVisualConstants.backgroundColor.ignoresSafeArea()
 
             viewerBody
 
@@ -65,25 +66,26 @@ public struct PhotoViewerView: View {
         .onExitCommand { onClose() }   // Esc closes the photo
     }
 
+    /// The media + info inspector. This view does NOT ignore the top safe area: the native window toolbar
+    /// is the viewer's opaque top bar, so SwiftUI already lays this region out *below* it. The media is
+    /// laid out in its final frame from the first frame — no extra toolbar offset, no shrink-then-settle,
+    /// no black top gap.
     private var viewerBody: some View {
         GeometryReader { geometry in
-            let container = CGRect(origin: .zero, size: geometry.size)
-            let contentFrame = ViewerChromeLayout.contentFrame(in: container)
-            let inspectorWidth = model.showInfo ? min(ViewerChromeLayout.inspectorWidth, contentFrame.width * 0.42) : 0
+            let content = CGRect(origin: .zero, size: geometry.size)
+            let inspectorWidth = model.showInfo ? ViewerChromeLayout.clampedInspectorWidth(in: content) : 0
             HStack(spacing: 0) {
-                content
-                    .frame(width: max(0, contentFrame.width - inspectorWidth), height: contentFrame.height)
+                self.content
+                    .frame(width: max(0, content.width - inspectorWidth), height: content.height)
                     .clipped()
                 if model.showInfo {
                     InfoPanelView(item: model.current, metadata: model.metadata) {
                         withAnimation(.easeInOut(duration: 0.25)) { model.toggleInfo() }
                     }
-                    .frame(width: inspectorWidth, height: contentFrame.height)
+                    .frame(width: inspectorWidth, height: content.height)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
-            .frame(width: contentFrame.width, height: contentFrame.height)
-            .position(x: contentFrame.midX, y: contentFrame.midY)
         }
     }
 
@@ -183,7 +185,6 @@ public struct PhotoViewerView: View {
             iconButton("chevron.right", size: 40, enabled: model.canGoNext) { goNext() }
         }
         .padding(.horizontal, 18)
-        .padding(.top, ViewerChromeLayout.toolbarHeight)
         .opacity(hovering ? 1 : 0)
         .animation(.easeInOut(duration: 0.15), value: hovering)
     }

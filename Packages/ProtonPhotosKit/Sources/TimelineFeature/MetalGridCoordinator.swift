@@ -1,0 +1,997 @@
+import AppKit
+import MetalKit
+import CoreGraphics
+import simd
+import PhotosCore
+
+/// Bridges scroll position + layout + texture cache + renderer for the Metal grid lab. It is the
+/// `MTKView` delegate: every frame it reads the clip view's scroll origin, queries the visible item
+/// rects from `MetalGridLayout`, uploads a bounded number of newly-available thumbnails, draws the
+/// viewport, and emits diagnostics. Only items intersecting the (overscan-expanded) visible rect are
+/// ever touched — never all 20k.
+@MainActor
+final class MetalGridCoordinator: NSObject, MTKViewDelegate {
+    private let renderer: MetalGridRenderer
+    private let cache: MetalGridTextureCache
+    private var dataSource: MetalGridDataSource
+    private let budget: MetalGridBudget
+
+    weak var clipView: NSClipView?
+    weak var metalView: MTKView?
+
+    var level: Int = JustifiedCollectionLayout.defaultLevel {
+        didSet {
+            level = min(max(level, 0), JustifiedCollectionLayout.levels.count - 1)
+            if level != oldValue { cachedDetent = nil; onContentSizeChange?(contentSize()) }
+        }
+    }
+
+    // MARK: - Apple-matched detent zoom (feature-flagged; see MetalGridDetentZoomFlag)
+
+    /// When true, the grid uses the data-driven `detentModel` ladder (justified aspect rows + square
+    /// overview) and the two-surface pinch transition. When false, it uses the legacy square `MetalGridLayout`.
+    let usesDetentZoom = MetalGridDetentZoomFlag.isEnabled
+    let detentModel = GridZoomDetentModel.apple
+    /// Per-section item aspect ratios (w/h) for the justified levels, fed from the `AspectRegistry`.
+    private var sectionAspects: [[CGFloat]] = []
+    private var aspectVersion = 0
+    private var cachedDetent: (level: Int, width: CGFloat, version: Int, layout: GridDetentLayout)?
+    // Per-gesture memo of detent layouts by level (justified composition is O(N) — never rebuild per frame).
+    private var memoWidth: CGFloat = 0
+    private var memoVersion = -1
+    private var memoLayouts: [Int: GridDetentLayout] = [:]
+    /// Active pinch/button zoom transition (nil = settled on a single detent).
+    private(set) var zoomSession: ZoomSession?
+    /// True only while the post-release SETTLE animation runs.
+    var isZoomSettling = false
+    /// The detent the release-settle is heading to (the snap target) — the base grid cross-dissolves into it.
+    var settleTargetLevel: Int?
+    /// Release-settle crossfade progress 0→1 (base → snap target). Driven by the settle animation so the
+    /// re-align ramps smoothly from 0 instead of popping in at the release position. 0 during the live drag.
+    var settleCrossfade: CGFloat = 0
+
+    // ── Zoom-OUT cross-dissolve (SOURCE grid fades out + TARGET grid fades in; autonomous time clock) ────
+    /// The detent currently shown (the SOURCE topology). Advances one step denser each time a zoom-out
+    /// cross-dissolve to the next detent completes (multi-detent zoom-out chains). Reset on commit.
+    private var displayedLevel = 0
+    /// When the current SOURCE→TARGET cross-dissolve began (nil = no transition running). Progress is
+    /// time-based off this, so it completes on its own even if the fingers stop.
+    private var pinchOutStart: CFTimeInterval?
+    /// Duration of the current cross-dissolve step (seconds), chosen from the pinch velocity at start.
+    private var pinchOutDuration: CFTimeInterval = PinchOutTiming.slowDuration
+    /// Smoothed pinch velocity (detent-levels/sec) pushed in by the host; picks the cross-dissolve duration.
+    private var currentPinchVelocity: CGFloat = 0
+    /// The cross-dissolve progress rendered last frame (0→1) — read by `snapLevel`/diagnostics.
+    private var lastPinchOutProgress: CGFloat = 0
+
+    /// Host pushes the live smoothed pinch velocity so the autonomous cross-dissolve can pick its duration.
+    func setPinchVelocity(_ v: CGFloat) { currentPinchVelocity = v }
+
+    /// One in-flight zoom gesture. Scroll is frozen at `scrollOriginY`; the anchor item is held under
+    /// `anchorScreen` (viewport coords) while the two detent surfaces scale + crossfade around it.
+    struct ZoomSession: Equatable {
+        var baseLevel: Int
+        var levelPosition: CGFloat
+        var anchorScreen: CGPoint
+        var anchorContentBase: CGPoint
+        var anchorFlatIndex: Int?
+        /// The cursor's UNIT position within the anchor item's cell (0…1). Keeping the same relative spot of
+        /// the same photo under the cursor in every layout is what makes the anchor feel rock-solid (and
+        /// avoids a pop at progress 0, where source == the settled grid).
+        var anchorRelInCell: CGPoint
+        var anchorYFraction: CGFloat
+        var scrollOriginY: CGFloat
+    }
+
+    /// Build (uncached) the detent layout for an arbitrary level.
+    func detentLayout(level lv: Int, width: CGFloat) -> GridDetentLayout {
+        GridDetentLayout(detent: detentModel.detent(lv), width: width,
+                         sectionCounts: dataSource.sectionCounts, sectionAspects: sectionAspects)
+    }
+
+    /// Memoized detent layout by level (cleared on width / aspect / dataset change). Used during the
+    /// transition so a justified surface's O(N) composition is built once per gesture, never per frame.
+    func detentLayoutMemo(level lv: Int, width: CGFloat) -> GridDetentLayout {
+        if memoWidth != width || memoVersion != aspectVersion { memoLayouts.removeAll(keepingCapacity: true); memoWidth = width; memoVersion = aspectVersion }
+        if let l = memoLayouts[lv] { return l }
+        let l = detentLayout(level: lv, width: width)
+        memoLayouts[lv] = l
+        return l
+    }
+
+    /// The cached detent layout for the committed level/width/aspect-version (rebuilt only on change).
+    func currentDetentLayout(width: CGFloat) -> GridDetentLayout {
+        if let c = cachedDetent, c.level == level, c.width == width, c.version == aspectVersion { return c.layout }
+        let l = detentLayout(level: level, width: width)
+        cachedDetent = (level, width, aspectVersion, l)
+        return l
+    }
+
+    /// Push per-section aspect ratios (from the AspectRegistry). Recomposes the justified levels.
+    func setSectionAspects(_ aspects: [[CGFloat]]) {
+        guard usesDetentZoom, aspects != sectionAspects else { return }
+        sectionAspects = aspects
+        aspectVersion &+= 1
+        cachedDetent = nil
+        onContentSizeChange?(contentSize())
+        requestRedraw()
+    }
+
+    /// Pushed (throttled) so the SwiftUI HUD can mirror live stats.
+    var onHUD: ((MetalGridHUD) -> Void)?
+    /// Called when the content size changes (level / width) so the host can resize the document view.
+    var onContentSizeChange: ((CGSize) -> Void)?
+
+    // Diagnostics state
+    private var frameTimestamps: [CFTimeInterval] = []
+    private var lastOriginY: CGFloat = 0
+    private var lastFrameTime: CFTimeInterval = 0
+    private var velocity: CGFloat = 0
+    private var lastHUDPush: CFTimeInterval = 0
+    private var lastHUDPushDetent: CFTimeInterval = 0
+    private var lastLog: CFTimeInterval = 0
+    private var totalUploads = 0
+
+    /// True when some VISIBLE cell still lacks a real texture — the host keeps ticking redraws while this
+    /// holds (so placeholders swap to thumbnails without needing a scroll), and goes idle once false.
+    private(set) var hasPendingVisibleThumbnails = false
+
+    init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default) {
+        guard let renderer = MetalGridRenderer(device: device),
+              let cache = MetalGridTextureCache(device: device, budget: budget) else { return nil }
+        self.renderer = renderer
+        self.cache = cache
+        self.dataSource = dataSource
+        self.budget = budget
+        super.init()
+        rebuildIndex()
+    }
+
+    func setDataSource(_ newSource: MetalGridDataSource) {
+        dataSource = newSource
+        rebuildIndex()
+        onContentSizeChange?(contentSize())
+        requestRedraw()
+    }
+
+    var totalItems: Int { dataSource.flatUIDs.count }
+    var orderedUIDs: [PhotoUID] { dataSource.flatUIDs }
+
+    // MARK: - Production decorations + selection state (lab leaves `decorationsEnabled` false)
+
+    /// When true, selection outlines + favorite/check/video badges are drawn for visible cells.
+    var decorationsEnabled = false
+    private(set) var selectedUIDs: Set<PhotoUID> = []
+    private(set) var favoriteUIDs: Set<PhotoUID> = []
+    private(set) var selectionMode = false
+    private var indexByUID: [PhotoUID: Int] = [:]
+
+    func setSelection(_ uids: Set<PhotoUID>) { selectedUIDs = uids; requestRedraw() }
+    func setFavorites(_ uids: Set<PhotoUID>) { favoriteUIDs = uids; requestRedraw() }
+    func setSelectionMode(_ on: Bool) { selectionMode = on; requestRedraw() }
+    func requestRedraw() { metalView?.needsDisplay = true }
+
+    private func rebuildIndex() {
+        var map: [PhotoUID: Int] = [:]
+        map.reserveCapacity(dataSource.flatUIDs.count)
+        for (i, uid) in dataSource.flatUIDs.enumerated() { map[uid] = i }
+        indexByUID = map
+        cachedDetent = nil
+        memoLayouts.removeAll(keepingCapacity: true)
+        memoVersion = -1
+    }
+
+    func flatIndex(forUID uid: PhotoUID) -> Int? { indexByUID[uid] }
+    func uid(atFlatIndex index: Int) -> PhotoUID? {
+        let uids = dataSource.flatUIDs
+        return (index >= 0 && index < uids.count) ? uids[index] : nil
+    }
+
+    /// The photo cell + its flat index under a CONTENT-space point (for click/selection).
+    func hitTestCell(contentPoint: CGPoint) -> (flatIndex: Int, uid: PhotoUID)? {
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 0
+        guard width > 1 else { return nil }
+        let flat: Int?
+        if usesDetentZoom { flat = currentDetentLayout(width: width).hitTest(contentPoint)?.flatIndex }
+        else { flat = currentLayout(width: width).hitTest(contentPoint)?.flatIndex }
+        guard let flat, let uid = uid(atFlatIndex: flat) else { return nil }
+        return (flat, uid)
+    }
+
+    /// A photo's cell rect in CONTENT coordinates at the current level/width (nil if unknown).
+    func cellContentRect(forUID uid: PhotoUID) -> CGRect? {
+        guard let index = indexByUID[uid] else { return nil }
+        return cellContentRect(forFlatIndex: index)
+    }
+
+    func cellContentRect(forFlatIndex index: Int) -> CGRect? {
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 0
+        guard width > 1 else { return nil }
+        if usesDetentZoom { return currentDetentLayout(width: width).frame(flatIndex: index) }
+        return currentLayout(width: width).frame(flatIndex: index)
+    }
+
+    /// Whether the current level shows month/year labels (the two most zoomed-out levels).
+    var showsMonthLabels: Bool {
+        if usesDetentZoom { return detentModel.detent(level).monthLabels }
+        return JustifiedCollectionLayout.levels[min(max(level, 0), JustifiedCollectionLayout.levels.count - 1)].monthLabels
+    }
+
+    var scrollOriginY: CGFloat { clipView?.bounds.origin.y ?? 0 }
+    var viewportSize: CGSize { metalView?.bounds.size ?? clipView?.bounds.size ?? .zero }
+
+    /// Visible cells (flat index + content rect) for the accessibility provider / header positioning.
+    func visibleCells() -> [(flatIndex: Int, rect: CGRect)] {
+        guard let view = metalView, let clip = clipView, view.bounds.width > 1 else { return [] }
+        let visible = CGRect(origin: clip.bounds.origin, size: view.bounds.size)
+        if usesDetentZoom {
+            return currentDetentLayout(width: view.bounds.width).visibleCells(in: visible).map { ($0.flatIndex, $0.rect) }
+        }
+        return currentLayout(width: view.bounds.width).visibleCells(in: visible).map { ($0.flatIndex, $0.rect) }
+    }
+
+    /// The first visible cell + how far its top sits below the viewport top — captured before a level
+    /// change so the same photo can be re-pinned afterward (anchor preservation).
+    func anchorAtViewportTop() -> (uid: PhotoUID, offset: CGFloat)? {
+        guard let clip = clipView, let view = metalView else { return nil }
+        let origin = clip.bounds.origin
+        let visible = CGRect(origin: origin, size: view.bounds.size)
+        let cells: [(flatIndex: Int, minY: CGFloat)]
+        if usesDetentZoom {
+            cells = currentDetentLayout(width: view.bounds.width).visibleCells(in: visible).map { ($0.flatIndex, $0.rect.minY) }
+        } else {
+            cells = currentLayout(width: view.bounds.width).visibleCells(in: visible).map { ($0.flatIndex, $0.rect.minY) }
+        }
+        guard let top = cells.min(by: { $0.minY < $1.minY }), let uid = uid(atFlatIndex: top.flatIndex) else { return nil }
+        return (uid, top.minY - origin.y)
+    }
+
+    /// Layout at the current width/level. Width comes from the metal view (== document/clip width).
+    func currentLayout(width: CGFloat) -> MetalGridLayout {
+        MetalGridLayout.forLevel(level, sectionCounts: dataSource.sectionCounts, width: width)
+    }
+
+    func contentSize() -> CGSize {
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 0
+        guard width > 1 else { return .zero }
+        if usesDetentZoom { return currentDetentLayout(width: width).contentSize }
+        return currentLayout(width: width).contentSize
+    }
+
+    /// Debug hit test: a viewport point → the photo UID under it (or nil for a gap).
+    func hitTest(viewportPoint: CGPoint) -> PhotoUID? {
+        guard let clip = clipView else { return nil }
+        let content = MetalGridGeometry.contentPoint(viewportPoint: viewportPoint, visibleOrigin: clip.bounds.origin)
+        return hitTest(contentPoint: content)
+    }
+
+    /// Debug hit test from a CONTENT-space point (e.g. a mouse location in the document spacer).
+    func hitTest(contentPoint: CGPoint) -> PhotoUID? {
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 0
+        guard width > 1 else { return nil }
+        let flat: Int?
+        if usesDetentZoom { flat = currentDetentLayout(width: width).hitTest(contentPoint)?.flatIndex }
+        else { flat = currentLayout(width: width).hitTest(contentPoint)?.flatIndex }
+        guard let flat, flat < dataSource.flatUIDs.count else { return nil }
+        return dataSource.flatUIDs[flat]
+    }
+
+    // MARK: - MTKViewDelegate
+
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        onContentSizeChange?(contentSize())
+    }
+
+    func draw(in view: MTKView) {
+        guard let clip = clipView else { return }
+        let viewportSize = view.bounds.size
+        guard viewportSize.width > 1, viewportSize.height > 1 else { return }
+        let now = CACurrentMediaTime()
+
+        if usesDetentZoom {
+            drawDetent(in: view, clip: clip, viewportSize: viewportSize, now: now)
+            return
+        }
+
+        // ---- Layout pass ----
+        let layoutStart = CFAbsoluteTimeGetCurrent()
+        let visibleOrigin = clip.bounds.origin
+        let visibleRect = CGRect(origin: visibleOrigin, size: viewportSize)
+        let layout = currentLayout(width: viewportSize.width)
+        let overscan = budget.overscanFraction * viewportSize.height
+        let overscanRect = MetalGridGeometry.overscanRect(visibleRect: visibleRect, overscan: overscan, contentHeight: layout.contentHeight)
+        let cells = layout.visibleCells(in: overscanRect)
+        let cpuLayoutMs = (CFAbsoluteTimeGetCurrent() - layoutStart) * 1000
+
+        // Split into visible (pinned) and overscan, preserving priority order (visible first).
+        var visibleUIDs: [PhotoUID] = []
+        var overscanUIDs: [PhotoUID] = []
+        let flatUIDs = dataSource.flatUIDs
+        for c in cells where c.flatIndex < flatUIDs.count {
+            if c.rect.intersects(visibleRect) { visibleUIDs.append(flatUIDs[c.flatIndex]) }
+            else { overscanUIDs.append(flatUIDs[c.flatIndex]) }
+        }
+        cache.beginFrame(pinned: Set(visibleUIDs))
+        let priorityOrder = visibleUIDs + overscanUIDs
+
+        // ---- Upload pass (bounded, visible-first) ----
+        var wanted: [PhotoUID] = []
+        for uid in priorityOrder where !cache.isResident(uid) && dataSource.hasImage(for: uid) { wanted.append(uid) }
+        cache.uploadVisible(wanted: wanted) { [dataSource] uid in dataSource.image(for: uid) }
+        totalUploads += cache.uploadsThisFrame
+
+        // ---- Warm pass (still-missing → prime RAM off-main) ----
+        var warm: [PhotoUID] = []
+        for uid in priorityOrder where !cache.isResident(uid) && !cache.isInFlight(uid) && !dataSource.hasImage(for: uid) { warm.append(uid) }
+        if !warm.isEmpty { dataSource.warm(warm) }
+
+        // ---- Instance build pass ----
+        let instanceStart = CFAbsoluteTimeGetCurrent()
+        var backgrounds: [MetalGridQuad] = []
+        var images: [MetalGridQuad] = []
+        var imageTextures: [MTLTexture] = []
+        // Decoration quads (production only — all empty in the lab, where `decorationsEnabled` is false).
+        var outlineQuads: [MetalGridQuad] = []
+        var favoriteQuads: [MetalGridQuad] = []
+        var checkFilledQuads: [MetalGridQuad] = []
+        var checkEmptyQuads: [MetalGridQuad] = []
+        var videoQuads: [MetalGridQuad] = []
+        backgrounds.reserveCapacity(cells.count)
+        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
+        let accent = Self.colorVector(.controlAccentColor)
+        var realCount = 0
+        for c in cells where c.flatIndex < flatUIDs.count {
+            let uid = flatUIDs[c.flatIndex]
+            let cellViewport = MetalGridGeometry.viewportRect(contentRect: c.rect, visibleOrigin: visibleOrigin)
+            backgrounds.append(MetalGridQuad(rect: cellViewport, radius: cardRadius))
+            var displayedRect = cellViewport
+            if cache.isResident(uid) {
+                cache.noteUsed(uid)
+                let texture = cache.texture(for: uid)
+                let geo = imageGeometry(cellViewport: cellViewport, texture: texture, cropMode: layout.cropMode)
+                displayedRect = geo.rect
+                images.append(MetalGridQuad(rect: geo.rect, uvMin: geo.uvMin, uvMax: geo.uvMax, radius: cardRadius))
+                imageTextures.append(texture)
+                realCount += 1
+            }
+            if decorationsEnabled {
+                appendDecorations(uid: uid, cell: cellViewport, displayed: displayedRect, cardRadius: cardRadius, accent: accent,
+                                  outline: &outlineQuads, favorite: &favoriteQuads,
+                                  checkFilled: &checkFilledQuads, checkEmpty: &checkEmptyQuads, video: &videoQuads)
+            }
+        }
+        let cpuInstanceMs = (CFAbsoluteTimeGetCurrent() - instanceStart) * 1000
+
+        cache.evictToBudget()
+
+        // ---- Draw (back → front: cards, thumbnails, then decorations) ----
+        var groups: [MetalGridRenderGroup] = [
+            MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: backgrounds),
+            MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
+        ]
+        if !outlineQuads.isEmpty {
+            groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: outlineQuads))
+        }
+        if !videoQuads.isEmpty, let t = cache.glyphTexture(symbol: "video.fill", color: .white) {
+            groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: videoQuads))
+        }
+        if !favoriteQuads.isEmpty, let t = cache.glyphTexture(symbol: "heart.fill", color: .white) {
+            groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: favoriteQuads))
+        }
+        if !checkEmptyQuads.isEmpty, let t = cache.glyphTexture(symbol: "circle", color: .white) {
+            groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkEmptyQuads))
+        }
+        if !checkFilledQuads.isEmpty, let t = cache.glyphTexture(symbol: "checkmark.circle.fill", color: .controlAccentColor) {
+            groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkFilledQuads))
+        }
+        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
+
+        // Still-streaming if any VISIBLE cell lacks a real texture (drives the host's redraw ticker).
+        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
+
+        // ---- Diagnostics ----
+        updateMotion(originY: visibleOrigin.y, now: now)
+        let placeholderCount = cells.count - realCount
+        let overscanCount = max(0, cells.count - visibleUIDs.count)
+        var stats = MetalGridStats()
+        stats.visibleItems = visibleUIDs.count
+        stats.overscanItems = overscanCount
+        stats.realTextureItems = realCount
+        stats.placeholderItems = placeholderCount
+        stats.textureUploads = cache.uploadsThisFrame
+        stats.textureUploadBytes = cache.uploadBytesThisFrame
+        stats.cacheHits = realCount
+        stats.cacheMisses = placeholderCount
+        stats.evictions = cache.evictionsThisFrame
+        stats.drawCalls = renderer.lastDrawCalls
+        stats.instanceCount = renderer.lastInstanceCount
+        stats.cpuLayoutMs = cpuLayoutMs
+        stats.cpuInstanceMs = cpuInstanceMs
+        stats.textureUploadMs = cache.uploadMsThisFrame
+        stats.gpuDrawMs = renderer.lastDrawMs
+        stats.fpsEstimate = fpsEstimate()
+        stats.memoryEstimateBytes = cache.memoryEstimateBytes
+
+        var scroll = MetalGridScrollStats()
+        scroll.visibleRect = visibleRect
+        scroll.contentSize = layout.contentSize
+        scroll.scrollVelocity = velocity
+        scroll.overscanAhead = overscan
+        scroll.overscanBehind = overscan
+
+        publishDiagnostics(stats: stats, scroll: scroll, cache: cache.cacheStats, now: now)
+    }
+
+    // MARK: - Image quad geometry (crop / aspect)
+
+    /// The displayed-image rect (viewport coords) + the UV window for a thumbnail in a cell.
+    private func imageGeometry(cellViewport: CGRect, texture: MTLTexture, cropMode: GridCropMode) -> (rect: CGRect, uvMin: SIMD2<Float>, uvMax: SIMD2<Float>) {
+        let texW = CGFloat(max(texture.width, 1)), texH = CGFloat(max(texture.height, 1))
+        switch cropMode {
+        case .squareFill:
+            // Center-crop the texture to a square that fills the whole (square) cell.
+            var insetX: Float = 0, insetY: Float = 0
+            if texW > texH { insetX = Float((1 - texH / texW) / 2) } else if texH > texW { insetY = Float((1 - texW / texH) / 2) }
+            return (cellViewport, SIMD2(insetX, insetY), SIMD2(1 - insetX, 1 - insetY))
+        case .aspectFit:
+            // Letterbox the whole image inside the cell (bars are the placeholder card behind it).
+            let ar = texW / texH
+            var w = cellViewport.width, h = cellViewport.height
+            if ar >= 1 { h = w / ar } else { w = h * ar }
+            let rect = CGRect(x: cellViewport.midX - w / 2, y: cellViewport.midY - h / 2, width: w, height: h)
+            return (rect, SIMD2(0, 0), SIMD2(1, 1))
+        }
+    }
+
+    // MARK: - Decorations (selection outline + badges, production only)
+
+    private func appendDecorations(
+        uid: PhotoUID, cell: CGRect, displayed: CGRect, cardRadius: Float, accent: SIMD4<Float>,
+        outline: inout [MetalGridQuad], favorite: inout [MetalGridQuad],
+        checkFilled: inout [MetalGridQuad], checkEmpty: inout [MetalGridQuad], video: inout [MetalGridQuad]
+    ) {
+        let side = cell.height
+        let badge = min(22, max(11, side * 0.3))
+        let pad = max(3, side * 0.06)
+        // Blue selection outline hugging the displayed image (border mode → no layout impact).
+        if selectedUIDs.contains(uid) {
+            let radius = min(cardRadius, Float(min(displayed.width, displayed.height) * 0.5))
+            outline.append(MetalGridQuad(rect: displayed, radius: radius, color: accent, mode: .border, borderWidth: 3.5))
+        }
+        // Favorite heart, bottom-left.
+        if favoriteUIDs.contains(uid) {
+            favorite.append(MetalGridQuad(rect: CGRect(x: cell.minX + pad, y: cell.maxY - badge - pad, width: badge, height: badge), radius: 0))
+        }
+        let brCorner = CGRect(x: cell.maxX - badge - pad, y: cell.maxY - badge - pad, width: badge, height: badge)
+        if selectionMode {
+            // Checkmark badge, bottom-right (filled+accent when selected, empty circle otherwise).
+            if selectedUIDs.contains(uid) { checkFilled.append(MetalGridQuad(rect: brCorner, radius: 0)) }
+            else { checkEmpty.append(MetalGridQuad(rect: brCorner, radius: 0)) }
+        } else if dataSource.isVideo(uid) {
+            // Video marker, bottom-right (no duration text in this pass — see report).
+            video.append(MetalGridQuad(rect: brCorner, radius: 0))
+        }
+    }
+
+    private static func colorVector(_ color: NSColor) -> SIMD4<Float> {
+        let c = color.usingColorSpace(.sRGB) ?? color
+        return SIMD4(Float(c.redComponent), Float(c.greenComponent), Float(c.blueComponent), Float(c.alphaComponent))
+    }
+
+    // MARK: - Motion / fps / logging
+
+    private func updateMotion(originY: CGFloat, now: CFTimeInterval) {
+        if lastFrameTime > 0 {
+            let dt = now - lastFrameTime
+            if dt > 0 { velocity = (originY - lastOriginY) / CGFloat(dt) }
+            // On-demand rendering is bursty (active during scroll/streaming, idle otherwise). After an
+            // idle gap, restart the fps window so the estimate reflects the CURRENT active cadence rather
+            // than being dragged down by the idle period.
+            if dt > 0.25 { frameTimestamps.removeAll(keepingCapacity: true); velocity = 0 }
+        }
+        lastOriginY = originY
+        lastFrameTime = now
+        frameTimestamps.append(now)
+        if frameTimestamps.count > 60 { frameTimestamps.removeFirst(frameTimestamps.count - 60) }
+    }
+
+    private func fpsEstimate() -> Double {
+        guard frameTimestamps.count >= 2, let first = frameTimestamps.first, let last = frameTimestamps.last, last > first else { return 0 }
+        return Double(frameTimestamps.count - 1) / (last - first)
+    }
+
+    private func publishDiagnostics(stats: MetalGridStats, scroll: MetalGridScrollStats, cache cacheStats: MetalGridCacheStats, now: CFTimeInterval) {
+        if now - lastHUDPush > 0.1 {   // ~10 Hz HUD
+            lastHUDPush = now
+            var hud = MetalGridHUD()
+            hud.stats = stats
+            hud.scroll = scroll
+            hud.cache = cacheStats
+            hud.level = level
+            hud.totalItems = totalItems
+            hud.dataSource = dataSource.label
+            onHUD?(hud)
+        }
+        if now - lastLog > 1.0 {       // ~1 Hz log
+            lastLog = now
+            PhotoDiagnostics.shared.emit("MetalGrid", ["stats": stats.summary])
+            PhotoDiagnostics.shared.emit("MetalGridScroll", ["scroll": scroll.summary])
+            PhotoDiagnostics.shared.emit("MetalGridCache", ["cache": cacheStats.summary])
+        }
+    }
+}
+
+// MARK: - Apple-matched detent zoom: render + transition compositing
+//
+// Single source of truth for the new grid look (justified aspect rows / square overview) and the
+// two-surface pinch transition (see GridZoom/*.swift + docs/grid-zoom-apple-model.md). All cells are
+// cover-filled — NO letterbox bars, ever. When a `zoomSession` is live the SOURCE and TARGET detent
+// layouts are both anchored at one screen point, geometrically scaled to a shared apparent size, and the
+// target is crossfaded over the source per the transition family (focus-protected near vs. global whoosh).
+extension MetalGridCoordinator {
+
+    func drawDetent(in view: MTKView, clip: NSClipView, viewportSize: CGSize, now: CFTimeInterval) {
+        if zoomSession != nil {
+            drawZoomTransition(in: view, viewportSize: viewportSize, now: now)
+        } else {
+            drawSettledDetent(in: view, clip: clip, viewportSize: viewportSize, now: now)
+        }
+    }
+
+    // MARK: Settled (no active gesture) — the normal justified/square grid
+
+    private func drawSettledDetent(in view: MTKView, clip: NSClipView, viewportSize: CGSize, now: CFTimeInterval) {
+        let visibleOrigin = clip.bounds.origin
+        let visibleRect = CGRect(origin: visibleOrigin, size: viewportSize)
+        let layout = currentDetentLayout(width: viewportSize.width)
+        let overscan = budget.overscanFraction * viewportSize.height
+        let overscanRect = MetalGridGeometry.overscanRect(visibleRect: visibleRect, overscan: overscan, contentHeight: layout.contentSize.height)
+        let cells = layout.visibleCells(in: overscanRect)
+
+        var visibleUIDs: [PhotoUID] = []
+        var overscanUIDs: [PhotoUID] = []
+        let flatUIDs = dataSource.flatUIDs
+        for c in cells where c.flatIndex < flatUIDs.count {
+            if c.rect.intersects(visibleRect) { visibleUIDs.append(flatUIDs[c.flatIndex]) }
+            else { overscanUIDs.append(flatUIDs[c.flatIndex]) }
+        }
+        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
+
+        let detent = detentModel.detent(level)
+        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
+        let accent = Self.colorVector(.controlAccentColor)
+        var backgrounds: [MetalGridQuad] = []
+        var images: [MetalGridQuad] = []
+        var imageTextures: [MTLTexture] = []
+        var outlineQuads: [MetalGridQuad] = []
+        var favoriteQuads: [MetalGridQuad] = []
+        var checkFilledQuads: [MetalGridQuad] = []
+        var checkEmptyQuads: [MetalGridQuad] = []
+        var videoQuads: [MetalGridQuad] = []
+        backgrounds.reserveCapacity(cells.count)
+        var realCount = 0
+        for c in cells where c.flatIndex < flatUIDs.count {
+            let uid = flatUIDs[c.flatIndex]
+            let cellViewport = MetalGridGeometry.viewportRect(contentRect: c.rect, visibleOrigin: visibleOrigin)
+            let r = cellRadius(cardRadius, cell: cellViewport)
+            backgrounds.append(MetalGridQuad(rect: cellViewport, radius: r))
+            if cache.isResident(uid) {
+                cache.noteUsed(uid)
+                let texture = cache.texture(for: uid)
+                let geo = coverFillGeometry(cell: cellViewport, texture: texture, family: detent.family)
+                images.append(MetalGridQuad(rect: geo.rect, uvMin: geo.uvMin, uvMax: geo.uvMax, radius: r))
+                imageTextures.append(texture)
+                realCount += 1
+            }
+            if decorationsEnabled {
+                appendDecorations(uid: uid, cell: cellViewport, displayed: cellViewport, cardRadius: r, accent: accent,
+                                  outline: &outlineQuads, favorite: &favoriteQuads,
+                                  checkFilled: &checkFilledQuads, checkEmpty: &checkEmptyQuads, video: &videoQuads)
+            }
+        }
+        cache.evictToBudget()
+
+        var groups: [MetalGridRenderGroup] = [
+            MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: backgrounds),
+            MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
+        ]
+        if !outlineQuads.isEmpty { groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: outlineQuads)) }
+        if !videoQuads.isEmpty, let t = cache.glyphTexture(symbol: "video.fill", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: videoQuads)) }
+        if !favoriteQuads.isEmpty, let t = cache.glyphTexture(symbol: "heart.fill", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: favoriteQuads)) }
+        if !checkEmptyQuads.isEmpty, let t = cache.glyphTexture(symbol: "circle", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkEmptyQuads)) }
+        if !checkFilledQuads.isEmpty, let t = cache.glyphTexture(symbol: "checkmark.circle.fill", color: .controlAccentColor) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkFilledQuads)) }
+        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
+
+        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
+        publishLightDiagnostics(visibleCount: visibleUIDs.count, realCount: realCount, cellCount: cells.count,
+                                visibleRect: visibleRect, contentSize: layout.contentSize, now: now)
+    }
+
+    // MARK: Active transition — SINGLE-GRID geometric scale (the "rubber-band" applied to the whole zoom)
+    //
+    // The user loved the rubber-band: ONE grid, scaled around the cursor, no second overlaid grid. So that is
+    // now the WHOLE pinch. During the drag we render exactly one detent (the gesture's base), scaled to the
+    // apparent cell size around the cursor — no crossfade (→ no ghost/double-exposure), the same detent's
+    // textures stay loaded (→ no blackouts), no per-frame re-justify (→ nothing jumps). The width over/
+    // underflows as it scales (clean, like zooming an image). The REFLOW to the new column count happens
+    // ONCE, on release: a brief cross-dissolve from the scaled base grid to the snapped detent (whose
+    // textures we pre-warm during the drag) — Apple's "smooth zoom, then re-align".
+
+    /// Apparent cell size for a continuous level position, including the soft rubber-band past the ends.
+    /// Within the ladder it interpolates the two bracketing detents; past detent 0 (over-zoom IN) it grows
+    /// with diminishing return (the gummiband that snaps back on release); the densest end is clamped (no
+    /// over-shrink, so an over-zoom OUT never drops below fill).
+    private func apparentSize(at x: CGFloat) -> CGFloat {
+        let maxIndex = detentModel.count - 1
+        if x <= 0 { return detentModel.detent(0).size * (1 - x * 0.6) }
+        if x >= CGFloat(maxIndex) { return detentModel.detent(maxIndex).size }
+        let lo = Int(x)
+        return GridZoomEasing.lerp(detentModel.detent(lo).size, detentModel.detent(lo + 1).size, x - CGFloat(lo))
+    }
+
+    private func drawZoomTransition(in view: MTKView, viewportSize: CGSize, now: CFTimeInterval) {
+        guard let session = zoomSession else { return }
+        let x = session.levelPosition
+        let maxIndex = detentModel.count - 1
+        let dispLevel = detentModel.clampIndex(displayedLevel)
+
+        // ── ZOOM-OUT → autonomous SOURCE→TARGET cross-dissolve ──────────────────────────────────────────
+        // Pinch-out crosses into a wider/denser topology. We render the SOURCE grid (current detent, fading
+        // OUT) and the TARGET grid (next denser detent, fading IN on top) — both full-width, vertical-anchored
+        // at the cursor — driven by a per-cell ReplacementPlan with COMPLEMENTARY alpha. The progress is an
+        // AUTONOMOUS time clock (duration from pinch velocity), so it finishes on its own even if the fingers
+        // stop. Active both on the live drag and while the release-settle drives a denser target.
+        let settleTarget = settleTargetLevel
+        let settleDenser = isZoomSettling && (settleTarget ?? dispLevel) > dispLevel
+        let dragOut = !isZoomSettling && x > CGFloat(dispLevel) + 0.06 && dispLevel < maxIndex
+        if (dragOut || settleDenser), dispLevel < maxIndex {
+            let targetLevel = settleDenser ? detentModel.clampIndex(settleTarget ?? dispLevel + 1) : dispLevel + 1
+            let progress: CGFloat
+            if dragOut {
+                if pinchOutStart == nil { pinchOutStart = now; pinchOutDuration = PinchOutTiming.duration(velocity: currentPinchVelocity) }
+                progress = PinchOutTiming.progress(elapsed: now - (pinchOutStart ?? now), duration: pinchOutDuration)
+            } else {
+                progress = CGFloat(min(max(settleCrossfade, 0), 1))   // the settle ramps it the rest of the way
+            }
+            lastPinchOutProgress = progress
+            renderPinchOutCrossDissolve(in: view, viewportSize: viewportSize, session: session,
+                                        sourceLevel: dispLevel, targetLevel: targetLevel, progress: progress, now: now)
+            if dragOut {
+                if progress >= 1 { displayedLevel = targetLevel; pinchOutStart = nil }   // step done → advance, next re-arms
+                else { requestRedraw() }                                                 // keep the autonomous clock ticking
+            }
+            return
+        }
+        pinchOutStart = nil
+        lastPinchOutProgress = 0
+
+        // ── ZOOM-IN / at the displayed detent / RELEASE re-align to a BIGGER detent → geometric scale ─────
+        // Each thumbnail grows (pinch-in), gummiband past the largest detent via `apparentSize`. On a release
+        // that re-aligns to a bigger (less-dense) detent, that detent fades in on top (`settleCrossfade`).
+        let apparent = apparentSize(at: x)
+        let flatUIDs = dataSource.flatUIDs
+        let baseRadius = Float(GridVisualConstants.thumbnailCornerRadius)
+        var overlayLevel: Int?
+        var fade: Float = 0
+        if isZoomSettling, let target = settleTarget, target != dispLevel {   // here target < dispLevel (bigger)
+            overlayLevel = target
+            fade = Float(min(max(settleCrossfade, 0), 1))
+        }
+        let baseInfo = scaledGrid(level: dispLevel, apparent: apparent, viewportSize: viewportSize, session: session)
+        let overlayInfo = overlayLevel.map { scaledGrid(level: $0, apparent: apparent, viewportSize: viewportSize, session: session) }
+
+        var visibleUIDs: [PhotoUID] = []
+        for c in baseInfo.cells where c.flatIndex < flatUIDs.count { visibleUIDs.append(flatUIDs[c.flatIndex]) }
+        if let o = overlayInfo { for c in o.cells where c.flatIndex < flatUIDs.count { visibleUIDs.append(flatUIDs[c.flatIndex]) } }
+        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: [])
+
+        var groups: [MetalGridRenderGroup] = []
+        var bbg: [MetalGridQuad] = [], bimg: [MetalGridQuad] = [], btex: [MTLTexture] = []
+        buildSurfaceQuads(cells: baseInfo.cells, transform: baseInfo.transform, family: baseInfo.family, alpha: { _ in 1 },
+                          flatUIDs: flatUIDs, baseRadius: baseRadius, backgrounds: &bbg, images: &bimg, textures: &btex)
+        groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: bbg))
+        groups.append(MetalGridRenderGroup(source: .perQuadTexture(btex), quads: bimg))
+        if let o = overlayInfo {
+            var obg: [MetalGridQuad] = [], oimg: [MetalGridQuad] = [], otex: [MTLTexture] = []
+            buildSurfaceQuads(cells: o.cells, transform: o.transform, family: o.family, alpha: { _ in fade },
+                              flatUIDs: flatUIDs, baseRadius: baseRadius, backgrounds: &obg, images: &oimg, textures: &otex)
+            groups.append(MetalGridRenderGroup(source: .perQuadTexture(otex), quads: oimg))
+        }
+        cache.evictToBudget()
+        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
+        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
+        if now - lastLog > 0.25 {
+            lastLog = now
+            GridZoomDebug.transition(mode: overlayLevel != nil ? "reAlign" : "scale", progress: CGFloat(fade),
+                                     replacementCount: baseInfo.cells.count, focusProtected: false)
+        }
+    }
+
+    /// A detent's grid at NATURAL size, FULL-WIDTH (horizontal identity → never a black side), anchored only
+    /// VERTICALLY so the cursor's focus row stays put. The two surfaces of the cross-dissolve use this.
+    private func naturalGrid(level: Int, viewportSize: CGSize, session: ZoomSession)
+        -> (cells: [GridDetentCell], vOffset: CGFloat, family: GridLayoutFamily) {
+        let detent = detentModel.detent(level)
+        let layout = detentLayoutMemo(level: level, width: viewportSize.width)
+        let vOffset = anchorContent(in: layout, session: session).y - session.anchorScreen.y
+        let query = CGRect(x: 0, y: vOffset - detent.size, width: viewportSize.width, height: viewportSize.height + 2 * detent.size)
+        return (layout.visibleCells(in: query), vOffset, detent.family)
+    }
+
+    /// Render one SOURCE→TARGET pinch-out cross-dissolve frame: SOURCE fades out, TARGET fades in ON TOP
+    /// (so the new photo is never hidden behind the old), per the per-cell `PinchOutPlan` (complementary
+    /// alpha, focus-row protected). Draw order: source bg, source img, [target bg for newly-exposed cells],
+    /// target img.
+    private func renderPinchOutCrossDissolve(in view: MTKView, viewportSize: CGSize, session: ZoomSession,
+                                             sourceLevel: Int, targetLevel: Int, progress: CGFloat, now: CFTimeInterval) {
+        let flatUIDs = dataSource.flatUIDs
+        let baseRadius = Float(GridVisualConstants.thumbnailCornerRadius)
+        let src = naturalGrid(level: sourceLevel, viewportSize: viewportSize, session: session)
+        let tgt = naturalGrid(level: targetLevel, viewportSize: viewportSize, session: session)
+
+        func screenRect(_ r: CGRect, _ vOffset: CGFloat) -> CGRect {
+            CGRect(x: r.minX, y: r.minY - vOffset, width: r.width, height: r.height)
+        }
+        let srcCells = src.cells.map { PinchOutCell(flatIndex: $0.flatIndex, rect: screenRect($0.rect, src.vOffset)) }
+        let tgtCells = tgt.cells.map { PinchOutCell(flatIndex: $0.flatIndex, rect: screenRect($0.rect, tgt.vOffset)) }
+        let focusRadius = detentModel.detent(targetLevel).size * 1.5
+        let plan = PinchOutPlan(source: srcCells, target: tgtCells, anchorFlatIndex: session.anchorFlatIndex,
+                                focusScreenY: session.anchorScreen.y, focusRadius: focusRadius)
+
+        var visibleUIDs: [PhotoUID] = []
+        for c in srcCells where c.flatIndex < flatUIDs.count { visibleUIDs.append(flatUIDs[c.flatIndex]) }
+        for c in tgtCells where c.flatIndex < flatUIDs.count { visibleUIDs.append(flatUIDs[c.flatIndex]) }
+        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: [])
+
+        func emit(rect: CGRect, alpha: Float, uid: PhotoUID, family: GridLayoutFamily, background: Bool,
+                  bg: inout [MetalGridQuad], img: inout [MetalGridQuad], tex: inout [MTLTexture]) {
+            guard alpha > 0.004 else { return }
+            let r = cellRadius(baseRadius, cell: rect)
+            if background { bg.append(MetalGridQuad(rect: rect, radius: r, alpha: alpha)) }
+            if cache.isResident(uid) {
+                cache.noteUsed(uid)
+                let texture = cache.texture(for: uid)
+                let geo = coverFillGeometry(cell: rect, texture: texture, family: family)
+                img.append(MetalGridQuad(rect: geo.rect, uvMin: geo.uvMin, uvMax: geo.uvMax, radius: r, alpha: alpha))
+                tex.append(texture)
+            }
+        }
+
+        var sbg: [MetalGridQuad] = [], simg: [MetalGridQuad] = [], stex: [MTLTexture] = []
+        for item in plan.source where item.flatIndex < flatUIDs.count {
+            emit(rect: item.rect, alpha: Float(plan.sourceAlpha(item, progress: progress)), uid: flatUIDs[item.flatIndex],
+                 family: src.family, background: true, bg: &sbg, img: &simg, tex: &stex)
+        }
+        var tbg: [MetalGridQuad] = [], timg: [MetalGridQuad] = [], ttex: [MTLTexture] = []
+        for item in plan.target where item.flatIndex < flatUIDs.count {
+            // Replacement cells draw photos only (don't darken the opaque source they cover); newly-exposed
+            // (targetOnly) cells carry a placeholder backdrop so they're never black while the photo loads.
+            emit(rect: item.rect, alpha: Float(plan.targetAlpha(item, progress: progress)), uid: flatUIDs[item.flatIndex],
+                 family: tgt.family, background: item.kind == .targetOnly, bg: &tbg, img: &timg, tex: &ttex)
+        }
+
+        var groups: [MetalGridRenderGroup] = []
+        groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: sbg))   // SOURCE bg
+        groups.append(MetalGridRenderGroup(source: .perQuadTexture(stex), quads: simg))                     // SOURCE img
+        if !tbg.isEmpty { groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: tbg)) }
+        groups.append(MetalGridRenderGroup(source: .perQuadTexture(ttex), quads: timg))                     // TARGET img (top)
+
+        cache.evictToBudget()
+        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
+        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
+        if now - lastLog > 0.25 {
+            lastLog = now
+            GridZoomDebug.transition(mode: "pinchOut", progress: progress, replacementCount: plan.replacementCount, focusProtected: true)
+        }
+        GridZoomDebug.pinchOut(progress: progress, source: sourceLevel, target: targetLevel,
+                               replacements: plan.replacementCount, targetOnly: plan.targetOnlyCount, unchanged: plan.unchangedCount)
+    }
+
+    /// Visible cells + anchored transform for ONE detent scaled to `apparent` around the cursor.
+    private func scaledGrid(level: Int, apparent: CGFloat, viewportSize: CGSize, session: ZoomSession)
+        -> (cells: [GridDetentCell], transform: GridZoomSurfaceTransform, family: GridLayoutFamily) {
+        let detent = detentModel.detent(level)
+        let layout = detentLayoutMemo(level: level, width: viewportSize.width)
+        let scale = apparent / max(detent.size, 0.001)
+        let transform = GridZoomSurfaceTransform(anchorScreen: session.anchorScreen,
+                                                 anchorContent: anchorContent(in: layout, session: session), scale: scale)
+        let query = CGRect(origin: .zero, size: viewportSize).insetBy(dx: -apparent, dy: -apparent)
+        return (layout.visibleCells(in: transform.contentRect(forViewport: query)), transform, detent.family)
+    }
+
+    private func buildSurfaceQuads(
+        cells: [GridDetentCell], transform: GridZoomSurfaceTransform, family: GridLayoutFamily,
+        alpha: (CGRect) -> Float, flatUIDs: [PhotoUID], baseRadius: Float,
+        backgrounds: inout [MetalGridQuad], images: inout [MetalGridQuad], textures: inout [MTLTexture]
+    ) {
+        for c in cells where c.flatIndex < flatUIDs.count {
+            let screen = transform.screenRect(c.rect)
+            let a = alpha(screen)
+            guard a > 0.004 else { continue }
+            let r = cellRadius(baseRadius, cell: screen)
+            backgrounds.append(MetalGridQuad(rect: screen, radius: r, alpha: a))
+            let uid = flatUIDs[c.flatIndex]
+            if cache.isResident(uid) {
+                cache.noteUsed(uid)
+                let texture = cache.texture(for: uid)
+                let geo = coverFillGeometry(cell: screen, texture: texture, family: family)
+                images.append(MetalGridQuad(rect: geo.rect, uvMin: geo.uvMin, uvMax: geo.uvMax, radius: r, alpha: a))
+                textures.append(texture)
+            }
+        }
+    }
+
+    /// The anchor location in a layout's content space: the anchor item's cell center if present, else the
+    /// same vertical fraction of content (keeps the scroll position over a gap).
+    private func anchorContent(in layout: GridDetentLayout, session: ZoomSession) -> CGPoint {
+        if let item = session.anchorFlatIndex, let f = layout.frame(flatIndex: item) {
+            // The SAME relative spot of the SAME photo — keeps the cursor pinned exactly (no start pop).
+            return CGPoint(x: f.minX + session.anchorRelInCell.x * f.width,
+                           y: f.minY + session.anchorRelInCell.y * f.height)
+        }
+        // No item under the cursor (a gap) → keep the same x and the same vertical fraction of content.
+        return CGPoint(x: session.anchorContentBase.x, y: session.anchorYFraction * layout.contentSize.height)
+    }
+
+    // MARK: Cover-fill geometry (no letterbox bars)
+
+    /// Center-crop the texture to COVER the cell (any aspect). For justified cells (cell aspect ≈ photo
+    /// aspect) this is a near-zero crop; for square cells it crops to the square. Never letterboxes.
+    private func coverFillGeometry(cell: CGRect, texture: MTLTexture, family: GridLayoutFamily) -> (rect: CGRect, uvMin: SIMD2<Float>, uvMax: SIMD2<Float>) {
+        let texW = CGFloat(max(texture.width, 1)), texH = CGFloat(max(texture.height, 1))
+        let texAR = texW / texH
+        let cellAR = cell.width / max(cell.height, 1)
+        var insetX: Float = 0, insetY: Float = 0
+        if texAR > cellAR { insetX = Float((1 - cellAR / texAR) / 2) }
+        else { insetY = Float((1 - texAR / cellAR) / 2) }
+        return (cell, SIMD2(insetX, insetY), SIMD2(1 - insetX, 1 - insetY))
+    }
+
+    private func cellRadius(_ base: Float, cell: CGRect) -> Float {
+        min(base, Float(min(cell.width, cell.height) * 0.5))
+    }
+
+    // MARK: Texture streaming (shared by both detent paths)
+
+    private func streamTextures(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID]) {
+        cache.beginFrame(pinned: Set(visibleUIDs))
+        let priority = visibleUIDs + overscanUIDs
+        var wanted: [PhotoUID] = []
+        for uid in priority where !cache.isResident(uid) && dataSource.hasImage(for: uid) { wanted.append(uid) }
+        cache.uploadVisible(wanted: wanted) { [dataSource] uid in dataSource.image(for: uid) }
+        var warm: [PhotoUID] = []
+        for uid in priority where !cache.isResident(uid) && !cache.isInFlight(uid) && !dataSource.hasImage(for: uid) { warm.append(uid) }
+        if !warm.isEmpty { dataSource.warm(warm) }
+    }
+
+    private func publishLightDiagnostics(visibleCount: Int, realCount: Int, cellCount: Int, visibleRect: CGRect, contentSize: CGSize, now: CFTimeInterval) {
+        guard now - lastHUDPushDetent > 0.1 else { return }
+        lastHUDPushDetent = now
+        var stats = MetalGridStats()
+        stats.visibleItems = visibleCount
+        stats.realTextureItems = realCount
+        stats.placeholderItems = max(0, cellCount - realCount)
+        stats.drawCalls = renderer.lastDrawCalls
+        stats.instanceCount = renderer.lastInstanceCount
+        var hud = MetalGridHUD()
+        hud.stats = stats
+        hud.level = level
+        hud.totalItems = totalItems
+        hud.dataSource = dataSource.label
+        onHUD?(hud)
+    }
+
+    // MARK: - Zoom session API (driven by MetalGridScrollHost)
+
+    /// Begin a gesture anchored at a CONTENT point under the cursor (scroll frozen at the current origin).
+    func beginZoomTransition(anchorContentPoint: CGPoint) {
+        let originY = clipView?.bounds.origin.y ?? 0
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 1
+        let anchorScreen = CGPoint(x: anchorContentPoint.x, y: anchorContentPoint.y - originY)
+        let baseLayout = currentDetentLayout(width: width)
+        let item = baseLayout.hitTest(anchorContentPoint)?.flatIndex
+        let frac = anchorContentPoint.y / max(baseLayout.contentSize.height, 1)
+        // The cursor's unit position within the anchor cell — kept invariant across detents.
+        var rel = CGPoint(x: 0.5, y: 0.5)
+        if let item, let cell = baseLayout.frame(flatIndex: item), cell.width > 0, cell.height > 0 {
+            rel = CGPoint(x: (anchorContentPoint.x - cell.minX) / cell.width,
+                          y: (anchorContentPoint.y - cell.minY) / cell.height)
+        }
+        zoomSession = ZoomSession(
+            baseLevel: level, levelPosition: CGFloat(level),
+            anchorScreen: anchorScreen, anchorContentBase: anchorContentPoint,
+            anchorFlatIndex: item, anchorRelInCell: rel, anchorYFraction: frac, scrollOriginY: originY
+        )
+        displayedLevel = level            // SOURCE grid starts on the committed detent
+        pinchOutStart = nil
+        lastPinchOutProgress = 0
+        GridZoomDebug.anchor(uid: item.flatMap { uid(atFlatIndex: $0) }.map { "\($0.nodeID)" } ?? "—",
+                             screen: anchorScreen, status: item == nil ? "GAP" : "PASS")
+        // Pre-warm the DENSER neighbour's visible thumbnails so the zoom-out fill backdrop isn't a wall of
+        // grey placeholders the moment the user starts pinching out.
+        prewarmNeighbor(of: level, width: width)
+        requestRedraw()
+    }
+
+    /// Decode (off-main) the thumbnails the denser neighbour detent would reveal, so a zoom-out has them ready.
+    private func prewarmNeighbor(of baseLevel: Int, width: CGFloat) {
+        let denser = detentModel.clampIndex(baseLevel + 1)
+        guard denser != baseLevel, let view = metalView, let clip = clipView else { return }
+        let layout = detentLayout(level: denser, width: width)
+        let visible = CGRect(origin: clip.bounds.origin, size: view.bounds.size).insetBy(dx: 0, dy: -view.bounds.height * 0.5)
+        let uids = layout.visibleCells(in: visible).compactMap { uid(atFlatIndex: $0.flatIndex) }
+        let missing = uids.filter { !cache.isResident($0) && !dataSource.hasImage(for: $0) }
+        if !missing.isEmpty { dataSource.warm(missing) }
+    }
+
+    /// Update the continuous level position during the gesture (allows a little over-travel past the ends
+    /// for the rubber-band; the release snap clamps back to a real detent).
+    func updateZoomTransition(levelPosition: CGFloat) {
+        guard zoomSession != nil else { return }
+        zoomSession?.levelPosition = min(max(levelPosition, -0.5), CGFloat(detentModel.count - 1) + 0.5)
+        requestRedraw()
+    }
+
+    /// The detent the gesture should settle on (velocity in levels/sec; + = zooming out). Snaps RELATIVE to
+    /// the displayed detent: mid zoom-OUT cross-dissolve commits forward if it's past halfway (or a flick);
+    /// zoom-IN commits to the bigger detent past the size midpoint.
+    func snapLevel(velocity: CGFloat) -> Int {
+        guard let session = zoomSession else { return level }
+        let disp = detentModel.clampIndex(displayedLevel)
+        let flick = detentModel.tuning.flickVelocity
+        if pinchOutStart != nil, disp < detentModel.count - 1 {
+            // A cross-dissolve toward disp+1 is in flight: keep it if it's past halfway or the release flicks out.
+            return detentModel.clampIndex(disp + ((lastPinchOutProgress >= 0.5 || velocity > flick) ? 1 : 0))
+        }
+        let apparent = apparentSize(at: session.levelPosition)
+        let dispSize = detentModel.detent(disp).size
+        if apparent > dispSize + 0.5, disp > 0 {
+            // Zoom-IN toward the bigger (less-dense) detent: commit past the size midpoint (or a flick).
+            let bigger = disp - 1
+            let mid = (dispSize + detentModel.detent(bigger).size) / 2
+            return detentModel.clampIndex((apparent >= mid || velocity < -flick) ? bigger : disp)
+        }
+        return disp
+    }
+
+    var activeLevelPosition: CGFloat? { zoomSession?.levelPosition }
+    var activeAnchorFlatIndex: Int? { zoomSession?.anchorFlatIndex }
+    /// The cross-dissolve progress showing last frame — so the release-settle CONTINUES it (no reset/flicker).
+    var lastZoomFadeValue: Float { Float(lastPinchOutProgress) }
+    /// True while a live zoom-OUT cross-dissolve is mid-flight (the host lets it finish autonomously).
+    var isPinchOutActive: Bool { pinchOutStart != nil }
+
+    /// The scroll origin Y that keeps the anchor under its gesture screen point at `finalLevel`. Call BEFORE
+    /// `commitZoomTransition` (it reads the live session). nil if no session.
+    func scrollOriginAfterCommit(finalLevel: Int) -> CGFloat? {
+        guard let session = zoomSession else { return nil }
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 1
+        let layout = detentLayout(level: finalLevel, width: width)
+        let anchorContentY: CGFloat
+        if let item = session.anchorFlatIndex, let f = layout.frame(flatIndex: item) {
+            anchorContentY = f.minY + session.anchorRelInCell.y * f.height
+        } else {
+            anchorContentY = session.anchorYFraction * layout.contentSize.height
+        }
+        return anchorContentY - session.anchorScreen.y
+    }
+
+    /// Finish: commit `finalLevel` as the settled detent and clear the gesture (the host re-anchors scroll).
+    func commitZoomTransition(finalLevel: Int) {
+        let originMatch = zoomSession.map { abs($0.levelPosition - CGFloat(finalLevel)) < 0.001 } ?? false
+        GridZoomDebug.settle(velocity: 0, finalDetent: finalLevel, originMatch: originMatch)
+        zoomSession = nil
+        displayedLevel = detentModel.clampIndex(finalLevel)
+        pinchOutStart = nil
+        lastPinchOutProgress = 0
+        level = detentModel.clampIndex(finalLevel)   // didSet recomputes content size
+        requestRedraw()
+    }
+
+    func cancelZoomTransition() {
+        zoomSession = nil
+        pinchOutStart = nil
+        lastPinchOutProgress = 0
+        requestRedraw()
+    }
+}

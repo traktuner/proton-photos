@@ -16,6 +16,16 @@ final class PhotoGridItem: NSCollectionViewItem {
 
     private var cropMode: GridCropMode = .aspectFit
 
+    // Cached inputs so repeated badge/selection updates with unchanged state skip redundant work.
+    private struct BadgeLayoutKey: Equatable {
+        var imageRect: CGRect
+        var bounds: CGRect
+        var text: String
+    }
+    private var lastBadgeLayoutKey: BadgeLayoutKey?
+    private var lastCheckedState: (checked: Bool, mode: Bool)?
+    private var lastFavorite: Bool?
+
     override func loadView() {
         let container = RoundedCellView()           // rounded corners so each photo is a distinct cell
         container.thumbnailImage = GridThumbnailFallback.placeholderImage
@@ -65,15 +75,55 @@ final class PhotoGridItem: NSCollectionViewItem {
         self.view = container
     }
 
-    func setFavorite(_ isFavorite: Bool) { heartBadge.isHidden = !isFavorite }
+    /// The collection view sets this as native selection changes (click / ⌘ / ⇧ / rubber-band). We render
+    /// it as the blue rounded outline on the cell.
+    override var isSelected: Bool {
+        didSet { updateSelectionOutline() }
+    }
+
+    /// During a rubber-band (marquee) drag the collection view updates `highlightState` LIVE — items
+    /// entering the band get `.forSelection`, items leaving (that were selected) get `.forDeselection` —
+    /// but it does NOT commit `isSelected` until the mouse is released. Reflecting the highlight here is
+    /// what makes the blue outline appear/disappear live under the marquee instead of only on release.
+    override var highlightState: NSCollectionViewItem.HighlightState {
+        didSet { updateSelectionOutline() }
+    }
+
+    /// Effective outline state: the live marquee highlight wins while a band is being dragged, otherwise
+    /// the committed `isSelected` state. (`.asDropTarget` / `.none` fall through to `isSelected`.)
+    private func updateSelectionOutline() {
+        let outline: Bool
+        switch highlightState {
+        case .forSelection: outline = true
+        case .forDeselection: outline = false
+        default: outline = isSelected
+        }
+        roundedView?.isSelected = outline
+    }
+
+    /// Explicit selection sync used when (re)configuring a reused cell, so the blue outline is always
+    /// consistent with the coordinator's model even if `isSelected` didn't change on dequeue.
+    func setSelectedOutline(_ selected: Bool) {
+        roundedView?.isSelected = selected
+    }
+
+    func setFavorite(_ isFavorite: Bool) {
+        guard lastFavorite != isFavorite else { return }
+        lastFavorite = isFavorite
+        heartBadge.isHidden = !isFavorite
+    }
 
     func setDuration(_ seconds: Double?) {
         guard let seconds, seconds > 0, seconds.isFinite else {
+            guard !durationBadge.isHidden || !durationLabel.stringValue.isEmpty else { return }
             durationBadge.isHidden = true
             durationLabel.stringValue = ""
             return
         }
-        durationLabel.stringValue = Self.durationString(seconds)
+        let text = Self.durationString(seconds)
+        // Only touch the label / re-layout when the displayed string or visibility actually changes.
+        guard durationLabel.stringValue != text || durationBadge.isHidden else { return }
+        durationLabel.stringValue = text
         durationBadge.isHidden = false
         layoutDurationBadge()
     }
@@ -81,6 +131,8 @@ final class PhotoGridItem: NSCollectionViewItem {
     /// Shows/updates the selection badge. `mode` = selection mode active (badge visible at all);
     /// `isChecked` = this photo is selected.
     func setChecked(_ isChecked: Bool, mode: Bool) {
+        if let last = lastCheckedState, last == (isChecked, mode) { return }
+        lastCheckedState = (isChecked, mode)
         checkBadge.isHidden = !mode
         guard mode else { view.alphaValue = 1; return }
         let name = isChecked ? "checkmark.circle.fill" : "circle"
@@ -137,6 +189,10 @@ final class PhotoGridItem: NSCollectionViewItem {
             context: "normalCell.placeholderVisible"
         ))
         loadTask = Task { [weak self] in
+            // Bounded exponential backoff per cell: the first cache check is immediate, then polling
+            // slows 120→240→480ms and holds, so a screenful of placeholders doesn't hammer the feed.
+            // Reset is implicit: a new uid cancels this task and starts a fresh one at attempt 0.
+            var attempt = 0
             while !Task.isCancelled {
                 if let image = await feed.cachedImage(for: uid) {
                     let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
@@ -153,10 +209,19 @@ final class PhotoGridItem: NSCollectionViewItem {
                             context: "normalCell.asyncSwapInPlace"
                         ))
                     }
+                    PhotoDiagnostics.shared.emit("PhotoGridItem", [
+                        "uid": "\(uid.volumeID)~\(uid.nodeID)",
+                        "pollAttempt": "\(attempt)",
+                        "imageHit": "true",
+                    ], throttleSeconds: 1.0)
                     return
                 }
                 await feed.requestPriority(uid, priority: .visibleNow)
-                try? await Task.sleep(for: .milliseconds(120))
+                let ms = Self.pollBackoffMs(attempt: attempt)
+                PhotoDiagnostics.shared.increment("perf.photoGridItemPolls")
+                PhotoDiagnostics.shared.recordMax("perf.photoGridItemPollBackoffMax", ms)
+                attempt += 1
+                try? await Task.sleep(for: .milliseconds(ms))
             }
         }
     }
@@ -168,10 +233,22 @@ final class PhotoGridItem: NSCollectionViewItem {
         roundedView?.showsPlaceholder = true
         roundedView?.thumbnailImage = GridThumbnailFallback.placeholderImage
         view.alphaValue = 1
+        roundedView?.isSelected = false
         checkBadge.isHidden = true
         heartBadge.isHidden = true
         durationBadge.isHidden = true
         durationLabel.stringValue = ""
+        // Drop cached state markers so the next configure recomputes from a clean slate.
+        lastBadgeLayoutKey = nil
+        lastCheckedState = nil
+        lastFavorite = nil
+    }
+
+    /// Bounded exponential backoff for the visible-cell thumbnail poll: 120 → 240 → 480 ms, then holds
+    /// at 480. `attempt` is 0-based; a new uid restarts at 0 (the load task is recreated per configure).
+    static let pollBackoffSequenceMs = [120, 240, 480]
+    static func pollBackoffMs(attempt: Int) -> Int {
+        pollBackoffSequenceMs[min(max(0, attempt), pollBackoffSequenceMs.count - 1)]
     }
 
     private static func durationString(_ seconds: Double) -> String {
@@ -196,6 +273,13 @@ final class PhotoGridItem: NSCollectionViewItem {
 
     private func layoutDurationBadge() {
         guard !durationBadge.isHidden, let imageRect = roundedView?.displayedImageRect, imageRect.width > 1, imageRect.height > 1 else { return }
+        // Skip when the geometry/text that drives the frame is unchanged since the last layout.
+        let key = BadgeLayoutKey(imageRect: imageRect, bounds: view.bounds, text: durationLabel.stringValue)
+        if key == lastBadgeLayoutKey {
+            PhotoDiagnostics.shared.increment("perf.badgeLayoutSkipped")
+            return
+        }
+        lastBadgeLayoutKey = key
         let textWidth = ceil(durationLabel.intrinsicContentSize.width)
         let height: CGFloat = 26
         let width = max(48, textWidth + 24)
@@ -213,11 +297,25 @@ final class PhotoGridItem: NSCollectionViewItem {
 /// its own rounded cell (Apple-style) instead of merging into a gapless "Wurst".
 final class RoundedCellView: NSView {
     var thumbnailImage: CGImage? {
-        didSet { needsDisplay = true }
+        didSet {
+            // Only invalidate when the image actually changed. The placeholder is a single shared
+            // CGImage and real thumbnails are distinct objects, so identity (`===`) is exact and cheap;
+            // re-assigning the same image (e.g. placeholder→placeholder on reuse) skips the redraw.
+            guard !Self.sameImage(oldValue, thumbnailImage) else { return }
+            needsDisplay = true
+        }
     }
     var cropMode: GridCropMode = .aspectFit {
         didSet {
             guard oldValue != cropMode else { return }
+            needsDisplay = true
+        }
+    }
+    /// Apple-Photos selection: a blue rounded outline hugging the displayed image. Purely an overlay —
+    /// it never changes layout. Driven by `NSCollectionViewItem.isSelected`.
+    var isSelected = false {
+        didSet {
+            guard oldValue != isSelected else { return }
             needsDisplay = true
         }
     }
@@ -230,6 +328,27 @@ final class RoundedCellView: NSView {
 
     override var isOpaque: Bool { false }
     override var isFlipped: Bool { true }
+
+    /// Solid fill used for the placeholder, matching the old 16×16 gray placeholder bitmap exactly:
+    /// device-RGB gray 46/255 (same color space + value as `GridThumbnailFallback.placeholderImage`).
+    private static let placeholderFillColor: CGColor = {
+        let v: CGFloat = 46.0 / 255
+        return CGColor(colorSpace: CGColorSpaceCreateDeviceRGB(), components: [v, v, v, 1])
+            ?? CGColor(gray: v, alpha: 1)
+    }()
+
+    // Cache for `displayedImageRect(imageSize:)`. The crop math is recomputed on every draw and badge
+    // layout; the inputs (bounds size, image pixel size, crop mode) rarely change between those calls,
+    // so a one-slot cache keyed on exactly those inputs avoids the repeated divides.
+    private struct RectCacheKey: Equatable {
+        var boundsSize: CGSize
+        var imageWidth: Int
+        var imageHeight: Int
+        var cropMode: GridCropMode
+        var showsPlaceholder: Bool
+    }
+    private var rectCacheKey: RectCacheKey?
+    private var rectCacheValue: CGRect = .zero
 
     var displayedImageRect: CGRect? {
         guard let image = thumbnailImage else { return nil }
@@ -247,15 +366,27 @@ final class RoundedCellView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        guard let image = thumbnailImage,
-              bounds.width > 0,
+        guard bounds.width > 0,
               bounds.height > 0,
               let context = NSGraphicsContext.current?.cgContext else { return }
 
+        // Placeholder: fill a rounded rect directly. No CGImage draw, no interpolation, no flip path —
+        // visually identical to the old gray placeholder bitmap stretched to bounds.
+        if showsPlaceholder {
+            let radius = min(GridVisualConstants.thumbnailCornerRadius, bounds.width * 0.5, bounds.height * 0.5)
+            context.addPath(CGPath(roundedRect: bounds, cornerWidth: radius, cornerHeight: radius, transform: nil))
+            context.setFillColor(Self.placeholderFillColor)
+            context.fillPath()
+            PhotoDiagnostics.shared.increment("perf.placeholderDirectFill")
+            strokeSelectionIfNeeded(in: context, around: bounds, radius: radius)
+            return
+        }
+
+        guard let image = thumbnailImage else { return }
         let imageSize = CGSize(width: image.width, height: image.height)
         guard imageSize.width > 0, imageSize.height > 0 else { return }
 
-        let target = showsPlaceholder ? bounds : displayedImageRect(imageSize: imageSize)
+        let target = displayedImageRect(imageSize: imageSize)
         let radius = min(GridVisualConstants.thumbnailCornerRadius, target.width * 0.5, target.height * 0.5)
 
         context.saveGState()
@@ -269,9 +400,43 @@ final class RoundedCellView: NSView {
         let flippedTarget = CGRect(x: target.minX, y: bounds.height - target.maxY, width: target.width, height: target.height)
         context.draw(image, in: flippedTarget)
         context.restoreGState()
+
+        strokeSelectionIfNeeded(in: context, around: target, radius: radius)
+    }
+
+    /// Strokes the Apple-Photos blue selection outline (system accent) just inside the given rect so the
+    /// stroke is never clipped. ~3.5 pt, corner radius matched to the thumbnail. No-op when unselected.
+    private func strokeSelectionIfNeeded(in context: CGContext, around rect: CGRect, radius: CGFloat) {
+        guard isSelected, rect.width > 4, rect.height > 4 else { return }
+        let lineWidth: CGFloat = 3.5
+        let strokeRect = rect.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
+        let strokeRadius = max(0, radius - lineWidth / 2)
+        context.addPath(CGPath(roundedRect: strokeRect, cornerWidth: strokeRadius, cornerHeight: strokeRadius, transform: nil))
+        context.setStrokeColor(NSColor.controlAccentColor.cgColor)
+        context.setLineWidth(lineWidth)
+        context.strokePath()
     }
 
     private func displayedImageRect(imageSize: CGSize) -> CGRect {
+        let key = RectCacheKey(
+            boundsSize: bounds.size,
+            imageWidth: Int(imageSize.width),
+            imageHeight: Int(imageSize.height),
+            cropMode: cropMode,
+            showsPlaceholder: showsPlaceholder
+        )
+        if key == rectCacheKey {
+            PhotoDiagnostics.shared.increment("perf.displayedRectCacheHit")
+            return rectCacheValue
+        }
+        PhotoDiagnostics.shared.increment("perf.displayedRectCacheMiss")
+        let rect = computeDisplayedImageRect(imageSize: imageSize)
+        rectCacheKey = key
+        rectCacheValue = rect
+        return rect
+    }
+
+    private func computeDisplayedImageRect(imageSize: CGSize) -> CGRect {
         let scale: CGFloat
         switch cropMode {
         case .aspectFit:
@@ -286,6 +451,16 @@ final class RoundedCellView: NSView {
             width: size.width,
             height: size.height
         ).intersection(bounds)
+    }
+
+    /// Exact, cheap image equality: identity only. Distinct decoded thumbnails are distinct objects, so
+    /// this never coalesces a real swap; it only short-circuits re-assigning the *same* CGImage.
+    static func sameImage(_ a: CGImage?, _ b: CGImage?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case let (lhs?, rhs?): return lhs === rhs
+        default: return false
+        }
     }
 }
 

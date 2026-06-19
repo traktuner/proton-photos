@@ -1,0 +1,56 @@
+import XCTest
+@testable import PhotoViewerFeature
+
+final class ViewerTitleFormatterTests: XCTestCase {
+    private let german = Locale(identifier: "de_DE")
+    private let english = Locale(identifier: "en_US")
+
+    private func date(_ iso: String) -> Date {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: iso)!
+    }
+
+    func testPositionStringGermanGroupingAndConnector() {
+        let s = ViewerTitleFormatter.positionString(index: 4453, total: 35666, locale: german)
+        XCTAssertEqual(s, "4.454 von 35.666")   // 1-based index, German grouping + "von"
+    }
+
+    func testPositionStringEnglishConnector() {
+        let s = ViewerTitleFormatter.positionString(index: 0, total: 22884, locale: english)
+        XCTAssertEqual(s, "1 of 22,884")
+    }
+
+    func testDateTimeIsGermanWithUmConnector() {
+        let title = ViewerTitleFormatter.make(
+            captureDate: date("2026-06-17T16:53:58Z"),
+            index: 22856, total: 22884, locale: german
+        )
+        XCTAssertTrue(title.line1.contains("2026"), title.line1)
+        XCTAssertTrue(title.line1.contains(" um "), title.line1)
+        XCTAssertEqual(title.line2, "22.857 von 22.884")
+    }
+
+    func testLocationGoesOnLineOneWithDateAndPositionBelow() {
+        let title = ViewerTitleFormatter.make(
+            captureDate: date("2026-06-06T13:45:00Z"),
+            index: 4453, total: 35666, locationName: "Maria Laach am Jauerling", locale: german
+        )
+        XCTAssertEqual(title.line1, "Maria Laach am Jauerling")
+        XCTAssertTrue(title.line2.contains("·"), title.line2)
+        XCTAssertTrue(title.line2.contains("4.454 von 35.666"), title.line2)
+    }
+
+    func testFilenameFallbackWhenNoDate() {
+        let title = ViewerTitleFormatter.make(
+            captureDate: nil, index: 0, total: 10, filename: "IMG_0001.jpg", locale: english
+        )
+        XCTAssertEqual(title.line1, "IMG_0001.jpg")
+        XCTAssertEqual(title.line2, "1 of 10")
+    }
+
+    func testFotoFallbackWhenNoDateOrFilename() {
+        let title = ViewerTitleFormatter.make(captureDate: nil, index: 0, total: 10, locale: english)
+        XCTAssertEqual(title.line1, "Foto")
+    }
+}

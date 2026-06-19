@@ -159,15 +159,22 @@ public struct VideoBlockMap: Sendable {
     /// The ordered block slices needed to satisfy a request for `length` bytes starting at `offset`.
     /// Clamps to the file size, skips empty blocks, and returns slices in file order so the loader
     /// can stream `respond(with:)` calls contiguously. An out-of-range request returns `[]`.
+    ///
+    /// Blocks are stored in ascending `clearOffset` order (so their cleartext *ends* are non-decreasing);
+    /// a binary search skips straight to the first block that can overlap the window instead of scanning
+    /// every block from the front — the output is byte-for-byte identical to the old linear scan.
     public func slices(offset: Int, length: Int) -> [BlockSlice] {
         let reqStart = Swift.max(0, offset)
         let reqEnd = Swift.min(offset + length, totalSize)
         guard reqStart < reqEnd else { return [] }
         var out: [BlockSlice] = []
-        for block in blocks where block.clearSize > 0 {
+        var i = firstBlockIndex(endGreaterThan: reqStart)
+        while i < blocks.count {
+            let block = blocks[i]
+            i += 1
+            guard block.clearSize > 0 else { continue }
             let bStart = block.clearOffset
-            let bEnd = block.clearOffset + block.clearSize
-            if bEnd <= reqStart { continue }     // entirely before the window
+            let bEnd = bStart + block.clearSize
             if bStart >= reqEnd { break }        // past the window (blocks are ordered)
             let from = Swift.max(reqStart, bStart) - bStart
             let to = Swift.min(reqEnd, bEnd) - bStart
@@ -183,5 +190,38 @@ public struct VideoBlockMap: Sendable {
     /// The block indices a request touches (for prefetch / cancellation bookkeeping).
     public func blockIndices(offset: Int, length: Int) -> [Int] {
         slices(offset: offset, length: length).map(\.blockIndex)
+    }
+
+    /// Up to `count` non-empty blocks (in file order) whose cleartext bytes extend past `clearOffset` —
+    /// the read-ahead set for forward prefetch. Binary-searches to the first candidate so a large block
+    /// count isn't rescanned linearly on every range request. Equivalent to
+    /// `blocks.filter { $0.clearSize > 0 && $0.clearOffset + $0.clearSize > clearOffset }.prefix(count)`.
+    public func forwardBlocks(afterClearOffset clearOffset: Int, count: Int) -> [ClearBlock] {
+        guard count > 0 else { return [] }
+        var out: [ClearBlock] = []
+        var i = firstBlockIndex(endGreaterThan: clearOffset)
+        while i < blocks.count, out.count < count {
+            let block = blocks[i]
+            i += 1
+            if block.clearSize > 0 { out.append(block) }
+        }
+        return out
+    }
+
+    /// Index of the first block whose cleartext *end* (`clearOffset + clearSize`) is strictly greater
+    /// than `offset` — i.e. the first block that could contain or follow `offset`. Block ends are
+    /// non-decreasing, so this is a standard lower-bound binary search.
+    func firstBlockIndex(endGreaterThan offset: Int) -> Int {
+        var lo = 0
+        var hi = blocks.count
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2
+            if blocks[mid].clearOffset + blocks[mid].clearSize > offset {
+                hi = mid
+            } else {
+                lo = mid + 1
+            }
+        }
+        return lo
     }
 }

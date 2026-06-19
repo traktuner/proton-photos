@@ -6,6 +6,10 @@ import MediaCache
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var level: Int
+    /// Production renderer selector. Default ON; the Settings ▸ Developer toggle / `MetalGrid.enabled`
+    /// UserDefaults key / `-MetalGrid.enabled NO` launch arg flip it. The legacy NSCollectionView grid
+    /// stays available as a fallback. Reactive so toggling rebuilds the grid.
+    @AppStorage(MetalGridFeatureFlag.userDefaultsKey) private var metalEnabled = true
     private let aspects: AspectRegistry
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
     private let proxy: GridProxy?
@@ -49,31 +53,56 @@ public struct TimelineView: View {
             case let .failed(message):
                 errorState(message)
             case let .loaded(sections):
-                // Precompute aspect ratios here (MainActor). Reading the registry establishes the
-                // observation dependency, so the grid re-justifies as ratios are learned.
-                let _ = aspects.version
-                let sectionAspects = sections.map { section in
-                    section.items.map { min(max(aspects.aspect(for: $0.uid), 0.45), 3.2) }
+                if metalEnabled && MetalGridRuntime.isMetalRenderable {
+                    // Production Metal-backed grid (default). The Apple-matched detent zoom needs per-item
+                    // aspect ratios for its justified levels; reading `aspects.version` re-justifies as ratios
+                    // are learned (memoized in the model, so a sidebar drag won't rebuild the whole library).
+                    let _ = aspects.version
+                    let metalAspects = model.sectionAspects(for: sections, registry: aspects)
+                    MetalProductionGridView(
+                        sections: sections,
+                        allItems: model.allItems,
+                        feed: model.feed,
+                        sectionAspects: metalAspects,
+                        level: $level,
+                        onOpen: onOpen,
+                        proxy: proxy,
+                        selectionMode: selectionMode,
+                        onSelectionChange: onSelectionChange,
+                        favoriteUIDs: favoriteUIDs,
+                        media: media,
+                        metadataProvider: metadataProvider
+                    )
+                    .ignoresSafeArea(edges: .bottom)
+                } else {
+                    // Fallback: legacy NSCollectionView grid.
+                    // Aspect ratios (MainActor). Reading the registry version establishes the observation
+                    // dependency so the grid re-justifies as ratios are learned; the actual per-section
+                    // array is memoized in the model so an unrelated re-render (e.g. a sidebar-width drag,
+                    // which re-evaluates this body every tick) does not rebuild it for the whole library.
+                    let _ = aspects.version
+                    let sectionAspects = model.sectionAspects(for: sections, registry: aspects)
+                    PhotoGridView(
+                        sections: sections,
+                        allItems: model.allItems,
+                        feed: model.feed,
+                        sectionAspects: sectionAspects,
+                        level: $level,
+                        onOpen: onOpen,
+                        proxy: proxy,
+                        selectionMode: selectionMode,
+                        onSelectionChange: onSelectionChange,
+                        favoriteUIDs: favoriteUIDs,
+                        media: media,
+                        metadataProvider: metadataProvider
+                    )
+                    .ignoresSafeArea(edges: .bottom)
                 }
-                PhotoGridView(
-                    sections: sections,
-                    allItems: model.allItems,
-                    feed: model.feed,
-                    sectionAspects: sectionAspects,
-                    level: $level,
-                    onOpen: onOpen,
-                    proxy: proxy,
-                    selectionMode: selectionMode,
-                    onSelectionChange: onSelectionChange,
-                    favoriteUIDs: favoriteUIDs,
-                    media: media,
-                    metadataProvider: metadataProvider
-                )
-                .ignoresSafeArea(edges: .bottom)
             }
         }
         .background(ProtonColor.backgroundNorm)
         .task { await model.load() }
+        .onAppear { MetalGridRuntime.logResolutionOnce() }
     }
 
     private var emptyState: some View {

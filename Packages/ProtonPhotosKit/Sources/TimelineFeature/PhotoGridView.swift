@@ -118,8 +118,12 @@ struct PhotoGridView: NSViewRepresentable {
         private var selectedUIDs: Set<PhotoUID> = []
         private var favoriteUIDs: Set<PhotoUID> = []
         private var durationByUID: [PhotoUID: Double] = [:]
-        private var durationLookupCompleted: Set<PhotoUID> = []
         private var durationTasks: [PhotoUID: Task<Void, Never>] = [:]
+        // Bounded duration-metadata lookups: at most 4 run at once; the rest queue (coalesced per uid)
+        // so a dense video section can't fan out dozens of metadata requests at once. The gate owns the
+        // active/queued/completed bookkeeping; we keep the latest uid→cell index path alongside it.
+        private var durationGate = DurationLookupGate(maxConcurrent: 4)
+        private var durationIndexPath: [PhotoUID: IndexPath] = [:]
         let promiseHandler = FilePromiseHandler()
         // Month/year labels shown on the square (zoomed-out) levels.
         private var monthMarkers: [(index: Int, text: String)] = []
@@ -816,32 +820,72 @@ struct PhotoGridView: NSViewRepresentable {
                 requestDurationIfNeeded(for: photo, indexPath: indexPath)
             }
             item.setChecked(selectedUIDs.contains(photo.uid), mode: selectionMode)
+            item.setSelectedOutline(selectedUIDs.contains(photo.uid))
             item.setFavorite(favoriteUIDs.contains(photo.uid))
             return item
         }
 
         private func requestDurationIfNeeded(for photo: PhotoItem, indexPath: IndexPath) {
             guard photo.isVideo, photo.durationSeconds == nil,
-                  durationLookupCompleted.contains(photo.uid) == false,
-                  durationTasks[photo.uid] == nil,
-                  let metadataProvider = parent.metadataProvider else { return }
+                  parent.metadataProvider != nil else { return }
             let uid = photo.uid
+            durationIndexPath[uid] = indexPath   // remember the latest cell for this uid
+            switch durationGate.request(uid) {
+            case .start:
+                startDurationLookup(uid: uid, indexPath: indexPath)
+            case .queued:
+                PhotoDiagnostics.shared.emit("DurationLookup", [
+                    "uid": "\(uid.volumeID)~\(uid.nodeID)", "state": "queued",
+                    "active": "\(durationGate.activeCount)", "queued": "\(durationGate.queuedCount)",
+                ], throttleSeconds: 0.5)
+            case .ignored:
+                break
+            }
+        }
+
+        private func startDurationLookup(uid: PhotoUID, indexPath: IndexPath) {
+            guard let metadataProvider = parent.metadataProvider else { return }
+            PhotoDiagnostics.shared.recordMax("perf.durationLookupActiveMax", durationGate.activeCount)
+            PhotoDiagnostics.shared.emit("DurationLookup", [
+                "uid": "\(uid.volumeID)~\(uid.nodeID)", "state": "running",
+                "active": "\(durationGate.activeCount)", "queued": "\(durationGate.queuedCount)",
+            ], throttleSeconds: 0.5)
             durationTasks[uid] = Task { [weak self, metadataProvider] in
                 let duration = try? await metadataProvider.metadata(for: uid).durationSeconds
                 await MainActor.run {
                     guard let self else { return }
                     self.durationTasks[uid] = nil
-                    self.durationLookupCompleted.insert(uid)
-                    guard let duration, duration > 0, duration.isFinite else { return }
-                    self.durationByUID[uid] = duration
-                    if let item = self.collectionView?.item(at: indexPath) as? PhotoGridItem,
-                       indexPath.section < self.sections.count,
-                       indexPath.item < self.sections[indexPath.section].items.count,
-                       self.sections[indexPath.section].items[indexPath.item].uid == uid {
-                        item.setDuration(duration)
+                    let next = self.durationGate.complete(uid)
+                    self.applyDurationResult(uid: uid, indexPath: indexPath, duration: duration)
+                    self.durationIndexPath[uid] = nil
+                    if let next {
+                        self.startDurationLookup(uid: next, indexPath: self.durationIndexPath[next] ?? indexPath)
                     }
                 }
             }
+        }
+
+        /// Records a resolved duration and updates the cell only if it's still on screen showing `uid`
+        /// (it may have been reused while the lookup was in flight).
+        private func applyDurationResult(uid: PhotoUID, indexPath: IndexPath, duration: Double?) {
+            guard let duration, duration > 0, duration.isFinite else {
+                PhotoDiagnostics.shared.emit("DurationLookup", [
+                    "uid": "\(uid.volumeID)~\(uid.nodeID)", "state": "failed",
+                    "active": "\(durationGate.activeCount)", "queued": "\(durationGate.queuedCount)",
+                ], throttleSeconds: 0.5)
+                return
+            }
+            durationByUID[uid] = duration
+            if let item = collectionView?.item(at: indexPath) as? PhotoGridItem,
+               indexPath.section < sections.count,
+               indexPath.item < sections[indexPath.section].items.count,
+               sections[indexPath.section].items[indexPath.item].uid == uid {
+                item.setDuration(duration)
+            }
+            PhotoDiagnostics.shared.emit("DurationLookup", [
+                "uid": "\(uid.volumeID)~\(uid.nodeID)", "state": "completed",
+                "active": "\(durationGate.activeCount)", "queued": "\(durationGate.queuedCount)",
+            ], throttleSeconds: 0.5)
         }
 
         func setFavorites(_ set: Set<PhotoUID>) {
@@ -857,19 +901,44 @@ struct PhotoGridView: NSViewRepresentable {
 
         // MARK: Delegate
 
+        /// Native selection is authoritative: AppKit already implements Apple-Photos pointer semantics
+        /// (single click replaces, ⌘ toggles, ⇧ range-selects, drag in empty space rubber-bands). We just
+        /// mirror the native selection set into our model + checkmark badges; the blue outline is rendered
+        /// from each item's `isSelected`. A single click never opens — only a double click does.
         func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
-            guard let indexPath = indexPaths.first,
-                  indexPath.section < sections.count, indexPath.item < sections[indexPath.section].items.count else { return }
-            let photo = sections[indexPath.section].items[indexPath.item]
-            let decision = GridInteractionPolicy.decision(click: .single, selectionMode: selectionMode)
-            logGridInteraction(type: "single", uid: photo.uid, openViewer: decision.opensViewer)
-            if decision.togglesSelection {
-                collectionView.deselectItems(at: indexPaths)   // custom checkmark badge is the selected state
-                if selectedUIDs.contains(photo.uid) { selectedUIDs.remove(photo.uid) } else { selectedUIDs.insert(photo.uid) }
-                (collectionView.item(at: indexPath) as? PhotoGridItem)?.setChecked(selectedUIDs.contains(photo.uid), mode: true)
-                parent.onSelectionChange(selectedUIDs)
-            } else if decision.opensViewer {
-                parent.onOpen(photo, parent.allItems)
+            syncSelectionFromNative(changed: indexPaths)
+        }
+
+        func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
+            syncSelectionFromNative(changed: indexPaths)
+        }
+
+        private func syncSelectionFromNative(changed: Set<IndexPath>) {
+            guard let cv = collectionView else { return }
+            var uids = Set<PhotoUID>()
+            for ip in cv.selectionIndexPaths {
+                guard ip.section < sections.count, ip.item < sections[ip.section].items.count else { continue }
+                uids.insert(sections[ip.section].items[ip.item].uid)
+            }
+            selectedUIDs = uids
+            refreshVisibleSelectionBadges()
+            parent.onSelectionChange(selectedUIDs)
+
+            let isDrag = NSApp.currentEvent?.type == .leftMouseDragged
+            if let ip = changed.first, ip.section < sections.count, ip.item < sections[ip.section].items.count {
+                logGridInteraction(event: isDrag ? "dragSelect" : "singleClick",
+                                   uid: sections[ip.section].items[ip.item].uid, openViewer: false)
+            }
+        }
+
+        /// Keeps the (selection-mode) checkmark badges in step with the live selection for visible cells.
+        /// The blue outline updates itself via `isSelected`, so this only touches the badge/alpha state.
+        private func refreshVisibleSelectionBadges() {
+            guard let cv = collectionView else { return }
+            for ip in cv.indexPathsForVisibleItems() {
+                guard ip.section < sections.count, ip.item < sections[ip.section].items.count else { continue }
+                let uid = sections[ip.section].items[ip.item].uid
+                (cv.item(at: ip) as? PhotoGridItem)?.setChecked(selectedUIDs.contains(uid), mode: selectionMode)
             }
         }
 
@@ -877,7 +946,7 @@ struct PhotoGridView: NSViewRepresentable {
             guard indexPath.section < sections.count, indexPath.item < sections[indexPath.section].items.count else { return }
             let photo = sections[indexPath.section].items[indexPath.item]
             let decision = GridInteractionPolicy.decision(click: .double, selectionMode: selectionMode)
-            logGridInteraction(type: "double", uid: photo.uid, openViewer: decision.opensViewer)
+            logGridInteraction(event: "doubleClick", uid: photo.uid, openViewer: decision.opensViewer)
             guard decision.opensViewer else { return }
             parent.onOpen(photo, parent.allItems)
         }
@@ -887,8 +956,14 @@ struct PhotoGridView: NSViewRepresentable {
         func setSelectionMode(_ on: Bool) {
             guard on != selectionMode else { return }
             selectionMode = on
-            if !on { selectedUIDs.removeAll(); parent.onSelectionChange([]) }
             guard let cv = collectionView else { return }
+            // Leaving the explicit checkmark flow clears the selection — and the native selection with it,
+            // so the blue outlines drop too (Done button behavior).
+            if !on {
+                selectedUIDs.removeAll()
+                cv.deselectItems(at: cv.selectionIndexPaths)
+                parent.onSelectionChange([])
+            }
             for ip in cv.indexPathsForVisibleItems() {
                 guard ip.section < sections.count, ip.item < sections[ip.section].items.count else { continue }
                 let uid = sections[ip.section].items[ip.item].uid
@@ -2786,9 +2861,9 @@ struct PhotoGridView: NSViewRepresentable {
             "\(uid.volumeID)~\(uid.nodeID)"
         }
 
-        private func logGridInteraction(type: String, uid: PhotoUID, openViewer: Bool) {
+        private func logGridInteraction(event: String, uid: PhotoUID, openViewer: Bool) {
             #if DEBUG
-            print("[GridInteraction] click type=\(type) uid=\(key(for: uid)) openViewer=\(openViewer)")
+            print("[GridInteraction] event=\(event) uid=\(key(for: uid)) selectedCount=\(selectedUIDs.count) openViewer=\(openViewer)")
             #endif
         }
 

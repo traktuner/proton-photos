@@ -229,8 +229,11 @@ import CoreGraphics
     }
 
     @Test func sharedCornerRadiusIsSmallAndPositive() {
+        // The radius is a deliberate design value: the reference capture's rounded corner measures
+        // ~20-22px ≈ 11pt on Retina, so the grid + Metal overlay share 11 (see GridVisualConstants).
+        // This guards it stays small/positive — not an accidental large or zero radius.
         #expect(GridVisualConstants.thumbnailCornerRadius > 0)
-        #expect(GridVisualConstants.thumbnailCornerRadius <= 8)
+        #expect(GridVisualConstants.thumbnailCornerRadius <= 12)
     }
 
     // MARK: Full target backdrop alpha mask (no holes; focus stays source-dominant)
