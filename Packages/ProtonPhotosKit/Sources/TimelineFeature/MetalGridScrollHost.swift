@@ -16,7 +16,7 @@ import PhotosCore
 final class MetalGridScrollHost: NSView {
     let coordinator: MetalGridCoordinator
     private let metalView: MetalGridView
-    private let scrollView = NSScrollView()
+    private let scrollView = MetalGridBlockingScrollView()
     private let spacer = MetalGridDocumentSpacer()
 
     var onHUD: ((MetalGridHUD) -> Void)? {
@@ -52,6 +52,11 @@ final class MetalGridScrollHost: NSView {
     /// Time of the last trackpad magnify event — arms a brief scroll-suppression grace window so the residual
     /// finger drift after a pinch (esp. pushing past the largest stage) can't leak into a wild scroll.
     private var lastMagnifyEventTime: CFTimeInterval = 0
+    /// SCROLL LOCK: the scroll origin to hold while a pinch (or its grace) is active. Even if a scrollWheel
+    /// leaks past both interception points (macOS responsive-scrolling / gesture disambiguation at the
+    /// extreme detents), `scrolled()` snaps the position straight back to this — so the grid CANNOT drift
+    /// during a zoom. nil = not locked.
+    private var scrollLockOrigin: CGPoint?
     // Post-release (or button) settle animation.
     private var settleActive = false
     private var settleFrom: CGFloat = 0
@@ -120,18 +125,20 @@ final class MetalGridScrollHost: NSView {
             self?.onCellClick?(point, clickCount, modifiers)
         }
         spacer.onMagnify = { [weak self] event in self?.handleMagnify(event) }
-        // While a pinch (or its release-settle) runs — and for a short grace window AFTER the last magnify —
-        // block scroll so a drifting two-finger pinch can't fire a wild concurrent scroll. The grace window
-        // is what catches the residual finger movement when you push past the largest stage (nowhere bigger
-        // to zoom → the leftover motion was scrolling the committed grid to the end and back).
-        spacer.shouldBlockScroll = { [weak self] in
+        // Swallow scroll whenever a pinch could leak into one. Wired on BOTH the document spacer and the
+        // scroll view itself (two interception points) so trackpad scroll/inertia that bypasses the spacer
+        // is still caught. Blocks: the live pinch + its settle (`pinchActive`/`settleActive`/`zoomSession`),
+        // a grace window after the last magnify OR the commit, and post-pinch MOMENTUM (the inertia that
+        // keeps scrolling the committed grid wildly when you push past the largest/densest stage).
+        let block: (NSEvent) -> Bool = { [weak self] event in
             guard let self else { return false }
-            // Block for the WHOLE zoom: the live pinch, its settle, the autonomous cross-dissolve (all of
-            // which keep `zoomSession` non-nil), AND a 0.5 s grace after the last magnify OR the commit — so
-            // the residual finger drift after a pinch (esp. at the extreme detents) can never leak into scroll.
             if pinchActive || settleActive || coordinator.zoomSession != nil { return true }
-            return CACurrentMediaTime() - lastMagnifyEventTime < 0.5
+            let sinceMagnify = CACurrentMediaTime() - lastMagnifyEventTime
+            if sinceMagnify < 0.6 { return true }                               // grace after a pinch/commit
+            return event.momentumPhase != [] && sinceMagnify < 1.5             // post-pinch inertia
         }
+        spacer.shouldBlockScroll = block
+        scrollView.shouldBlockScroll = block
 
         // Redraw on EVERY scroll (incl. momentum / rubber-band) — the scroll itself paces the renderer.
         NotificationCenter.default.addObserver(
@@ -189,6 +196,7 @@ final class MetalGridScrollHost: NSView {
             pinchLastPosition = CGFloat(coordinator.level)
             pinchLastTime = CACurrentMediaTime()
             pinchVelocity = 0
+            scrollLockOrigin = scrollView.contentView.bounds.origin   // freeze scroll for the whole gesture
             coordinator.beginZoomTransition(anchorContentPoint: anchorContentForGestureStart())
         case .changed, .mayBegin:
             guard pinchActive else { return }
@@ -203,7 +211,6 @@ final class MetalGridScrollHost: NSView {
                 pinchLastTime = now
                 pinchLastPosition = pos
             }
-            coordinator.setPinchVelocity(pinchVelocity)   // feeds the autonomous cross-dissolve duration
             coordinator.updateZoomTransition(levelPosition: pos)
             metalView.needsDisplay = true
         case .ended:
@@ -275,6 +282,7 @@ final class MetalGridScrollHost: NSView {
             scrollView.contentView.scroll(to: CGPoint(x: 0, y: y))
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
+        scrollLockOrigin = scrollView.contentView.bounds.origin   // re-lock to the committed origin for the grace
         metalView.needsDisplay = true
         onZoomCommit?(target)
     }
@@ -307,7 +315,28 @@ final class MetalGridScrollHost: NSView {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
-    @objc private func scrolled() { metalView.needsDisplay = true; onViewportChanged?() }
+    /// True while scroll must be frozen: the live pinch, its settle, or a short grace after the last magnify.
+    private func isScrollBlocking() -> Bool {
+        pinchActive || settleActive || coordinator.zoomSession != nil
+            || CACurrentMediaTime() - lastMagnifyEventTime < 0.6
+    }
+
+    @objc private func scrolled() {
+        // SCROLL LOCK backstop: if anything scrolled the grid during a zoom (a leaked scrollWheel / inertia),
+        // snap it straight back to the frozen origin so the grid can't drift. Once the zoom is fully done,
+        // release the lock and scroll normally.
+        if isScrollBlocking(), let locked = scrollLockOrigin {
+            let cur = scrollView.contentView.bounds.origin
+            if abs(cur.x - locked.x) > 0.5 || abs(cur.y - locked.y) > 0.5 {
+                scrollView.contentView.scroll(to: locked)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        } else {
+            scrollLockOrigin = nil
+        }
+        metalView.needsDisplay = true
+        onViewportChanged?()
+    }
 
     // The display link only TRIGGERS redraws while thumbnails are streaming in; when the visible set is
     // fully loaded and not scrolling, no draws happen at all. It's invalidated when the view leaves its

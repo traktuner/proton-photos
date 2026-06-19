@@ -168,14 +168,17 @@ public struct GridZoomDetentModel: Equatable, Sendable {
     // is edge-to-edge with no black at any density. So the whole ladder is one continuous justified
     // densification (no aspect→square family change). The square family/policy is retained in the codebase
     // (not yet deleted, per the visual-sign-off rule) but is no longer used by the default ladder.
+    // JUSTIFIED aspect rows at EVERY level (Apple-verified): uniform ROW HEIGHT, cell WIDTH = the photo's real
+    // aspect ratio, no center-crop, no square slots — wide panoramas stay wide, portraits stay narrow, edge-
+    // to-edge. (The square-slot variant was a scoped experiment for the now-reverted cross-dissolve; the
+    // square family/`MetalGridLayout` path is retained in the codebase but unused by the default ladder.)
+    // `size` = ROW HEIGHT in points. Gaps are generous like Apple. Retune here after live testing.
     public static let apple = GridZoomDetentModel(
         detents: [
-            // id 0 — most zoomed IN (largest thumbnails). Gaps are GENEROUS like Apple (~6–7% of row height).
-            GridZoomDetent(id: 0, family: .justifiedAspectRows, size: 470, gap: 30, monthLabels: false), // ~3–4 cols
+            GridZoomDetent(id: 0, family: .justifiedAspectRows, size: 470, gap: 30, monthLabels: false), // ~3–4 cols (largest)
             GridZoomDetent(id: 1, family: .justifiedAspectRows, size: 360, gap: 24, monthLabels: false), // ~5 cols
             GridZoomDetent(id: 2, family: .justifiedAspectRows, size: 292, gap: 20, monthLabels: false), // ~6 cols (default)
             GridZoomDetent(id: 3, family: .justifiedAspectRows, size: 242, gap: 16, monthLabels: false), // ~7–8 cols
-            // Dense overview — STILL justified (verified), just a smaller row height. Was square-crop; corrected.
             GridZoomDetent(id: 4, family: .justifiedAspectRows, size: 185, gap: 12, monthLabels: false), // ~9–10 cols
             GridZoomDetent(id: 5, family: .justifiedAspectRows, size: 128, gap: 8,  monthLabels: false), // ~13–14 cols (densest)
         ],

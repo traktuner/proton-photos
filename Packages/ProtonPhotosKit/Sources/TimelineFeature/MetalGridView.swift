@@ -23,10 +23,10 @@ final class MetalGridDocumentSpacer: NSView {
     var onClick: ((CGPoint, Int, GridClickModifiers) -> Void)?
     /// Raw trackpad magnify events (for discrete pinch-to-zoom that mirrors the +/- buttons).
     var onMagnify: ((NSEvent) -> Void)?
-    /// While this returns true (a pinch / its settle is in flight) scrollWheel events are SWALLOWED instead
-    /// of bubbling to the enclosing scroll view — so a pinch whose fingers also drift doesn't fire a wild
-    /// concurrent scroll. (A still-fingered pinch never produced the pan; this makes the moving one behave.)
-    var shouldBlockScroll: (() -> Bool)?
+    /// While this returns true (a pinch / its settle / post-pinch grace is in flight) scrollWheel events are
+    /// SWALLOWED instead of bubbling to the enclosing scroll view — so a pinch whose fingers also drift can't
+    /// fire a wild concurrent scroll. Takes the event so momentum/inertia after a pinch can be caught too.
+    var shouldBlockScroll: ((NSEvent) -> Bool)?
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -55,7 +55,19 @@ final class MetalGridDocumentSpacer: NSView {
         // Owned by the discrete zoom; do NOT forward to super (no NSScrollView live magnification).
     }
     override func scrollWheel(with event: NSEvent) {
-        if shouldBlockScroll?() == true { return }   // pinch in flight → swallow the concurrent pan
-        super.scrollWheel(with: event)               // otherwise bubble to the enclosing scroll view
+        if shouldBlockScroll?(event) == true { return }   // pinch in flight → swallow the concurrent pan
+        super.scrollWheel(with: event)                    // otherwise bubble to the enclosing scroll view
+    }
+}
+
+/// The enclosing `NSScrollView`, subclassed so it ALSO swallows `scrollWheel` during a pinch / its grace —
+/// a second interception point behind the document spacer. Trackpad scroll/inertia that bypasses the spacer
+/// (or arrives as post-gesture momentum) is the actual thing that scrolls the grid, so blocking it here is
+/// the reliable backstop against the "wild scroll while pinching at the extreme detents" bug.
+final class MetalGridBlockingScrollView: NSScrollView {
+    var shouldBlockScroll: ((NSEvent) -> Bool)?
+    override func scrollWheel(with event: NSEvent) {
+        if shouldBlockScroll?(event) == true { return }
+        super.scrollWheel(with: event)
     }
 }

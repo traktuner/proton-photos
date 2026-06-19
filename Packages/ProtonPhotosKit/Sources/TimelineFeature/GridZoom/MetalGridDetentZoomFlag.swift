@@ -58,14 +58,4 @@ enum GridZoomDebug {
             "finalDetent": "\(finalDetent)", "originMatch": "\(originMatch)",
         ])
     }
-
-    /// `[PinchOutTransition]` per-frame diagnostics: the cross-dissolve plan counts + progress.
-    static func pinchOut(progress: CGFloat, source: Int, target: Int, replacements: Int, targetOnly: Int, unchanged: Int) {
-        guard verbose else { return }
-        PhotoDiagnostics.shared.emit("PinchOutTransition", [
-            "progress": String(format: "%.3f", progress),
-            "source": "\(source)", "target": "\(target)",
-            "replacements": "\(replacements)", "targetOnly": "\(targetOnly)", "unchanged": "\(unchanged)",
-        ])
-    }
 }

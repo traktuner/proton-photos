@@ -50,22 +50,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// re-align ramps smoothly from 0 instead of popping in at the release position. 0 during the live drag.
     var settleCrossfade: CGFloat = 0
 
-    // ── Zoom-OUT cross-dissolve (SOURCE grid fades out + TARGET grid fades in; autonomous time clock) ────
-    /// The detent currently shown (the SOURCE topology). Advances one step denser each time a zoom-out
-    /// cross-dissolve to the next detent completes (multi-detent zoom-out chains). Reset on commit.
+    // ── Geometric-scale zoom (gummiband) + release re-align ─────────────────────────────────────────────
+    /// The detent currently shown. Held for the gesture; reset to the committed level on commit.
     private var displayedLevel = 0
-    /// When the current SOURCE→TARGET cross-dissolve began (nil = no transition running). Progress is
-    /// time-based off this, so it completes on its own even if the fingers stop.
-    private var pinchOutStart: CFTimeInterval?
-    /// Duration of the current cross-dissolve step (seconds), chosen from the pinch velocity at start.
-    private var pinchOutDuration: CFTimeInterval = PinchOutTiming.slowDuration
-    /// Smoothed pinch velocity (detent-levels/sec) pushed in by the host; picks the cross-dissolve duration.
-    private var currentPinchVelocity: CGFloat = 0
-    /// The cross-dissolve progress rendered last frame (0→1) — read by `snapLevel`/diagnostics.
-    private var lastPinchOutProgress: CGFloat = 0
-
-    /// Host pushes the live smoothed pinch velocity so the autonomous cross-dissolve can pick its duration.
-    func setPinchVelocity(_ v: CGFloat) { currentPinchVelocity = v }
+    /// The release re-align overlay fade rendered last frame (0→1) — the settle continues from it.
+    private var lastZoomFade: Float = 0
 
     /// One in-flight zoom gesture. Scroll is frozen at `scrollOriginY`; the anchor item is held under
     /// `anchorScreen` (viewport coords) while the two detent surfaces scale + crossfade around it.
@@ -632,51 +621,24 @@ extension MetalGridCoordinator {
     private func drawZoomTransition(in view: MTKView, viewportSize: CGSize, now: CFTimeInterval) {
         guard let session = zoomSession else { return }
         let x = session.levelPosition
-        let maxIndex = detentModel.count - 1
-        let dispLevel = detentModel.clampIndex(displayedLevel)
-
-        // ── ZOOM-OUT → autonomous SOURCE→TARGET cross-dissolve ──────────────────────────────────────────
-        // Pinch-out crosses into a wider/denser topology. We render the SOURCE grid (current detent, fading
-        // OUT) and the TARGET grid (next denser detent, fading IN on top) — both full-width, vertical-anchored
-        // at the cursor — driven by a per-cell ReplacementPlan with COMPLEMENTARY alpha. The progress is an
-        // AUTONOMOUS time clock (duration from pinch velocity), so it finishes on its own even if the fingers
-        // stop. Active both on the live drag and while the release-settle drives a denser target.
-        let settleTarget = settleTargetLevel
-        let settleDenser = isZoomSettling && (settleTarget ?? dispLevel) > dispLevel
-        let dragOut = !isZoomSettling && x > CGFloat(dispLevel) + 0.06 && dispLevel < maxIndex
-        if (dragOut || settleDenser), dispLevel < maxIndex {
-            let targetLevel = settleDenser ? detentModel.clampIndex(settleTarget ?? dispLevel + 1) : dispLevel + 1
-            let progress: CGFloat
-            if dragOut {
-                if pinchOutStart == nil { pinchOutStart = now; pinchOutDuration = PinchOutTiming.duration(velocity: currentPinchVelocity) }
-                progress = PinchOutTiming.progress(elapsed: now - (pinchOutStart ?? now), duration: pinchOutDuration)
-            } else {
-                progress = CGFloat(min(max(settleCrossfade, 0), 1))   // the settle ramps it the rest of the way
-            }
-            lastPinchOutProgress = progress
-            renderPinchOutCrossDissolve(in: view, viewportSize: viewportSize, session: session,
-                                        sourceLevel: dispLevel, targetLevel: targetLevel, progress: progress, now: now)
-            if dragOut {
-                if progress >= 1 { displayedLevel = targetLevel; pinchOutStart = nil }   // step done → advance, next re-arms
-                else { requestRedraw() }                                                 // keep the autonomous clock ticking
-            }
-            return
-        }
-        pinchOutStart = nil
-        lastPinchOutProgress = 0
-
-        // ── ZOOM-IN / at the displayed detent / RELEASE re-align to a BIGGER detent → geometric scale ─────
-        // Each thumbnail grows (pinch-in), gummiband past the largest detent via `apparentSize`. On a release
-        // that re-aligns to a bigger (less-dense) detent, that detent fades in on top (`settleCrossfade`).
         let apparent = apparentSize(at: x)
         let flatUIDs = dataSource.flatUIDs
         let baseRadius = Float(GridVisualConstants.thumbnailCornerRadius)
+        let dispLevel = detentModel.clampIndex(displayedLevel)
+
+        // ── Geometric scale of the displayed grid (gummiband) + release re-align ──────────────────────────
+        // Each thumbnail grows (pinch-in) / shrinks (pinch-out), geometrically scaled to `apparent` around the
+        // cursor; rubber-band past the largest detent via `apparentSize`. Zoom-OUT contracts the grid -> black
+        // L/R strips while dragging (known/accepted in this clean state). The re-pack ("neu ausrichten")
+        // happens only on RELEASE: the snapped detent fades in on top (`settleCrossfade`).
         var overlayLevel: Int?
         var fade: Float = 0
-        if isZoomSettling, let target = settleTarget, target != dispLevel {   // here target < dispLevel (bigger)
+        if isZoomSettling, let target = settleTargetLevel, target != dispLevel {
             overlayLevel = target
             fade = Float(min(max(settleCrossfade, 0), 1))
         }
+        lastZoomFade = overlayLevel != nil ? fade : 0
+
         let baseInfo = scaledGrid(level: dispLevel, apparent: apparent, viewportSize: viewportSize, session: session)
         let overlayInfo = overlayLevel.map { scaledGrid(level: $0, apparent: apparent, viewportSize: viewportSize, session: session) }
 
@@ -707,87 +669,7 @@ extension MetalGridCoordinator {
         }
     }
 
-    /// A detent's grid at NATURAL size, FULL-WIDTH (horizontal identity → never a black side), anchored only
-    /// VERTICALLY so the cursor's focus row stays put. The two surfaces of the cross-dissolve use this.
-    private func naturalGrid(level: Int, viewportSize: CGSize, session: ZoomSession)
-        -> (cells: [GridDetentCell], vOffset: CGFloat, family: GridLayoutFamily) {
-        let detent = detentModel.detent(level)
-        let layout = detentLayoutMemo(level: level, width: viewportSize.width)
-        let vOffset = anchorContent(in: layout, session: session).y - session.anchorScreen.y
-        let query = CGRect(x: 0, y: vOffset - detent.size, width: viewportSize.width, height: viewportSize.height + 2 * detent.size)
-        return (layout.visibleCells(in: query), vOffset, detent.family)
-    }
 
-    /// Render one SOURCE→TARGET pinch-out cross-dissolve frame: SOURCE fades out, TARGET fades in ON TOP
-    /// (so the new photo is never hidden behind the old), per the per-cell `PinchOutPlan` (complementary
-    /// alpha, focus-row protected). Draw order: source bg, source img, [target bg for newly-exposed cells],
-    /// target img.
-    private func renderPinchOutCrossDissolve(in view: MTKView, viewportSize: CGSize, session: ZoomSession,
-                                             sourceLevel: Int, targetLevel: Int, progress: CGFloat, now: CFTimeInterval) {
-        let flatUIDs = dataSource.flatUIDs
-        let baseRadius = Float(GridVisualConstants.thumbnailCornerRadius)
-        let src = naturalGrid(level: sourceLevel, viewportSize: viewportSize, session: session)
-        let tgt = naturalGrid(level: targetLevel, viewportSize: viewportSize, session: session)
-
-        func screenRect(_ r: CGRect, _ vOffset: CGFloat) -> CGRect {
-            CGRect(x: r.minX, y: r.minY - vOffset, width: r.width, height: r.height)
-        }
-        let srcCells = src.cells.map { PinchOutCell(flatIndex: $0.flatIndex, rect: screenRect($0.rect, src.vOffset)) }
-        let tgtCells = tgt.cells.map { PinchOutCell(flatIndex: $0.flatIndex, rect: screenRect($0.rect, tgt.vOffset)) }
-        let focusRadius = detentModel.detent(targetLevel).size * 1.5
-        let plan = PinchOutPlan(source: srcCells, target: tgtCells, anchorFlatIndex: session.anchorFlatIndex,
-                                focusScreenY: session.anchorScreen.y, focusRadius: focusRadius)
-
-        var visibleUIDs: [PhotoUID] = []
-        for c in srcCells where c.flatIndex < flatUIDs.count { visibleUIDs.append(flatUIDs[c.flatIndex]) }
-        for c in tgtCells where c.flatIndex < flatUIDs.count { visibleUIDs.append(flatUIDs[c.flatIndex]) }
-        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: [])
-
-        func emit(rect: CGRect, alpha: Float, uid: PhotoUID, family: GridLayoutFamily, background: Bool,
-                  bg: inout [MetalGridQuad], img: inout [MetalGridQuad], tex: inout [MTLTexture]) {
-            guard alpha > 0.004 else { return }
-            let r = cellRadius(baseRadius, cell: rect)
-            if background { bg.append(MetalGridQuad(rect: rect, radius: r, alpha: alpha)) }
-            if cache.isResident(uid) {
-                cache.noteUsed(uid)
-                let texture = cache.texture(for: uid)
-                let geo = coverFillGeometry(cell: rect, texture: texture, family: family)
-                img.append(MetalGridQuad(rect: geo.rect, uvMin: geo.uvMin, uvMax: geo.uvMax, radius: r, alpha: alpha))
-                tex.append(texture)
-            }
-        }
-
-        var sbg: [MetalGridQuad] = [], simg: [MetalGridQuad] = [], stex: [MTLTexture] = []
-        for item in plan.source where item.flatIndex < flatUIDs.count {
-            emit(rect: item.rect, alpha: Float(plan.sourceAlpha(item, progress: progress)), uid: flatUIDs[item.flatIndex],
-                 family: src.family, background: true, bg: &sbg, img: &simg, tex: &stex)
-        }
-        var tbg: [MetalGridQuad] = [], timg: [MetalGridQuad] = [], ttex: [MTLTexture] = []
-        for item in plan.target where item.flatIndex < flatUIDs.count {
-            // Replacement cells draw photos only (don't darken the opaque source they cover); newly-exposed
-            // (targetOnly) cells carry a placeholder backdrop so they're never black while the photo loads.
-            emit(rect: item.rect, alpha: Float(plan.targetAlpha(item, progress: progress)), uid: flatUIDs[item.flatIndex],
-                 family: tgt.family, background: item.kind == .targetOnly, bg: &tbg, img: &timg, tex: &ttex)
-        }
-
-        var groups: [MetalGridRenderGroup] = []
-        groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: sbg))   // SOURCE bg
-        groups.append(MetalGridRenderGroup(source: .perQuadTexture(stex), quads: simg))                     // SOURCE img
-        if !tbg.isEmpty { groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: tbg)) }
-        groups.append(MetalGridRenderGroup(source: .perQuadTexture(ttex), quads: timg))                     // TARGET img (top)
-
-        cache.evictToBudget()
-        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
-        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
-        if now - lastLog > 0.25 {
-            lastLog = now
-            GridZoomDebug.transition(mode: "pinchOut", progress: progress, replacementCount: plan.replacementCount, focusProtected: true)
-        }
-        GridZoomDebug.pinchOut(progress: progress, source: sourceLevel, target: targetLevel,
-                               replacements: plan.replacementCount, targetOnly: plan.targetOnlyCount, unchanged: plan.unchangedCount)
-    }
-
-    /// Visible cells + anchored transform for ONE detent scaled to `apparent` around the cursor.
     private func scaledGrid(level: Int, apparent: CGFloat, viewportSize: CGSize, session: ZoomSession)
         -> (cells: [GridDetentCell], transform: GridZoomSurfaceTransform, family: GridLayoutFamily) {
         let detent = detentModel.detent(level)
@@ -902,9 +784,8 @@ extension MetalGridCoordinator {
             anchorScreen: anchorScreen, anchorContentBase: anchorContentPoint,
             anchorFlatIndex: item, anchorRelInCell: rel, anchorYFraction: frac, scrollOriginY: originY
         )
-        displayedLevel = level            // SOURCE grid starts on the committed detent
-        pinchOutStart = nil
-        lastPinchOutProgress = 0
+        displayedLevel = level            // grid starts on the committed detent
+        lastZoomFade = 0
         GridZoomDebug.anchor(uid: item.flatMap { uid(atFlatIndex: $0) }.map { "\($0.nodeID)" } ?? "—",
                              screen: anchorScreen, status: item == nil ? "GAP" : "PASS")
         // Pre-warm the DENSER neighbour's visible thumbnails so the zoom-out fill backdrop isn't a wall of
@@ -932,34 +813,27 @@ extension MetalGridCoordinator {
         requestRedraw()
     }
 
-    /// The detent the gesture should settle on (velocity in levels/sec; + = zooming out). Snaps RELATIVE to
-    /// the displayed detent: mid zoom-OUT cross-dissolve commits forward if it's past halfway (or a flick);
-    /// zoom-IN commits to the bigger detent past the size midpoint.
+    /// The detent the gesture should settle on (velocity in levels/sec; + = zooming out). Snaps to the detent
+    /// whose cell size is nearest the apparent size shown during the drag, with a flick biasing one detent
+    /// further in the motion direction.
     func snapLevel(velocity: CGFloat) -> Int {
         guard let session = zoomSession else { return level }
-        let disp = detentModel.clampIndex(displayedLevel)
-        let flick = detentModel.tuning.flickVelocity
-        if pinchOutStart != nil, disp < detentModel.count - 1 {
-            // A cross-dissolve toward disp+1 is in flight: keep it if it's past halfway or the release flicks out.
-            return detentModel.clampIndex(disp + ((lastPinchOutProgress >= 0.5 || velocity > flick) ? 1 : 0))
-        }
         let apparent = apparentSize(at: session.levelPosition)
-        let dispSize = detentModel.detent(disp).size
-        if apparent > dispSize + 0.5, disp > 0 {
-            // Zoom-IN toward the bigger (less-dense) detent: commit past the size midpoint (or a flick).
-            let bigger = disp - 1
-            let mid = (dispSize + detentModel.detent(bigger).size) / 2
-            return detentModel.clampIndex((apparent >= mid || velocity < -flick) ? bigger : disp)
+        let flick = detentModel.tuning.flickVelocity
+        var best = 0, bestDelta = CGFloat.greatestFiniteMagnitude
+        for i in 0 ..< detentModel.count {
+            let d = abs(detentModel.detent(i).size - apparent)
+            if d < bestDelta { bestDelta = d; best = i }
         }
-        return disp
+        if velocity > flick { best = max(best, detentModel.clampIndex(displayedLevel + 1)) }       // zoom-out flick
+        else if velocity < -flick { best = min(best, detentModel.clampIndex(displayedLevel - 1)) } // zoom-in flick
+        return detentModel.clampIndex(best)
     }
 
     var activeLevelPosition: CGFloat? { zoomSession?.levelPosition }
     var activeAnchorFlatIndex: Int? { zoomSession?.anchorFlatIndex }
-    /// The cross-dissolve progress showing last frame — so the release-settle CONTINUES it (no reset/flicker).
-    var lastZoomFadeValue: Float { Float(lastPinchOutProgress) }
-    /// True while a live zoom-OUT cross-dissolve is mid-flight (the host lets it finish autonomously).
-    var isPinchOutActive: Bool { pinchOutStart != nil }
+    /// The re-align overlay fade showing last frame — so the release-settle CONTINUES it (no reset/flicker).
+    var lastZoomFadeValue: Float { lastZoomFade }
 
     /// The scroll origin Y that keeps the anchor under its gesture screen point at `finalLevel`. Call BEFORE
     /// `commitZoomTransition` (it reads the live session). nil if no session.
@@ -982,16 +856,14 @@ extension MetalGridCoordinator {
         GridZoomDebug.settle(velocity: 0, finalDetent: finalLevel, originMatch: originMatch)
         zoomSession = nil
         displayedLevel = detentModel.clampIndex(finalLevel)
-        pinchOutStart = nil
-        lastPinchOutProgress = 0
+        lastZoomFade = 0
         level = detentModel.clampIndex(finalLevel)   // didSet recomputes content size
         requestRedraw()
     }
 
     func cancelZoomTransition() {
         zoomSession = nil
-        pinchOutStart = nil
-        lastPinchOutProgress = 0
+        lastZoomFade = 0
         requestRedraw()
     }
 }
