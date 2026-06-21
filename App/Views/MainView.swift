@@ -16,7 +16,7 @@ struct MainView: View {
 
     @State private var timelineModel: TimelineViewModel
     @State private var viewerModel: PhotoViewerModel?
-    @State private var level: Int = 2          // 0 = most zoomed in … 5 = most zoomed out
+    @State private var level: Int = 3          // 0 = most zoomed in (largest tiles) … 6 = most zoomed out
     @State private var sidebarOpen: Bool
     @State private var sidebarWidth: CGFloat
     @State private var albums: [PhotoAlbum] = []

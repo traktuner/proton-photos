@@ -105,16 +105,12 @@ final class SyntheticMetalGridDataSource: MetalGridDataSource {
     var latencyRange: ClosedRange<Double> = 0.05 ... 0.7
 
     init(itemCount: Int) {
-        var counts: [Int] = []
-        var remaining = itemCount
-        var seed: UInt64 = 0x9E3779B97F4A7C15
-        func next() -> UInt64 { seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17; return seed }
-        while remaining > 0 {
-            let day = min(remaining, 8 + Int(next() % 60))   // 8…67 photos per "day"
-            counts.append(day)
-            remaining -= day
-        }
-        self.sectionCounts = counts
+        // ONE continuous section — like production (`MetalGridProductionAdapter` delivers a single ordered
+        // section). The grid is one uninterrupted run of square slots filled bottom-right → top, with NO
+        // day/week/month groupings. (Previously this split the items into ~hundreds of random "day" sections,
+        // which the engine laid out with a partial top row each → a misleading staircase the real grid never
+        // shows. Multi-section geometry stays covered by the engine unit tests.)
+        self.sectionCounts = itemCount > 0 ? [itemCount] : []
         var uids: [PhotoUID] = []
         uids.reserveCapacity(itemCount)
         var map: [PhotoUID: Int] = [:]

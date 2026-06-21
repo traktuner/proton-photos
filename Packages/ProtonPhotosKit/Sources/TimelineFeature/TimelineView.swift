@@ -6,10 +6,8 @@ import MediaCache
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var level: Int
-    /// Production renderer selector. Default ON; the Settings ▸ Developer toggle / `MetalGrid.enabled`
-    /// UserDefaults key / `-MetalGrid.enabled NO` launch arg flip it. The legacy NSCollectionView grid
-    /// stays available as a fallback. Reactive so toggling rebuilds the grid.
-    @AppStorage(MetalGridFeatureFlag.userDefaultsKey) private var metalEnabled = true
+    /// Retained for source compatibility with the public init; the production grid no longer consults media
+    /// aspect for layout (the engine is square-only; aspect lives only in `TileContentFitter`).
     private let aspects: AspectRegistry
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
     private let proxy: GridProxy?
@@ -22,7 +20,7 @@ public struct TimelineView: View {
     public init(
         model: TimelineViewModel,
         aspects: AspectRegistry,
-        level: Binding<Int> = .constant(2),
+        level: Binding<Int> = .constant(3),
         proxy: GridProxy? = nil,
         selectionMode: Bool = false,
         media: FullMediaProvider? = nil,
@@ -53,51 +51,24 @@ public struct TimelineView: View {
             case let .failed(message):
                 errorState(message)
             case let .loaded(sections):
-                if metalEnabled && MetalGridRuntime.isMetalRenderable {
-                    // Production Metal-backed grid (default). The Apple-matched detent zoom needs per-item
-                    // aspect ratios for its justified levels; reading `aspects.version` re-justifies as ratios
-                    // are learned (memoized in the model, so a sidebar drag won't rebuild the whole library).
-                    let _ = aspects.version
-                    let metalAspects = model.sectionAspects(for: sections, registry: aspects)
-                    MetalProductionGridView(
-                        sections: sections,
-                        allItems: model.allItems,
-                        feed: model.feed,
-                        sectionAspects: metalAspects,
-                        level: $level,
-                        onOpen: onOpen,
-                        proxy: proxy,
-                        selectionMode: selectionMode,
-                        onSelectionChange: onSelectionChange,
-                        favoriteUIDs: favoriteUIDs,
-                        media: media,
-                        metadataProvider: metadataProvider
-                    )
-                    .ignoresSafeArea(edges: .bottom)
-                } else {
-                    // Fallback: legacy NSCollectionView grid.
-                    // Aspect ratios (MainActor). Reading the registry version establishes the observation
-                    // dependency so the grid re-justifies as ratios are learned; the actual per-section
-                    // array is memoized in the model so an unrelated re-render (e.g. a sidebar-width drag,
-                    // which re-evaluates this body every tick) does not rebuild it for the whole library.
-                    let _ = aspects.version
-                    let sectionAspects = model.sectionAspects(for: sections, registry: aspects)
-                    PhotoGridView(
-                        sections: sections,
-                        allItems: model.allItems,
-                        feed: model.feed,
-                        sectionAspects: sectionAspects,
-                        level: $level,
-                        onOpen: onOpen,
-                        proxy: proxy,
-                        selectionMode: selectionMode,
-                        onSelectionChange: onSelectionChange,
-                        favoriteUIDs: favoriteUIDs,
-                        media: media,
-                        metadataProvider: metadataProvider
-                    )
-                    .ignoresSafeArea(edges: .bottom)
-                }
+                // Production timeline is MetalGrid-ONLY: the canonical `SquareTileGridEngine` owns all
+                // geometry (square slots). No NSCollectionView fallback, no aspect-driven justified layout,
+                // no silent feature-flag switch — media aspect never reaches the layout (it lives only in
+                // `TileContentFitter`, inside the renderer).
+                MetalProductionGridView(
+                    sections: sections,
+                    allItems: model.allItems,
+                    feed: model.feed,
+                    level: $level,
+                    onOpen: onOpen,
+                    proxy: proxy,
+                    selectionMode: selectionMode,
+                    onSelectionChange: onSelectionChange,
+                    favoriteUIDs: favoriteUIDs,
+                    media: media,
+                    metadataProvider: metadataProvider
+                )
+                .ignoresSafeArea(edges: .bottom)
             }
         }
         .background(ProtonColor.backgroundNorm)

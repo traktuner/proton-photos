@@ -103,14 +103,15 @@ public struct MetalGridLab: View {
                 }
 
                 group("Zoom level (density)") {
+                    let maxLevel = SquareTileGridEngine.defaultLevels.count - 1
                     HStack {
-                        Button("−") { model.setLevel(model.level + 1) }.disabled(model.level >= 5)
+                        Button("−") { model.setLevel(model.level + 1) }.disabled(model.level >= maxLevel)
                         Text("level \(model.level)").font(.system(.caption, design: .monospaced)).foregroundStyle(.white)
                         Button("+") { model.setLevel(model.level - 1) }.disabled(model.level <= 0)
                     }
                     .controlSize(.small)
                     Picker("", selection: Binding(get: { model.level }, set: { model.setLevel($0) })) {
-                        ForEach(0 ..< 6) { Text("\($0)").tag($0) }
+                        ForEach(0 ... maxLevel, id: \.self) { Text("\($0)").tag($0) }
                     }
                     .pickerStyle(.segmented).labelsHidden()
                 }
@@ -161,7 +162,7 @@ final class MetalGridLabModel {
     var hud = MetalGridHUD()
     var hoverUID = "—"
     var showHUD = true
-    var level = JustifiedCollectionLayout.defaultLevel
+    var level = 3   // medium density (matches production opening level after the larger level 0 was added)
     var useRealData = true { didSet { if useRealData != oldValue { pendingRebuild = true } } }
     var syntheticCount = 20_000 { didSet { if syntheticCount != oldValue && !(useRealData && MetalGridLabBridge.shared.hasRealData) { pendingRebuild = true } } }
 

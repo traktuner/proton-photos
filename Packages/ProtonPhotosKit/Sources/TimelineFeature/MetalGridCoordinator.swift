@@ -19,19 +19,72 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     weak var clipView: NSClipView?
     weak var metalView: MTKView?
 
-    var level: Int = JustifiedCollectionLayout.defaultLevel {
+    var level: Int = 3 {                       // medium density; clamped to the engine ladder in didSet
         didSet {
-            level = min(max(level, 0), JustifiedCollectionLayout.levels.count - 1)
+            level = engine.clampLevel(level)
             if level != oldValue { cachedDetent = nil; onContentSizeChange?(contentSize()) }
         }
     }
 
-    // MARK: - Apple-matched detent zoom (feature-flagged; see MetalGridDetentZoomFlag)
+    // MARK: - Zoom mode (Option A: detent-only foundation)
 
-    /// When true, the grid uses the data-driven `detentModel` ladder (justified aspect rows + square
-    /// overview) and the two-surface pinch transition. When false, it uses the legacy square `MetalGridLayout`.
-    let usesDetentZoom = MetalGridDetentZoomFlag.isEnabled
+    /// FALSE on purpose. A continuous fractional pinch would re-resolve the grid every frame — changing
+    /// `columnCount` and rewrapping every flat index, which shuffles the items at every screen position
+    /// (the "jumps to unrelated index regions" failure). Until live pinch is rebuilt as an engine-owned
+    /// `GridZoomTransaction` (Option B), the production grid is DETENT-ONLY: it renders only settled
+    /// integer-level `GridFramePlan`s, and the pinch maps to discrete, anchor-preserving level steps (the
+    /// `PinchStepDetector` path in the host) — stable static/discrete geometry over a broken live pinch.
+    let usesDetentZoom = false
     let detentModel = GridZoomDetentModel.apple
+
+    // MARK: - Canonical geometry engine (single source of truth)
+    //
+    // `SquareTileGridEngine` owns ALL grid geometry: square slot rects, per-level gap/pitch, columns,
+    // content size, the visible-slot query, hit testing, and the zoom frame plan (continuous apparent
+    // metrics + anchor preservation). The coordinator ONLY converts the engine's `GridFramePlan` into Metal
+    // quads — it never invents layout, never computes edge-fill, never scales a second surface. THE
+    // canonical production path: input → engine → GridFramePlan → renderer draws exactly that plan.
+    private(set) var engine = SquareTileGridEngine(sectionCounts: [])
+    /// When true, render the SYNTHETIC square grid: one colored square per visible slot, straight from
+    /// `GridSlot.viewportRect`, no textures/aspect. Lets the geometry be validated without thumbnails.
+    var debugSyntheticGrid = MetalGridDebugGridFlag.isEnabled
+    /// The production grid is engine-only. (Stored, not a literal, so the retained legacy draw paths below
+    /// stay compiled-but-unreachable without a dead-code warning, pending their deletion.)
+    private let useCanonicalEngine = true
+
+    // MARK: - Live zoom transaction (engine-owned; focus-row stable)
+    //
+    // A live pinch is a `GridZoomTransaction` captured at gesture start, NOT a per-frame stateless re-resolve
+    // (which rewraps the focus row). While a transaction is active, `draw` renders its frame at the current
+    // continuous level; the row under the cursor keeps its photos. On release the host commits to a settled
+    // detent (cursor re-anchored).
+    private var zoomTransaction: GridZoomTransaction?
+    private var zoomTransactionLevel: CGFloat = 0
+    /// True while a live focus-row zoom is in flight (the host freezes scroll while this holds).
+    var isZoomingLive: Bool { zoomTransaction != nil }
+    /// The live continuous level position (for the host's snap-on-release).
+    var liveZoomLevel: CGFloat { zoomTransactionLevel }
+
+    /// The persistent view anchor (item + the viewport point it was last zoomed toward). Drives the settled
+    /// grid's COLUMN PHASE so, after a live-zoom commit (or a +/- step), the focus item keeps its cursor
+    /// column — the settled grid matches where the live transaction left things (seamless commit, no rephase
+    /// jump). Single continuous run only; nil = the default bottom-right wrap.
+    private var viewAnchor: (globalIndex: Int, viewportPoint: CGPoint, localFraction: CGPoint)?
+
+    /// The column phase for the settled grid. DISABLED (always nil → the default BOTTOM-RIGHT wrap, newest in
+    /// the corner). A cursor-aligned phase would keep the focus item's column on a live-zoom commit (seamless),
+    /// but it is INCOMPATIBLE with bottom-right anchoring — it moves the partial row to the bottom-right
+    /// (black there) and breaks "newest bottom-right". The real release jump is fixed in the host's scroll
+    /// lock, so the phase is not needed; making the commit's residual horizontal rephase smooth is a future
+    /// settle-animation step, not a phase. (`viewAnchor` + the engine's `columnPhase` support stay for that.)
+    private func currentPhase(level lv: Int, width: CGFloat) -> Int? {
+        _ = (viewAnchor, lv, width)
+        return nil
+    }
+    private func currentPhase() -> Int? {
+        currentPhase(level: level, width: metalView?.bounds.width ?? clipView?.bounds.width ?? 0)
+    }
+
     /// Per-section item aspect ratios (w/h) for the justified levels, fed from the `AspectRegistry`.
     private var sectionAspects: [[CGFloat]] = []
     private var aspectVersion = 0
@@ -165,6 +218,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         map.reserveCapacity(dataSource.flatUIDs.count)
         for (i, uid) in dataSource.flatUIDs.enumerated() { map[uid] = i }
         indexByUID = map
+        // Rebuild the canonical engine from the new section structure (single source of truth).
+        engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts)
+        viewAnchor = nil                          // a stale anchor index could point past the new data
         cachedDetent = nil
         memoLayouts.removeAll(keepingCapacity: true)
         memoVersion = -1
@@ -179,12 +235,80 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// The photo cell + its flat index under a CONTENT-space point (for click/selection).
     func hitTestCell(contentPoint: CGPoint) -> (flatIndex: Int, uid: PhotoUID)? {
         let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 0
-        guard width > 1 else { return nil }
-        let flat: Int?
-        if usesDetentZoom { flat = currentDetentLayout(width: width).hitTest(contentPoint)?.flatIndex }
-        else { flat = currentLayout(width: width).hitTest(contentPoint)?.flatIndex }
-        guard let flat, let uid = uid(atFlatIndex: flat) else { return nil }
-        return (flat, uid)
+        guard width > 1, let slot = engine.hitTest(contentPoint: contentPoint, level: level, width: width, columnPhase: currentPhase()),
+              let uid = uid(atFlatIndex: slot.index) else { return nil }
+        return (slot.index, uid)
+    }
+
+    var levelCount: Int { engine.levelCount }
+    func clampLevel(_ l: Int) -> Int { engine.clampLevel(l) }
+
+    /// Scroll Y that keeps the item under `cursorContentPoint` at the same viewport position after changing
+    /// to `newLevel` (zoom toward the cursor — the Apple rule). The engine owns the capture + rebase; this
+    /// just supplies the live view width + scroll origin. nil if no item resolvable.
+    func cursorAnchoredScrollOffsetY(toLevel newLevel: Int, cursorContentPoint: CGPoint) -> CGFloat? {
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 1
+        let originY = clipView?.bounds.origin.y ?? 0
+        return engine.cursorAnchoredScrollOffsetY(levelChangeFrom: level, to: newLevel, width: width,
+                                                  cursorContentPoint: cursorContentPoint, sourceScrollOriginY: originY)
+    }
+
+    // MARK: - Live focus-row zoom transaction (driven by the host's trackpad pinch)
+
+    /// Begin a live zoom anchored at the item under (or nearest to) the cursor. `viewportPoint` is where to
+    /// hold it (the cursor in viewport coords). The engine captures the transaction; the row under the cursor
+    /// is then preserved as the level position changes.
+    func beginLiveZoom(cursorContentPoint: CGPoint, viewportPoint: CGPoint) {
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 1
+        zoomTransaction = engine.beginZoomTransaction(cursorContentPoint: cursorContentPoint,
+                                                      viewportPoint: viewportPoint, level: level, width: width,
+                                                      columnPhase: currentPhase(level: level, width: width))
+        zoomTransactionLevel = CGFloat(level)
+        requestRedraw()
+    }
+
+    /// Update the live continuous level position (fractional = mid-pinch).
+    func updateLiveZoom(continuousLevel x: CGFloat) {
+        guard zoomTransaction != nil else { return }
+        zoomTransactionLevel = min(max(x, 0), CGFloat(engine.levelCount - 1))
+        requestRedraw()
+    }
+
+    /// The settled scroll Y that keeps the live anchor under the cursor at `finalLevel`, AND latches the view
+    /// anchor so the settled grid adopts the live transaction's column phase (seamless commit — no rephase
+    /// jump). The host scrolls there after committing. nil if no transaction.
+    func liveZoomCommitScrollOffsetY(finalLevel: Int) -> CGFloat? {
+        guard let tx = zoomTransaction else { return nil }
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 1
+        viewAnchor = (tx.anchorGlobalIndex, tx.anchorViewportPoint, tx.anchorLocalFraction)
+        let phase = currentPhase(level: finalLevel, width: width)
+        return engine.anchoredScrollOffset(flatIndex: tx.anchorGlobalIndex, localFraction: tx.anchorLocalFraction,
+                                           viewportPoint: tx.anchorViewportPoint, level: finalLevel, width: width, columnPhase: phase).y
+    }
+
+    /// Commit the live zoom to a settled detent and clear the transaction (didSet recomputes content size).
+    func commitLiveZoom(finalLevel: Int) {
+        zoomTransaction = nil
+        level = engine.clampLevel(finalLevel)
+        requestRedraw()
+    }
+
+    func cancelLiveZoom() { zoomTransaction = nil; requestRedraw() }
+
+    /// A discrete +/- (or programmatic) level change that keeps the item under `anchorContentPoint` at the
+    /// same viewport point AND latches the view anchor / column phase (so +/- is seamless with the phased
+    /// grid too). Returns the scroll Y to apply; nil if no item resolvable.
+    func settleScrollOffsetY(toLevel newLevel: Int, anchorContentPoint: CGPoint, viewportPoint: CGPoint) -> CGFloat? {
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 1
+        guard let a = engine.anchorItem(nearContentPoint: anchorContentPoint, level: level, width: width,
+                                        columnPhase: currentPhase(level: level, width: width)) else {
+            level = engine.clampLevel(newLevel); return nil
+        }
+        viewAnchor = (a.flatIndex, viewportPoint, a.localFraction)
+        level = engine.clampLevel(newLevel)
+        let phase = currentPhase(level: level, width: width)
+        return engine.anchoredScrollOffset(flatIndex: a.flatIndex, localFraction: a.localFraction,
+                                           viewportPoint: viewportPoint, level: level, width: width, columnPhase: phase).y
     }
 
     /// A photo's cell rect in CONTENT coordinates at the current level/width (nil if unknown).
@@ -196,15 +320,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     func cellContentRect(forFlatIndex index: Int) -> CGRect? {
         let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 0
         guard width > 1 else { return nil }
-        if usesDetentZoom { return currentDetentLayout(width: width).frame(flatIndex: index) }
-        return currentLayout(width: width).frame(flatIndex: index)
+        return engine.slotRect(flatIndex: index, level: level, width: width, columnPhase: currentPhase())
     }
 
-    /// Whether the current level shows month/year labels (the two most zoomed-out levels).
-    var showsMonthLabels: Bool {
-        if usesDetentZoom { return detentModel.detent(level).monthLabels }
-        return JustifiedCollectionLayout.levels[min(max(level, 0), JustifiedCollectionLayout.levels.count - 1)].monthLabels
-    }
+    /// Whether the current level shows month/year labels (the dense overview levels).
+    var showsMonthLabels: Bool { engine.metrics(level: level).monthLabels }
 
     var scrollOriginY: CGFloat { clipView?.bounds.origin.y ?? 0 }
     var viewportSize: CGSize { metalView?.bounds.size ?? clipView?.bounds.size ?? .zero }
@@ -212,27 +332,19 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Visible cells (flat index + content rect) for the accessibility provider / header positioning.
     func visibleCells() -> [(flatIndex: Int, rect: CGRect)] {
         guard let view = metalView, let clip = clipView, view.bounds.width > 1 else { return [] }
-        let visible = CGRect(origin: clip.bounds.origin, size: view.bounds.size)
-        if usesDetentZoom {
-            return currentDetentLayout(width: view.bounds.width).visibleCells(in: visible).map { ($0.flatIndex, $0.rect) }
-        }
-        return currentLayout(width: view.bounds.width).visibleCells(in: visible).map { ($0.flatIndex, $0.rect) }
+        let plan = engine.framePlan(level: level, viewportSize: view.bounds.size, scrollOffset: clip.bounds.origin, overscan: 0, columnPhase: currentPhase())
+        return plan.visibleSlots.map { ($0.index, $0.slotRect) }
     }
 
     /// The first visible cell + how far its top sits below the viewport top — captured before a level
     /// change so the same photo can be re-pinned afterward (anchor preservation).
     func anchorAtViewportTop() -> (uid: PhotoUID, offset: CGFloat)? {
-        guard let clip = clipView, let view = metalView else { return nil }
+        guard let clip = clipView, let view = metalView, view.bounds.width > 1 else { return nil }
         let origin = clip.bounds.origin
-        let visible = CGRect(origin: origin, size: view.bounds.size)
-        let cells: [(flatIndex: Int, minY: CGFloat)]
-        if usesDetentZoom {
-            cells = currentDetentLayout(width: view.bounds.width).visibleCells(in: visible).map { ($0.flatIndex, $0.rect.minY) }
-        } else {
-            cells = currentLayout(width: view.bounds.width).visibleCells(in: visible).map { ($0.flatIndex, $0.rect.minY) }
-        }
-        guard let top = cells.min(by: { $0.minY < $1.minY }), let uid = uid(atFlatIndex: top.flatIndex) else { return nil }
-        return (uid, top.minY - origin.y)
+        let plan = engine.framePlan(level: level, viewportSize: view.bounds.size, scrollOffset: origin, overscan: 0, columnPhase: currentPhase())
+        guard let top = plan.visibleSlots.min(by: { $0.slotRect.minY < $1.slotRect.minY }),
+              let uid = uid(atFlatIndex: top.index) else { return nil }
+        return (uid, top.slotRect.minY - origin.y)
     }
 
     /// Layout at the current width/level. Width comes from the metal view (== document/clip width).
@@ -243,8 +355,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     func contentSize() -> CGSize {
         let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 0
         guard width > 1 else { return .zero }
-        if usesDetentZoom { return currentDetentLayout(width: width).contentSize }
-        return currentLayout(width: width).contentSize
+        return engine.contentSize(level: level, width: width, columnPhase: currentPhase())
     }
 
     /// Debug hit test: a viewport point → the photo UID under it (or nil for a gap).
@@ -257,12 +368,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Debug hit test from a CONTENT-space point (e.g. a mouse location in the document spacer).
     func hitTest(contentPoint: CGPoint) -> PhotoUID? {
         let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 0
-        guard width > 1 else { return nil }
-        let flat: Int?
-        if usesDetentZoom { flat = currentDetentLayout(width: width).hitTest(contentPoint)?.flatIndex }
-        else { flat = currentLayout(width: width).hitTest(contentPoint)?.flatIndex }
-        guard let flat, flat < dataSource.flatUIDs.count else { return nil }
-        return dataSource.flatUIDs[flat]
+        guard width > 1, let slot = engine.hitTest(contentPoint: contentPoint, level: level, width: width, columnPhase: currentPhase()),
+              slot.index < dataSource.flatUIDs.count else { return nil }
+        return dataSource.flatUIDs[slot.index]
     }
 
     // MARK: - MTKViewDelegate
@@ -276,6 +384,14 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let viewportSize = view.bounds.size
         guard viewportSize.width > 1, viewportSize.height > 1 else { return }
         let now = CACurrentMediaTime()
+
+        // CANONICAL PATH: input → engine → GridFramePlan → renderer draws exactly that plan. The legacy
+        // detent/two-surface (`drawDetent`) and square (`MetalGridLayout`, below) paths are retained but
+        // unreachable until the engine is signed off, then deleted.
+        if useCanonicalEngine {
+            drawEngineFrame(in: view, clip: clip, viewportSize: viewportSize, now: now)
+            return
+        }
 
         if usesDetentZoom {
             drawDetent(in: view, clip: clip, viewportSize: viewportSize, now: now)
@@ -409,6 +525,136 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         scroll.overscanBehind = overscan
 
         publishDiagnostics(stats: stats, scroll: scroll, cache: cache.cacheStats, now: now)
+    }
+
+    // MARK: - Canonical engine render: GridFramePlan → Metal quads (no edge-fill, no second surface)
+
+    /// THE production render. Resolves a `GridFramePlan` from the engine and draws exactly its square
+    /// slots. Settled → free scroll origin. Live pinch → the engine computes the anchored scroll offset and
+    /// the width-filling apparent grid itself, so left/right always carry real slots (never a black strip).
+    private func drawEngineFrame(in view: MTKView, clip: NSClipView, viewportSize: CGSize, now: CFTimeInterval) {
+        let overscan = budget.overscanFraction * viewportSize.height
+        let slots: [GridSlot]
+        let contentSizeForDiag: CGSize
+        if let tx = zoomTransaction {
+            // LIVE zoom: an engine-owned transaction with a STABLE focus row. The grid is laid out relative
+            // to the anchor under the cursor — NOT a per-frame stateless re-resolve — so the row under the
+            // cursor keeps its photos (zoom-in drops edge neighbours, zoom-out adds them), never re-wrapping.
+            let frame = tx.frame(continuousLevel: zoomTransactionLevel, viewportSize: viewportSize, overscan: overscan)
+            slots = frame.visibleSlots
+            contentSizeForDiag = CGSize(width: viewportSize.width, height: frame.pitch * CGFloat(max(1, slots.count / max(frame.columns, 1))))
+        } else {
+            // SETTLED: clamp the camera to the content extent (the window is a camera over the wall; it can't
+            // leave the wall — pull it back if a zoom-out shrank the content below the scroll position). The
+            // column phase keeps the focus item's column where the last live zoom / +- left it (seamless).
+            let phase = currentPhase(level: level, width: viewportSize.width)
+            let content = engine.contentSize(level: level, width: viewportSize.width, columnPhase: phase)
+            let maxY = max(0, content.height - viewportSize.height)
+            let rawOrigin = clip.bounds.origin
+            let clampedY = min(max(0, rawOrigin.y), maxY)
+            if abs(clampedY - rawOrigin.y) > 0.5 {
+                clip.scroll(to: CGPoint(x: rawOrigin.x, y: clampedY))
+                clip.enclosingScrollView?.reflectScrolledClipView(clip)
+            }
+            let plan = engine.framePlan(level: level, viewportSize: viewportSize,
+                                        scrollOffset: CGPoint(x: rawOrigin.x, y: clampedY), overscan: overscan, columnPhase: phase)
+            slots = plan.visibleSlots
+            contentSizeForDiag = plan.contentSize
+        }
+
+        if debugSyntheticGrid {
+            renderSyntheticSlots(in: view, slots: slots, viewportSize: viewportSize)
+            hasPendingVisibleThumbnails = false
+            updateMotion(originY: clip.bounds.origin.y, now: now)
+            publishLightDiagnostics(visibleCount: slots.count, realCount: slots.count, cellCount: slots.count,
+                                    visibleRect: CGRect(origin: clip.bounds.origin, size: viewportSize),
+                                    contentSize: contentSizeForDiag, now: now)
+            return
+        }
+
+        let pureViewport = CGRect(origin: .zero, size: viewportSize)
+        let flatUIDs = dataSource.flatUIDs
+        var visibleUIDs: [PhotoUID] = []
+        var overscanUIDs: [PhotoUID] = []
+        for s in slots where s.index < flatUIDs.count {
+            if s.viewportRect.intersects(pureViewport) { visibleUIDs.append(flatUIDs[s.index]) }
+            else { overscanUIDs.append(flatUIDs[s.index]) }
+        }
+        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
+        let realCount = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
+        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
+        updateMotion(originY: clip.bounds.origin.y, now: now)
+        publishLightDiagnostics(visibleCount: visibleUIDs.count, realCount: realCount, cellCount: slots.count,
+                                visibleRect: CGRect(origin: clip.bounds.origin, size: viewportSize),
+                                contentSize: contentSizeForDiag, now: now)
+    }
+
+    /// Real thumbnails: a square outer card + the image cover-filled INSIDE the square slot (aspect only via
+    /// the UV window — never changes the slot), plus production decorations. Returns the real-texture count.
+    @discardableResult
+    private func renderRealSlots(in view: MTKView, slots: [GridSlot], flatUIDs: [PhotoUID], viewportSize: CGSize) -> Int {
+        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
+        let accent = Self.colorVector(.controlAccentColor)
+        var backgrounds: [MetalGridQuad] = []
+        var images: [MetalGridQuad] = []
+        var imageTextures: [MTLTexture] = []
+        var outlineQuads: [MetalGridQuad] = []
+        var favoriteQuads: [MetalGridQuad] = []
+        var checkFilledQuads: [MetalGridQuad] = []
+        var checkEmptyQuads: [MetalGridQuad] = []
+        var videoQuads: [MetalGridQuad] = []
+        backgrounds.reserveCapacity(slots.count)
+        var realCount = 0
+        for s in slots where s.index < flatUIDs.count {
+            let uid = flatUIDs[s.index]
+            let cell = s.viewportRect                       // ALWAYS square (engine guarantee)
+            let r = cellRadius(cardRadius, cell: cell)
+            backgrounds.append(MetalGridQuad(rect: cell, radius: r))
+            if cache.isResident(uid) {
+                cache.noteUsed(uid)
+                let texture = cache.texture(for: uid)
+                // Compose: slotRect (engine) + content fit (TileContentFitter) + texture (cache). The
+                // fitter is the ONLY thing that sees media aspect; the slot is square regardless.
+                let fit = TileContentFitter.fit(slotRect: cell,
+                                                mediaPixelSize: CGSize(width: texture.width, height: texture.height),
+                                                mode: .aspectFill)
+                images.append(MetalGridQuad(rect: fit.contentRect, uvMin: fit.uvMin, uvMax: fit.uvMax, radius: r))
+                imageTextures.append(texture)
+                realCount += 1
+            }
+            if decorationsEnabled {
+                appendDecorations(uid: uid, cell: cell, displayed: cell, cardRadius: r, accent: accent,
+                                  outline: &outlineQuads, favorite: &favoriteQuads,
+                                  checkFilled: &checkFilledQuads, checkEmpty: &checkEmptyQuads, video: &videoQuads)
+            }
+        }
+        cache.evictToBudget()
+        var groups: [MetalGridRenderGroup] = [
+            MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: backgrounds),
+            MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
+        ]
+        if !outlineQuads.isEmpty { groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: outlineQuads)) }
+        if !videoQuads.isEmpty, let t = cache.glyphTexture(symbol: "video.fill", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: videoQuads)) }
+        if !favoriteQuads.isEmpty, let t = cache.glyphTexture(symbol: "heart.fill", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: favoriteQuads)) }
+        if !checkEmptyQuads.isEmpty, let t = cache.glyphTexture(symbol: "circle", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkEmptyQuads)) }
+        if !checkFilledQuads.isEmpty, let t = cache.glyphTexture(symbol: "checkmark.circle.fill", color: .controlAccentColor) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkFilledQuads)) }
+        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
+        return realCount
+    }
+
+    /// Synthetic debug grid: one solid colored square per visible slot (geometry only — no textures, no
+    /// media aspect). Proves the grid (square slots, consistent gaps, both edges filled) without thumbnails.
+    private func renderSyntheticSlots(in view: MTKView, slots: [GridSlot], viewportSize: CGSize) {
+        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
+        var quads: [MetalGridQuad] = []
+        quads.reserveCapacity(slots.count)
+        for cmd in SquareGridDebugMode.commands(forSlots: slots) {
+            let r = cellRadius(cardRadius, cell: cmd.rect)
+            quads.append(MetalGridQuad(rect: cmd.rect, radius: r, color: cmd.color, mode: .solid))
+        }
+        cache.evictToBudget()
+        renderer.render(in: view, viewportSize: viewportSize,
+                        groups: [MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: quads)])
     }
 
     // MARK: - Image quad geometry (crop / aspect)
@@ -770,15 +1016,14 @@ extension MetalGridCoordinator {
         let originY = clipView?.bounds.origin.y ?? 0
         let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 1
         let anchorScreen = CGPoint(x: anchorContentPoint.x, y: anchorContentPoint.y - originY)
-        let baseLayout = currentDetentLayout(width: width)
-        let item = baseLayout.hitTest(anchorContentPoint)?.flatIndex
-        let frac = anchorContentPoint.y / max(baseLayout.contentSize.height, 1)
-        // The cursor's unit position within the anchor cell — kept invariant across detents.
-        var rel = CGPoint(x: 0.5, y: 0.5)
-        if let item, let cell = baseLayout.frame(flatIndex: item), cell.width > 0, cell.height > 0 {
-            rel = CGPoint(x: (anchorContentPoint.x - cell.minX) / cell.width,
-                          y: (anchorContentPoint.y - cell.minY) / cell.height)
-        }
+        // Capture a LOGICAL anchor: the engine resolves the ITEM under (or nearest to) the cursor + the
+        // local fraction within its slot. The anchor identity is the item (section/global index), never a
+        // raw y — so the engine rebases the scroll offset from THIS item's new slot rect at every apparent
+        // metric, instead of reusing a scroll offset that's invalid once slotSide/gap/columns/sections change.
+        let resolvedAnchor = engine.anchorItem(nearContentPoint: anchorContentPoint, level: level, width: width)
+        let item = resolvedAnchor?.flatIndex
+        let rel = resolvedAnchor?.localFraction ?? CGPoint(x: 0.5, y: 0.5)
+        let frac = anchorContentPoint.y / max(engine.contentSize(level: level, width: width).height, 1)
         zoomSession = ZoomSession(
             baseLevel: level, levelPosition: CGFloat(level),
             anchorScreen: anchorScreen, anchorContentBase: anchorContentPoint,
@@ -796,11 +1041,11 @@ extension MetalGridCoordinator {
 
     /// Decode (off-main) the thumbnails the denser neighbour detent would reveal, so a zoom-out has them ready.
     private func prewarmNeighbor(of baseLevel: Int, width: CGFloat) {
-        let denser = detentModel.clampIndex(baseLevel + 1)
+        let denser = engine.clampLevel(baseLevel + 1)
         guard denser != baseLevel, let view = metalView, let clip = clipView else { return }
-        let layout = detentLayout(level: denser, width: width)
-        let visible = CGRect(origin: clip.bounds.origin, size: view.bounds.size).insetBy(dx: 0, dy: -view.bounds.height * 0.5)
-        let uids = layout.visibleCells(in: visible).compactMap { uid(atFlatIndex: $0.flatIndex) }
+        let plan = engine.framePlan(level: denser, viewportSize: view.bounds.size,
+                                    scrollOffset: clip.bounds.origin, overscan: view.bounds.height * 0.5)
+        let uids = plan.visibleSlots.compactMap { uid(atFlatIndex: $0.index) }
         let missing = uids.filter { !cache.isResident($0) && !dataSource.hasImage(for: $0) }
         if !missing.isEmpty { dataSource.warm(missing) }
     }
@@ -818,16 +1063,18 @@ extension MetalGridCoordinator {
     /// further in the motion direction.
     func snapLevel(velocity: CGFloat) -> Int {
         guard let session = zoomSession else { return level }
-        let apparent = apparentSize(at: session.levelPosition)
+        // Snap to the detent whose engine slot size is nearest the apparent size shown during the drag —
+        // same size space as the rendered grid, so the release lands without a jump.
+        let apparent = engine.apparentSlotSide(at: session.levelPosition)
         let flick = detentModel.tuning.flickVelocity
         var best = 0, bestDelta = CGFloat.greatestFiniteMagnitude
-        for i in 0 ..< detentModel.count {
-            let d = abs(detentModel.detent(i).size - apparent)
+        for i in 0 ..< engine.levelCount {
+            let d = abs(engine.metrics(level: i).slotSide - apparent)
             if d < bestDelta { bestDelta = d; best = i }
         }
-        if velocity > flick { best = max(best, detentModel.clampIndex(displayedLevel + 1)) }       // zoom-out flick
-        else if velocity < -flick { best = min(best, detentModel.clampIndex(displayedLevel - 1)) } // zoom-in flick
-        return detentModel.clampIndex(best)
+        if velocity > flick { best = max(best, engine.clampLevel(displayedLevel + 1)) }       // zoom-out flick
+        else if velocity < -flick { best = min(best, engine.clampLevel(displayedLevel - 1)) } // zoom-in flick
+        return engine.clampLevel(best)
     }
 
     var activeLevelPosition: CGFloat? { zoomSession?.levelPosition }
@@ -840,14 +1087,9 @@ extension MetalGridCoordinator {
     func scrollOriginAfterCommit(finalLevel: Int) -> CGFloat? {
         guard let session = zoomSession else { return nil }
         let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 1
-        let layout = detentLayout(level: finalLevel, width: width)
-        let anchorContentY: CGFloat
-        if let item = session.anchorFlatIndex, let f = layout.frame(flatIndex: item) {
-            anchorContentY = f.minY + session.anchorRelInCell.y * f.height
-        } else {
-            anchorContentY = session.anchorYFraction * layout.contentSize.height
-        }
-        return anchorContentY - session.anchorScreen.y
+        return engine.anchoredScrollOffsetY(flatIndex: session.anchorFlatIndex, relInCellY: session.anchorRelInCell.y,
+                                            contentFractionY: session.anchorYFraction, viewportPointY: session.anchorScreen.y,
+                                            level: finalLevel, width: width)
     }
 
     /// Finish: commit `finalLevel` as the settled detent and clear the gesture (the host re-anchors scroll).

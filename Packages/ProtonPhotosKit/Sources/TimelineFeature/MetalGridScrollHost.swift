@@ -132,7 +132,7 @@ final class MetalGridScrollHost: NSView {
         // keeps scrolling the committed grid wildly when you push past the largest/densest stage).
         let block: (NSEvent) -> Bool = { [weak self] event in
             guard let self else { return false }
-            if pinchActive || settleActive || coordinator.zoomSession != nil { return true }
+            if pinchActive || settleActive || coordinator.isZoomingLive { return true }
             let sinceMagnify = CACurrentMediaTime() - lastMagnifyEventTime
             if sinceMagnify < 0.6 { return true }                               // grace after a pinch/commit
             return event.momentumPhase != [] && sinceMagnify < 1.5             // post-pinch inertia
@@ -154,30 +154,80 @@ final class MetalGridScrollHost: NSView {
 
     @objc private func userWillScroll() { stickToBottom = false }
 
-    // MARK: - Discrete pinch zoom (mirrors +/-)
+    // MARK: - Live focus-row pinch zoom (engine-owned GridZoomTransaction)
 
+    /// Magnification → continuous level position. Pinch OPEN (positive magnification) = zoom IN = lower level
+    /// index. Smaller = more sensitive.
+    private let magnificationPerLevel: CGFloat = 0.42
+
+    /// A trackpad pinch drives an engine-owned `GridZoomTransaction`: the item under the cursor is the anchor,
+    /// the focus row keeps its photos as the level position glides, and on release we snap to the nearest
+    /// detent (cursor re-anchored). NOT a per-frame stateless re-resolve — no focus-row rewrap.
     private func handleMagnify(_ event: NSEvent) {
         lastMagnifyEventTime = CACurrentMediaTime()   // arms the post-pinch scroll grace window
-        if coordinator.usesDetentZoom {
-            handleContinuousMagnify(event)
-            return
-        }
-        // LEGACY: one discrete step per gesture (mirrors +/- buttons).
         switch event.phase {
         case .began:
-            pinchDetector.begin()
+            cancelSettle()
+            stickToBottom = false
+            pinchActive = true
+            pinchBaseLevel = coordinator.level
+            pinchCumulativeMagnification = 0
+            scrollLockOrigin = scrollView.contentView.bounds.origin   // freeze scroll for the gesture
+            let cursorContent = cursorContentPoint(for: event)
+            let viewportPoint = CGPoint(x: cursorContent.x, y: cursorContent.y - scrollView.contentView.bounds.origin.y)
+            coordinator.beginLiveZoom(cursorContentPoint: cursorContent, viewportPoint: viewportPoint)
         case .changed, .mayBegin:
-            if let direction = pinchDetector.accumulate(event.magnification) {
-                let now = CACurrentMediaTime()
-                guard now - lastPinchStepTime > DiscreteGridZoomTuning.pinchCooldown else { return }
-                lastPinchStepTime = now
-                onZoomStep?(direction)
-            }
-        case .ended, .cancelled:
-            pinchDetector.end()
+            guard pinchActive else { return }
+            pinchCumulativeMagnification += event.magnification
+            let pos = CGFloat(pinchBaseLevel) - pinchCumulativeMagnification / magnificationPerLevel
+            coordinator.updateLiveZoom(continuousLevel: pos)
+            metalView.needsDisplay = true
+        case .ended:
+            guard pinchActive else { return }
+            pinchActive = false
+            finishLiveZoom(target: Int(coordinator.liveZoomLevel.rounded()))
+        case .cancelled:
+            guard pinchActive else { return }
+            pinchActive = false
+            finishLiveZoom(target: pinchBaseLevel)
         default:
             break
         }
+    }
+
+    /// Commit the live zoom to a settled detent and re-anchor scroll so the cursor item stays put.
+    private func finishLiveZoom(target: Int) {
+        let clamped = max(0, min(target, coordinator.levelCount - 1))
+        let newY = coordinator.liveZoomCommitScrollOffsetY(finalLevel: clamped)   // reads tx, latches view anchor
+        coordinator.commitLiveZoom(finalLevel: clamped)                           // clears tx, sets level
+        let clipH = scrollView.contentView.bounds.height
+        let content = coordinator.contentSize()
+        let targetY = (!stickToBottom && newY != nil)
+            ? min(max(0, newY!), max(0, content.height - clipH))
+            : scrollView.contentView.bounds.origin.y
+        // CRITICAL: set the scroll lock to the COMMITTED position BEFORE any scroll/resize. The post-magnify
+        // grace window keeps `scrolled()` snapping the clip back to `scrollLockOrigin`; if that still held the
+        // PRE-zoom origin, it would instantly undo the commit scroll → the grid jumps to a different position.
+        lastMagnifyEventTime = CACurrentMediaTime()
+        scrollLockOrigin = CGPoint(x: 0, y: targetY)
+        applyContentSize(content)
+        if !stickToBottom, newY != nil {
+            scrollView.contentView.scroll(to: CGPoint(x: 0, y: targetY))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+        metalView.needsDisplay = true
+        onZoomCommit?(coordinator.level)                            // sync the SwiftUI level binding
+    }
+
+    /// The cursor's CURRENT content-space point from a gesture event (fresh — never the stale last
+    /// mouse-moved position), clamped into the current viewport so a centroid just outside still anchors
+    /// sensibly (falls back to the viewport centre).
+    private func cursorContentPoint(for event: NSEvent) -> CGPoint {
+        let p = spacer.convert(event.locationInWindow, from: nil)
+        let origin = scrollView.contentView.bounds.origin
+        let vh = scrollView.contentView.bounds.height
+        if p.y >= origin.y, p.y <= origin.y + vh, p.x >= 0, p.x <= bounds.width { return p }
+        return CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)
     }
 
     // MARK: - Continuous detent pinch (Apple-matched)
@@ -227,11 +277,17 @@ final class MetalGridScrollHost: NSView {
         }
     }
 
-    /// Content point under the cursor at gesture start, or the viewport centre if the pointer is unknown.
+    /// Content point under the cursor at gesture start, or the viewport centre if the pointer is unknown or
+    /// STALE. `lastMouseContentPoint` is only refreshed on mouse-moved, so after a scroll it can hold an
+    /// off-screen content point from the previous scroll position — anchoring to that makes the zoom jump to
+    /// an unrelated part of the timeline. Trust it only when it lies inside the CURRENT viewport.
     private func anchorContentForGestureStart() -> CGPoint {
-        if let p = lastMouseContentPoint { return p }
         let origin = scrollView.contentView.bounds.origin
-        return CGPoint(x: bounds.width / 2, y: origin.y + bounds.height / 2)
+        let vh = scrollView.contentView.bounds.height
+        let center = CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)
+        guard let p = lastMouseContentPoint,
+              p.y >= origin.y, p.y <= origin.y + vh, p.x >= 0, p.x <= bounds.width else { return center }
+        return p
     }
 
     /// Animate the continuous level position onto an integer detent, then commit + re-anchor scroll.
@@ -317,7 +373,7 @@ final class MetalGridScrollHost: NSView {
 
     /// True while scroll must be frozen: the live pinch, its settle, or a short grace after the last magnify.
     private func isScrollBlocking() -> Bool {
-        pinchActive || settleActive || coordinator.zoomSession != nil
+        pinchActive || settleActive || coordinator.isZoomingLive
             || CACurrentMediaTime() - lastMagnifyEventTime < 0.6
     }
 
@@ -381,17 +437,29 @@ final class MetalGridScrollHost: NSView {
 
     // MARK: - Public controls
 
-    /// Change zoom level. If pinned to the bottom (newest), stay there; otherwise keep the same photo
-    /// pinned near the viewport top (anchor preservation).
-    func setLevel(_ level: Int) {
-        guard level != coordinator.level else { return }
-        let anchor = stickToBottom ? nil : coordinator.anchorAtViewportTop()
-        coordinator.level = level
-        applyContentSize(coordinator.contentSize())   // pins to bottom when sticky
-        if let anchor, let newRect = coordinator.cellContentRect(forUID: anchor.uid) {
-            let maxY = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
-            let targetY = min(max(0, newRect.minY - anchor.offset), maxY)
-            scrollView.contentView.scroll(to: CGPoint(x: 0, y: targetY))
+    /// Change zoom level, holding an EXPLICIT anchor point under the same viewport position (zoom directed
+    /// toward that point — the Apple rule). `anchorContentPoint` is the cursor's content point for a trackpad
+    /// pinch; for +/- it's nil → the viewport centre is used. NEVER the top-visible item. Pinned-to-bottom
+    /// (newest) stays pinned.
+    func setLevel(_ newLevel: Int, anchorContentPoint: CGPoint? = nil) {
+        guard newLevel != coordinator.level else { return }
+        let vh = scrollView.contentView.bounds.height
+        if stickToBottom {
+            coordinator.level = newLevel
+            applyContentSize(coordinator.contentSize())   // pins to bottom (newest)
+            metalView.needsDisplay = true
+            return
+        }
+        let origin = scrollView.contentView.bounds.origin
+        // Explicit cursor point (pinch) else the viewport centre — an explicit viewport point, not the top.
+        let anchorPoint = anchorContentPoint ?? CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)
+        let viewportPoint = CGPoint(x: anchorPoint.x, y: anchorPoint.y - origin.y)
+        // Latches the view anchor / column phase so the settled grid keeps the focus item's column (seamless).
+        let newY = coordinator.settleScrollOffsetY(toLevel: newLevel, anchorContentPoint: anchorPoint, viewportPoint: viewportPoint)
+        applyContentSize(coordinator.contentSize())
+        if let newY {
+            let maxY = max(0, spacer.frame.height - vh)
+            scrollView.contentView.scroll(to: CGPoint(x: 0, y: min(max(0, newY), maxY)))
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
         metalView.needsDisplay = true

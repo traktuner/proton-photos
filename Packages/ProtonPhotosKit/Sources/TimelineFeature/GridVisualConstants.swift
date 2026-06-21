@@ -13,7 +13,7 @@ enum GridVisualConstants {
 ///  • `aspectFit`  — letterbox the whole photo inside the cell (large/medium levels keep the photo).
 ///  • `squareFill` — center-crop the photo to fill a square cell, packed nearly gapless (the dense
 ///                   compact overview, like Apple Photos' most-zoomed-out grid).
-enum GridCropMode: Equatable {
+public enum GridCropMode: Equatable, Sendable {
     case aspectFit
     case squareFill
 }

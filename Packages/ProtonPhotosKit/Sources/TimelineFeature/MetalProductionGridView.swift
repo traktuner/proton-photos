@@ -109,7 +109,7 @@ struct MetalProductionGridView: NSViewRepresentable {
     }
 
     private func wireProxy(host: MetalGridScrollHost, levelBinding: Binding<Int>) {
-        let levelCount = JustifiedCollectionLayout.levels.count
+        let levelCount = host.coordinator.levelCount   // engine ladder (incl. the larger level 0)
         let stepIn = { levelBinding.wrappedValue = max(0, levelBinding.wrappedValue - 1) }
         let stepOut = { levelBinding.wrappedValue = min(levelCount - 1, levelBinding.wrappedValue + 1) }
         // Trackpad pinch mirrors the +/- buttons (LEGACY discrete path only — the detent path is continuous).
