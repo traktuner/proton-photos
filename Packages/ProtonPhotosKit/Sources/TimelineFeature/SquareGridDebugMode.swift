@@ -53,6 +53,15 @@ public enum SquareGridDebugMode {
         return hsv(h: hue, s: 0.62, v: brightness)
     }
 
+    /// A stable color keyed ONLY by GLOBAL INDEX (identity) — used by the synthetic transition path so a given
+    /// photo keeps its colour as it fades. If an identity ever flew across the grid, its colour would visibly
+    /// translate; with the crossfade it fades in/out in place instead.
+    public static func color(forIndex index: Int) -> SIMD4<Float> {
+        let hue = Float((index &* 137) % 360) / 360          // golden-ish stride for well-spread hues
+        let brightness: Float = (index & 1 == 0) ? 0.90 : 0.74
+        return hsv(h: hue, s: 0.66, v: brightness)
+    }
+
     private static func hsv(h: Float, s: Float, v: Float) -> SIMD4<Float> {
         let i = Int(h * 6) % 6
         let f = h * 6 - Float(Int(h * 6))

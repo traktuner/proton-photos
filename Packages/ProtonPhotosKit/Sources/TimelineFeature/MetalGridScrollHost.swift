@@ -59,6 +59,9 @@ final class MetalGridScrollHost: NSView {
     /// Post-release commit-bridge timing (the geometry-only transaction→settled settle). Driven by the tick.
     private var bridgeStart: CFTimeInterval = 0
     private let bridgeDuration: CFTimeInterval = GridZoomCommitBridge.duration
+    /// Discrete +/- normal-level crossfade timing (the `focusRowRelayout` visual transition). Driven by the tick.
+    private var transitionStart: CFTimeInterval = 0
+    private let transitionDuration: CFTimeInterval = 0.22
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default) {
         guard let coordinator = MetalGridCoordinator(device: device, dataSource: dataSource, budget: budget) else { return nil }
@@ -303,7 +306,17 @@ final class MetalGridScrollHost: NSView {
 
     @objc private func step() {
         if coordinator.isCommitBridging { advanceCommitBridge() }
+        if coordinator.isNormalTransitioning { advanceNormalTransition() }
         if coordinator.hasPendingVisibleThumbnails { metalView.needsDisplay = true }
+    }
+
+    /// Advance the discrete +/- normal-level crossfade. The committed level/scroll are already settled; this
+    /// only drives the transient visual overlay's progress 0→1, then ends it → plain settled rendering.
+    private func advanceNormalTransition() {
+        let t = transitionDuration > 0 ? min(1, (CACurrentMediaTime() - transitionStart) / transitionDuration) : 1
+        coordinator.normalTransitionProgress = CGFloat(t)
+        metalView.needsDisplay = true
+        if t >= 1 { coordinator.endNormalTransition(); metalView.needsDisplay = true }
     }
 
     /// Advance the post-release commit bridge (geometry settle). When it completes, end it → normal settled
@@ -387,15 +400,25 @@ final class MetalGridScrollHost: NSView {
         let anchorPoint = anchorContentPoint ?? CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)
         let viewportPoint = CGPoint(x: anchorPoint.x, y: anchorPoint.y - origin.y)
         let trigger: GridZoomTrigger = newLevel < coordinator.level ? .toolbarPlus : .toolbarMinus   // plus = zoom in
+        // Arm an Apple-like crossfade for an ADJACENT normal-level (L0–L3 `focusRowRelayout`) step BEFORE the
+        // settle mutates level/scroll/phase. The settle below is unchanged — the crossfade is a transient
+        // overlay, so the committed end-state is byte-identical to the prior instant behaviour.
+        let armed = coordinator.armNormalLevelTransition(toLevel: newLevel, anchorContentPoint: anchorPoint, viewportPoint: viewportPoint)
         // Latches the committed column phase so the settled grid keeps the anchor's column (no fly).
         let newY = coordinator.settleScrollOffsetY(toLevel: newLevel, anchorContentPoint: anchorPoint, viewportPoint: viewportPoint, trigger: trigger)
         applyContentSize(coordinator.contentSize())
+        var appliedY = origin.y
         if let newY {
             let maxY = max(0, spacer.frame.height - vh)
-            scrollView.contentView.scroll(to: CGPoint(x: 0, y: min(max(0, newY), maxY)))
+            appliedY = min(max(0, newY), maxY)
+            scrollView.contentView.scroll(to: CGPoint(x: 0, y: appliedY))
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
         coordinator.logPostCommitAnchor()
+        if armed {
+            coordinator.finalizeNormalLevelTransition(toScrollY: appliedY)   // start the crossfade at the settled scroll
+            transitionStart = CACurrentMediaTime()
+        }
         metalView.needsDisplay = true
     }
 

@@ -183,6 +183,41 @@ enum GridZoomCommitLog {
     }
 }
 
+// MARK: - Normal-level visual transition diagnostics
+//
+// `[GridTransition]` traces the L0–L3 `focusRowRelayout` crossfade (`GridNormalZoomVisualPlanner`) so a
+// flying identity is impossible to miss: `flyingIdentityDetected` / `maxIdentityMovementPx` are emitted every
+// step. begin (once) → frame (throttled per step) → end (on settle).
+@MainActor
+enum GridTransitionLog {
+    static func begin(_ d: GridTransitionDiagnostics) {
+        PhotoDiagnostics.shared.emit("GridTransition", [
+            "phase": "begin", "kind": d.kind.rawValue,
+            "sourceLevel": "\(d.sourceLevel)", "targetLevel": "\(d.targetLevel)",
+            "anchorGlobalIndex": "\(d.anchorGlobalIndex)", "focusRowIndices": "\(d.focusRowIndices)",
+            "sourceVisibleCount": "\(d.sourceVisibleCount)", "targetVisibleCount": "\(d.targetVisibleCount)",
+        ])
+    }
+
+    static func frame(_ d: GridTransitionDiagnostics) {
+        PhotoDiagnostics.shared.emit("GridTransition", [
+            "phase": "frame", "progress": String(format: "%.2f", d.progress),
+            "focusAnchorStable": "\(d.focusAnchorStable)", "targetOnlyCount": "\(d.targetOnlyCount)",
+            "sourceOnlyCount": "\(d.sourceOnlyCount)", "replacementCount": "\(d.replacementCount)",
+            "flyingIdentityDetected": "\(d.flyingIdentityDetected)",
+            "maxIdentityMovementPx": String(format: "%.1f", d.maxIdentityMovementPx),
+        ], throttleSeconds: 0.1)
+    }
+
+    static func end(completed: Bool, maxIdentityMovementPx: CGFloat, focusRowStable: Bool) {
+        PhotoDiagnostics.shared.emit("GridTransition", [
+            "phase": "end", "completed": "\(completed)",
+            "maxIdentityMovementPx": String(format: "%.1f", maxIdentityMovementPx),
+            "focusRowStable": "\(focusRowStable)",
+        ])
+    }
+}
+
 // MARK: - Commit bridge (pure geometry-only release settle)
 //
 // The release bridge from the `GridZoomTransaction` final frame → the settled `GridFramePlan`. GEOMETRY ONLY:

@@ -173,18 +173,48 @@ Production `TimelineFeature` source must **never** reintroduce any of:
 
 ---
 
-## 13. Future transition effects (high-level plan)
+## 13. Transition effects
 
-The next branch adds Apple-style level-transition effects. **Not implemented here.** When built, effects must be
-**consumers** of the existing contract:
+Apple-style level-transition effects are **consumers** of the existing contract — they add NO geometry
+ownership and cross NONE of the boundaries above.
 
 **Inputs an effect may consume:** the source `GridFramePlan`, the target `GridFramePlan`, the
-`GridZoomTransaction` focus row, and the level `transitionKind` (`focusRowRelayout` / `overviewWarp` /
+`GridZoomTransaction` focus row/frame, and the level `transitionKind` (`focusRowRelayout` / `overviewWarp` /
 `denseOverviewZoom`).
 
-**An effect may:** in-place fade/crossfade per cell · target-slot fade-in · an overview "warp" for L3→L4 · a
-dense-overview transition for L4→L5.
+**An effect may:** in-place fade/crossfade per cell · target-slot fade-in · source-slot fade-out · an overview
+"warp" for L3→L4 · a dense-overview transition for L4→L5.
 
 **An effect must NOT:** animate a thumbnail *identity* flying from its old slot to a new slot · reintroduce
 `sourcePlate`/`targetBackdrop` · compute any geometry in the renderer · derive outer rects from media aspect
 ratio · change the engine/fitter/resize ownership boundaries above.
+
+### 13.1 Implemented: normal-level `focusRowRelayout` crossfade (L0↔L1↔L2↔L3)
+
+The FIRST effect ships: `GridNormalZoomVisualPlanner` (`GridNormalZoomVisualPlan.swift`) — a **pure**,
+AppKit-free planner that turns a discrete +/- step between adjacent NORMAL levels into an Apple-like crossfade.
+
+- **Trigger:** the discrete +/- (toolbar/keyboard) path only, in the non-bottom-pinned state, gated by
+  `MetalGridFocusRowTransitionFlag` (default ON; flip via `MetalGrid.focusRowTransition`). The continuous
+  trackpad pinch (already an anchored uniform scale via `GridZoomTransaction`) is untouched. The committed
+  level/scroll/phase are set SYNCHRONOUSLY exactly as before — the crossfade is a transient visual overlay, so
+  the settled end-state is byte-identical to the prior snap.
+- **Model (verified against Apple Photos macOS):** the focus band (the anchor's row, from the live
+  `GridZoomTransaction`) holds identity-stable + anchored under the cursor (it *scales* in place, never flies);
+  zoom-out fades NEW side neighbours IN, zoom-in fades outer neighbours OUT; outside the focus band, regions
+  crossfade by spatial overlap (target-only → fade-in, source-only → fade-out, occupant-change → replacement
+  crossfade). **Every tile's rect is taken VERBATIM from the source plan / target plan / transaction frame —
+  never a fresh `lerp(oldRect, newRect)`.** A UID may appear in two places mid-crossfade (its source rect
+  fading out + its target rect fading in); after the transition each UID appears only where the target says.
+- **Boundaries honoured:** the planner computes no slotSide/gap/pitch/columns/contentSize, does no hit-testing,
+  and never calls `TileContentFitter` — so the aspect/square toggle cannot change a single transition rect,
+  alpha, role, or the focus band. Content fitting + per-tile `alpha` stay in the renderer
+  (`MetalGridCoordinator.renderTransitionTiles`, reusing the existing `MetalGridQuad.alpha`). Diagnostics:
+  `[GridTransition]` (begin/frame/end) with `flyingIdentityDetected` / `maxIdentityMovementPx`.
+- **Guards:** `FocusRowRelayoutTransitionTests` (no-fly, focus-anchor-stable, zoom-in-drops / zoom-out-adds
+  neighbours, target/source fade, replacement crossfade, focus-replacement-suppressed, content-mode geometry
+  invariance, engine-geometry-only, overview-kinds-refused).
+
+**Still future / NOT implemented:** the overview transitions `overviewWarp` (L3→L4) and `denseOverviewZoom`
+(L4→L5). The normal planner explicitly REFUSES them (returns an empty, `handled == false` plan) so an overview
+step can never accidentally use the normal crossfade.

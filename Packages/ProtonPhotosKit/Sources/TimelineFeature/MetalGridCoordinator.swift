@@ -73,6 +73,36 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var bridgeDelta: GridZoomCommitDelta?
     var isCommitBridging: Bool { bridgeTransaction != nil }
 
+    // MARK: - Normal-level visual transition (discrete +/- crossfade; engine plans as the source of truth)
+    //
+    // The FIRST Apple-like level-transition effect, for the NORMAL levels L0↔L1↔L2↔L3 (`focusRowRelayout`).
+    // A discrete +/- step today snaps instantly; with the flag on it instead plays a short crossfade driven by
+    // `GridNormalZoomVisualPlanner` — a PURE consumer of the engine's source/target `GridFramePlan`s plus a
+    // live `GridZoomTransaction` focus band. NO identity ever flies old-rect→new-rect (the planner only fades
+    // source-out / target-in and holds the anchored focus band). The committed level/scroll/phase are set
+    // SYNCHRONOUSLY exactly as before (the crossfade is a transient visual overlay), so the settled end-state
+    // is byte-identical to the prior behaviour — the flag is an instant revert. The continuous trackpad pinch
+    // (already Apple-like anchored scale via the transaction) is untouched. NOT for the overview transitions.
+    private struct NormalTransition: Equatable {
+        let fromLevel: Int
+        let toLevel: Int
+        let fromScrollY: CGFloat
+        var toScrollY: CGFloat
+        let fromPhase: Int?
+        var toPhase: Int?
+        let anchorGlobalIndex: Int
+        let anchorLocalFraction: CGPoint
+        let cursorViewportPoint: CGPoint
+    }
+    private var pendingTransition: NormalTransition?      // armed at source level, before the settle mutates state
+    private var normalTransition: NormalTransition?       // active (finalized) transition
+    private var normalTransitionLoggedBegin = false
+    private var lastTransitionDiag: GridTransitionDiagnostics?
+    /// 0→1, advanced by the host's display-link tick; eased inside the planner.
+    var normalTransitionProgress: CGFloat = 0
+    /// True while a discrete-step normal-level crossfade is in flight (the host keeps ticking redraws).
+    var isNormalTransitioning: Bool { normalTransition != nil }
+
     // MARK: - Camera column phase (persistent, cursor-anchor preserving)
     //
     // The persistent COLUMN PHASE the settled grid is rendered with (engine-owned; single continuous run). On
@@ -182,6 +212,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         // Rebuild the canonical engine from the new section structure (single source of truth).
         engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts)
         committedPhase = nil                      // a stale phase could point past the new data → canonical
+        pendingTransition = nil; normalTransition = nil   // a mid-flight crossfade can't reference new data
+        normalTransitionLoggedBegin = false; lastTransitionDiag = nil
     }
 
     func flatIndex(forUID uid: PhotoUID) -> Int? { indexByUID[uid] }
@@ -415,6 +447,61 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                            viewportPoint: viewportPoint, level: lv, width: width, columnPhase: committedPhase).y
     }
 
+    // MARK: - Normal-level crossfade transition (discrete +/- step)
+
+    /// Arm a normal-level crossfade for a discrete +/- step IF eligible (flag on, single section, an adjacent
+    /// L0–L3 `focusRowRelayout` step, an anchor resolvable at the current level/phase). Call BEFORE the settle
+    /// mutates level/scroll/phase — it snapshots the SOURCE level/scroll/phase + the anchor. Returns whether a
+    /// transition was armed; the host completes it with `finalizeNormalLevelTransition(toScrollY:)` after the
+    /// settle. No-op (returns false) when ineligible → the caller keeps the prior instant behaviour.
+    func armNormalLevelTransition(toLevel rawTo: Int, anchorContentPoint: CGPoint, viewportPoint: CGPoint) -> Bool {
+        pendingTransition = nil
+        guard MetalGridFocusRowTransitionFlag.isEnabled else { return false }
+        let from = level
+        let to = engine.clampLevel(rawTo)
+        guard abs(to - from) == 1 else { return false }                       // single adjacent step only
+        guard engine.sectionCount <= 1, totalItems > 0 else { return false }  // transaction is single-section
+        // Only the NORMAL↔NORMAL relayout transitions (the lower level's kind classifies the pair).
+        guard engine.metrics(level: min(from, to)).transitionKindToNext == .focusRowRelayout else { return false }
+        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 1
+        guard width > 1 else { return false }
+        let fromPhase = currentPhase()
+        guard let a = engine.anchorItem(nearContentPoint: anchorContentPoint, level: from, width: width, columnPhase: fromPhase) else { return false }
+        let fromScrollY = clipView?.bounds.origin.y ?? 0
+        pendingTransition = NormalTransition(fromLevel: from, toLevel: to, fromScrollY: fromScrollY, toScrollY: fromScrollY,
+                                             fromPhase: fromPhase, toPhase: nil, anchorGlobalIndex: a.flatIndex,
+                                             anchorLocalFraction: a.localFraction, cursorViewportPoint: viewportPoint)
+        return true
+    }
+
+    /// Complete a previously-armed transition with the ACTUAL settled scroll Y (and now-committed phase). Starts
+    /// the crossfade at progress 0. No-op if nothing was armed.
+    func finalizeNormalLevelTransition(toScrollY: CGFloat) {
+        guard var t = pendingTransition else { return }
+        pendingTransition = nil
+        t.toScrollY = toScrollY
+        t.toPhase = currentPhase()
+        normalTransition = t
+        normalTransitionProgress = 0
+        normalTransitionLoggedBegin = false
+        lastTransitionDiag = nil
+        requestRedraw()
+    }
+
+    /// Drop any armed-but-not-finalized transition (the caller decided not to animate).
+    func cancelNormalLevelTransition() { pendingTransition = nil }
+
+    /// End the crossfade → normal settled rendering at the committed level. Logs `[GridTransition] end`.
+    func endNormalTransition() {
+        if let d = lastTransitionDiag {
+            GridTransitionLog.end(completed: true, maxIdentityMovementPx: d.maxIdentityMovementPx, focusRowStable: d.focusAnchorStable)
+        }
+        normalTransition = nil
+        normalTransitionLoggedBegin = false
+        lastTransitionDiag = nil
+        requestRedraw()
+    }
+
     /// A photo's cell rect in CONTENT coordinates at the current level/width (nil if unknown).
     func cellContentRect(forUID uid: PhotoUID) -> CGRect? {
         guard let index = indexByUID[uid] else { return nil }
@@ -488,6 +575,12 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             drawCommitBridge(in: view, viewportSize: viewportSize, now: now)
             return
         }
+        // Normal-level crossfade (discrete +/- step) — a transient visual overlay over the (already-committed)
+        // settled target. When it ends, the next frame is the plain settled render at the same level/scroll.
+        if let nt = normalTransition {
+            drawNormalTransition(nt, in: view, viewportSize: viewportSize, now: now)
+            return
+        }
         // THE canonical production path: input → engine → GridFramePlan → renderer draws exactly that plan.
         drawEngineFrame(in: view, clip: clip, viewportSize: viewportSize, now: now)
     }
@@ -529,6 +622,126 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                 visibleRect: CGRect(origin: scrollOffset, size: viewportSize),
                                 contentSize: settledContentSize, now: now)
     }
+
+    /// The normal-level crossfade: build the SOURCE and TARGET settled `GridFramePlan`s (both in the same
+    /// viewport frame, anchor at the same point) plus the live transaction's focus band, hand them to the PURE
+    /// `GridNormalZoomVisualPlanner`, and draw the resulting tiles with per-tile alpha. The planner owns ALL
+    /// classification; the coordinator only maps tile → quad (texture by globalIndex, content fit by
+    /// `TileContentFitter`, alpha from the tile). No geometry math here, no rect lerp, no second surface.
+    private func drawNormalTransition(_ nt: NormalTransition, in view: MTKView, viewportSize: CGSize, now: CFTimeInterval) {
+        let overscan = budget.overscanFraction * viewportSize.height
+        let progress = min(max(normalTransitionProgress, 0), 1)
+        // Source & target settled plans, each at its OWN scroll/phase but mapped into the SAME viewport space.
+        let sourcePlan = engine.framePlan(level: nt.fromLevel, viewportSize: viewportSize,
+                                          scrollOffset: CGPoint(x: 0, y: nt.fromScrollY), overscan: overscan, columnPhase: nt.fromPhase)
+        let targetPlan = engine.framePlan(level: nt.toLevel, viewportSize: viewportSize,
+                                          scrollOffset: CGPoint(x: 0, y: nt.toScrollY), overscan: overscan, columnPhase: nt.toPhase)
+        // The focus band's source of truth: a transaction pinned at the cursor, sampled at the eased continuous
+        // level so the anchored neighbourhood scales smoothly between source and target density.
+        let tx = GridZoomTransaction(totalItems: totalItems, anchorGlobalIndex: nt.anchorGlobalIndex,
+                                     anchorViewportPoint: nt.cursorViewportPoint, anchorLocalFraction: nt.anchorLocalFraction,
+                                     levels: engine.levels, sourceLevel: nt.fromLevel)
+        let eased = Self.smoothstep(progress)
+        let continuous = CGFloat(nt.fromLevel) + (CGFloat(nt.toLevel) - CGFloat(nt.fromLevel)) * eased
+        let txFrame = tx.frame(continuousLevel: continuous, viewportSize: viewportSize, overscan: overscan)
+
+        let input = GridTransitionVisualInput(sourcePlan: sourcePlan, targetPlan: targetPlan, transactionFrame: txFrame,
+                                              transitionKind: .focusRowRelayout, anchorGlobalIndex: nt.anchorGlobalIndex,
+                                              cursorViewportPoint: nt.cursorViewportPoint, progress: progress,
+                                              contentMode: effectiveDisplayMode)
+        let plan = GridNormalZoomVisualPlanner.plan(input)
+        if !normalTransitionLoggedBegin { GridTransitionLog.begin(plan.diagnostics); normalTransitionLoggedBegin = true }
+        GridTransitionLog.frame(plan.diagnostics)
+        lastTransitionDiag = plan.diagnostics
+
+        let diagRect = CGRect(x: 0, y: nt.toScrollY, width: viewportSize.width, height: viewportSize.height)
+        let settledContentSize = engine.contentSize(level: nt.toLevel, width: viewportSize.width, columnPhase: nt.toPhase)
+        if debugSyntheticGrid {
+            renderSyntheticTransition(in: view, tiles: plan.tiles, viewportSize: viewportSize)
+            hasPendingVisibleThumbnails = false
+            publishLightDiagnostics(visibleCount: plan.tiles.count, realCount: plan.tiles.count, cellCount: plan.tiles.count,
+                                    visibleRect: diagRect, contentSize: settledContentSize, now: now)
+            return
+        }
+        let realCount = renderTransitionTiles(in: view, tiles: plan.tiles, viewportSize: viewportSize)
+        publishLightDiagnostics(visibleCount: plan.tiles.count, realCount: realCount, cellCount: plan.tiles.count,
+                                visibleRect: diagRect, contentSize: settledContentSize, now: now)
+    }
+
+    /// Draw transition tiles with real thumbnails: texture by globalIndex, content fit by `TileContentFitter`
+    /// (so the aspect/square toggle still only changes the inner fit), per-tile alpha for the crossfade, drawn
+    /// back→front by `zIndex`. A globalIndex may legitimately appear twice (source-fade + target-fade) — each
+    /// is a separate pinned quad, never one tile sliding between rects. Returns the real-texture count.
+    @discardableResult
+    private func renderTransitionTiles(in view: MTKView, tiles: [GridTransitionVisualTile], viewportSize: CGSize) -> Int {
+        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
+        let flatUIDs = dataSource.flatUIDs
+        let pureViewport = CGRect(origin: .zero, size: viewportSize)
+        // Stream textures for the union of tile UIDs (dedup; a crossfade lists a UID twice).
+        var visibleUIDs: [PhotoUID] = []
+        var overscanUIDs: [PhotoUID] = []
+        var seen: Set<PhotoUID> = []
+        for t in tiles where t.globalIndex >= 0 && t.globalIndex < flatUIDs.count {
+            let uid = flatUIDs[t.globalIndex]
+            guard seen.insert(uid).inserted else { continue }
+            if t.rect.intersects(pureViewport) { visibleUIDs.append(uid) } else { overscanUIDs.append(uid) }
+        }
+        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
+
+        // Back→front draw order (stable within a zIndex), so premultiplied-over alpha composites correctly.
+        let ordered = tiles.enumerated().sorted { ($0.element.zIndex, $0.offset) < ($1.element.zIndex, $1.offset) }.map(\.element)
+        let displayMode = effectiveDisplayMode
+        var backgrounds: [MetalGridQuad] = []
+        var images: [MetalGridQuad] = []
+        var imageTextures: [MTLTexture] = []
+        var realCount = 0
+        for t in ordered where t.globalIndex >= 0 && t.globalIndex < flatUIDs.count {
+            let uid = flatUIDs[t.globalIndex]
+            let cell = t.rect                                  // viewport-space, square (planner guarantee)
+            let r = cellRadius(cardRadius, cell: cell)
+            let a = Float(min(max(t.alpha, 0), 1))
+            if cache.isResident(uid) {
+                cache.noteUsed(uid)
+                let texture = cache.texture(for: uid)
+                let fit = TileContentFitter.fit(slotRect: cell,
+                                                mediaPixelSize: CGSize(width: texture.width, height: texture.height),
+                                                displayMode: displayMode)
+                images.append(MetalGridQuad(rect: fit.contentRect, uvMin: fit.uvMin, uvMax: fit.uvMax, radius: r, alpha: a))
+                imageTextures.append(texture)
+                realCount += 1
+            } else {
+                backgrounds.append(MetalGridQuad(rect: cell, radius: r, alpha: a))
+            }
+        }
+        cache.evictToBudget()
+        renderer.render(in: view, viewportSize: viewportSize, groups: [
+            MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: backgrounds),
+            MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
+        ])
+        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
+        return realCount
+    }
+
+    /// Synthetic transition: one solid square per tile, coloured by GLOBAL INDEX (stable per identity) with the
+    /// tile's alpha. Validates the crossfade WITHOUT thumbnails — if any identity flew, you'd see a coloured
+    /// square translate; instead identities fade in/out in place while the focus band holds.
+    private func renderSyntheticTransition(in view: MTKView, tiles: [GridTransitionVisualTile], viewportSize: CGSize) {
+        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
+        let ordered = tiles.enumerated().sorted { ($0.element.zIndex, $0.offset) < ($1.element.zIndex, $1.offset) }.map(\.element)
+        var quads: [MetalGridQuad] = []
+        quads.reserveCapacity(ordered.count)
+        for t in ordered {
+            let r = cellRadius(cardRadius, cell: t.rect)
+            quads.append(MetalGridQuad(rect: t.rect, radius: r, alpha: Float(min(max(t.alpha, 0), 1)),
+                                       color: SquareGridDebugMode.color(forIndex: t.globalIndex), mode: .solid))
+        }
+        cache.evictToBudget()
+        renderer.render(in: view, viewportSize: viewportSize,
+                        groups: [MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: quads)])
+    }
+
+    /// Smoothstep easing (no spring / no bounce) for the transition's continuous-level + progress.
+    private static func smoothstep(_ x: CGFloat) -> CGFloat { let t = min(max(x, 0), 1); return t * t * (3 - 2 * t) }
 
     // MARK: - Canonical engine render: GridFramePlan → Metal quads (no edge-fill, no second surface)
 
