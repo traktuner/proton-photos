@@ -138,7 +138,7 @@ public actor ThumbnailFeed {
 
     /// Visible cell asks for its thumbnail to be fetched soon. Cheap + idempotent.
     public func requestPriority(_ uid: PhotoUID, priority requestedPriority: ThumbnailPriority = .visibleNow) {
-        PhotoDiagnostics.shared.recordDiskReadDuringPinch()
+        PhotoDiagnostics.shared.recordDiskPresenceCheckDuringPinch()
         let diskHit = cache.has(uid)
         diskPresence.set(uid, present: diskHit)
         guard !diskHit else {
@@ -428,7 +428,7 @@ public actor ThumbnailFeed {
             } ?? priority.index(before: priority.endIndex)
             let uid = priority.remove(at: bestIndex)
             priorityByUID.removeValue(forKey: uid)
-            PhotoDiagnostics.shared.recordDiskReadDuringPinch()
+            PhotoDiagnostics.shared.recordDiskPresenceCheckDuringPinch()
             let diskHit = cache.has(uid)
             diskPresence.set(uid, present: diskHit)
             if !diskHit { out.append(uid) } else { prefetchDiskHit += 1 }

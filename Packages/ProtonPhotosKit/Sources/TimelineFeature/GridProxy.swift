@@ -18,6 +18,9 @@ public final class GridProxy {
     /// Scrolls the grid so the photo is vertically centred (used before a fly-back-to-cell close).
     public var scrollToItem: ((PhotoItem) -> Void)?
 
+    /// Scrolls to the newest timeline position. The grid is ordered oldest at top, newest at bottom.
+    public var scrollToLatest: (() -> Void)?
+
     /// The `+` toolbar button: one discrete zoom-IN step (bigger thumbnails). Wired to the SAME
     /// `zoomInStep` the trackpad pinch-in calls, so the button and pinch are identical by construction.
     public var zoomIn: (() -> Void)?
@@ -25,4 +28,16 @@ public final class GridProxy {
     /// The `−` toolbar button: one discrete zoom-OUT step (smaller thumbnails). Wired to the SAME
     /// `zoomOutStep` the trackpad pinch-out calls.
     public var zoomOut: (() -> Void)?
+
+    /// The aspect/square toolbar toggle: flip the NORMAL-level (L0–L3) thumbnail content fit between
+    /// aspectFitInsideSquare and squareFillCrop. Pure content-fit change — never mutates level/zoom/scroll/
+    /// phase/geometry. Ignored on the overview levels (L4–L5, square-only).
+    public var toggleContentMode: (() -> Void)?
+
+    /// Set the NORMAL-level content-mode preference explicitly (used by the toolbar's two-state control).
+    public var setContentMode: ((TileContentDisplayMode) -> Void)?
+
+    /// Query the live content-mode state for rendering the toolbar control (current mode + whether the
+    /// toggle is available at the current level). Returns nil before the grid is wired.
+    public var contentModeState: (() -> (mode: TileContentDisplayMode, toggleAvailable: Bool))?
 }

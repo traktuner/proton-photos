@@ -6,21 +6,25 @@ import MediaCache
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var level: Int
+    /// Retained for source compatibility with the public init; the production grid no longer consults media
+    /// aspect for layout (the engine is square-only; aspect lives only in `TileContentFitter`).
     private let aspects: AspectRegistry
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
     private let proxy: GridProxy?
     private let selectionMode: Bool
     private let onSelectionChange: (Set<PhotoUID>) -> Void
     private let media: FullMediaProvider?
+    private let metadataProvider: PhotoMetadataProvider?
     private let favoriteUIDs: Set<PhotoUID>
 
     public init(
         model: TimelineViewModel,
         aspects: AspectRegistry,
-        level: Binding<Int> = .constant(2),
+        level: Binding<Int> = .constant(3),
         proxy: GridProxy? = nil,
         selectionMode: Bool = false,
         media: FullMediaProvider? = nil,
+        metadataProvider: PhotoMetadataProvider? = nil,
         favoriteUIDs: Set<PhotoUID> = [],
         onSelectionChange: @escaping (Set<PhotoUID>) -> Void = { _ in },
         onOpen: @escaping (PhotoItem, [PhotoItem]) -> Void = { _, _ in }
@@ -31,6 +35,7 @@ public struct TimelineView: View {
         self.proxy = proxy
         self.selectionMode = selectionMode
         self.media = media
+        self.metadataProvider = metadataProvider
         self.favoriteUIDs = favoriteUIDs
         self.onSelectionChange = onSelectionChange
         self.onOpen = onOpen
@@ -46,30 +51,29 @@ public struct TimelineView: View {
             case let .failed(message):
                 errorState(message)
             case let .loaded(sections):
-                // Precompute aspect ratios here (MainActor). Reading the registry establishes the
-                // observation dependency, so the grid re-justifies as ratios are learned.
-                let _ = aspects.version
-                let sectionAspects = sections.map { section in
-                    section.items.map { min(max(aspects.aspect(for: $0.uid), 0.45), 3.2) }
-                }
-                PhotoGridView(
+                // Production timeline is MetalGrid-ONLY: the canonical `SquareTileGridEngine` owns all
+                // geometry (square slots). No legacy-grid fallback, no aspect-driven justified layout,
+                // no silent feature-flag switch — media aspect never reaches the layout (it lives only in
+                // `TileContentFitter`, inside the renderer).
+                MetalProductionGridView(
                     sections: sections,
                     allItems: model.allItems,
                     feed: model.feed,
-                    sectionAspects: sectionAspects,
                     level: $level,
                     onOpen: onOpen,
                     proxy: proxy,
                     selectionMode: selectionMode,
                     onSelectionChange: onSelectionChange,
                     favoriteUIDs: favoriteUIDs,
-                    media: media
+                    media: media,
+                    metadataProvider: metadataProvider
                 )
                 .ignoresSafeArea(edges: .bottom)
             }
         }
         .background(ProtonColor.backgroundNorm)
         .task { await model.load() }
+        .onAppear { MetalGridRuntime.logResolutionOnce() }
     }
 
     private var emptyState: some View {

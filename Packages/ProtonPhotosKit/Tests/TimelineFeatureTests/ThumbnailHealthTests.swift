@@ -30,52 +30,9 @@ struct ThumbnailHealthTests {
         #expect(after.ramDecoded)
     }
 
-    @Test func missingThumbnailPlaceholderTest() {
-        #expect(GridThumbnailFallback.placeholderImage.width > 0)
-        #expect(GridThumbnailFallback.placeholderImage.height > 0)
-    }
-
-    @Test func noDropMissingImageTest() {
-        let descriptor = GridTransitionSpriteDescriptor(
-            key: "missing",
-            image: nil,
-            imageSize: .zero,
-            fromFrame: CGRect(x: 1, y: 2, width: 30, height: 40),
-            toFrame: CGRect(x: 1, y: 2, width: 30, height: 40),
-            fromAlpha: 1,
-            toAlpha: 1,
-            priority: 0
-        )
-        #expect(descriptor.image != nil)
-        #expect(descriptor.usedPlaceholderFallback)
-        #expect(descriptor.fromFrame == descriptor.toFrame)
-    }
-
-    @Test func thumbnailArrivesDuringPinchTest() {
-        let placeholder = GridTransitionSpriteDescriptor(
-            key: "__ph__",
-            image: nil,
-            imageSize: .zero,
-            fromFrame: CGRect(x: 4, y: 5, width: 60, height: 70),
-            toFrame: CGRect(x: 4, y: 5, width: 60, height: 70),
-            fromAlpha: 1,
-            toAlpha: 1,
-            priority: 0
-        )
-        let real = GridTransitionSpriteDescriptor(
-            key: "vol~arrived",
-            image: Self.testCGImage(),
-            imageSize: CGSize(width: 8, height: 8),
-            fromFrame: placeholder.fromFrame,
-            toFrame: placeholder.toFrame,
-            fromAlpha: 1,
-            toAlpha: 1,
-            priority: 0
-        )
-        #expect(real.fromFrame == placeholder.fromFrame)
-        #expect(real.toFrame == placeholder.toFrame)
-        #expect(real.key != placeholder.key)
-    }
+    // (Placeholder-image + GridTransitionSpriteDescriptor "no drop / arrives during pinch" tests were
+    // removed with the legacy GridThumbnailFallback / GridSpriteTransitionView. The Metal grid's
+    // placeholder-until-resident behavior is covered by MetalGridPlaceholderTests.)
 
     @Test func noMainThreadDecodeTest() async throws {
         let uid = PhotoUID(volumeID: "vol", nodeID: "no-main")
@@ -95,17 +52,8 @@ struct ThumbnailHealthTests {
         #expect(PhotoDiagnostics.shared.dbQueryCountDuringActivePinch() == 0)
     }
 
-    @Test func textureCacheHitTest() {
-        var stats = GridSpriteRenderStats()
-        stats.descriptorCount = 4
-        stats.renderedSpriteCount = 4
-        stats.atlasBuildCount = 1
-        stats.textureUploadCount = 1
-        let firstBuilds = stats.atlasBuildCount
-        stats.vertexBuildCount += 1
-        #expect(stats.atlasBuildCount == firstBuilds)
-        #expect(stats.textureUploadCount == 1)
-    }
+    // (textureCacheHitTest covered the deleted GridSpriteRenderStats atlas-build accounting; the Metal
+    // texture cache's upload dedup/budget is covered by MetalGridUploadDedupTests/UploadBudgetTests.)
 
     @Test func prefetchProgressTest() async throws {
         // Unique nodeID per run: the prefetch resume-checkpoint is persisted in UserDefaults keyed by

@@ -50,80 +50,126 @@ public struct PhotoViewerView: View {
 
     public var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            // Warm Apple-Photos background fills the whole window (behind the now-opaque top bar too).
+            ViewerVisualConstants.backgroundColor.ignoresSafeArea()
 
-            content
+            viewerBody
 
             loadingOverlay
 
-            infoPanel
-            controls
+            navigationControls
             shortcuts
         }
         .onAppear { model.start() }
+        .onDisappear { model.stop() }   // closing cancels in-flight work + stops playback
         .onHover { hovering = $0 }
         .onExitCommand { onClose() }   // Esc closes the photo
     }
 
-    @ViewBuilder private var infoPanel: some View {
-        if model.showInfo {
+    /// The media + info inspector. This view does NOT ignore the top safe area: the native window toolbar
+    /// is the viewer's opaque top bar, so SwiftUI already lays this region out *below* it. The media is
+    /// laid out in its final frame from the first frame — no extra toolbar offset, no shrink-then-settle,
+    /// no black top gap.
+    private var viewerBody: some View {
+        GeometryReader { geometry in
+            let content = CGRect(origin: .zero, size: geometry.size)
+            let inspectorWidth = model.showInfo ? ViewerChromeLayout.clampedInspectorWidth(in: content) : 0
             HStack(spacing: 0) {
-                Spacer()
-                InfoPanelView(item: model.current, metadata: model.metadata) {
-                    withAnimation(.easeInOut(duration: 0.25)) { model.toggleInfo() }
+                self.content
+                    .frame(width: max(0, content.width - inspectorWidth), height: content.height)
+                    .clipped()
+                if model.showInfo {
+                    InfoPanelView(item: model.current, metadata: model.metadata) {
+                        withAnimation(.easeInOut(duration: 0.25)) { model.toggleInfo() }
+                    }
+                    .frame(width: inspectorWidth, height: content.height)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
-                .transition(.move(edge: .trailing))
             }
-            .ignoresSafeArea()
         }
     }
 
     @ViewBuilder private var content: some View {
         if let player = model.player {
             PlayerView(player: player)             // single AVPlayer (streaming or downloaded)
-                .ignoresSafeArea()
         } else if let image = model.image {
             ZoomableImageView(image: image, onPinchClose: onClose)   // pinch-zoom + pinch-out-to-close
-                .ignoresSafeArea()
         }
     }
 
-    /// Loading / error affordance for the media (image original or video). Shows a real percentage
-    /// while bytes download, a spinner while resolving, and a user-visible error if playback fails —
-    /// never an infinite spinner once the video path reports `.failed`.
+    /// Loading / error affordance for the media (image original or video). The cardinal rule: this is
+    /// driven entirely by `videoState`, so the UI is always in exactly one of — preparing, buffering
+    /// (with a real reason), playing (no overlay), or failed (readable error + Retry). There is no
+    /// branch that can leave a spinner up forever.
     @ViewBuilder private var loadingOverlay: some View {
-        if let message = model.videoState.errorMessage {
-            VStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 30))
-                    .foregroundStyle(.white)
-                Text("Wiedergabe fehlgeschlagen")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text(message)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 320)
+        if let error = model.videoState.error {
+            failureCard(error)
+        } else if model.videoState.isBusy {
+            // Buffering/seeking sit OVER a live player (non-blocking, native controls still usable);
+            // resolving/downloading have no player yet, so they're a centered blocking spinner.
+            busyOverlay
+                .allowsHitTesting(false)
+        } else if model.player == nil && !model.isSharp && model.isLoadingOriginal {
+            imageLoadingOverlay   // still images: percent while the original downloads
+        }
+    }
+
+    @ViewBuilder private func failureCard(_ error: VideoPlaybackError) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 30))
+                .foregroundStyle(.white)
+            Text("Wiedergabe fehlgeschlagen")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+            Text(error.userMessage)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+            if error.isRetryable {
+                Button("Erneut versuchen") { model.retry() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white.opacity(0.2))
+                    .padding(.top, 4)
             }
-            .padding(22)
-            .glassEffect(in: RoundedRectangle(cornerRadius: 16))
-        } else if model.player == nil && !model.isSharp {
-            let progress = max(model.originalProgress, model.videoState.progress)
-            if model.isLoadingOriginal, progress > 0.001, progress < 0.995 {
-                VStack(spacing: 8) {
-                    ProgressView().controlSize(.large).tint(.white)
-                    Text("\(Int(progress * 100))%")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                }
-                .padding(18)
-                .glassEffect(in: RoundedRectangle(cornerRadius: 16))
-            } else {
+        }
+        .padding(22)
+        .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder private var busyOverlay: some View {
+        let progress = model.videoState.progress
+        if case .downloading = model.videoState, progress > 0.001, progress < 0.995 {
+            VStack(spacing: 8) {
                 ProgressView().controlSize(.large).tint(.white)
-                    .padding(16)
-                    .glassEffect(in: Circle())
+                Text("\(Int(progress * 100))%")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
             }
+            .padding(18)
+            .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+        } else {
+            ProgressView().controlSize(.large).tint(.white)
+                .padding(16)
+                .glassEffect(in: Circle())
+        }
+    }
+
+    @ViewBuilder private var imageLoadingOverlay: some View {
+        if model.originalProgress > 0.001, model.originalProgress < 0.995 {
+            VStack(spacing: 8) {
+                ProgressView().controlSize(.large).tint(.white)
+                Text("\(Int(model.originalProgress * 100))%")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .padding(18)
+            .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+        } else {
+            ProgressView().controlSize(.large).tint(.white)
+                .padding(16)
+                .glassEffect(in: Circle())
         }
     }
 
@@ -132,27 +178,7 @@ public struct PhotoViewerView: View {
 
     // MARK: Controls + shortcuts
 
-    @ViewBuilder private var controls: some View {
-        VStack {
-            HStack(spacing: 12) {
-                Spacer()
-                iconButton(isFavorite(model.current.uid) ? "heart.fill" : "heart", size: 40) {
-                    onToggleFavorite(model.current.uid)
-                }
-                iconButton("trash", size: 40) { onTrash(model.current) }
-                iconButton("info.circle", size: 40) {
-                    withAnimation(.easeInOut(duration: 0.25)) { model.toggleInfo() }
-                }
-                iconButton("xmark", size: 40) { onClose() }
-            }
-            Spacer()
-        }
-        .padding(18)
-        .padding(.trailing, model.showInfo ? 320 : 0)   // keep clear of the info panel
-        .opacity(hovering || model.showInfo ? 1 : 0)
-        .animation(.easeInOut(duration: 0.2), value: model.showInfo)
-        .animation(.easeInOut(duration: 0.15), value: hovering)
-
+    @ViewBuilder private var navigationControls: some View {
         HStack {
             iconButton("chevron.left", size: 40, enabled: model.canGoPrevious) { goPrevious() }
             Spacer()

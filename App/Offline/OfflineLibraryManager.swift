@@ -70,6 +70,7 @@ final class OfflineLibraryManager {
     func deleteOfflineCache() async {
         await cache.clear()
         await previewCache.clear()
+        VideoByteRangeCache.shared.clearAll()   // also drop streamed video blocks
         await refreshStatus()
     }
 

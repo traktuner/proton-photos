@@ -27,6 +27,8 @@ final class AppModel {
 
     private(set) var auth: AuthState = .checking
     private(set) var backend: BackendState = .idle
+    /// High-level client composition (uploads + albums), built alongside the backend.
+    private(set) var facade: ProtonClientFacade?
 
     private let store = SessionKeychainStore()
     private let authenticator = ProtonForkAuthenticator()
@@ -78,6 +80,7 @@ final class AppModel {
     func signOut() {
         backendTask?.cancel()
         backend = .idle
+        facade = nil
         store.clear()
         auth = .signedOut(error: nil)
     }
@@ -93,6 +96,8 @@ final class AppModel {
             guard let self else { return }
             do {
                 let bridge = try await DriveSDKBridge(session: session, store: store)
+                SDKCapabilities.current.log()
+                facade = ProtonClientFacade.make(bridge: bridge)
                 backend = .ready(bridge)
             } catch is CancellationError {
                 // ignore

@@ -22,10 +22,9 @@ struct InfoPanelView: View {
                 .padding(20)
             }
         }
-        .frame(width: 320)
+        .frame(width: ViewerChromeLayout.inspectorWidth)
         .frame(maxHeight: .infinity)
-        .glassEffect(in: RoundedRectangle(cornerRadius: 0))
-        .background(.black.opacity(0.2))
+        .background(.regularMaterial)
     }
 
     private var header: some View {

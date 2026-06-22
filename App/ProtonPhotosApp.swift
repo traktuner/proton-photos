@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import DesignSystem
-import GridZoomV3
 import TimelineFeature
 
 @main
@@ -20,16 +19,46 @@ struct ProtonPhotosApp: App {
         .defaultSize(width: 1080, height: 720)
         .windowToolbarStyle(.unified)
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("Upload Photos…") {
+                    NotificationCenter.default.post(
+                        name: .protonPhotosUploadPhotos,
+                        object: nil,
+                        userInfo: uploadCommandUserInfo(trigger: .menu)
+                    )
+                }
+                .keyboardShortcut("u", modifiers: [.command])
+                Button("Upload Folder…") {
+                    NotificationCenter.default.post(
+                        name: .protonPhotosUploadFolder,
+                        object: nil,
+                        userInfo: uploadCommandUserInfo(trigger: .menu)
+                    )
+                }
+                .keyboardShortcut("u", modifiers: [.command, .shift])
+                Divider()
+                Button("Show Uploads") {
+                    NotificationCenter.default.post(
+                        name: .protonPhotosShowUploadQueue,
+                        object: nil,
+                        userInfo: uploadCommandUserInfo(trigger: .menu)
+                    )
+                }
+            }
             CommandGroup(after: .sidebar) {
                 Button("Toggle Sidebar") {
                     NotificationCenter.default.post(name: .protonPhotosToggleSidebar, object: nil)
                 }
                 .keyboardShortcut("s", modifiers: [.command, .option])
+                Button("Refresh Library") {
+                    NotificationCenter.default.post(name: .protonPhotosRefreshLibrary, object: nil)
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
             }
-            // Debug ▸ open the isolated Grid-Zoom V3 prototype (synthetic tiles, no Proton data).
+            // Debug ▸ open the Metal Grid Lab (Metal-backed grid prototype — real library when available).
             CommandMenu("Debug") {
-                Button("GridZoom V3 Lab…") { openWindow(id: GridZoomV3WindowID) }
-                    .keyboardShortcut("g", modifiers: [.command, .option, .shift])
+                Button("Metal Grid Lab…") { openWindow(id: MetalGridLabWindowID) }
+                    .keyboardShortcut("m", modifiers: [.command, .option, .shift])
             }
         }
 
@@ -45,16 +74,17 @@ struct ProtonPhotosApp: App {
         .defaultSize(width: 340, height: 460)
         .defaultPosition(.topTrailing)
 
-        // Dev: isolated Grid-Zoom V3 prototype lab (Debug ▸ GridZoom V3 Lab… / ⌥⇧⌘G).
-        Window("GridZoom V3 Lab", id: GridZoomV3WindowID) {
-            GridZoomV3Lab()
+        // Dev: Metal Grid Lab (Debug ▸ Metal Grid Lab… / ⌥⇧⌘M). Renders the real library when
+        // the main UI has published it, else synthetic streaming tiles.
+        Window("Metal Grid Lab", id: MetalGridLabWindowID) {
+            MetalGridLab()
                 .preferredColorScheme(.dark)
         }
-        .defaultSize(width: 1100, height: 760)
+        .defaultSize(width: 1180, height: 820)
     }
 }
 
-let GridZoomV3WindowID = "gridzoom-v3-lab"
+let MetalGridLabWindowID = "metal-grid-lab"
 
 /// Makes the window title bar transparent + full-size, so content (the photo grid) extends up under
 /// the translucent Liquid-Glass toolbar — you see photos scroll through behind it, like Apple Photos.
@@ -99,8 +129,12 @@ struct RootView: View {
 
     @ViewBuilder private var signedIn: some View {
         switch model.backend {
-        case let .ready(backend):
-            MainView(model: model, backend: backend)
+        case .ready:
+            if let facade = model.facade {
+                MainView(model: model, facade: facade)
+            } else {
+                ProtonLoadingView(caption: "Building your library…")
+            }
         case let .failed(message):
             BackendErrorView(message: message, retry: { model.retryBackend() }, signOut: { model.signOut() })
         case .preparing, .idle:

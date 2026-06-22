@@ -1,0 +1,65 @@
+import Foundation
+import PhotosCore
+
+/// App-facing album operations. UI binds to this, never to the SDK/HTTP layer.
+public protocol AlbumManaging: Sendable {
+    var capabilities: AlbumCapabilities { get }
+    func listAlbums() async throws -> [AlbumSummary]
+    func createAlbum(name: String) async throws -> AlbumID
+    func addPhotos(_ photoUIDs: [PhotoUID], to albumID: AlbumID) async throws
+    func setAlbumCover(albumID: AlbumID, photoUID: PhotoUID) async throws
+}
+
+/// Default implementation over an injected `AlbumBackend`. Validates input and normalises errors so
+/// every UI/caller sees the same `AlbumError` surface regardless of which backend is wired.
+public actor AlbumsRepository: AlbumManaging {
+    private let backend: any AlbumBackend
+
+    public init(backend: any AlbumBackend) {
+        self.backend = backend
+    }
+
+    public nonisolated var capabilities: AlbumCapabilities { backend.capabilities }
+
+    public func listAlbums() async throws -> [AlbumSummary] {
+        guard backend.capabilities.canList else {
+            throw AlbumError.unsupported(operation: "List albums", gap: "no album listing backend is wired")
+        }
+        return try await backend.listAlbums()
+    }
+
+    public func createAlbum(name: String) async throws -> AlbumID {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw AlbumError.backend("Album name can’t be empty.")
+        }
+        guard backend.capabilities.canCreate else {
+            throw AlbumError.unsupported(
+                operation: "Create album",
+                gap: "the Proton SDK exposes no album API and album-node encryption isn’t implemented"
+            )
+        }
+        return try await backend.createAlbum(name: trimmed)
+    }
+
+    public func addPhotos(_ photoUIDs: [PhotoUID], to albumID: AlbumID) async throws {
+        guard !photoUIDs.isEmpty else { return }
+        guard backend.capabilities.canAddPhotos else {
+            throw AlbumError.unsupported(
+                operation: "Add to album",
+                gap: "adding a photo re-encrypts its content key to the album key, which isn’t implemented"
+            )
+        }
+        try await backend.addPhotos(photoUIDs, to: albumID)
+    }
+
+    public func setAlbumCover(albumID: AlbumID, photoUID: PhotoUID) async throws {
+        guard backend.capabilities.canSetCover else {
+            throw AlbumError.unsupported(
+                operation: "Set album cover",
+                gap: "the Proton SDK exposes no album-cover API and no encrypted-write HTTP path exists yet"
+            )
+        }
+        try await backend.setAlbumCover(albumID: albumID, photoUID: photoUID)
+    }
+}

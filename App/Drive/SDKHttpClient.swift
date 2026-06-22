@@ -42,17 +42,49 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         return result
     }
 
-    // MARK: Storage upload (absolute url)
+    // MARK: Storage upload (absolute url, streamed)
 
+    /// Streams an encrypted block to block storage. The SDK hands us a bound stream pair via
+    /// `StreamForUpload`: it writes encrypted bytes into the pair's output (pumped on the main run
+    /// loop by `openOutputStream()`), and `URLSession` reads them from the pair's input as the request
+    /// body. Storage URLs carry their own `pm-storage-token` in `headers`, so we add NO session auth.
     func requestUploadToStorage(
         method: String,
         url: String,
         content: StreamForUpload,
         headers: [(String, [String])]
     ) async -> Result<HttpClientResponse, NSError> {
-        // TODO(Phase 2): streaming block upload. Not needed for timeline/thumbnail viewing.
-        .failure(NSError(domain: "ProtonPhotos.SDKHttpClient", code: -2,
-                         userInfo: [NSLocalizedDescriptionKey: "Upload not implemented yet"]))
+        guard let requestURL = URL(string: url) else {
+            return .failure(NSError(domain: "ProtonPhotos.SDKHttpClient", code: -5,
+                                    userInfo: [NSLocalizedDescriptionKey: "Invalid storage upload URL"]))
+        }
+        var req = URLRequest(url: requestURL)
+        req.httpMethod = method
+        applyHeaders(&req, headers: headers)        // storage URLs are token-authed; no session headers
+        req.httpBodyStream = content.input
+
+        let streamError = ErrorBox()
+        content.onStreamError = { streamError.set($0) }
+        // Begin the SDK → output-stream pump (schedules on the main run loop).
+        await MainActor.run { content.openOutputStream() }
+
+        await rateLimit.waitIfNeeded()
+        do {
+            let (data, response) = try await urlSession.data(for: req)
+            guard let http = response as? HTTPURLResponse else {
+                return .failure(NSError(domain: "ProtonPhotos.SDKHttpClient", code: -6))
+            }
+            if http.statusCode == 429 { rateLimit.penalize(seconds: Self.retryAfter(http)) }
+            if http.statusCode >= 400 {
+                DebugLog.log("uploadStorage \(method) -> \(http.statusCode)")
+            }
+            return .success(HttpClientResponse(
+                data: data, headers: Self.headerPairs(http), statusCode: http.statusCode
+            ))
+        } catch {
+            // Prefer a stream-side error (encryption/producer) over the generic transport error.
+            return .failure((streamError.value ?? error) as NSError)
+        }
     }
 
     // MARK: Storage download (absolute url, streamed)
@@ -163,4 +195,12 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
             return (k, ["\(value)"])
         }
     }
+}
+
+/// Thread-safe one-shot holder for a stream-side upload error.
+private final class ErrorBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: Error?
+    func set(_ error: Error) { lock.withLock { if _value == nil { _value = error } } }
+    var value: Error? { lock.withLock { _value } }
 }
