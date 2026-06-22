@@ -118,24 +118,27 @@ import CoreGraphics
         }
     }
 
-    // 9. Window resize recomputes columns: different widths → valid, different column counts, no overlaps.
-    @Test func windowResizeRecomputesColumns() {
+    // 9. Window resize is RESOLUTION-INDEPENDENT: a level keeps the SAME column count at every width (tiles
+    // grow on a wider viewport), the grid still fills the width, and adjacent slots never overlap.
+    @Test func windowResizeKeepsColumnsAndGrowsTiles() {
         let e = engine()
-        var seen: Set<Int> = []
+        var sides: [CGFloat] = []
+        var columnsSeen: Set<Int> = []
         for w in [CGFloat(600), 900, 1280, 1920] {
             let plan = e.framePlan(level: 2, viewportSize: CGSize(width: w, height: 900), scrollOffset: CGPoint(x: 0, y: 3000), overscan: 0)
-            #expect(plan.columns >= 1)
+            #expect(plan.columns == e.metrics(level: 2).nominalColumns, "level 2 must keep its nominalColumns at width \(w)")
             #expect(plan.contentSize.width == w)
-            seen.insert(plan.columns)
-            // No horizontal overlap: adjacent slots in a full row are separated by exactly `gap`.
+            columnsSeen.insert(plan.columns)
+            sides.append(plan.slotSide)
             if let row = fullRows(plan).values.first?.sorted(by: { $0.column < $1.column }) {
                 for i in 1 ..< row.count {
-                    #expect(row[i].slotRect.minX - row[i - 1].slotRect.maxX >= plan.gap - eps)
+                    #expect(row[i].slotRect.minX - row[i - 1].slotRect.maxX >= plan.gap - eps) // no overlap
                 }
-                #expect(abs(row.last!.slotRect.maxX - w) < 1.0)  // still fills width at every size
+                #expect(abs(row.last!.slotRect.maxX - w) < 1.0)                                 // still fills width
             }
         }
-        #expect(seen.count > 1, "different widths must produce different column counts")
+        #expect(columnsSeen.count == 1, "column count must NOT change with width (resolution independent)")
+        for i in 1 ..< sides.count { #expect(sides[i] > sides[i - 1], "tiles must grow as the viewport widens") }
     }
 
     // 10. Hit testing uses the SQUARE slot rect — a point in the slot corner that an aspectFit inner rect
@@ -160,9 +163,13 @@ import CoreGraphics
     // square at every apparent level, and zooming out increases columns.
     @Test func zoomUsesMetrics() {
         let e = engine()
-        #expect(abs(e.apparentSlotSide(at: 2) - e.metrics(level: 2).slotSide) < eps)
-        let mid = e.apparentSlotSide(at: 2.5)
-        #expect(mid < e.metrics(level: 2).slotSide && mid > e.metrics(level: 3).slotSide) // between detents
+        let w = viewport.width
+        func nomSide(_ lvl: Int) -> CGFloat {
+            SquareTileGridEngine.nominalSlotSide(columns: e.metrics(level: lvl).nominalColumns, gap: e.metrics(level: lvl).gap, width: w)
+        }
+        #expect(abs(e.apparentSlotSide(at: 2, width: w) - nomSide(2)) < eps)        // at a detent → that level's derived side
+        let mid = e.apparentSlotSide(at: 2.5, width: w)
+        #expect(mid < nomSide(2) && mid > nomSide(3))                               // between detents
         let anchor = GridZoomAnchor(flatIndex: 1000, viewportPoint: CGPoint(x: 700, y: 450),
                                     contentFractionY: 0.5, relInCell: CGPoint(x: 0.5, y: 0.5))
         let inPlan = e.zoomFramePlan(continuousLevel: 2.0, viewportSize: viewport, anchor: anchor, overscan: 0)

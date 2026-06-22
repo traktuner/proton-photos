@@ -16,7 +16,11 @@ struct MainView: View {
 
     @State private var timelineModel: TimelineViewModel
     @State private var viewerModel: PhotoViewerModel?
-    @State private var level: Int = 3          // 0 = most zoomed in (largest tiles) … 6 = most zoomed out
+    @State private var level: Int = 3          // 0 = most zoomed in (largest, ~3 cols) … 5 = densest overview
+    // Aspect/square thumbnail toggle preference (normal levels L0–L3). Pushed to the grid coordinator; the
+    // overview levels (L4–L5) force squareFillCrop regardless. Toggling changes content fit ONLY, never layout.
+    // Initial default = aspectFitInsideSquare (matches the coordinator's default).
+    @State private var gridContentMode: TileContentDisplayMode = .aspectFitInsideSquare
     @State private var sidebarOpen: Bool
     @State private var sidebarWidth: CGFloat
     @State private var albums: [PhotoAlbum] = []
@@ -583,6 +587,7 @@ struct MainView: View {
                         .help("Larger thumbnails")
                         .disabled(level <= 0)
                 }
+                aspectSquareToggleButton
                 Menu {
                     Button("Sign out", role: .destructive) { model.signOut() }
                 } label: {
@@ -590,6 +595,22 @@ struct MainView: View {
                 }
             }
         }
+    }
+
+    /// Apple-Photos-style aspect/square thumbnail toggle. Switches `gridContentMode` between
+    /// aspectFitInsideSquare and squareFillCrop and pushes it to the grid coordinator — content fit ONLY, the
+    /// square slot geometry never changes. Disabled on the dense overview levels (L4–L5, square-only). The
+    /// glyph is an SF Symbol (or an in-app vector fallback) resolved by `AspectSquareToggleModel`; no raster.
+    private var aspectSquareToggleButton: some View {
+        Button {
+            gridContentMode = AspectSquareToggleModel.toggled(gridContentMode)
+            gridProxy.setContentMode?(gridContentMode)
+        } label: {
+            Image(nsImage: AspectSquareToggleModel.image(for: gridContentMode))
+        }
+        .help(AspectSquareToggleModel.accessibilityLabel(for: gridContentMode))
+        .accessibilityLabel(AspectSquareToggleModel.accessibilityLabel(for: gridContentMode))
+        .disabled(level >= 4)   // overview levels are square-only — the toggle is inert there
     }
 
     private var uploadToolbarMenu: some View {

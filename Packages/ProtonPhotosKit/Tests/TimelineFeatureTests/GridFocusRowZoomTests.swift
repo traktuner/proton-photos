@@ -133,25 +133,27 @@ import CoreGraphics
         #expect(!coord.contains("engine.zoomFramePlan("), "production must not re-resolve a stateless plan per frame")
     }
 
-    // LargerZoomLevelExistsTest — a new largest level was added at the front, bigger than the old largest.
+    // LargerZoomLevelExistsTest — the largest level (L0) is the lowest density (fewest columns, biggest tiles).
     @Test func largerZoomLevelExists() {
         let levels = SquareTileGridEngine.defaultLevels
-        #expect(levels.count == 7, "expected the added largest level (7 total)")
-        #expect(levels[0].slotSide >= 360, "new largest level should be ≥360pt: \(levels[0].slotSide)")
-        #expect(levels[0].slotSide > 260, "new largest must exceed the previous largest (260)")
+        #expect(levels.count == 6, "expected exactly six Apple-like levels")
+        #expect(levels[0].nominalColumns <= 3, "largest level should be ~3 columns: \(levels[0].nominalColumns)")
+        // The largest-level slot side (derived from nominalColumns) exceeds every denser level's at one width.
+        let w: CGFloat = 1440
+        let s0 = SquareTileGridEngine.nominalSlotSide(columns: levels[0].nominalColumns, gap: levels[0].gap, width: w)
+        let s1 = SquareTileGridEngine.nominalSlotSide(columns: levels[1].nominalColumns, gap: levels[1].gap, width: w)
+        #expect(s0 > s1, "L0 tiles must be physically larger than L1 at a fixed width")
     }
 
-    // (The "seamless commit via column phase" test was removed: the engine has no column-phase concept —
-    // the settled grid is always bottom-right anchored, and the release jump is handled by the host's scroll
-    // lock, not a phase. See ZoomAnchorPreservationTests / CursorAnchorZoomTests for commit anchoring.)
-
-    // LevelMetricsMonotonicTest — zooming out: slotSide strictly decreases, pitch strictly decreases, gap
-    // does not increase.
+    // LevelMetricsMonotonicTest — zooming out (rising level): nominalColumns strictly increases (density up),
+    // the derived slot side strictly decreases, gap does not increase.
     @Test func levelMetricsMonotonic() {
         let levels = SquareTileGridEngine.defaultLevels
+        let w: CGFloat = 1440
+        func side(_ i: Int) -> CGFloat { SquareTileGridEngine.nominalSlotSide(columns: levels[i].nominalColumns, gap: levels[i].gap, width: w) }
         for i in 1 ..< levels.count {
-            #expect(levels[i].slotSide < levels[i - 1].slotSide, "slotSide not decreasing at \(i)")
-            #expect(levels[i].pitch < levels[i - 1].pitch, "pitch not decreasing at \(i)")
+            #expect(levels[i].nominalColumns > levels[i - 1].nominalColumns, "nominalColumns not increasing at \(i)")
+            #expect(side(i) < side(i - 1), "derived slot side not decreasing at \(i)")
             #expect(levels[i].gap <= levels[i - 1].gap, "gap increased at \(i)")
         }
     }

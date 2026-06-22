@@ -101,7 +101,7 @@ final class MetalGridRenderer {
               let pass = view.currentRenderPassDescriptor,
               let commandBuffer = commandQueue.makeCommandBuffer() else { return }
         pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0.043, green: 0.039, blue: 0.035, alpha: 1)
+        pass.colorAttachments[0].clearColor = MetalGridPalette.clearColor   // uniform Apple-like dark surface
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             commandBuffer.commit(); return
         }

@@ -48,7 +48,7 @@ import CoreGraphics
     // MARK: 1 — CursorAnchorIdentitySurvivesCommitTest
     @Test func cursorAnchorIdentitySurvivesCommit() {
         for sourcePhase in scenarios {
-            for (s, t) in [(2, 4), (3, 1), (4, 6), (1, 5)] {
+            for (s, t) in [(2, 4), (3, 1), (4, 5), (1, 5)] {
                 let r = simulatePinch(sourceLevel: s, sourcePhase: sourcePhase, targetLevel: t, cursorVP: cursorVP, sourceScrollY: 5000)
                 #expect(r.txAnchor == r.displayed, "begin anchored \(r.txAnchor) ≠ displayed \(r.displayed) (phase \(String(describing: sourcePhase)))")
                 #expect(r.after == r.displayed, "after commit \(String(describing: r.after)) ≠ displayed \(r.displayed) (s\(s)→t\(t), phase \(String(describing: sourcePhase)))")
@@ -124,7 +124,7 @@ import CoreGraphics
     // MARK: 8 — Working84CaseStillWorksTest
     @Test func working84CaseStillWorks() {
         // A gesture starting from the canonical phase (e.g. right after bottom-pin reset) keeps working.
-        for (s, t) in [(2, 4), (4, 2), (3, 6)] {
+        for (s, t) in [(2, 4), (4, 2), (3, 5)] {
             let r = simulatePinch(sourceLevel: s, sourcePhase: nil, targetLevel: t, cursorVP: cursorVP, sourceScrollY: 5000)
             #expect(r.after == r.displayed, "canonical-phase gesture broke: s\(s)→t\(t)")
         }

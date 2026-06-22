@@ -28,4 +28,16 @@ public final class GridProxy {
     /// The `−` toolbar button: one discrete zoom-OUT step (smaller thumbnails). Wired to the SAME
     /// `zoomOutStep` the trackpad pinch-out calls.
     public var zoomOut: (() -> Void)?
+
+    /// The aspect/square toolbar toggle: flip the NORMAL-level (L0–L3) thumbnail content fit between
+    /// aspectFitInsideSquare and squareFillCrop. Pure content-fit change — never mutates level/zoom/scroll/
+    /// phase/geometry. Ignored on the overview levels (L4–L5, square-only).
+    public var toggleContentMode: (() -> Void)?
+
+    /// Set the NORMAL-level content-mode preference explicitly (used by the toolbar's two-state control).
+    public var setContentMode: ((TileContentDisplayMode) -> Void)?
+
+    /// Query the live content-mode state for rendering the toolbar control (current mode + whether the
+    /// toggle is available at the current level). Returns nil before the grid is wired.
+    public var contentModeState: (() -> (mode: TileContentDisplayMode, toggleAvailable: Bool))?
 }

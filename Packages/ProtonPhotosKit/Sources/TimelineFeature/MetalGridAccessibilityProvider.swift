@@ -22,8 +22,34 @@ final class MetalGridAccessibilityProvider {
         host.setAccessibilityLabel("Photo library grid")
     }
 
-    /// Rebuild the visible accessibility elements and assign them to the host.
+    // The full element rebuild (a framePlan + one NSAccessibilityElement per visible cell + coordinate
+    // conversions) is too heavy to run on EVERY viewport change — a live resize/scroll fires `invalidate()`
+    // per frame, which was a real jank source. Coalesce to ~10 Hz with a guaranteed trailing rebuild so the
+    // final state is always correct. VoiceOver does not need per-frame element frames.
+    private var lastRebuild: Date = .distantPast
+    private var trailingScheduled = false
+    private let minRebuildInterval: TimeInterval = 0.1
+
+    /// Request an accessibility-element rebuild (throttled). Safe to call on every viewport/selection change.
     func invalidate() {
+        let now = Date()
+        let since = now.timeIntervalSince(lastRebuild)
+        if since >= minRebuildInterval {
+            lastRebuild = now
+            rebuildNow()
+        } else if !trailingScheduled {
+            trailingScheduled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + (minRebuildInterval - since)) { [weak self] in
+                guard let self else { return }
+                self.trailingScheduled = false
+                self.lastRebuild = Date()
+                self.rebuildNow()
+            }
+        }
+    }
+
+    /// Rebuild the visible accessibility elements and assign them to the host (the actual work).
+    private func rebuildNow() {
         guard let host, let coordinator, let window = host.window else { return }
         let hostHeight = host.bounds.height
         var elements: [NSAccessibilityElement] = []
@@ -47,13 +73,16 @@ final class MetalGridAccessibilityProvider {
         host.setAccessibilityChildren(elements)
     }
 
+    /// Shared formatter — `DateFormatter()` is expensive to allocate, and `label(for:)` is called once per
+    /// visible cell per rebuild, so a per-call instance was a real cost.
+    private static let labelFormatter: DateFormatter = {
+        let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .short; return df
+    }()
+
     /// VoiceOver label for a photo: kind + capture date.
     static func label(for item: PhotoItem) -> String {
-        let df = DateFormatter()
-        df.dateStyle = .medium
-        df.timeStyle = .short
         let kind = item.isVideo ? "Video" : "Photo"
-        return "\(kind), \(df.string(from: item.captureTime))"
+        return "\(kind), \(labelFormatter.string(from: item.captureTime))"
     }
 }
 

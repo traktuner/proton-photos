@@ -108,6 +108,6 @@ import CoreGraphics
             Issue.record("gap did not resolve to an item"); return
         }
         #expect(resolved.flatIndex == a.index || resolved.flatIndex == b.index, "must resolve to an adjacent cell")
-        #expect(abs(resolved.slotRect.midY - gapPoint.y) < e.metrics(level: level).pitch, "resolved item must be in the focus row")
+        #expect(abs(resolved.slotRect.midY - gapPoint.y) < e.resolvedMetrics(level: level, width: width).pitch, "resolved item must be in the focus row")
     }
 }

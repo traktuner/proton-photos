@@ -93,9 +93,18 @@ public struct GridZoomTransaction: Equatable, Sendable {
     func lattice(continuousLevel x: CGFloat, width rawWidth: CGFloat) -> Lattice {
         let width = max(rawWidth, 1)
         let gap = apparentGap(at: x)
-        let target = apparentSlotSide(at: x)
-        // Columns fill the width (same rule as the settled grid); the rendered side is uniform & square.
-        let columns = max(1, Int((width + gap) / (target + gap)))
+        let target = apparentSlotSide(at: x, width: width)
+        // Columns fill the width. AT (or extremely near) an integer level use that level's nominalColumns
+        // EXACTLY — matching the settled grid, which uses fixedColumns. Deriving from the exact-fill side
+        // instead float-truncates to nc−1, and the commit would then fly the anchor a full column. Between
+        // levels (the live lens) derive from the apparent side (continuous reflow).
+        let columns: Int
+        let nearestLevel = x.rounded()
+        if abs(x - nearestLevel) < 1e-6, nearestLevel >= 0, Int(nearestLevel) < levels.count {
+            columns = max(1, levels[Int(nearestLevel)].nominalColumns)
+        } else {
+            columns = max(1, Int((width + gap) / (target + gap)))
+        }
         let side = (width - gap * CGFloat(columns - 1)) / CGFloat(columns)
         let pitch = side + gap
         // Pin the anchor under the cursor: its cell's local point sits at `anchorViewportPoint`.
@@ -155,12 +164,13 @@ public struct GridZoomTransaction: Equatable, Sendable {
     }
 
     // Apparent-metric interpolation (mirrors SquareTileGridEngine, with the soft rubber-band past the ends).
-    public func apparentSlotSide(at x: CGFloat) -> CGFloat {
+    public func apparentSlotSide(at x: CGFloat, width: CGFloat) -> CGFloat {
         let maxIndex = levels.count - 1
-        if x <= 0 { return levels[0].slotSide * (1 - x * 0.6) }
-        if x >= CGFloat(maxIndex) { return levels[maxIndex].slotSide }
+        func side(_ i: Int) -> CGFloat { SquareTileGridEngine.nominalSlotSide(columns: levels[i].nominalColumns, gap: levels[i].gap, width: width) }
+        if x <= 0 { return side(0) * (1 - x * 0.6) }
+        if x >= CGFloat(maxIndex) { return side(maxIndex) }
         let lo = Int(x)
-        return lerp(levels[lo].slotSide, levels[lo + 1].slotSide, smoothstep(x - CGFloat(lo)))
+        return lerp(side(lo), side(lo + 1), smoothstep(x - CGFloat(lo)))
     }
     public func apparentGap(at x: CGFloat) -> CGFloat {
         let maxIndex = levels.count - 1

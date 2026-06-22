@@ -116,6 +116,13 @@ struct MetalProductionGridView: NSViewRepresentable {
         proxy.scrollToLatest = { [weak host] in host?.scrollToBottom() }
         proxy.zoomIn = stepIn
         proxy.zoomOut = stepOut
+        // Aspect/square toggle → the coordinator's content-mode preference (content fit only; no geometry change).
+        proxy.toggleContentMode = { [weak host] in host?.coordinator.toggleContentMode() }
+        proxy.setContentMode = { [weak host] mode in host?.coordinator.setPreferredNormalLevelContentMode(mode) }
+        proxy.contentModeState = { [weak host] in
+            guard let c = host?.coordinator else { return (.aspectFitInsideSquare, false) }
+            return (c.preferredNormalLevelContentMode, c.aspectToggleAvailable)
+        }
     }
 
     @MainActor final class Coordinator {

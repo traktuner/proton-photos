@@ -18,7 +18,20 @@ import simd
 //   content   ← TileContentFitter   (this file)
 //   texture   ← thumbnail cache
 
-/// How the media fits inside its square slot.
+/// The Apple-Photos aspect/square toggle, expressed as media fitting inside an UNCHANGED square slot. This is
+/// the explicit, toggle-facing model: a trackpad/toolbar toggle flips between these two; NEITHER changes the
+/// square slot, columns, gap, pitch, content size, hit testing, or anchor — only `contentRect`/UV.
+public enum TileContentDisplayMode: String, Equatable, Sendable, CaseIterable {
+    /// Mode A — preserve full media aspect ratio, fit the WHOLE image inside the square (letterbox/pillarbox
+    /// inside the slot). `contentRect` ⊂ slot, UV = full texture.
+    case aspectFitInsideSquare
+    /// Mode B — fill the entire square, center-crop the overflow (the dense Apple-grid look). `contentRect` =
+    /// slot, crop via the UV window. No bars.
+    case squareFillCrop
+}
+
+/// How the media fits inside its square slot (the low-level fitter mode). `TileContentDisplayMode` is the
+/// toggle-facing synonym; the two map 1:1 (`squareFillCrop` ⇄ `aspectFill`, `aspectFitInsideSquare` ⇄ `aspectFit`).
 public enum TileContentMode: Equatable, Sendable {
     /// Center-crop the media to COVER the whole square (the dense / Apple-style grid look). The content rect
     /// equals the slot; the crop happens in the UV window. No letterbox bars.
@@ -26,6 +39,14 @@ public enum TileContentMode: Equatable, Sendable {
     /// Letterbox the whole media INSIDE the square (the full photo is shown, bars fill the rest of the slot).
     /// The content rect is the centered fitted rect; UV is the full texture.
     case aspectFit
+
+    public init(_ display: TileContentDisplayMode) {
+        self = display == .squareFillCrop ? .aspectFill : .aspectFit
+    }
+}
+
+public extension TileContentDisplayMode {
+    var fitterMode: TileContentMode { TileContentMode(self) }
 }
 
 /// The result: where to draw the image (`contentRect`, viewport/content coords matching the slot) and the
@@ -43,6 +64,20 @@ public struct TileContentLayout: Equatable, Sendable {
 }
 
 public enum TileContentFitter {
+    // MARK: Toggle-facing API (TileContentDisplayMode) — the same square slot in, content fit out.
+
+    /// Fit by explicit media pixel size for a toggle display mode.
+    public static func fit(slotRect: CGRect, mediaPixelSize: CGSize, displayMode: TileContentDisplayMode) -> TileContentLayout {
+        fit(slotRect: slotRect, mediaPixelSize: mediaPixelSize, mode: displayMode.fitterMode)
+    }
+
+    /// Fit by media aspect ratio for a toggle display mode.
+    public static func fit(slotRect: CGRect, mediaAspect: CGFloat, displayMode: TileContentDisplayMode) -> TileContentLayout {
+        fit(slotRect: slotRect, mediaAspect: mediaAspect, mode: displayMode.fitterMode)
+    }
+
+    // MARK: Low-level API (TileContentMode)
+
     /// Fit by explicit media pixel size.
     public static func fit(slotRect: CGRect, mediaPixelSize: CGSize, mode: TileContentMode) -> TileContentLayout {
         let aspect = mediaPixelSize.height > 0 ? mediaPixelSize.width / mediaPixelSize.height : 1

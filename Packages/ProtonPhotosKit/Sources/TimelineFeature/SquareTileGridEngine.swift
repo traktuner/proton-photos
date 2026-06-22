@@ -30,22 +30,63 @@ import CoreGraphics
 /// recomputed per width so the grid fills the viewport exactly. `gap` is the inter-slot spacing and may
 /// differ per level (dynamic gap). `headerHeight`/`interSectionSpacing` let the engine reserve section
 /// header space + spacing (0 = labels float over the grid, the production default). `pitch == slotSide + gap`.
+/// How two adjacent levels transition. STORED CLASSIFICATION ONLY — the visual transition effect is a FUTURE
+/// pass and is deliberately NOT implemented here (no crossfade, no warp animation).
+public enum GridTransitionKind: String, Equatable, Sendable {
+    /// Normal photo↔photo levels: the focus row re-lays-out (the cursor-anchored zoom we already ship).
+    case focusRowRelayout
+    /// Last normal photo level → first dense square overview (a larger re-layout / "warp").
+    case overviewWarp
+    /// Within the dense square overview: zoom between the two overview densities.
+    case denseOverviewZoom
+}
+
+/// One Apple-like zoom level, defined PRIMARILY by density (`nominalColumns`) — NOT a fixed pixel slot size.
+/// A level therefore shows ~the same number of columns on any viewport width (tiles grow physically on a
+/// wider screen; viewport height only changes how many rows are visible). The square slot side is DERIVED at
+/// resolve time: `slotSide = (width − gap·(cols−1)) / cols` (`SquareTileGridEngine.nominalSlotSide`).
+public struct AppleGridLevelSpec: Equatable, Sendable {
+    public let id: Int
+    public let nominalColumns: Int
+    public let gap: CGFloat
+    public let supportedContentModes: Set<TileContentDisplayMode>
+    public let defaultContentMode: TileContentDisplayMode
+    public let transitionKindToNext: GridTransitionKind?   // nil = last level (no next)
+    public let monthLabels: Bool
+
+    public init(id: Int, nominalColumns: Int, gap: CGFloat, supportedContentModes: Set<TileContentDisplayMode>,
+                defaultContentMode: TileContentDisplayMode, transitionKindToNext: GridTransitionKind?, monthLabels: Bool) {
+        self.id = id; self.nominalColumns = nominalColumns; self.gap = gap
+        self.supportedContentModes = supportedContentModes; self.defaultContentMode = defaultContentMode
+        self.transitionKindToNext = transitionKindToNext; self.monthLabels = monthLabels
+    }
+}
+
 public struct GridLevelMetrics: Equatable, Sendable {
     public let levelID: Int
-    public let slotSide: CGFloat
+    /// PRIMARY level key: density. The actual square side is derived from this + the current width, so levels
+    /// are resolution-independent (NOT a fixed absolute pixel `slotSide`).
+    public let nominalColumns: Int
     public let gap: CGFloat
     public let headerHeight: CGFloat
     public let interSectionSpacing: CGFloat
     public let monthLabels: Bool
+    public let supportedContentModes: Set<TileContentDisplayMode>
+    public let defaultContentMode: TileContentDisplayMode
+    public let transitionKindToNext: GridTransitionKind?
 
-    public var pitch: CGFloat { slotSide + gap }
-
-    public init(levelID: Int, slotSide: CGFloat, gap: CGFloat, monthLabels: Bool,
+    public init(levelID: Int, nominalColumns: Int, gap: CGFloat, monthLabels: Bool,
+                supportedContentModes: Set<TileContentDisplayMode> = [.squareFillCrop],
+                defaultContentMode: TileContentDisplayMode = .squareFillCrop,
+                transitionKindToNext: GridTransitionKind? = nil,
                 headerHeight: CGFloat = 0, interSectionSpacing: CGFloat = 0) {
         self.levelID = levelID
-        self.slotSide = slotSide
+        self.nominalColumns = nominalColumns
         self.gap = gap
         self.monthLabels = monthLabels
+        self.supportedContentModes = supportedContentModes
+        self.defaultContentMode = defaultContentMode
+        self.transitionKindToNext = transitionKindToNext
         self.headerHeight = headerHeight
         self.interSectionSpacing = interSectionSpacing
     }
@@ -191,18 +232,44 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     public func clampLevel(_ l: Int) -> Int { min(max(l, 0), levels.count - 1) }
     public func metrics(level: Int) -> GridLevelMetrics { levels[clampLevel(level)] }
 
-    /// The canonical square ladder: square `slotSide` (target) + first-class per-level `gap` (14 → 2,
-    /// clearly dynamic), `monthLabels` on the dense overview. Headers float (headerHeight 0), as production
-    /// shows them today. This is the ONE table; retuning the grid is a one-place edit.
-    public static let defaultLevels: [GridLevelMetrics] = [
-        GridLevelMetrics(levelID: 0, slotSide: 380, gap: 16, monthLabels: false), // NEW largest — fewer, bigger tiles
-        GridLevelMetrics(levelID: 1, slotSide: 260, gap: 14, monthLabels: false),
-        GridLevelMetrics(levelID: 2, slotSide: 190, gap: 12, monthLabels: false),
-        GridLevelMetrics(levelID: 3, slotSide: 140, gap: 10, monthLabels: false), // default density
-        GridLevelMetrics(levelID: 4, slotSide: 100, gap: 7,  monthLabels: false),
-        GridLevelMetrics(levelID: 5, slotSide: 72,  gap: 4,  monthLabels: true),
-        GridLevelMetrics(levelID: 6, slotSide: 48,  gap: 2,  monthLabels: true),
+    /// THE content-mode policy (single source of truth, used by the coordinator AND tests): the user's
+    /// preferred mode where the level supports it, else the forced `squareFillCrop` (the only mode the dense
+    /// overview levels L4–L5 offer). Pure — it reads only the level's `supportedContentModes`.
+    public func effectiveContentMode(preferred: TileContentDisplayMode, level: Int) -> TileContentDisplayMode {
+        metrics(level: level).supportedContentModes.contains(preferred) ? preferred : .squareFillCrop
+    }
+
+    /// Whether the aspect/square toggle is meaningful at a level (both modes supported → the normal levels L0–L3).
+    public func contentModeToggleAvailable(level: Int) -> Bool { metrics(level: level).supportedContentModes.count > 1 }
+
+    /// The SIX Apple-like zoom levels, keyed by density (nominalColumns) — the canonical spec (video + the
+    /// user-confirmed macOS-Photos ladder ~3/5/7/9/20+/30+). L0–L3 are normal photo levels (both content
+    /// modes); L4–L5 are dense square overviews (squareFillCrop only, month/year labels). Resolution-
+    /// independent: tiles grow on a wider viewport, the column count stays. Transition kinds are stored for a
+    /// FUTURE effects pass — no transition animation is implemented here.
+    public static let appleLevelSpecs: [AppleGridLevelSpec] = [
+        AppleGridLevelSpec(id: 0, nominalColumns: 3,  gap: 16, supportedContentModes: [.aspectFitInsideSquare, .squareFillCrop], defaultContentMode: .aspectFitInsideSquare, transitionKindToNext: .focusRowRelayout,  monthLabels: false),
+        AppleGridLevelSpec(id: 1, nominalColumns: 5,  gap: 12, supportedContentModes: [.aspectFitInsideSquare, .squareFillCrop], defaultContentMode: .aspectFitInsideSquare, transitionKindToNext: .focusRowRelayout,  monthLabels: false),
+        AppleGridLevelSpec(id: 2, nominalColumns: 7,  gap: 10, supportedContentModes: [.aspectFitInsideSquare, .squareFillCrop], defaultContentMode: .aspectFitInsideSquare, transitionKindToNext: .focusRowRelayout,  monthLabels: false),
+        AppleGridLevelSpec(id: 3, nominalColumns: 9,  gap: 8,  supportedContentModes: [.aspectFitInsideSquare, .squareFillCrop], defaultContentMode: .aspectFitInsideSquare, transitionKindToNext: .overviewWarp,      monthLabels: false), // default density
+        AppleGridLevelSpec(id: 4, nominalColumns: 20, gap: 2,  supportedContentModes: [.squareFillCrop],                         defaultContentMode: .squareFillCrop,        transitionKindToNext: .denseOverviewZoom, monthLabels: true),
+        AppleGridLevelSpec(id: 5, nominalColumns: 30, gap: 1,  supportedContentModes: [.squareFillCrop],                         defaultContentMode: .squareFillCrop,        transitionKindToNext: nil,                 monthLabels: true),
     ]
+
+    public static let defaultLevels: [GridLevelMetrics] = appleLevelSpecs.map {
+        GridLevelMetrics(levelID: $0.id, nominalColumns: $0.nominalColumns, gap: $0.gap, monthLabels: $0.monthLabels,
+                         supportedContentModes: $0.supportedContentModes, defaultContentMode: $0.defaultContentMode,
+                         transitionKindToNext: $0.transitionKindToNext)
+    }
+
+    /// The width-filling square side for a column count + gap — the resolution-independent slot size. Levels
+    /// are defined by columns; this derives the pixel side at the CURRENT width: `(width − gap·(cols−1))/cols`.
+    /// Feeding this back into the column-from-side resolve returns exactly `columns`, so the live-zoom lattice
+    /// is unchanged while levels become resolution-independent.
+    public static func nominalSlotSide(columns: Int, gap: CGFloat, width: CGFloat) -> CGFloat {
+        let c = CGFloat(max(1, columns)); let g = max(0, gap); let w = max(1, width)
+        return max(1, (w - g * (c - 1)) / c)
+    }
 
     // MARK: globalIndex ⇄ (section, item)
 
@@ -338,11 +405,14 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// OLDEST at the top-left, no black on the right of the last row. With a cursor-aligned phase the partial
     /// row instead splits between the oldest (top-left) and newest (bottom-right) ends — see the report.
     func resolved(targetSide: CGFloat, gap: CGFloat, headerHeight: CGFloat, interSectionSpacing: CGFloat,
-                  width: CGFloat, columnPhase: Int? = nil) -> ResolvedGrid {
+                  width: CGFloat, columnPhase: Int? = nil, fixedColumns: Int? = nil) -> ResolvedGrid {
         let w = max(width, 1)
         let g = max(gap, 0)
         let target = max(targetSide, 1)
-        let columns = max(1, Int((w + g) / (target + g)))
+        // SETTLED path passes `fixedColumns` (the level's nominalColumns) directly → resolution-independent and
+        // FREE of the float-truncation that flooring `(w+g)/(target+g)` to nc−1 caused at the exact-fill side.
+        // The continuous/live lens omits it and derives columns from the apparent side (continuous reflow).
+        let columns = max(1, fixedColumns ?? Int((w + g) / (target + g)))
         let side = (w - g * CGFloat(columns - 1)) / CGFloat(columns)
         let pitch = side + g
         let singleSection = sectionCounts.count == 1
@@ -379,8 +449,13 @@ public struct SquareTileGridEngine: Equatable, Sendable {
 
     private func resolvedForLevel(_ level: Int, width: CGFloat, columnPhase: Int? = nil) -> ResolvedGrid {
         let m = metrics(level: level)
-        return resolved(targetSide: m.slotSide, gap: m.gap, headerHeight: m.headerHeight,
-                        interSectionSpacing: m.interSectionSpacing, width: width, columnPhase: columnPhase)
+        // Resolution-independent: derive the target side from the level's nominalColumns at THIS width. The
+        // column-from-side resolve then yields exactly nominalColumns (proven), so the grid fills the width
+        // with that column count and tiles grow on wider viewports.
+        let target = Self.nominalSlotSide(columns: m.nominalColumns, gap: m.gap, width: width)
+        return resolved(targetSide: target, gap: m.gap, headerHeight: m.headerHeight,
+                        interSectionSpacing: m.interSectionSpacing, width: width, columnPhase: columnPhase,
+                        fixedColumns: m.nominalColumns)
     }
 
     // MARK: Frame plans
@@ -400,7 +475,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// in source/target topology continuity rather than calling it per frame.
     public func zoomFramePlan(continuousLevel x: CGFloat, viewportSize: CGSize, anchor: GridZoomAnchor, overscan: CGFloat) -> GridFramePlan {
         let baseLevel = clampLevel(Int(x.rounded()))
-        let side = apparentSlotSide(at: x)
+        let side = apparentSlotSide(at: x, width: viewportSize.width)
         let gap = apparentGap(at: x)
         let m = metrics(level: baseLevel)
         let grid = resolved(targetSide: side, gap: gap, headerHeight: m.headerHeight,
@@ -489,12 +564,13 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// The apparent square slot size for a continuous level position `x`, including the soft rubber-band:
     /// within the ladder it interpolates the bracketing detents; past the largest end it grows with
     /// diminishing return; past the densest end it clamps (never over-shrink below fill).
-    public func apparentSlotSide(at x: CGFloat) -> CGFloat {
+    public func apparentSlotSide(at x: CGFloat, width: CGFloat) -> CGFloat {
         let maxIndex = levels.count - 1
-        if x <= 0 { return levels[0].slotSide * (1 - x * 0.6) }
-        if x >= CGFloat(maxIndex) { return levels[maxIndex].slotSide }
+        func side(_ i: Int) -> CGFloat { Self.nominalSlotSide(columns: levels[i].nominalColumns, gap: levels[i].gap, width: width) }
+        if x <= 0 { return side(0) * (1 - x * 0.6) }
+        if x >= CGFloat(maxIndex) { return side(maxIndex) }
         let lo = Int(x)
-        return lerp(levels[lo].slotSide, levels[lo + 1].slotSide, smoothstep(x - CGFloat(lo)))
+        return lerp(side(lo), side(lo + 1), smoothstep(x - CGFloat(lo)))
     }
 
     /// The apparent gap for a continuous level position (first-class: scales smoothly through the pinch).

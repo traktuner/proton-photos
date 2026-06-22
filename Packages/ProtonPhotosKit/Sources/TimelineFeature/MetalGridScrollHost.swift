@@ -36,6 +36,14 @@ final class MetalGridScrollHost: NSView {
     /// (newest) and re-pins on resize/level until the user scrolls away.
     private var stickToBottom = true
 
+    /// The viewport size at the previous `layout()` — used to detect a window/sidebar resize and rebase the
+    /// scroll so the SAME logical region stays visible (instead of reusing the raw scrollY after slotSide
+    /// changes). `.zero` until the first layout.
+    /// The grid viewport's frame in SCREEN coords (y-up) at the previous `layout()` — lets the engine detect
+    /// WHICH edge moved (window resize or sidebar) so the stationary edge holds the anchor and the moving edge
+    /// clips/reveals. `.zero` until the first layout with a window.
+    private var lastViewportScreenFrame: NSRect = .zero
+
     // Live focus-row pinch gesture state (engine-owned GridZoomTransaction).
     private var pinchActive = false
     private var pinchBaseLevel = 0
@@ -58,7 +66,7 @@ final class MetalGridScrollHost: NSView {
         self.metalView = MetalGridView(frame: .zero, device: device)
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         wantsLayer = true
-        layer?.backgroundColor = NSColor(red: 0.043, green: 0.039, blue: 0.035, alpha: 1).cgColor
+        layer?.backgroundColor = MetalGridPalette.background.cgColor   // uniform Apple-like dark surface
         setUp()
     }
 
@@ -75,9 +83,9 @@ final class MetalGridScrollHost: NSView {
         metalView.framebufferOnly = true
         metalView.isPaused = true
         metalView.enableSetNeedsDisplay = true
-        // Uncovered pixels clear to the grid background (matches the inter-cell gap colour), so a transient
+        // Uncovered pixels clear to the grid background (the inter-cell gap + letterbox colour), so a transient
         // coverage gap during a zoom transition is never a black flash.
-        metalView.clearColor = MTLClearColor(red: 0.043, green: 0.039, blue: 0.035, alpha: 1)
+        metalView.clearColor = MetalGridPalette.clearColor
         metalView.delegate = coordinator
         addSubview(metalView)
 
@@ -138,6 +146,13 @@ final class MetalGridScrollHost: NSView {
     }
 
     @objc private func userWillScroll() { stickToBottom = false }
+
+    /// A manual WINDOW resize detaches the bottom-pin — EXACTLY like a scroll. Without this, resizing a
+    /// freshly-opened grid (still `stickToBottom`) only ever bottom-pins and never runs the viewport-anchor
+    /// camera rebase (the user's bug: fresh-open resize was wrong; one tiny scroll "fixed" it because that
+    /// cleared `stickToBottom`). Fires only for USER-initiated live resizes (not the initial-open layout), so
+    /// "open at newest" is preserved. Observer is (re)wired in `viewDidMoveToWindow`.
+    @objc private func windowWillLiveResize() { stickToBottom = false }
 
     // MARK: - Live focus-row pinch zoom (engine-owned GridZoomTransaction)
 
@@ -266,6 +281,12 @@ final class MetalGridScrollHost: NSView {
     // window (CADisplayLink retains its target, so this also breaks that retain before dealloc).
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        // A manual window resize detaches the bottom-pin (so the camera rebase runs even on a fresh-open grid).
+        NotificationCenter.default.removeObserver(self, name: NSWindow.willStartLiveResizeNotification, object: nil)
+        if let window {
+            NotificationCenter.default.addObserver(self, selector: #selector(windowWillLiveResize),
+                                                   name: NSWindow.willStartLiveResizeNotification, object: window)
+        }
         if window != nil {
             if streamingTick == nil {
                 let dl = displayLink(target: self, selector: #selector(step))
@@ -297,7 +318,41 @@ final class MetalGridScrollHost: NSView {
     override func layout() {
         super.layout()
         metalView.frame = bounds
-        applyContentSize(coordinator.contentSize())
+        let newFrame = viewportScreenFrame()
+        let old = lastViewportScreenFrame
+        if old != .zero, abs(old.width - newFrame.width) > 0.5 || abs(old.height - newFrame.height) > 0.5 {
+            rebaseForResize(oldFrame: old, newFrame: newFrame)  // window resize / sidebar toggle — NOT zoom
+        } else {
+            applyContentSize(coordinator.contentSize())         // first layout / move-only (no size change)
+        }
+        lastViewportScreenFrame = newFrame
+    }
+
+    /// The grid viewport's frame in SCREEN coords (y-up): `maxY` = top edge, `minY` = bottom edge. The engine
+    /// compares old↔new to tell which edge moved. Falls back to local bounds before the view has a window.
+    private func viewportScreenFrame() -> NSRect {
+        guard let window else { return bounds }
+        return window.convertToScreen(convert(bounds, to: nil))
+    }
+
+    /// Viewport resized (window or sidebar). Recompute content size from the new width and rebase the scroll
+    /// via the engine so the SAME logical region stays visible — the stationary edge holds the anchor, the
+    /// moving edge clips/reveals. Never reuse the raw scrollY after slotSide changed, never start a zoom, never
+    /// restore an old origin. Bottom-pinned stays pinned.
+    private func rebaseForResize(oldFrame: NSRect, newFrame: NSRect) {
+        let oldScrollY = scrollView.contentView.bounds.origin.y
+        let result = coordinator.rebaseForViewportChange(oldFrame: oldFrame, newFrame: newFrame,
+                                                         oldScrollY: oldScrollY, wasBottomPinned: stickToBottom)
+        applyContentSize(coordinator.contentSize())            // new content height (new width); pins bottom if sticky
+        guard !stickToBottom, let r = result else { return }   // sticky → already bottom-pinned by applyContentSize
+        let maxY = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
+        let y = min(max(0, r.newScrollY), maxY)
+        scrollLockOrigin = nil                                 // a resize must NOT restore a pre-resize origin
+        if abs(y - oldScrollY) > 0.5 {                         // skip a no-op scroll (e.g. top-anchored width change)
+            scrollView.contentView.scroll(to: CGPoint(x: 0, y: y))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+        metalView.needsDisplay = true                          // first frame after resize uses the rebased scrollY
     }
 
     /// Set the document spacer to the current content height (width tracks the clip, no h-scroll).

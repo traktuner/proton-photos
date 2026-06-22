@@ -64,6 +64,67 @@ enum GridZoomAnchorLog {
     private static func idx(_ i: Int?) -> String { i.map { "\($0)" } ?? "nil" }
 }
 
+// MARK: - Viewport-resize diagnostics
+//
+// `[GridResize]` traces the resize/sidebar rebase so a jump is observable: the validation line's
+// `visibleOverlap` near `visibleBefore`/`visibleAfter` (and unchanged columns when width is unchanged)
+// confirms the SAME logical region stayed visible.
+@MainActor
+enum GridResizeLog {
+    static func begin(reason: String, oldFrame: CGRect, newFrame: CGRect, delta: GridViewportResizeDelta,
+                      level: Int, phase: Int?, wasBottomPinned: Bool, result: GridViewportResizeResult,
+                      anchorViewportY: CGFloat, oldScrollY: CGFloat, oldContentSize: CGSize) {
+        PhotoDiagnostics.shared.emit("GridResize", [
+            "phase": "begin", "reason": reason, "oldViewportFrame": rc(oldFrame), "newViewportFrame": rc(newFrame),
+            "widthChanged": "\(delta.widthChanged)", "heightChanged": "\(delta.heightChanged)",
+            "movedTopEdge": "\(delta.movedTopEdge)", "movedBottomEdge": "\(delta.movedBottomEdge)",
+            "movedLeftEdge": "\(delta.movedLeftEdge)", "movedRightEdge": "\(delta.movedRightEdge)",
+            "level": "\(level)", "committedPhase": phase.map { "\($0)" } ?? "canonical",
+            "wasBottomPinned": "\(wasBottomPinned)", "anchorFractionY": String(format: "%.2f", result.anchorFractionY),
+            "anchorGlobalIndex": result.anchorGlobalIndex.map { "\($0)" } ?? "nil",
+            "anchorViewportY": "\(Int(anchorViewportY))",
+            "anchorLocalFractionY": result.anchorLocalFractionY.map { String(format: "%.3f", $0) } ?? "nil",
+            "oldScrollY": "\(Int(oldScrollY))", "oldContentSize": sz(oldContentSize),
+        ])
+    }
+    static func end(result: GridViewportResizeResult, anchorViewportYAfter: CGFloat) {
+        PhotoDiagnostics.shared.emit("GridResize", [
+            "phase": "end", "newContentSize": sz(result.newContentSize), "newScrollY": "\(Int(result.newScrollY))",
+            "anchorViewportYAfter": "\(Int(anchorViewportYAfter))",
+            "bottomPinned": "\(result.bottomPinned)", "clamped": "\(result.clamped)",
+        ])
+    }
+    static func validation(visibleBefore: Int, visibleAfter: Int, visibleOverlap: Int, columnsBefore: Int,
+                           columnsAfter: Int, slotSideBefore: CGFloat, slotSideAfter: CGFloat, gapBefore: CGFloat, gapAfter: CGFloat) {
+        PhotoDiagnostics.shared.emit("GridResize", [
+            "phase": "validation", "visibleBefore": "\(visibleBefore)", "visibleAfter": "\(visibleAfter)",
+            "visibleOverlap": "\(visibleOverlap)", "nominalColumnsBefore": "\(columnsBefore)", "nominalColumnsAfter": "\(columnsAfter)",
+            "slotSideBefore": String(format: "%.1f", slotSideBefore), "slotSideAfter": String(format: "%.1f", slotSideAfter),
+            "gapBefore": String(format: "%.1f", gapBefore), "gapAfter": String(format: "%.1f", gapAfter),
+        ])
+    }
+    private static func sz(_ s: CGSize) -> String { "\(Int(s.width))x\(Int(s.height))" }
+    private static func rc(_ r: CGRect) -> String { "(\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height)))" }
+}
+
+// MARK: - MetalGrid performance signposts
+//
+// Lightweight, THROTTLED counters for the resize/render hot path so stutter is measurable without spamming
+// stdout (a live drag fires per frame; `emit` prints synchronously in DEBUG). Off the critical path by default.
+@MainActor
+enum MetalGridPerfLog {
+    static func resizeFrame(layoutMs: Double, visibleSlotCount: Int, renderQuadCount: Int, textureUploadCount: Int,
+                            widthChanged: Bool, heightChanged: Bool, metricsRecomputed: Bool, contentSizeRecomputed: Bool) {
+        PhotoDiagnostics.shared.emit("MetalGridPerf", [
+            "phase": "resizeFrame", "layoutMs": String(format: "%.2f", layoutMs),
+            "visibleSlotCount": "\(visibleSlotCount)", "renderQuadCount": "\(renderQuadCount)",
+            "textureUploadCount": "\(textureUploadCount)", "widthChanged": "\(widthChanged)",
+            "heightChanged": "\(heightChanged)", "metricsRecomputed": "\(metricsRecomputed)",
+            "contentSizeRecomputed": "\(contentSizeRecomputed)",
+        ], throttleSeconds: 0.5)
+    }
+}
+
 // MARK: - Commit seam diagnostics
 //
 // `[GridZoomCommit]` traces exactly what moves at the live→settled commit, so the seam is observable in the

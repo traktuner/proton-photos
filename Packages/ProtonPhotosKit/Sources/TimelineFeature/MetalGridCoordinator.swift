@@ -91,6 +91,41 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var gestureCursorVP: CGPoint = .zero
     private var gestureAnchorIndex: Int?
 
+    // MARK: - Content display mode (aspect/square toggle) — fitting INSIDE the square slot ONLY.
+    //
+    // The toggle is a TileContentFitter mode switch, NOT a layout switch: it changes only the thumbnail's
+    // contentRect/UV and NEVER the slot, columns, gap, pitch, content size, hit testing, anchor, or phase.
+    // `preferredNormalLevelContentMode` is the user's choice for NORMAL levels (L0–L3); the EFFECTIVE mode
+    // forces squareFillCrop on the dense overview levels (L4–L5, which support only that). The preference is
+    // remembered, so returning from an overview to a normal level restores the user's aspect/square choice.
+    // INITIAL DEFAULT = aspectFitInsideSquare (explicit app choice; matches the normal levels in the reference
+    // clip — NOT a claim about Apple's own default).
+    private(set) var preferredNormalLevelContentMode: TileContentDisplayMode = .aspectFitInsideSquare
+
+    /// The mode actually used to fit content at `level`: the preference where the level supports it, else
+    /// squareFillCrop (the only mode the overview levels offer).
+    func effectiveDisplayMode(for level: Int) -> TileContentDisplayMode {
+        engine.effectiveContentMode(preferred: preferredNormalLevelContentMode, level: level)
+    }
+    var effectiveDisplayMode: TileContentDisplayMode { effectiveDisplayMode(for: level) }
+
+    /// Whether the aspect/square toggle is meaningful at a level (both modes supported → the normal levels L0–L3).
+    func aspectToggleAvailable(for level: Int) -> Bool { engine.contentModeToggleAvailable(level: level) }
+    var aspectToggleAvailable: Bool { aspectToggleAvailable(for: level) }
+
+    /// Set the NORMAL-level content-mode preference (toolbar/keyboard/tests). Pure content-fit change: it does
+    /// NOT mutate level, zoom, scroll, phase, or any grid geometry — only the next frame's thumbnail fit.
+    func setPreferredNormalLevelContentMode(_ mode: TileContentDisplayMode) {
+        guard mode != preferredNormalLevelContentMode else { return }
+        preferredNormalLevelContentMode = mode
+        requestRedraw()
+    }
+
+    /// Flip the NORMAL-level content-mode preference (aspect ↔ square). Same purity guarantee as above.
+    func toggleContentMode() {
+        setPreferredNormalLevelContentMode(preferredNormalLevelContentMode == .squareFillCrop ? .aspectFitInsideSquare : .squareFillCrop)
+    }
+
     /// Pushed (throttled) so the SwiftUI HUD can mirror live stats.
     var onHUD: ((MetalGridHUD) -> Void)?
     /// Called when the content size changes (level / width) so the host can resize the document view.
@@ -280,6 +315,63 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     /// Override the bridge's settled scroll Y (e.g. when the host pins to the bottom instead of the rebased Y).
     func setCommitBridgeScrollY(_ y: CGFloat) { bridgeScrollY = y }
+
+    /// VIEWPORT-RESIZE REBASE (window resize / sidebar toggle — NOT zoom). Same level/phase/mode/columns/gap;
+    /// only slotSide/pitch/contentSize recompute from the new width. Returns the rebased scroll Y so the SAME
+    /// logical region stays visible; preserves `committedPhase` (never reset). The host applies the result
+    /// BEFORE the first frame after resize. Logs `[GridResize]`.
+    private var lastResizeDiagTime: Date = .distantPast
+    /// VIEWPORT-RESIZE REBASE (window resize / sidebar — NOT zoom). The host passes the grid viewport frame in
+    /// SCREEN coords (old + new) so the engine can tell WHICH edge moved; the stationary edge holds the anchor.
+    /// Preserves `committedPhase` (passed, never reset). Returns the rebased scroll Y; logs `[GridResize]`.
+    func rebaseForViewportChange(oldFrame: CGRect, newFrame: CGRect, oldScrollY: CGFloat,
+                                 wasBottomPinned: Bool) -> GridViewportResizeResult? {
+        let count = totalItems
+        guard count > 0 else { return nil }
+        let lvl = level
+        let phase = currentPhase()
+        let input = GridViewportResizeInput(oldViewportFrame: oldFrame, newViewportFrame: newFrame, oldScrollY: oldScrollY,
+                                            level: lvl, committedPhase: phase, itemCount: count,
+                                            wasBottomPinned: wasBottomPinned,
+                                            anchorFractionY: 0.5)   // normalized viewport-centre camera anchor
+        let t0 = Date()
+        let r = engine.rebasedScrollOffsetForViewportChange(input)            // cheap: 1 anchorItem + 1 slotRect
+        let layoutMs = Date().timeIntervalSince(t0) * 1000
+        // Diagnostics THROTTLED to ~3×/s: a live drag fires layout() per frame and `emit` prints synchronously
+        // in DEBUG, so emitting (+ the 2× framePlan overlap) every frame is the jank.
+        let now = Date()
+        if now.timeIntervalSince(lastResizeDiagTime) > 0.33 {
+            lastResizeDiagTime = now
+            let delta = GridViewportResizeDelta(old: oldFrame, new: newFrame)
+            let reason: String = wasBottomPinned ? "bottomPinned"
+                : (delta.heightChanged && delta.movedTopEdge && !delta.movedBottomEdge) ? "windowHeightTopEdge"
+                : (delta.heightChanged && delta.movedBottomEdge && !delta.movedTopEdge) ? "windowHeightBottomEdge"
+                : (delta.widthChanged && !delta.heightChanged) ? "windowWidth"
+                : delta.heightChanged ? "windowResizeUnknownEdge" : "unknown"
+            let oldVP = CGSize(width: max(oldFrame.width, 1), height: max(oldFrame.height, 0))
+            let newVP = CGSize(width: max(newFrame.width, 1), height: max(newFrame.height, 0))
+            let mOld = engine.resolvedMetrics(level: lvl, width: oldVP.width)
+            let mNew = engine.resolvedMetrics(level: lvl, width: newVP.width)
+            let oldContent = engine.contentSize(level: lvl, width: oldVP.width, columnPhase: phase)
+            let visBefore = Set(engine.framePlan(level: lvl, viewportSize: oldVP, scrollOffset: CGPoint(x: 0, y: oldScrollY), overscan: 0, columnPhase: phase).visibleSlots.map(\.index))
+            let visAfter = Set(engine.framePlan(level: lvl, viewportSize: newVP, scrollOffset: CGPoint(x: 0, y: r.newScrollY), overscan: 0, columnPhase: phase).visibleSlots.map(\.index))
+            let anchorVY: CGFloat = newVP.height * r.anchorFractionY   // the normalized anchor's viewport y
+            GridResizeLog.begin(reason: reason, oldFrame: oldFrame, newFrame: newFrame, delta: delta, level: lvl, phase: phase,
+                                wasBottomPinned: wasBottomPinned, result: r, anchorViewportY: anchorVY,
+                                oldScrollY: oldScrollY, oldContentSize: oldContent)
+            GridResizeLog.end(result: r, anchorViewportYAfter: anchorVY)
+            GridResizeLog.validation(visibleBefore: visBefore.count, visibleAfter: visAfter.count,
+                                     visibleOverlap: visBefore.intersection(visAfter).count,
+                                     columnsBefore: mOld.columns, columnsAfter: mNew.columns,
+                                     slotSideBefore: mOld.slotSide, slotSideAfter: mNew.slotSide, gapBefore: mOld.gap, gapAfter: mNew.gap)
+            // Perf signpost: the rebase is O(1)-ish; metrics/contentSize recompute ONLY when width changed.
+            MetalGridPerfLog.resizeFrame(layoutMs: layoutMs, visibleSlotCount: visAfter.count, renderQuadCount: visAfter.count,
+                                         textureUploadCount: cache.uploadsThisFrame, widthChanged: delta.widthChanged,
+                                         heightChanged: delta.heightChanged, metricsRecomputed: delta.widthChanged,
+                                         contentSizeRecomputed: delta.widthChanged)
+        }
+        return r
+    }
 
     /// End the bridge → normal settled rendering at the committed level. Logs `[GridZoomCommit] end`.
     func endCommitBridge() {
@@ -522,22 +614,28 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         var videoQuads: [MetalGridQuad] = []
         backgrounds.reserveCapacity(slots.count)
         var realCount = 0
+        let displayMode = effectiveDisplayMode               // aspect/square toggle — same for every slot this frame
         for s in slots where s.index < flatUIDs.count {
             let uid = flatUIDs[s.index]
             let cell = s.rect                               // viewport-space, ALWAYS square (engine guarantee)
             let r = cellRadius(cardRadius, cell: cell)
-            backgrounds.append(MetalGridQuad(rect: cell, radius: r))
             if cache.isResident(uid) {
                 cache.noteUsed(uid)
                 let texture = cache.texture(for: uid)
-                // Compose: square slot rect + content fit (TileContentFitter) + texture (cache). The
-                // fitter is the ONLY thing that sees media aspect; the slot is square regardless.
+                // Compose: square slot rect + content fit (TileContentFitter) + texture (cache). The fitter is
+                // the ONLY thing that sees media aspect; the slot is square regardless. `displayMode` is the
+                // aspect/square toggle (forced to squareFillCrop on the overview levels). NO per-cell card: the
+                // rounded thumbnail sits directly on the uniform background, so gaps + aspectFit letterbox show
+                // the same surface (no visible grid cells / lines).
                 let fit = TileContentFitter.fit(slotRect: cell,
                                                 mediaPixelSize: CGSize(width: texture.width, height: texture.height),
-                                                mode: .aspectFill)
+                                                displayMode: displayMode)
                 images.append(MetalGridQuad(rect: fit.contentRect, uvMin: fit.uvMin, uvMax: fit.uvMax, radius: r))
                 imageTextures.append(texture)
                 realCount += 1
+            } else {
+                // Only a genuinely MISSING image gets a placeholder card (a loading tile shouldn't be a hole).
+                backgrounds.append(MetalGridQuad(rect: cell, radius: r))
             }
             if decorationsEnabled {
                 appendDecorations(uid: uid, cell: cell, displayed: cell, cardRadius: r, accent: accent,
