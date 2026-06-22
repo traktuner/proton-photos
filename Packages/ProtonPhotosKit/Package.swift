@@ -18,8 +18,6 @@ let package = Package(
         // pure (no SDK/HTTP) and drive injected backend protocols the app implements.
         .library(name: "AlbumsFeature", targets: ["AlbumsFeature"]),
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
-        // Isolated Grid-Zoom V3 prototype (synthetic tiles, no Proton data). See GridZoomV3Lab.
-        .library(name: "GridZoomV3", targets: ["GridZoomV3"]),
     ],
     targets: [
         .target(name: "PhotosCore"),
@@ -46,8 +44,5 @@ let package = Package(
         // Upload: pure queue + state machine + folder enumeration over an injected upload backend.
         .target(name: "UploadFeature", dependencies: ["PhotosCore", "DesignSystem"]),
         .testTarget(name: "UploadFeatureTests", dependencies: ["UploadFeature", "PhotosCore"]),
-        // Pure prototype: AppKit renderer + SwiftUI shell + pure layout engine. No Proton deps.
-        .target(name: "GridZoomV3"),
-        .testTarget(name: "GridZoomV3Tests", dependencies: ["GridZoomV3"]),
     ]
 )

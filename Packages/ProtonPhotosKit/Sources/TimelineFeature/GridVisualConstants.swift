@@ -1,8 +1,7 @@
 import CoreGraphics
 
-/// Visual constants shared by the real grid cells (`PhotoGridItem`) and the Metal zoom overlay
-/// (`GridSpriteTransitionView`), so corners/cropping match at rest, during the pinch, in the target
-/// fill, and in the settle preview — one source of truth, no drift between the two render paths.
+/// Visual constants for the Metal grid cells — one source of truth for corner radius so the rounded
+/// corners match at rest and through a zoom.
 enum GridVisualConstants {
     /// Shared thumbnail corner radius in points. The reference capture's rounded image corner measures
     /// about 20-22 px, which is 10-11 pt on a Retina screenshot, so the live grid and Metal overlay use 11.

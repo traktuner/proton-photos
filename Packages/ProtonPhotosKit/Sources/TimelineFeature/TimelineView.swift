@@ -52,7 +52,7 @@ public struct TimelineView: View {
                 errorState(message)
             case let .loaded(sections):
                 // Production timeline is MetalGrid-ONLY: the canonical `SquareTileGridEngine` owns all
-                // geometry (square slots). No NSCollectionView fallback, no aspect-driven justified layout,
+                // geometry (square slots). No legacy-grid fallback, no aspect-driven justified layout,
                 // no silent feature-flag switch — media aspect never reaches the layout (it lives only in
                 // `TileContentFitter`, inside the renderer).
                 MetalProductionGridView(

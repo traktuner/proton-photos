@@ -1,17 +1,12 @@
 import CoreGraphics
 import PhotosCore
 
-// MARK: - Metal Grid Lab (Phase 1) — shared value types
+// MARK: - Metal grid — shared value types (diagnostics + HUD)
 //
-// This is the isolated MetalGridLab prototype (Phase 1 of the Metal-grid rewrite). It proves a Metal-
-// backed photo grid can render + scroll the 20k-photo library smoothly. It does NOT replace the
-// production NSCollectionView grid (`PhotoGridView`) — see the lab entry `MetalGridLab`.
+// Per-frame render accounting and HUD mirroring for the Metal-backed photo grid.
 //
 // Architecture (Option A): NSScrollView owns scroll physics; a viewport-sized MTKView draws only the
-// visible items. The renderer reuses the proven rounded-corner SDF + premultiplied-alpha shader from
-// `GridSpriteTransitionView` (one quad per visible cell) but uses one-texture-per-image with an LRU
-// cache (Pixe-style, Option A) rather than the zoom-transition atlas, so the production zoom path is
-// left completely untouched.
+// visible items each frame, with one texture per image behind an LRU cache (Pixe-style).
 
 /// Per-frame render accounting for the `[MetalGrid]` diagnostics block + the in-lab HUD overlay.
 struct MetalGridStats: Equatable, Sendable {

@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 import DesignSystem
-import GridZoomV3
 import TimelineFeature
 
 @main
@@ -56,11 +55,8 @@ struct ProtonPhotosApp: App {
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             }
-            // Debug ▸ open the isolated Grid-Zoom V3 prototype (synthetic tiles, no Proton data) and the
-            // Metal Grid Lab (Phase 1 Metal-backed grid prototype — real library when available).
+            // Debug ▸ open the Metal Grid Lab (Metal-backed grid prototype — real library when available).
             CommandMenu("Debug") {
-                Button("GridZoom V3 Lab…") { openWindow(id: GridZoomV3WindowID) }
-                    .keyboardShortcut("g", modifiers: [.command, .option, .shift])
                 Button("Metal Grid Lab…") { openWindow(id: MetalGridLabWindowID) }
                     .keyboardShortcut("m", modifiers: [.command, .option, .shift])
             }
@@ -78,14 +74,7 @@ struct ProtonPhotosApp: App {
         .defaultSize(width: 340, height: 460)
         .defaultPosition(.topTrailing)
 
-        // Dev: isolated Grid-Zoom V3 prototype lab (Debug ▸ GridZoom V3 Lab… / ⌥⇧⌘G).
-        Window("GridZoom V3 Lab", id: GridZoomV3WindowID) {
-            GridZoomV3Lab()
-                .preferredColorScheme(.dark)
-        }
-        .defaultSize(width: 1100, height: 760)
-
-        // Dev: Phase-1 Metal Grid Lab (Debug ▸ Metal Grid Lab… / ⌥⇧⌘M). Renders the real library when
+        // Dev: Metal Grid Lab (Debug ▸ Metal Grid Lab… / ⌥⇧⌘M). Renders the real library when
         // the main UI has published it, else synthetic streaming tiles.
         Window("Metal Grid Lab", id: MetalGridLabWindowID) {
             MetalGridLab()
@@ -95,7 +84,6 @@ struct ProtonPhotosApp: App {
     }
 }
 
-let GridZoomV3WindowID = "gridzoom-v3-lab"
 let MetalGridLabWindowID = "metal-grid-lab"
 
 /// Makes the window title bar transparent + full-size, so content (the photo grid) extends up under

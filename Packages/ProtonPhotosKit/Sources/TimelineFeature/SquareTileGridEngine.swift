@@ -244,9 +244,8 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         var pitch: CGFloat { slotSide + gap }
         var contentSize: CGSize { CGSize(width: width, height: contentHeight) }
 
-        /// Square frame + placement of a global index. The wrap phase is `sectionEmptyTopLeft` (default
-        /// bottom-right: the partial/empty row is the OLDEST, at the top; a live-zoom commit may instead set
-        /// it so the focus item keeps its cursor column — see `SquareTileGridEngine.columnPhase`).
+        /// Square frame + placement of a global index. The wrap phase is `sectionEmptyTopLeft`: bottom-right
+        /// anchoring, so the partial/empty row is the OLDEST, at the section's top-left.
         func placement(globalIndex flat: Int) -> (rect: CGRect, section: Int, item: Int, row: Int, column: Int)? {
             guard let (section, item) = sectionItem(flat) else { return nil }
             let emptyTopLeft = sectionEmptyTopLeft[section]
@@ -330,9 +329,14 @@ public struct SquareTileGridEngine: Equatable, Sendable {
 
     /// Build the resolved grid for a set of metrics + width. Column count + exact width-filling side are
     /// derived here (one rule), so the grid ALWAYS fills the width and the rendered side is uniform & square.
-    /// `columnPhase` (single continuous section only): the leading-empty-slot count P so the wrap aligns the
-    /// grid to a chosen column (a live-zoom commit sets it so the focus item keeps its cursor column → the
-    /// commit is seamless, no rephase jump). nil = the default bottom-right wrap (newest in the corner).
+    ///
+    /// `columnPhase` is the engine-owned COLUMN PHASE (single continuous section only): the count of leading
+    /// empty slots before item 0, i.e. `column(globalIndex) = (columnPhase + globalIndex) % columns`. It lets
+    /// a zoom commit land the anchor item in the cursor's column so the photo under the cursor does NOT fly
+    /// across the grid on release (`SquareTileGridEngine.columnPhase(forItem:targetColumn:…)` derives it).
+    /// `nil` = the default BOTTOM-RIGHT anchoring: newest item in the corner, the only partial row is the
+    /// OLDEST at the top-left, no black on the right of the last row. With a cursor-aligned phase the partial
+    /// row instead splits between the oldest (top-left) and newest (bottom-right) ends — see the report.
     func resolved(targetSide: CGFloat, gap: CGFloat, headerHeight: CGFloat, interSectionSpacing: CGFloat,
                   width: CGFloat, columnPhase: Int? = nil) -> ResolvedGrid {
         let w = max(width, 1)
@@ -351,14 +355,13 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         for (s, count) in sectionCounts.enumerated() {
             headerTop[s] = y
             contentTop[s] = y + headerHeight
-            let emptyTopLeft: Int
-            let rows: Int
+            let rows: Int, emptyTopLeft: Int
             if singleSection, let phase = columnPhase, count > 0 {
-                emptyTopLeft = ((phase % columns) + columns) % columns       // wrap phase 0…cols-1
+                emptyTopLeft = ((phase % columns) + columns) % columns       // cursor-aligned wrap (0…cols-1)
                 rows = (count + emptyTopLeft + columns - 1) / columns
             } else {
                 rows = count > 0 ? (count + columns - 1) / columns : 0
-                emptyTopLeft = rows * columns - count                        // bottom-right (default)
+                emptyTopLeft = rows * columns - count                        // bottom-right anchoring (default)
             }
             rowsArr[s] = rows
             emptyArr[s] = emptyTopLeft
@@ -382,8 +385,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
 
     // MARK: Frame plans
 
-    /// The renderable plan for a settled level at the given viewport + scroll offset. `columnPhase` (single
-    /// continuous run) aligns the wrap so a committed live-zoom focus item keeps its cursor column.
+    /// The renderable plan for a settled level at the given viewport + scroll offset.
     public func framePlan(level: Int, viewportSize: CGSize, scrollOffset: CGPoint, overscan: CGFloat, columnPhase: Int? = nil) -> GridFramePlan {
         let lv = clampLevel(level)
         let grid = resolvedForLevel(lv, width: viewportSize.width, columnPhase: columnPhase)
@@ -564,12 +566,23 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         return CGPoint(x: 0, y: y)
     }
 
-    /// The wrap phase (leading empty slots) that lands global index `forItem` in column `targetColumn` at a
-    /// given level/width — used so a settled grid after a live-zoom commit keeps the focus item's cursor
-    /// column (seamless commit). Single continuous run only.
+    // MARK: Column phase (cursor-anchor-preserving commit)
+
+    /// The COLUMN PHASE (leading-empty-slot count) that lands global index `item` in `targetColumn` at the
+    /// given level/width — single continuous run only. Feed the result as `columnPhase:` to the settled
+    /// queries so the committed grid keeps the anchor in the cursor's column (no horizontal fly on release).
     public func columnPhase(forItem item: Int, targetColumn: Int, level: Int, width: CGFloat) -> Int {
-        let cols = resolvedForLevel(level, width: width).columns
+        let cols = resolvedMetrics(level: level, width: width).columns
         return ((targetColumn - item) % cols + cols) % cols
+    }
+
+    /// The column the cursor's viewport x falls in at a settled level (clamped to the grid). The phase a zoom
+    /// commits to is `columnPhase(forItem: anchor, targetColumn: cursorColumn(...))` — so the anchor settles
+    /// exactly where the live transaction held it.
+    public func cursorColumn(viewportX: CGFloat, level: Int, width: CGFloat) -> Int {
+        let m = resolvedMetrics(level: level, width: width)
+        guard m.pitch > 0 else { return 0 }
+        return min(max(Int(viewportX / m.pitch), 0), m.columns - 1)
     }
 
     /// THE engine-owned anchor-capture + rebase for a DISCRETE level change: resolve the item under the

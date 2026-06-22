@@ -28,43 +28,29 @@ final class MetalGridScrollHost: NSView {
     var onCellClick: ((CGPoint, Int, GridClickModifiers) -> Void)?
     /// Fired on any viewport change (scroll / resize / level) so overlays (month labels, a11y) reposition.
     var onViewportChanged: (() -> Void)?
-    /// One discrete zoom step from a trackpad pinch (mirrors the +/- buttons). LEGACY path only.
-    var onZoomStep: ((GridZoomDirection) -> Void)?
-    /// The detent the continuous pinch / button transition settled on — so the SwiftUI `level` binding
-    /// stays in sync. (Detent-zoom path only.)
+    /// The level the live pinch settled on — so the SwiftUI `level` binding stays in sync after a commit.
     var onZoomCommit: ((Int) -> Void)?
 
     private var streamingTick: CADisplayLink?
     /// The grid is laid out oldest→top-left, newest→bottom-right, so it opens pinned to the BOTTOM
     /// (newest) and re-pins on resize/level until the user scrolls away.
     private var stickToBottom = true
-    private var pinchDetector = PinchStepDetector()
-    private var lastPinchStepTime: CFTimeInterval = 0
 
-    // Continuous detent-zoom gesture state (used only when coordinator.usesDetentZoom).
-    private var lastMouseContentPoint: CGPoint?
+    // Live focus-row pinch gesture state (engine-owned GridZoomTransaction).
     private var pinchActive = false
     private var pinchBaseLevel = 0
     private var pinchCumulativeMagnification: CGFloat = 0
-    private var pinchLastPosition: CGFloat = 0
-    private var pinchLastTime: CFTimeInterval = 0
-    private var pinchVelocity: CGFloat = 0   // levels/sec
     /// Time of the last trackpad magnify event — arms a brief scroll-suppression grace window so the residual
     /// finger drift after a pinch (esp. pushing past the largest stage) can't leak into a wild scroll.
     private var lastMagnifyEventTime: CFTimeInterval = 0
     /// SCROLL LOCK: the scroll origin to hold while a pinch (or its grace) is active. Even if a scrollWheel
     /// leaks past both interception points (macOS responsive-scrolling / gesture disambiguation at the
-    /// extreme detents), `scrolled()` snaps the position straight back to this — so the grid CANNOT drift
+    /// extreme levels), `scrolled()` snaps the position straight back to this — so the grid CANNOT drift
     /// during a zoom. nil = not locked.
     private var scrollLockOrigin: CGPoint?
-    // Post-release (or button) settle animation.
-    private var settleActive = false
-    private var settleFrom: CGFloat = 0
-    private var settleTo: CGFloat = 0
-    private var settleTarget: Int?
-    private var settleStart: CFTimeInterval = 0
-    private var settleCrossfadeStart: Float = 0   // the zoom-out fade value the settle continues from
-    private var settleDuration: CFTimeInterval = 0.22
+    /// Post-release commit-bridge timing (the geometry-only transaction→settled settle). Driven by the tick.
+    private var bridgeStart: CFTimeInterval = 0
+    private let bridgeDuration: CFTimeInterval = GridZoomCommitBridge.duration
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default) {
         guard let coordinator = MetalGridCoordinator(device: device, dataSource: dataSource, budget: budget) else { return nil }
@@ -117,7 +103,6 @@ final class MetalGridScrollHost: NSView {
 
         spacer.onMouseMoved = { [weak self] point in
             guard let self else { return }
-            self.lastMouseContentPoint = point
             self.onHitTest?(self.coordinator.hitTest(contentPoint: point), point)
         }
         spacer.onMouseExited = { [weak self] in self?.onHitTest?(nil, .zero) }
@@ -127,12 +112,12 @@ final class MetalGridScrollHost: NSView {
         spacer.onMagnify = { [weak self] event in self?.handleMagnify(event) }
         // Swallow scroll whenever a pinch could leak into one. Wired on BOTH the document spacer and the
         // scroll view itself (two interception points) so trackpad scroll/inertia that bypasses the spacer
-        // is still caught. Blocks: the live pinch + its settle (`pinchActive`/`settleActive`/`zoomSession`),
-        // a grace window after the last magnify OR the commit, and post-pinch MOMENTUM (the inertia that
+        // is still caught. Blocks: the live pinch (`pinchActive` / the engine's live-zoom transaction), a
+        // grace window after the last magnify OR the commit, and post-pinch MOMENTUM (the inertia that
         // keeps scrolling the committed grid wildly when you push past the largest/densest stage).
         let block: (NSEvent) -> Bool = { [weak self] event in
             guard let self else { return false }
-            if pinchActive || settleActive || coordinator.isZoomingLive { return true }
+            if pinchActive || coordinator.isZoomingLive || coordinator.isCommitBridging { return true }
             let sinceMagnify = CACurrentMediaTime() - lastMagnifyEventTime
             if sinceMagnify < 0.6 { return true }                               // grace after a pinch/commit
             return event.momentumPhase != [] && sinceMagnify < 1.5             // post-pinch inertia
@@ -162,22 +147,28 @@ final class MetalGridScrollHost: NSView {
 
     /// A trackpad pinch drives an engine-owned `GridZoomTransaction`: the item under the cursor is the anchor,
     /// the focus row keeps its photos as the level position glides, and on release we snap to the nearest
-    /// detent (cursor re-anchored). NOT a per-frame stateless re-resolve — no focus-row rewrap.
+    /// level (cursor re-anchored). NOT a per-frame stateless re-resolve — no focus-row rewrap.
+    ///
+    /// The transaction is SINGLE-SECTION only (see `GridZoomTransaction`). Production uses one physical layout
+    /// section by design (the flattened photo wall), so the pinch drives the transaction normally. If a grid
+    /// ever had multiple physical sections, `beginLiveZoom` would start no transaction and the pinch would stay
+    /// inert here (zoom via the +/- controls instead) — a safety fallback, not a production path.
     private func handleMagnify(_ event: NSEvent) {
-        lastMagnifyEventTime = CACurrentMediaTime()   // arms the post-pinch scroll grace window
         switch event.phase {
         case .began:
-            cancelSettle()
+            let cursorContent = cursorContentPoint(for: event)
+            let viewportPoint = CGPoint(x: cursorContent.x, y: cursorContent.y - scrollView.contentView.bounds.origin.y)
+            coordinator.beginLiveZoom(cursorContentPoint: cursorContent, viewportPoint: viewportPoint)
+            guard coordinator.isZoomingLive else { return }   // no transaction (non-single-section) → inert pinch
             stickToBottom = false
             pinchActive = true
             pinchBaseLevel = coordinator.level
             pinchCumulativeMagnification = 0
             scrollLockOrigin = scrollView.contentView.bounds.origin   // freeze scroll for the gesture
-            let cursorContent = cursorContentPoint(for: event)
-            let viewportPoint = CGPoint(x: cursorContent.x, y: cursorContent.y - scrollView.contentView.bounds.origin.y)
-            coordinator.beginLiveZoom(cursorContentPoint: cursorContent, viewportPoint: viewportPoint)
+            lastMagnifyEventTime = CACurrentMediaTime()               // arm the post-pinch scroll grace
         case .changed, .mayBegin:
             guard pinchActive else { return }
+            lastMagnifyEventTime = CACurrentMediaTime()
             pinchCumulativeMagnification += event.magnification
             let pos = CGFloat(pinchBaseLevel) - pinchCumulativeMagnification / magnificationPerLevel
             coordinator.updateLiveZoom(continuousLevel: pos)
@@ -195,11 +186,11 @@ final class MetalGridScrollHost: NSView {
         }
     }
 
-    /// Commit the live zoom to a settled detent and re-anchor scroll so the cursor item stays put.
+    /// Commit the live zoom: rebase scroll from the anchor, then run a short geometry-only BRIDGE that slides
+    /// the transaction-final frame to the settled frame (so the column-phase reflow is smooth, not a snap).
     private func finishLiveZoom(target: Int) {
         let clamped = max(0, min(target, coordinator.levelCount - 1))
-        let newY = coordinator.liveZoomCommitScrollOffsetY(finalLevel: clamped)   // reads tx, latches view anchor
-        coordinator.commitLiveZoom(finalLevel: clamped)                           // clears tx, sets level
+        let newY = coordinator.beginCommitBridge(finalLevel: clamped)   // rebase + capture tx + set level + start bridge
         let clipH = scrollView.contentView.bounds.height
         let content = coordinator.contentSize()
         let targetY = (!stickToBottom && newY != nil)
@@ -210,11 +201,14 @@ final class MetalGridScrollHost: NSView {
         // PRE-zoom origin, it would instantly undo the commit scroll → the grid jumps to a different position.
         lastMagnifyEventTime = CACurrentMediaTime()
         scrollLockOrigin = CGPoint(x: 0, y: targetY)
+        coordinator.setCommitBridgeScrollY(targetY)                 // the bridge settles toward the real scroll pos
+        bridgeStart = CACurrentMediaTime()
         applyContentSize(content)
         if !stickToBottom, newY != nil {
             scrollView.contentView.scroll(to: CGPoint(x: 0, y: targetY))
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
+        if !coordinator.isCommitBridging { coordinator.logPostCommitAnchor() }   // instant commit: probe now (bridge logs at end)
         metalView.needsDisplay = true
         onZoomCommit?(coordinator.level)                            // sync the SwiftUI level binding
     }
@@ -230,137 +224,10 @@ final class MetalGridScrollHost: NSView {
         return CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)
     }
 
-    // MARK: - Continuous detent pinch (Apple-matched)
-
-    /// A trackpad pinch glides the continuous level position between detents; release snaps to the nearest
-    /// (velocity-biased) and settles. The grid renders the two-surface transition the whole time.
-    private func handleContinuousMagnify(_ event: NSEvent) {
-        switch event.phase {
-        case .began:
-            cancelSettle()
-            coordinator.isZoomSettling = false   // live drag → clean opaque scale, no ghost
-            stickToBottom = false
-            pinchActive = true
-            pinchBaseLevel = coordinator.level
-            pinchCumulativeMagnification = 0
-            pinchLastPosition = CGFloat(coordinator.level)
-            pinchLastTime = CACurrentMediaTime()
-            pinchVelocity = 0
-            scrollLockOrigin = scrollView.contentView.bounds.origin   // freeze scroll for the whole gesture
-            coordinator.beginZoomTransition(anchorContentPoint: anchorContentForGestureStart())
-        case .changed, .mayBegin:
-            guard pinchActive else { return }
-            pinchCumulativeMagnification += event.magnification
-            let raw = coordinator.detentModel.rawLevelPosition(source: pinchBaseLevel, cumulativeMagnification: pinchCumulativeMagnification)
-            let pos = coordinator.detentModel.rubberBanded(raw)   // soft over-travel past the ends
-            let now = CACurrentMediaTime()
-            let dt = now - pinchLastTime
-            if dt > 0.001 {
-                let v = (pos - pinchLastPosition) / CGFloat(dt)
-                pinchVelocity = pinchVelocity * 0.6 + v * 0.4   // smoothed levels/sec
-                pinchLastTime = now
-                pinchLastPosition = pos
-            }
-            coordinator.updateZoomTransition(levelPosition: pos)
-            metalView.needsDisplay = true
-        case .ended:
-            guard pinchActive else { return }
-            pinchActive = false
-            let finalLevel = coordinator.snapLevel(velocity: pinchVelocity)
-            beginSettle(toLevel: finalLevel)
-        case .cancelled:
-            guard pinchActive else { return }
-            pinchActive = false
-            beginSettle(toLevel: pinchBaseLevel)
-        default:
-            break
-        }
-    }
-
-    /// Content point under the cursor at gesture start, or the viewport centre if the pointer is unknown or
-    /// STALE. `lastMouseContentPoint` is only refreshed on mouse-moved, so after a scroll it can hold an
-    /// off-screen content point from the previous scroll position — anchoring to that makes the zoom jump to
-    /// an unrelated part of the timeline. Trust it only when it lies inside the CURRENT viewport.
-    private func anchorContentForGestureStart() -> CGPoint {
-        let origin = scrollView.contentView.bounds.origin
-        let vh = scrollView.contentView.bounds.height
-        let center = CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)
-        guard let p = lastMouseContentPoint,
-              p.y >= origin.y, p.y <= origin.y + vh, p.x >= 0, p.x <= bounds.width else { return center }
-        return p
-    }
-
-    /// Animate the continuous level position onto an integer detent, then commit + re-anchor scroll.
-    private func beginSettle(toLevel target: Int) {
-        let from = coordinator.activeLevelPosition ?? CGFloat(coordinator.level)
-        if abs(from - CGFloat(target)) < 0.001 {
-            finishSettle(target: target)
-            return
-        }
-        settleActive = true
-        coordinator.isZoomSettling = true        // release → cross-dissolve the reflow, briefly
-        coordinator.settleTargetLevel = target
-        // CONTINUE the overlay fade from where the drag left it (no reset/flicker), then ramp it to 1 so the
-        // denser grid finishes fading in. A plain zoom-in re-align has lastZoomFade == 0 → starts at 0.
-        settleCrossfadeStart = coordinator.lastZoomFadeValue
-        coordinator.settleCrossfade = CGFloat(settleCrossfadeStart)
-        settleFrom = from
-        settleTo = CGFloat(target)
-        settleTarget = target
-        settleStart = CACurrentMediaTime()
-        streamingTick?.isPaused = false
-        metalView.needsDisplay = true
-    }
-
-    private func advanceSettle(now: CFTimeInterval) {
-        guard settleActive, let target = settleTarget else { return }
-        let t = settleDuration > 0 ? min(1, (now - settleStart) / settleDuration) : 1
-        let e = 1 - pow(1 - t, 3)   // easeOutCubic
-        let pos = settleFrom + (settleTo - settleFrom) * CGFloat(e)
-        let start = CGFloat(settleCrossfadeStart)
-        coordinator.settleCrossfade = start + (1 - start) * CGFloat(e)  // continue the fade → 1
-        coordinator.updateZoomTransition(levelPosition: pos)
-        metalView.needsDisplay = true
-        if t >= 1 { finishSettle(target: target) }
-    }
-
-    private func finishSettle(target: Int) {
-        settleActive = false
-        coordinator.isZoomSettling = false
-        settleTarget = nil
-        lastMagnifyEventTime = CACurrentMediaTime()   // re-arm the scroll grace from the commit moment
-        let originY = coordinator.scrollOriginAfterCommit(finalLevel: target)
-        coordinator.commitZoomTransition(finalLevel: target)
-        applyContentSize(coordinator.contentSize())
-        if !stickToBottom, let originY {
-            let maxY = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
-            let y = min(max(0, originY), maxY)
-            scrollView.contentView.scroll(to: CGPoint(x: 0, y: y))
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
-        scrollLockOrigin = scrollView.contentView.bounds.origin   // re-lock to the committed origin for the grace
-        metalView.needsDisplay = true
-        onZoomCommit?(target)
-    }
-
-    private func cancelSettle() {
-        settleActive = false
-        settleTarget = nil
-    }
-
-    /// Animate a button-driven level change as a transition (anchored at the viewport centre).
+    /// A button-driven level change. The discrete +/- path re-anchors scroll at the viewport centre (the
+    /// live trackpad pinch is the continuous path, handled in `handleMagnify`).
     func animateToLevel(_ target: Int) {
-        guard coordinator.usesDetentZoom else { setLevel(target); return }
-        let clamped = min(max(target, 0), coordinator.detentModel.count - 1)
-        if coordinator.zoomSession == nil && coordinator.level == clamped { return }
-        if pinchActive { return }                       // a live pinch owns the gesture
-        if settleActive && settleTarget == clamped { return }
-        cancelSettle()
-        if coordinator.zoomSession == nil {
-            let origin = scrollView.contentView.bounds.origin
-            coordinator.beginZoomTransition(anchorContentPoint: CGPoint(x: bounds.width / 2, y: origin.y + bounds.height / 2))
-        }
-        beginSettle(toLevel: clamped)
+        setLevel(target)
     }
 
     private func pinToBottom() {
@@ -371,9 +238,9 @@ final class MetalGridScrollHost: NSView {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
-    /// True while scroll must be frozen: the live pinch, its settle, or a short grace after the last magnify.
+    /// True while scroll must be frozen: the live pinch, the commit bridge, or a short grace after the magnify.
     private func isScrollBlocking() -> Bool {
-        pinchActive || settleActive || coordinator.isZoomingLive
+        pinchActive || coordinator.isZoomingLive || coordinator.isCommitBridging
             || CACurrentMediaTime() - lastMagnifyEventTime < 0.6
     }
 
@@ -414,8 +281,17 @@ final class MetalGridScrollHost: NSView {
     }
 
     @objc private func step() {
-        if settleActive { advanceSettle(now: CACurrentMediaTime()) }
+        if coordinator.isCommitBridging { advanceCommitBridge() }
         if coordinator.hasPendingVisibleThumbnails { metalView.needsDisplay = true }
+    }
+
+    /// Advance the post-release commit bridge (geometry settle). When it completes, end it → normal settled
+    /// rendering. Scroll stays locked throughout (the bridge is shorter than the post-magnify grace window).
+    private func advanceCommitBridge() {
+        let t = bridgeDuration > 0 ? min(1, (CACurrentMediaTime() - bridgeStart) / bridgeDuration) : 1
+        coordinator.commitBridgeProgress = CGFloat(t)
+        metalView.needsDisplay = true
+        if t >= 1 { coordinator.endCommitBridge(); metalView.needsDisplay = true }
     }
 
     override func layout() {
@@ -451,22 +327,25 @@ final class MetalGridScrollHost: NSView {
             return
         }
         let origin = scrollView.contentView.bounds.origin
-        // Explicit cursor point (pinch) else the viewport centre — an explicit viewport point, not the top.
+        // +/- anchors at the GRID VIEWPORT CENTRE (never the toolbar-button mouse point, a stale hover, or the
+        // top). The pinch path supplies an explicit cursor point instead.
         let anchorPoint = anchorContentPoint ?? CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)
         let viewportPoint = CGPoint(x: anchorPoint.x, y: anchorPoint.y - origin.y)
-        // Latches the view anchor / column phase so the settled grid keeps the focus item's column (seamless).
-        let newY = coordinator.settleScrollOffsetY(toLevel: newLevel, anchorContentPoint: anchorPoint, viewportPoint: viewportPoint)
+        let trigger: GridZoomTrigger = newLevel < coordinator.level ? .toolbarPlus : .toolbarMinus   // plus = zoom in
+        // Latches the committed column phase so the settled grid keeps the anchor's column (no fly).
+        let newY = coordinator.settleScrollOffsetY(toLevel: newLevel, anchorContentPoint: anchorPoint, viewportPoint: viewportPoint, trigger: trigger)
         applyContentSize(coordinator.contentSize())
         if let newY {
             let maxY = max(0, spacer.frame.height - vh)
             scrollView.contentView.scroll(to: CGPoint(x: 0, y: min(max(0, newY), maxY)))
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
+        coordinator.logPostCommitAnchor()
         metalView.needsDisplay = true
     }
 
     /// A photo's cell frame in WINDOW content coordinates (top-left origin), or nil if it isn't visible —
-    /// used by the shared-element zoom transition (matches `PhotoGridView`'s `windowFrame(for:)`).
+    /// used by the shared-element zoom transition (window-coordinate frame of a visible cell).
     func windowFrame(forUID uid: PhotoUID) -> CGRect? {
         guard let win = window, let contentRect = coordinator.cellContentRect(forUID: uid) else { return nil }
         let origin = scrollView.contentView.bounds.origin
@@ -490,10 +369,12 @@ final class MetalGridScrollHost: NSView {
         scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
-    /// Scroll to the newest (bottom) and re-arm the bottom pin.
+    /// Scroll to the newest (bottom) and re-arm the bottom pin. Resets the camera to the canonical bottom-right
+    /// phase so the newest view always has the newest item in the corner (no trailing black at the bottom-right).
     func scrollToBottom() {
         stickToBottom = true
-        pinToBottom()
+        coordinator.resetCommittedPhase()
+        applyContentSize(coordinator.contentSize())   // resize for the canonical phase, then pin to bottom
     }
 
     /// Scroll a specific photo to vertical center (detaches the bottom pin — the user navigated to it).

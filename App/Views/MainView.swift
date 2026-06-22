@@ -746,9 +746,8 @@ struct MainView: View {
 /// Draggable divider between the sidebar and the grid (Deliverable 4). Updates the bound width live
 /// (clamped to `SidebarMetrics`) and persists it ONCE on release — never per drag tick. The width
 /// change is the *only* thing the handle does to the grid: it never mutates grid layout directly. The
-/// resulting viewport-width change is reported to the shared `GridResizeStabilizer` via the
-/// `onDraggingChanged` callback (`.sidebarDrag` begin/end), so a manual drag is just a window resize
-/// with a different cause. Shows the resize cursor on hover.
+/// resulting viewport-width change is bracketed via the `onDraggingChanged` callback (`.sidebarDrag`
+/// begin/end) — the Metal grid relayouts natively on the width change. Shows the resize cursor on hover.
 private struct SidebarResizeHandle: View {
     @Binding var width: CGFloat
     var onDraggingChanged: (Bool) -> Void = { _ in }

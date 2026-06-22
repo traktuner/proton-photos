@@ -28,9 +28,15 @@ extension MetalGridDataSource {
 
 // MARK: - Real data (ThumbnailFeed-backed)
 
-/// Reads the live library: per-section counts come from the loaded `TimelineSection`s, decoded images
-/// from the shared `ThumbnailFeed` (RAM-hit only on the render thread; disk/network decode stays on the
-/// feed actor). `warm` drives the feed's bounded priority pipeline — no architecture change to the feed.
+/// Reads the live library: decoded images come from the shared `ThumbnailFeed` (RAM-hit only on the render
+/// thread; disk/network decode stays on the feed actor). `warm` drives the feed's bounded priority pipeline
+/// — no architecture change to the feed.
+///
+/// Production geometry is ONE continuous square-tile photo wall: all `TimelineSection`s are flattened into a
+/// single ordered run, so `sectionCounts` is always `[flatUIDs.count]` (or `[]` when empty). The date-grouped
+/// `TimelineSection`s are NOT used as physical grid layout sections — they only feed the month/date label
+/// overlay, via `MetalGridProductionAdapter.monthMarkers(sections:)`. (Multi-section layout stays supported by
+/// `SquareTileGridEngine` + its tests; production just never uses more than one section.)
 @MainActor
 final class RealMetalGridDataSource: MetalGridDataSource {
     let label = "real"
@@ -45,8 +51,9 @@ final class RealMetalGridDataSource: MetalGridDataSource {
     private let maxWarmBatch = 48
 
     init(sections: [TimelineSection], feed: ThumbnailFeed) {
-        self.sectionCounts = sections.map(\.items.count)
-        self.flatUIDs = sections.flatMap { $0.items.map(\.uid) }
+        let uids = sections.flatMap { $0.items.map(\.uid) }
+        self.flatUIDs = uids
+        self.sectionCounts = uids.isEmpty ? [] : [uids.count]   // one continuous section (production photo wall)
         self.videoUIDs = Set(sections.flatMap { $0.items }.filter(\.isVideo).map(\.uid))
         self.feed = feed
     }

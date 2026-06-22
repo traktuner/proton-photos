@@ -10,8 +10,7 @@ enum MetalGridProductionAdapter {
         RealMetalGridDataSource(sections: sections, feed: feed)
     }
 
-    /// Month/year markers (flat item index → "LLLL yyyy"), one per month boundary in library order —
-    /// matches `PhotoGridView`'s month-label computation.
+    /// Month/year markers (flat item index → "LLLL yyyy"), one per month boundary in library order.
     static func monthMarkers(sections: [TimelineSection]) -> [(index: Int, text: String)] {
         let items = sections.flatMap { $0.items }
         guard !items.isEmpty else { return [] }

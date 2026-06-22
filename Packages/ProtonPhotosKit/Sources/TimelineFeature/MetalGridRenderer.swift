@@ -33,14 +33,12 @@ struct MetalGridRenderGroup {
     var quads: [MetalGridQuad]
 }
 
-/// The persistent Metal renderer for the normal (non-zoom) grid. Separate from the zoom-transition
-/// renderer (`GridSpriteRenderer`) so the production zoom path is untouched. Draws one quad per visible
-/// cell (rounded-corner SDF + premultiplied alpha), plus solid/border/glyph quads for selection
-/// outlines and badges.
+/// The persistent Metal renderer for the grid. Draws one quad per visible cell (rounded-corner SDF +
+/// premultiplied alpha), plus solid/border/glyph quads for selection outlines and badges.
 ///
-/// The shader (rounded-corner signed-distance mask + premultiplied alpha + V-up sampling) is adapted
-/// from this repo's proven `GridSpriteRenderer`. The overall architecture (MTKView, one quad per cell,
-/// GPU textures, O(1) LRU cache, CGImageSource downsampling) follows the Pixe reference design.
+/// The shader (rounded-corner signed-distance mask + premultiplied alpha + V-up sampling) and the overall
+/// architecture (MTKView, one quad per cell, GPU textures, O(1) LRU cache, CGImageSource downsampling)
+/// follow the Pixe reference design.
 final class MetalGridRenderer {
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue

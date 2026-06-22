@@ -57,8 +57,6 @@ targets:
         product: AlbumsFeature
       - package: ProtonPhotosKit
         product: UploadFeature
-      - package: ProtonPhotosKit
-        product: GridZoomV3
       - package: ProtonCore
         product: ProtonCoreDataModel
       - package: ProtonCore

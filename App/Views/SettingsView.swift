@@ -105,18 +105,10 @@ private struct LibrarySettingsTab: View {
 private struct CacheStatusTab: View {
     @State private var status = OfflineCacheStatus()
     @State private var refreshing = false
-    /// MetalGrid.enabled — default ON. Toggling rebuilds the library grid (Metal ↔ NSCollectionView).
-    @AppStorage("MetalGrid.enabled") private var metalGridEnabled = true
     private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Form {
-            Section {
-                Toggle(isOn: $metalGridEnabled) { Text("Metal Grid Renderer verwenden") }
-                Text("Standard: an. Aus → klassisches NSCollectionView-Raster (Fallback).")
-                    .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Renderer") }
-
             Section {
                 row("Assets gesamt", "\(status.totalAssets)")
                 row("Metadaten-Zeilen", "\(status.metadataRows)")

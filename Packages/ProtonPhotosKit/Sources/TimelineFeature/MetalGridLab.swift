@@ -185,7 +185,7 @@ final class MetalGridLabModel {
     }
 
     func setLevel(_ newLevel: Int) {
-        let clamped = min(max(newLevel, 0), 5)
+        let clamped = min(max(newLevel, 0), SquareTileGridEngine.defaultLevels.count - 1)
         level = clamped
         host?.setLevel(clamped)
     }

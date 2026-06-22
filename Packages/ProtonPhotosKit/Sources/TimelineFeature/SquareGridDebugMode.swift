@@ -4,8 +4,8 @@ import simd
 
 // MARK: - Synthetic square-grid debug mode
 //
-// Renders the grid WITHOUT real thumbnails — one colored square per visible slot, straight from
-// `GridSlot.viewportRect`. The current problem class is grid GEOMETRY, not photos, so this mode lets the
+// Renders the grid WITHOUT real thumbnails — one colored square per visible render slot, straight from
+// `GridRenderSlot.rect`. The current problem class is grid GEOMETRY, not photos, so this mode lets the
 // grid be validated visually (square slots, consistent gaps, both edges filled, dynamic gap) before any
 // texture/aspect logic is involved. No texture cache, no media aspect, no black areas where slots exist.
 
@@ -14,7 +14,7 @@ public struct GridDebugSlotCommand: Equatable, Sendable {
     public let index: Int
     public let row: Int
     public let column: Int
-    public let rect: CGRect           // viewport-space; ALWAYS square (== GridSlot.viewportRect)
+    public let rect: CGRect           // viewport-space; ALWAYS square (== GridRenderSlot.rect)
     public let color: SIMD4<Float>    // premultiply-friendly straight RGBA
 
     public init(index: Int, row: Int, column: Int, rect: CGRect, color: SIMD4<Float>) {
@@ -29,16 +29,19 @@ public struct GridDebugSlotCommand: Equatable, Sendable {
 public enum SquareGridDebugMode {
     /// Exactly ONE command per visible slot, in plan order (GridDebugModeEmitsOneCommandPerVisibleSlotTest).
     /// Colors are a deterministic function of (row, column) so the grid structure reads at a glance and the
-    /// gaps between squares are obvious. Uses `slot.viewportRect` only — never an inner content rect.
+    /// gaps between squares are obvious. Maps the engine's content-space `GridSlot` to viewport-space render
+    /// slots first (`viewportRect`), then emits one command each.
     public static func commands(for plan: GridFramePlan) -> [GridDebugSlotCommand] {
-        commands(forSlots: plan.visibleSlots)
+        commands(forSlots: plan.visibleSlots.map {
+            GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect)
+        })
     }
 
-    /// Same, from a raw slot list (used by the live zoom transaction, which has no settled frame plan).
-    public static func commands(forSlots slots: [GridSlot]) -> [GridDebugSlotCommand] {
+    /// One command per render slot (used by the live zoom transaction, which emits `GridRenderSlot` directly).
+    public static func commands(forSlots slots: [GridRenderSlot]) -> [GridDebugSlotCommand] {
         slots.map { slot in
             GridDebugSlotCommand(index: slot.index, row: slot.row, column: slot.column,
-                                 rect: slot.viewportRect, color: color(row: slot.row, column: slot.column))
+                                 rect: slot.rect, color: color(row: slot.row, column: slot.column))
         }
     }
 

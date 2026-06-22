@@ -1,11 +1,10 @@
 import AppKit
 import PhotosCore
 
-/// Month/year label overlay for the Metal production grid. Reuses the existing `MonthLabelView`
-/// (Liquid-Glass pill) and positions one per visible month boundary, only at the zoomed-out levels that
-/// show labels (`monthLabels == true`) — matching `PhotoGridView`'s behavior. Display-only: the overlay
-/// never intercepts events (`FlippedOverlayView.hitTest` returns nil), so scrolling/clicks pass straight
-/// to the grid below.
+/// Month/year label overlay for the Metal production grid. Uses `MonthLabelView` (Liquid-Glass pill) and
+/// positions one per visible month boundary, only at the zoomed-out levels that show labels
+/// (`monthLabels == true`). Display-only: the overlay never intercepts events (`FlippedOverlayView.hitTest`
+/// returns nil), so scrolling/clicks pass straight to the grid below.
 @MainActor
 final class MetalGridHeaderRenderer {
     /// Pinned over the grid viewport (flipped, top-left origin, transparent to events).

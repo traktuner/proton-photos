@@ -4,8 +4,8 @@ import PhotosCore
 /// Minimal accessibility for the Metal grid. Because the Metal renderer has no per-cell `NSView`, this
 /// synthesizes `NSAccessibilityElement`s for the currently-visible items (role image, a date/kind label,
 /// selected state, and a press action that opens the viewer) and assigns them as the host's children,
-/// rebuilding on each viewport change. This is a baseline — NOT full `NSCollectionView` parity — which is
-/// why the NSCollectionView fallback is retained. See the report's accessibility section.
+/// rebuilding on each viewport change. This is a baseline (not yet full AppKit-grid parity). See the
+/// report's accessibility section.
 @MainActor
 final class MetalGridAccessibilityProvider {
     private weak var host: NSView?

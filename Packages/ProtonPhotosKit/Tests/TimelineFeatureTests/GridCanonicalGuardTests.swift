@@ -69,12 +69,17 @@ import CoreGraphics
         }
     }
 
-    // ProductionZoomIsDetentOnlyTest — until live pinch is rebuilt as an engine-owned transaction, the
-    // coordinator must NOT use the continuous fractional path (which rewraps columns every frame).
-    @Test func productionZoomIsDetentOnly() {
+    // GridZoomTransactionProductionPathTest — the live pinch is an engine-owned `GridZoomTransaction`
+    // (focus-row stable), NOT a stateless per-frame re-resolve that rewraps columns, and NOT the deleted
+    // detent/justified machinery.
+    @Test func productionLiveZoomUsesEngineTransaction() {
         let coord = source("MetalGridCoordinator.swift")
-        #expect(coord.contains("let usesDetentZoom = false"),
-                "production zoom must be detent-only (no continuous per-frame reflow)")
+        #expect(coord.contains("zoomTransaction"), "live zoom must be the engine-owned GridZoomTransaction")
+        #expect(coord.contains("beginLiveZoom"), "the coordinator must drive the live-zoom transaction")
+        // The deleted detent/justified zoom machinery must not come back into the coordinator.
+        for banned in ["GridDetentLayout", "GridZoomDetentModel", "detentModel", "MetalGridLayout", "usesDetentZoom"] {
+            #expect(!coord.contains(banned), "the coordinator must not reference removed '\(banned)'")
+        }
     }
 
     // VideoThumbnailUsesSquareSlotTest — the engine has no media-type input, so a video occupies the same

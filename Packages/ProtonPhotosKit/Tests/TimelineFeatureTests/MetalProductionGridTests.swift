@@ -4,77 +4,17 @@ import CoreGraphics
 import PhotosCore
 @testable import TimelineFeature
 
-/// Phase-2 production-integration tests. Pure pieces (feature flag, selection model, layout parity,
-/// zoom-level effect, interaction policy, accessibility label) run headlessly. Renderer-bound behaviors
-/// (Metal selection-outline instances, marquee, drag-to-Finder) are covered by the manual acceptance
-/// video; see the report.
+/// Production-integration tests for the Metal grid's kept components: selection model, interaction
+/// policy (double-click → viewer), and accessibility label. Renderer-bound behaviors (Metal
+/// selection-outline instances, marquee, drag-to-Finder) are covered by the manual acceptance video.
+///
+/// (The legacy feature-flag/fallback and `MetalGridLayout` ↔ `JustifiedCollectionLayout` parity suites
+/// were removed with those types — production is MetalGrid-only and the geometry is the canonical
+/// `SquareTileGridEngine`.)
 
 private func uids(_ n: Int) -> [PhotoUID] { (0 ..< n).map { PhotoUID(volumeID: "v", nodeID: "\($0)") } }
 
-// MARK: 1–2 — Feature flag + fallback
-
-@Suite(.serialized) struct MetalGridFeatureFlagTests {
-    private func withFlag(_ value: Bool?, _ body: () -> Void) {
-        let d = UserDefaults.standard, key = MetalGridFeatureFlag.userDefaultsKey
-        let saved = d.object(forKey: key)
-        if let value { d.set(value, forKey: key) } else { d.removeObject(forKey: key) }
-        body()
-        if let saved { d.set(saved, forKey: key) } else { d.removeObject(forKey: key) }
-    }
-
-    @Test func defaultsToEnabled() {
-        withFlag(nil) { #expect(MetalGridFeatureFlag.isEnabled == true) }   // unset → ON
-    }
-
-    @Test func disableViaUserDefaultsUsesFallback() {
-        withFlag(false) {
-            #expect(MetalGridFeatureFlag.isEnabled == false)
-            #expect(MetalGridRuntime.usesMetalGrid == false)   // flag OFF → NSCollectionView fallback
-        }
-        withFlag(true) {
-            #expect(MetalGridFeatureFlag.isEnabled == true)
-            // usesMetalGrid == flag AND renderable; on a GPU host this is true.
-            #expect(MetalGridRuntime.usesMetalGrid == MetalGridRuntime.isMetalRenderable)
-        }
-    }
-}
-
-// MARK: 3 — Layout parity (single production section)
-
-@MainActor
-@Suite struct MetalProductionLayoutParityTests {
-    @Test func singleSectionMatchesJustifiedLayout() {
-        let count = 2_037
-        let jl = JustifiedCollectionLayout()
-        jl.sectionAspects = [Array(repeating: CGFloat(1), count: count)]
-        for width in [720, 1280] as [CGFloat] {
-            for level in 0 ..< JustifiedCollectionLayout.levels.count {
-                let mg = MetalGridLayout.forLevel(level, sectionCounts: [count], width: width)
-                #expect(abs(mg.contentSize.height - jl.projectedContentSize(level: level, width: width).height) < 0.5)
-                for item in [0, 1, count / 2, count - 1] {
-                    let jr = jl.projectedFrameForItem(at: IndexPath(item: item, section: 0), level: level, width: width)
-                    let mr = mg.frame(section: 0, item: item)
-                    #expect(jr != nil && mr != nil)
-                    if let jr, let mr { #expect(abs(jr.minX - mr.minX) < 0.5 && abs(jr.minY - mr.minY) < 0.5 && abs(jr.width - mr.width) < 0.5) }
-                }
-            }
-        }
-    }
-}
-
-// MARK: 4 — Zoom level changes the Metal layout
-
-@Suite struct MetalGridZoomLevelTests {
-    @Test func zoomLevelChangesColumnsAndContentHeight() {
-        let counts = [1000]
-        let zoomedIn = MetalGridLayout(sectionCounts: counts, level: 0, size: 330, gap: 12, cropMode: .aspectFit, width: 1200)
-        let zoomedOut = MetalGridLayout(sectionCounts: counts, level: 5, size: 44, gap: 1, cropMode: .squareFill, width: 1200)
-        #expect(zoomedOut.metrics.cols > zoomedIn.metrics.cols)        // smaller thumbnails → more columns
-        #expect(zoomedOut.contentHeight < zoomedIn.contentHeight)      // more columns → fewer rows → shorter
-    }
-}
-
-// MARK: 5,7,8 — Selection (single / cmd / shift)
+// MARK: Selection (single / cmd / shift)
 
 @MainActor
 @Suite struct MetalGridSelectionControllerTests {
@@ -118,7 +58,7 @@ private func uids(_ n: Int) -> [PhotoUID] { (0 ..< n).map { PhotoUID(volumeID: "
     }
 }
 
-// MARK: 6 / 14 — Double-click opens viewer / handoff mapping
+// MARK: Double-click opens viewer / handoff mapping
 
 @Suite struct MetalGridViewerHandoffTests {
     @Test func doubleClickOpensViewer_singleDoesNot() {
@@ -134,7 +74,7 @@ private func uids(_ n: Int) -> [PhotoUID] { (0 ..< n).map { PhotoUID(volumeID: "
     }
 }
 
-// MARK: 16 — Accessibility label
+// MARK: Accessibility label
 
 @MainActor
 @Suite struct MetalGridAccessibilityTests {

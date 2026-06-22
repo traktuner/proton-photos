@@ -4,17 +4,14 @@ import Metal
 import PhotosCore
 import MediaCache
 
-/// The production wrapper around `MetalGridScrollHost` — the Metal-backed library grid used when the
-/// `MetalGrid` feature flag is on. Reuses the proven lab renderer/scroll/cache; adds real-data binding,
-/// selection, double-click viewer handoff, zoom-level changes, month labels, badges, and `GridProxy`
-/// wiring (windowFrame / scrollToItem / scrollToLatest / zoom). It mirrors `PhotoGridView`'s public
-/// interface so `TimelineView` can swap between them behind the flag without touching the rest of the app.
+/// The production wrapper around `MetalGridScrollHost` — the Metal-backed library grid (the only timeline
+/// grid). The canonical `SquareTileGridEngine` owns all geometry; this adds real-data binding, selection,
+/// double-click viewer handoff, zoom-level changes, month labels, badges, and `GridProxy` wiring
+/// (windowFrame / scrollToItem / scrollToLatest / zoom).
 struct MetalProductionGridView: NSViewRepresentable {
     let sections: [TimelineSection]
     let allItems: [PhotoItem]
     let feed: ThumbnailFeed
-    /// Per-section item aspect ratios (w/h) for the justified detent levels. Empty = square-only fallback.
-    var sectionAspects: [[CGFloat]] = []
     @Binding var level: Int
     let onOpen: (PhotoItem, [PhotoItem]) -> Void
     var proxy: GridProxy?
@@ -30,7 +27,8 @@ struct MetalProductionGridView: NSViewRepresentable {
         let coord = context.coordinator
         guard let device = MTLCreateSystemDefaultDevice(),
               let host = MetalGridScrollHost(device: device, dataSource: MetalGridProductionAdapter.makeDataSource(sections: sections, feed: feed)) else {
-            // Should never happen (TimelineView gates on MetalGridRuntime.isMetalRenderable), but never crash.
+            // Only reachable if Metal can't initialise on this machine (no GPU / shader build fails); emit a
+            // diagnostic and return an empty view rather than crash.
             PhotoDiagnostics.shared.emit("MetalGridFallback", ["reason": "hostInitFailed"])
             return NSView()
         }
@@ -77,7 +75,6 @@ struct MetalProductionGridView: NSViewRepresentable {
 
         host.coordinator.setSelectionMode(selectionMode)
         host.coordinator.setFavorites(favoriteUIDs)
-        host.coordinator.setSectionAspects(sectionAspects)
         wireProxy(host: host, levelBinding: $level)
         host.setLevel(level)
         MetalGridRuntime.logResolutionOnce()
@@ -102,7 +99,6 @@ struct MetalProductionGridView: NSViewRepresentable {
         }
         host.coordinator.setSelectionMode(selectionMode)
         host.coordinator.setFavorites(favoriteUIDs)
-        host.coordinator.setSectionAspects(sectionAspects)
         if level != host.coordinator.level { host.animateToLevel(level) }
         wireProxy(host: host, levelBinding: $level)
         coord.header?.reposition()
@@ -112,14 +108,7 @@ struct MetalProductionGridView: NSViewRepresentable {
         let levelCount = host.coordinator.levelCount   // engine ladder (incl. the larger level 0)
         let stepIn = { levelBinding.wrappedValue = max(0, levelBinding.wrappedValue - 1) }
         let stepOut = { levelBinding.wrappedValue = min(levelCount - 1, levelBinding.wrappedValue + 1) }
-        // Trackpad pinch mirrors the +/- buttons (LEGACY discrete path only — the detent path is continuous).
-        host.onZoomStep = { direction in
-            switch direction {
-            case .zoomIn: stepIn()
-            case .zoomOut: stepOut()
-            }
-        }
-        // The continuous pinch / animated button transition reports the settled detent → keep `level` in sync.
+        // The live trackpad pinch reports the settled level on release → keep the SwiftUI `level` in sync.
         host.onZoomCommit = { settled in levelBinding.wrappedValue = settled }
         guard let proxy else { return }
         proxy.windowFrameForItem = { [weak host] item in host?.windowFrame(forUID: item.uid) }

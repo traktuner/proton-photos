@@ -72,7 +72,7 @@ import CoreGraphics
             guard let slot = frame.visibleSlots.first(where: { $0.index == anchor }) else {
                 Issue.record("anchor slot missing at \(level)"); continue
             }
-            #expect(abs(slot.slotRect.midX - cursor.x) < 1 && abs(slot.slotRect.midY - cursor.y) < 1,
+            #expect(abs(slot.rect.midX - cursor.x) < 1 && abs(slot.rect.midY - cursor.y) < 1,
                     "anchor not under the cursor at \(level)")
         }
     }
@@ -141,24 +141,9 @@ import CoreGraphics
         #expect(levels[0].slotSide > 260, "new largest must exceed the previous largest (260)")
     }
 
-    // CommitIsSeamlessNoRephaseTest — the settled grid, with the column phase the coordinator latches on
-    // commit, places the anchor at the SAME column and shows the SAME focus row as the live transaction's
-    // final frame. So releasing the pinch does NOT rephase/jump the grid.
-    @Test func commitIsSeamlessNoRephase() {
-        let e = SquareTileGridEngine(sectionCounts: [3000])
-        let width: CGFloat = 1400
-        let t = tx()                                            // anchor 1000 at cursor (700,450)
-        let txFrame = t.frame(continuousLevel: 3, viewportSize: viewport, overscan: 0)
-        let cA = txFrame.anchorColumn
-        let phase = e.columnPhase(forItem: anchor, targetColumn: cA, level: 3, width: width)
-        let scrollY = e.anchoredScrollOffset(flatIndex: anchor, localFraction: CGPoint(x: 0.5, y: 0.5),
-                                             viewportPoint: CGPoint(x: 0, y: cursor.y), level: 3, width: width, columnPhase: phase).y
-        let plan = e.framePlan(level: 3, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: scrollY), overscan: 0, columnPhase: phase)
-        let anchorSlot = plan.visibleSlots.first { $0.index == anchor }!
-        #expect(anchorSlot.column == cA, "anchor settled column \(anchorSlot.column) ≠ transaction column \(cA) → rephase")
-        let settledFocusRow = plan.visibleSlots.filter { $0.row == anchorSlot.row }.map(\.index).sorted()
-        #expect(settledFocusRow == txFrame.focusRow, "focus row rephased on commit: \(settledFocusRow) ≠ \(txFrame.focusRow)")
-    }
+    // (The "seamless commit via column phase" test was removed: the engine has no column-phase concept —
+    // the settled grid is always bottom-right anchored, and the release jump is handled by the host's scroll
+    // lock, not a phase. See ZoomAnchorPreservationTests / CursorAnchorZoomTests for commit anchoring.)
 
     // LevelMetricsMonotonicTest — zooming out: slotSide strictly decreases, pitch strictly decreases, gap
     // does not increase.
@@ -169,6 +154,24 @@ import CoreGraphics
             #expect(levels[i].pitch < levels[i - 1].pitch, "pitch not decreasing at \(i)")
             #expect(levels[i].gap <= levels[i - 1].gap, "gap increased at \(i)")
         }
+    }
+
+    // TransactionIsSingleSectionOnlyTest — the live transaction's flat single-run model is valid only for one
+    // section; `beginZoomTransaction` returns nil for a multi-section engine (production keeps live continuous
+    // zoom OFF there and zooms via the section-aware +/- path), and nil for an empty library.
+    @Test func transactionIsSingleSectionOnly() {
+        let width: CGFloat = 1400
+        let cursor = CGPoint(x: 700, y: 5000)
+        let vp = CGPoint(x: 700, y: 450)
+        let single = SquareTileGridEngine(sectionCounts: [3000])
+        #expect(single.beginZoomTransaction(cursorContentPoint: cursor, viewportPoint: vp, level: 3, width: width) != nil,
+                "single-section engine must capture a live transaction")
+        let multi = SquareTileGridEngine(sectionCounts: [500, 700, 1800])
+        #expect(multi.beginZoomTransaction(cursorContentPoint: cursor, viewportPoint: vp, level: 3, width: width) == nil,
+                "multi-section engine must NOT capture a live transaction (live zoom off in production)")
+        let empty = SquareTileGridEngine(sectionCounts: [])
+        #expect(empty.beginZoomTransaction(cursorContentPoint: cursor, viewportPoint: vp, level: 3, width: width) == nil,
+                "empty library must capture no transaction")
     }
 
     // MARK: source scan
