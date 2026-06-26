@@ -356,12 +356,12 @@ import CoreGraphics
     }
 
     // ── 5. Selection eligibility ──
-    @Test func selectionEligibility() {
+    @Test func selectionDoesNotGateTransitionGeometry() {
         let relocating: Set<Int> = [201, 301]
         #expect(GridTransitionSelectionEligibility.isEligible(selection: [], relocatingIdentities: relocating))      // empty ⇒ ok
         #expect(GridTransitionSelectionEligibility.isEligible(selection: [100], relocatingIdentities: relocating))   // stable ⇒ ok
-        #expect(!GridTransitionSelectionEligibility.isEligible(selection: [201], relocatingIdentities: relocating))  // relocating ⇒ snap
-        #expect(!GridTransitionSelectionEligibility.isEligible(selection: [100, 201], relocatingIdentities: relocating)) // mixed ⇒ snap
+        #expect(GridTransitionSelectionEligibility.isEligible(selection: [201], relocatingIdentities: relocating))   // selected overlays are settled-only
+        #expect(GridTransitionSelectionEligibility.isEligible(selection: [100, 201], relocatingIdentities: relocating))
     }
 
     // (feature-flag default-OFF + gating tests live in the .serialized GridTransitionControllerTests

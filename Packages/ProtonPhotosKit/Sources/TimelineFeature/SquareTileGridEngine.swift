@@ -525,6 +525,15 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         resolvedForLevel(level, width: width, columnPhase: columnPhase).contentSize
     }
 
+    /// Clamp a vertical scroll offset into the real content bounds for a settled level/phase. Transition builders
+    /// must use this before constructing an endpoint frame: the rendered endpoint and the post-release committed
+    /// grid must share the exact same scroll Y, including at library edges where cursor anchoring is impossible.
+    public func clampScrollOffsetY(_ y: CGFloat, level: Int, width: CGFloat,
+                                   viewportHeight: CGFloat, columnPhase: Int? = nil) -> CGFloat {
+        let maxY = max(0, contentSize(level: level, width: width, columnPhase: columnPhase).height - viewportHeight)
+        return min(max(0, y), maxY)
+    }
+
     /// One item's square content-space frame at a settled level (nil if out of range).
     public func slotRect(flatIndex: Int, level: Int, width: CGFloat, columnPhase: Int? = nil) -> CGRect? {
         resolvedForLevel(level, width: width, columnPhase: columnPhase).placement(globalIndex: flatIndex)?.rect

@@ -2,6 +2,33 @@ import AppKit
 import MetalKit
 import PhotosCore
 
+/// A layout-INVARIANT scroll position: the UID of the photo at the top of the viewport plus how far its top sat
+/// below the viewport top. Restoring re-resolves that photo's CURRENT position (whatever the zoom level, width,
+/// or column phase now is) and re-pins it at the same sub-offset — so a remembered route reopens exactly where
+/// the user was, even if they changed zoom or resized the window while on another route. (A raw scroll-Y would
+/// land in the wrong place after any such change; the photo anchor does not.)
+public struct GridScrollAnchor: Equatable {
+    public let uid: PhotoUID
+    public let topOffset: CGFloat
+    public init(uid: PhotoUID, topOffset: CGFloat) {
+        self.uid = uid
+        self.topOffset = topOffset
+    }
+}
+
+/// The one-shot viewport policy a data-source / route switch hands the host, consumed by the host's
+/// layout/content-size path only after layout geometry is valid — never as an immediate scroll from SwiftUI.
+///   - `.preserve`: keep the current scroll position (the default for incremental data updates).
+///   - `.newest`: place the viewport at the newest (bottom) end exactly once (a route's first visit / launch).
+///   - `.restore(anchor)`: re-pin a remembered photo anchor (returning to a previously-visited route so it
+///     reopens exactly where the user left it).
+/// In every case, after the one-shot placement the user scrolls freely (no sticky pinning, no pullback).
+enum GridInitialViewport: Equatable {
+    case preserve
+    case newest
+    case restore(GridScrollAnchor)
+}
+
 /// Option-A scroll architecture: a native `NSScrollView` owns scroll physics (scrollbars, trackpad
 /// inertia, rubber-band, keyboard paging) over a transparent, content-sized document spacer; a
 /// viewport-sized `MetalGridView` sits BEHIND the transparent scroll view and draws only the visible
@@ -31,10 +58,32 @@ final class MetalGridScrollHost: NSView {
     /// The level the live pinch settled on — so the SwiftUI `level` binding stays in sync after a commit.
     var onZoomCommit: ((Int) -> Void)?
 
+    /// The leading obstruction inset (points) for the native floating sidebar. ONE value drives three things:
+    /// (1) event hit-testing is declined for `x < eventLeadingInset` (those events reach the sidebar); (2) input
+    /// content/viewport points are converted render→layout by subtracting it before any engine/coordinator API;
+    /// (3) it is mirrored to `coordinator.leadingObstructionInset`, which insets the engine LAYOUT width and
+    /// translates every rendered rect `+inset` back into render space. The detail MTKView still renders FULL
+    /// width (photos draw under the sidebar and animate behind it during pinch); only the SETTLED layout is
+    /// inset. 0 when the sidebar is hidden ⇒ plain full-width grid (identity).
+    var eventLeadingInset: CGFloat = 0 {
+        didSet { applyLeadingInsetChange(from: oldValue) }
+    }
+    /// Extra leading breathing room between the sidebar and the grid for the NORMAL levels (L0–L3) only; the
+    /// dense square overviews (L4–L5) go edge-to-edge. The coordinator applies it only when a sidebar is present.
+    static let normalLevelLeadingGap: CGFloat = 16
+
     private var streamingTick: CADisplayLink?
     /// The grid is laid out oldest→top-left, newest→bottom-right, so it opens pinned to the BOTTOM
     /// (newest) and re-pins on resize/level until the user scrolls away.
     private var stickToBottom = true
+
+    /// One-shot initial-viewport policy installed by a route / data-source switch. While `.newest`, the next
+    /// `applyContentSize` that runs with VALID layout geometry (in a window, content width + height + clip
+    /// height all valid) places the viewport at the newest end exactly once, then clears the policy back to
+    /// `.preserve` and leaves `stickToBottom == false` so the user scrolls freely. If geometry isn't valid yet
+    /// (e.g. the host was just recreated and not laid out), the policy STAYS pending — it is never consumed
+    /// early, and host recreation can't swallow it. NOT an immediate scroll from SwiftUI.
+    private var pendingInitialViewport: GridInitialViewport = .preserve
 
     /// The viewport size at the previous `layout()` — used to detect a window/sidebar resize and rebase the
     /// scroll so the SAME logical region stays visible (instead of reusing the raw scrollY after slotSide
@@ -103,6 +152,16 @@ final class MetalGridScrollHost: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Decline events under the translucent sidebar so they reach it (the grid renders full-width but must not
+    /// steal the sidebar's clicks/scroll). Hit-test only — coordinates for events to the RIGHT of the inset are
+    /// unchanged, so click→photo routing and the pinch anchor stay correct.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if eventLeadingInset > 0 {
+            if point.x < eventLeadingInset { return nil }
+        }
+        return super.hitTest(point)
+    }
+
     private func setUp() {
         // Metal view (back): ON-DEMAND rendering. It redraws only when `needsDisplay` is set — on scroll
         // (the clip-bounds observer below) and while thumbnails are still streaming (the display-link
@@ -128,6 +187,14 @@ final class MetalGridScrollHost: NSView {
         scrollView.hasHorizontalScroller = false
         scrollView.scrollerStyle = .overlay
         scrollView.autohidesScrollers = true
+        // Do NOT let the scroll view inset its content to the window safe area. Under the native NavigationSplitView
+        // the leading safe-area inset is the floating sidebar width (e.g. 282); auto-adjustment pushed the clip to
+        // `origin.x = -inset`, which then double-applied with the coordinator's render translation (a huge leading
+        // gap on open that "fixed itself" after the first scroll/zoom recomputed the inset). The grid is a plain
+        // full-area scroll: it owns its leading-obstruction inset (render translate) and top frost (overlay), so
+        // the clip must stay at origin 0. Vertical/horizontal both — the grid never scrolls horizontally.
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsetsZero
         scrollView.contentView.drawsBackground = false
         scrollView.contentView.postsBoundsChangedNotifications = true
 
@@ -137,15 +204,18 @@ final class MetalGridScrollHost: NSView {
 
         coordinator.clipView = scrollView.contentView
         coordinator.metalView = metalView
+        coordinator.normalLevelLeadingGap = Self.normalLevelLeadingGap
         coordinator.onContentSizeChange = { [weak self] size in self?.applyContentSize(size) }
 
         spacer.onMouseMoved = { [weak self] point in
             guard let self else { return }
-            self.onHitTest?(self.coordinator.hitTest(contentPoint: point), point)
+            let p = CGPoint(x: point.x - self.coordinator.leadingObstructionInset, y: point.y)   // render → layout space (X)
+            self.onHitTest?(self.coordinator.hitTest(contentPoint: p), p)
         }
         spacer.onMouseExited = { [weak self] in self?.onHitTest?(nil, .zero) }
         spacer.onClick = { [weak self] point, clickCount, modifiers in
-            self?.onCellClick?(point, clickCount, modifiers)
+            guard let self else { return }
+            self.onCellClick?(CGPoint(x: point.x - self.coordinator.leadingObstructionInset, y: point.y), clickCount, modifiers)   // render → layout
         }
         spacer.onMagnify = { [weak self] event in self?.handleMagnify(event) }
         // Swallow scroll whenever a pinch could leak into one. Wired on BOTH the document spacer and the
@@ -516,11 +586,14 @@ final class MetalGridScrollHost: NSView {
     /// mouse-moved position), clamped into the current viewport so a centroid just outside still anchors
     /// sensibly (falls back to the viewport centre).
     private func cursorContentPoint(for event: NSEvent) -> CGPoint {
-        let p = spacer.convert(event.locationInWindow, from: nil)
+        let raw = spacer.convert(event.locationInWindow, from: nil)
+        let inset = coordinator.leadingObstructionInset                    // sidebar + (normal-level) gap
+        let p = CGPoint(x: raw.x - inset, y: raw.y)                         // render → layout space (X)
         let origin = scrollView.contentView.bounds.origin
         let vh = scrollView.contentView.bounds.height
-        if p.y >= origin.y, p.y <= origin.y + vh, p.x >= 0, p.x <= bounds.width { return p }
-        return CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)
+        let layoutW = max(1, bounds.width - inset)                         // the unobscured layout width
+        if p.y >= origin.y, p.y <= origin.y + vh, p.x >= 0, p.x <= layoutW { return p }
+        return CGPoint(x: layoutW / 2, y: origin.y + vh / 2)               // layout-space viewport centre
     }
 
     /// A button-driven level change. The discrete +/- path re-anchors scroll at the viewport centre (the
@@ -612,7 +685,7 @@ final class MetalGridScrollHost: NSView {
         metalView.frame = bounds
         let newFrame = viewportScreenFrame()
         let old = lastViewportScreenFrame
-        if old != .zero, abs(old.width - newFrame.width) > 0.5 || abs(old.height - newFrame.height) > 0.5 {
+        if old != .zero, viewportGeometryChanged(old, newFrame) {
             rebaseForResize(oldFrame: old, newFrame: newFrame)  // window resize / sidebar toggle — NOT zoom
         } else {
             applyContentSize(coordinator.contentSize())         // first layout / move-only (no size change)
@@ -620,11 +693,41 @@ final class MetalGridScrollHost: NSView {
         lastViewportScreenFrame = newFrame
     }
 
-    /// The grid viewport's frame in SCREEN coords (y-up): `maxY` = top edge, `minY` = bottom edge. The engine
-    /// compares old↔new to tell which edge moved. Falls back to local bounds before the view has a window.
+    /// The grid LAYOUT viewport's frame in SCREEN coords (y-up): `maxY` = top edge, `minY` = bottom edge. The
+    /// MTKView renders full-width under the sidebar, but the engine's settled layout is only the unobscured
+    /// width to the right of `coordinator.leadingObstructionInset`. Resize rebase must therefore use this
+    /// layout-space frame, never the full render frame, or the sidebar animation changes slotSide without a
+    /// coherent scroll rebase. Falls back to local bounds before the view has a window.
     private func viewportScreenFrame() -> NSRect {
-        guard let window else { return bounds }
-        return window.convertToScreen(convert(bounds, to: nil))
+        let full: NSRect
+        if let window {
+            full = window.convertToScreen(convert(bounds, to: nil))
+        } else {
+            full = bounds
+        }
+        let inset = coordinator.leadingObstructionInset
+        return NSRect(x: full.minX + inset, y: full.minY, width: max(1, full.width - inset), height: full.height)
+    }
+
+    private func viewportGeometryChanged(_ old: NSRect, _ new: NSRect) -> Bool {
+        abs(old.width - new.width) > 0.5 || abs(old.height - new.height) > 0.5
+    }
+
+    /// SwiftUI safe-area changes from the floating sidebar do not always arrive as an AppKit `layout()` pass.
+    /// Treat the inset change itself as a layout-width resize so the scroll camera rebases during the sidebar
+    /// animation instead of letting content-size changes accumulate and snap on the next scroll/resize tick.
+    private func applyLeadingInsetChange(from oldValue: CGFloat) {
+        guard abs(eventLeadingInset - oldValue) > 0.5 else { return }
+        let oldFrame = lastViewportScreenFrame
+        coordinator.sidebarObstructionInset = eventLeadingInset
+        guard oldFrame != .zero else { return }
+        let newFrame = viewportScreenFrame()
+        if viewportGeometryChanged(oldFrame, newFrame) {
+            rebaseForResize(oldFrame: oldFrame, newFrame: newFrame)
+        } else {
+            applyContentSize(coordinator.contentSize())
+        }
+        lastViewportScreenFrame = newFrame
     }
 
     /// Viewport resized (window or sidebar). Recompute content size from the new width and rebase the scroll
@@ -632,10 +735,12 @@ final class MetalGridScrollHost: NSView {
     /// moving edge clips/reveals. Never reuse the raw scrollY after slotSide changed, never start a zoom, never
     /// restore an old origin. Bottom-pinned stays pinned.
     private func rebaseForResize(oldFrame: NSRect, newFrame: NSRect) {
+        let placingInitial = pendingInitialViewport != .preserve
         let oldScrollY = scrollView.contentView.bounds.origin.y
         let result = coordinator.rebaseForViewportChange(oldFrame: oldFrame, newFrame: newFrame,
                                                          oldScrollY: oldScrollY, wasBottomPinned: stickToBottom)
-        applyContentSize(coordinator.contentSize())            // new content height (new width); pins bottom if sticky
+        applyContentSize(coordinator.contentSize())            // new content height (new width); consumes a pending policy
+        if placingInitial, pendingInitialViewport == .preserve { return }  // initial viewport just placed → don't rebase over it
         guard !stickToBottom, let r = result else { return }   // sticky → already bottom-pinned by applyContentSize
         let maxY = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
         let y = min(max(0, r.newScrollY), maxY)
@@ -647,15 +752,80 @@ final class MetalGridScrollHost: NSView {
         metalView.needsDisplay = true                          // first frame after resize uses the rebased scrollY
     }
 
-    /// Set the document spacer to the current content height (width tracks the clip, no h-scroll).
+    /// Set the document spacer to the current content height (width tracks the clip, no h-scroll). This is also
+    /// the SINGLE consume point for a pending `.newest` initial-viewport policy: the placement happens here,
+    /// only after the spacer/document frame has been installed and the layout geometry is valid — so a route
+    /// switch never scrolls before content height + clip height are real.
     private func applyContentSize(_ size: CGSize) {
         let width = scrollView.contentView.bounds.width
+        // Geometry not valid yet (no clip width, or no content height) → install nothing and, crucially, leave
+        // any pending `.newest` policy PENDING. A later `applyContentSize` (from `layout()` / the content-size
+        // callback) consumes it once the geometry is real.
         guard width > 1, size.height > 0 else { return }
         let newFrame = NSRect(x: 0, y: 0, width: width, height: size.height)
-        if spacer.frame != newFrame { spacer.frame = newFrame }
-        if stickToBottom { pinToBottom() }   // open at / stay at newest (bottom) until the user scrolls
+        if spacer.frame != newFrame { spacer.frame = newFrame }   // spacer/document frame installed first
+        let clipH = scrollView.contentView.bounds.height
+        if pendingInitialViewport != .preserve, window != nil, clipH > 0 {
+            // Consume the one-shot placement against the now-valid geometry (real window, real content + clip
+            // height). After this the policy is cleared and bottom-pinning stays OFF.
+            placeForInitialViewport(pendingInitialViewport, clipHeight: clipH)
+            pendingInitialViewport = .preserve
+        } else if stickToBottom {
+            pinToBottom()                    // launch / sticky open: stay at newest (bottom) until the user scrolls
+        }
         metalView.needsDisplay = true
         onViewportChanged?()
+    }
+
+    /// Consume a pending initial-viewport policy: place the viewport ONCE at the newest (bottom) end (`.newest`)
+    /// or re-pin a remembered photo anchor (`.restore`). Unlike `scrollToBottom` / sticky pinning, this does NOT
+    /// re-arm bottom-pinning — it leaves `stickToBottom == false` so the user's first manual scroll is honoured
+    /// and never pulled back. `.restore` re-resolves the anchored photo's position in the CURRENT layout (so it
+    /// is exact across any zoom/width/phase change while away); if that photo is gone (e.g. trashed meanwhile) it
+    /// falls back to the newest end.
+    private func placeForInitialViewport(_ policy: GridInitialViewport, clipHeight: CGFloat) {
+        let maxY = max(0, spacer.frame.height - clipHeight)
+        let targetY: CGFloat
+        switch policy {
+        case .newest:
+            targetY = maxY
+        case .restore(let anchor):
+            if let rect = coordinator.cellContentRect(forUID: anchor.uid) {
+                targetY = min(max(0, rect.minY - anchor.topOffset), maxY)
+            } else {
+                targetY = maxY                 // the remembered photo no longer exists in this route → newest
+            }
+        case .preserve:
+            return
+        }
+        stickToBottom = false
+        scrollLockOrigin = nil                 // no stale zoom lock may override the placement
+        lastMagnifyEventTime = 0               // clear any post-magnify scroll-suppression grace
+        scrollView.contentView.scroll(to: CGPoint(x: 0, y: targetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    /// Arm a one-shot initial-viewport policy: reset to the canonical bottom-right phase (so the content height
+    /// matches what a remembered offset was captured against) and mark the policy pending. The actual placement
+    /// is deferred to `applyContentSize` (called below and on every subsequent layout) once the geometry is
+    /// valid — never an immediate scroll. Used for sidebar route switches and for a freshly (re)created host.
+    func requestInitialViewport(_ policy: GridInitialViewport) {
+        guard policy != .preserve else { return }
+        pendingInitialViewport = policy
+        coordinator.resetCommittedPhase()
+        applyContentSize(coordinator.contentSize())   // consume now if geometry is valid; else it stays pending
+    }
+
+    /// A layout-invariant snapshot of the current scroll position — the photo at the viewport top plus its
+    /// sub-offset — or nil if the grid isn't laid out yet. The shell reads this when leaving a route so it can
+    /// reopen the route EXACTLY here later (`.restore`), robust to any zoom/width/phase change while away.
+    /// Derived from the existing visible-cell query (NOT the zoom anchor): this is route-scroll memory, not a
+    /// zoom anchor — the live pinch / +- path still anchors on the cursor item.
+    func currentScrollAnchor() -> GridScrollAnchor? {
+        let originY = scrollView.contentView.bounds.origin.y
+        guard let top = coordinator.visibleCells().min(by: { $0.rect.minY < $1.rect.minY }),
+              let uid = coordinator.uid(atFlatIndex: top.flatIndex) else { return nil }
+        return GridScrollAnchor(uid: uid, topOffset: top.rect.minY - originY)
     }
 
     // MARK: - Public controls
@@ -670,7 +840,9 @@ final class MetalGridScrollHost: NSView {
         let origin = scrollView.contentView.bounds.origin
         // +/- anchors at the GRID VIEWPORT CENTRE (never the toolbar-button mouse point, a stale hover, or the
         // top). The pinch path supplies an explicit cursor point instead.
-        let anchorPoint = anchorContentPoint ?? CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)
+        // Layout-space viewport centre (the engine works in layout space; never add the inset back here — the
+        // render translation happens once at the coordinator's draw chokepoint).
+        let anchorPoint = anchorContentPoint ?? CGPoint(x: max(1, bounds.width - coordinator.leadingObstructionInset) / 2, y: origin.y + vh / 2)
         let viewportPoint = CGPoint(x: anchorPoint.x, y: anchorPoint.y - origin.y)
         let trigger: GridZoomTrigger = newLevel < coordinator.level ? .toolbarPlus : .toolbarMinus   // plus = zoom in
         // Try the single-lattice transition FIRST — including when the grid is freshly bottom-pinned
@@ -710,7 +882,8 @@ final class MetalGridScrollHost: NSView {
     func windowFrame(forUID uid: PhotoUID) -> CGRect? {
         guard let win = window, let contentRect = coordinator.cellContentRect(forUID: uid) else { return nil }
         let origin = scrollView.contentView.bounds.origin
-        let vp = CGRect(x: contentRect.minX - origin.x, y: contentRect.minY - origin.y, width: contentRect.width, height: contentRect.height)
+        // cellContentRect is LAYOUT-space (X from 0); translate +inset into render space for the on-screen frame.
+        let vp = CGRect(x: contentRect.minX - origin.x + coordinator.leadingObstructionInset, y: contentRect.minY - origin.y, width: contentRect.width, height: contentRect.height)
         guard CGRect(origin: .zero, size: metalView.bounds.size).intersects(vp) else { return nil }
         // The metal view is not flipped (y-up); our viewport rect is top-left origin (y-down).
         let localYUp = CGRect(x: vp.minX, y: metalView.bounds.height - vp.maxY, width: vp.width, height: vp.height)
@@ -719,9 +892,17 @@ final class MetalGridScrollHost: NSView {
         return CGRect(x: inWindow.minX, y: contentH - inWindow.maxY, width: inWindow.width, height: inWindow.height)
     }
 
-    func setDataSource(_ source: MetalGridDataSource) {
-        coordinator.setDataSource(source)
-        applyContentSize(coordinator.contentSize())   // pins to bottom when sticky (newest first)
+    /// Install a new data source. For an incremental data update pass `.preserve` (the default — the current
+    /// scroll position is kept). For a sidebar route switch pass `.newest`: the host arms the one-shot newest
+    /// placement (canonical bottom-right phase) and consumes it via `applyContentSize` once geometry is valid —
+    /// it does NOT scroll immediately, and it never arms sticky bottom-pinning.
+    func setDataSource(_ source: MetalGridDataSource, initialViewport: GridInitialViewport = .preserve) {
+        if initialViewport != .preserve {
+            pendingInitialViewport = initialViewport
+            coordinator.resetCommittedPhase()             // canonical bottom-right phase, BEFORE the size callback
+        }
+        coordinator.setDataSource(source)                 // rebuild + onContentSizeChange → applyContentSize
+        applyContentSize(coordinator.contentSize())       // pins to bottom when sticky / consumes a pending policy
     }
 
     func scrollToTop() {
@@ -748,5 +929,19 @@ final class MetalGridScrollHost: NSView {
         scrollView.contentView.scroll(to: CGPoint(x: 0, y: targetY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
         metalView.needsDisplay = true
+    }
+
+    /// Scroll a flattened timeline index near the top of the viewport. This is the date-jump primitive for the
+    /// overview scrubber: no SwiftUI geometry, no synthetic sections, no custom scroll physics.
+    func scrollToFlatIndex(_ index: Int) {
+        stickToBottom = false
+        guard let rect = coordinator.cellContentRect(forFlatIndex: index) else { return }
+        let clipH = scrollView.contentView.bounds.height
+        let maxY = max(0, spacer.frame.height - clipH)
+        let targetY = min(max(0, rect.minY - 24), maxY)
+        scrollView.contentView.scroll(to: CGPoint(x: 0, y: targetY))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        metalView.needsDisplay = true
+        onViewportChanged?()
     }
 }

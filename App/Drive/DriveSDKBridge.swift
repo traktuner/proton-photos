@@ -234,7 +234,8 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             let photos = links
                 .map { PhotoItem(uid: PhotoUID(volumeID: root.volumeID, nodeID: $0.linkID),
                                  captureTime: Date(timeIntervalSince1970: $0.captureTime),
-                                 mediaType: ($0.mimeType?.hasPrefix("video/") == true) ? "video/quicktime" : "image/jpeg") }
+                                 mediaType: ($0.mimeType?.hasPrefix("video/") == true) ? "video/quicktime" : "image/jpeg",
+                                 tags: ($0.mimeType?.hasPrefix("video/") == true) ? [.videos] : []) }
                 .sorted { $0.captureTime < $1.captureTime }
             return [TimelineSection(id: "trash", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]
         }
@@ -274,7 +275,8 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                     captureTime: Date(timeIntervalSince1970: e.captureTime),
                     mediaType: e.tags.contains(2) ? "video/quicktime" : "image/jpeg",
                     isLivePhoto: e.isLivePhoto,
-                    relatedVideoID: e.relatedVideoLinkID
+                    relatedVideoID: e.relatedVideoLinkID,
+                    tags: Self.tags(from: e.tags)
                 )
             }
             .sorted { $0.captureTime < $1.captureTime }
@@ -327,7 +329,8 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         let photos = items
             .map { PhotoItem(uid: PhotoUID(volumeID: $0.nodeUid.volumeID, nodeID: $0.nodeUid.nodeID),
                              captureTime: Date(timeIntervalSince1970: $0.captureTime),
-                             mediaType: videoNodeIDs.contains($0.nodeUid.nodeID) ? "video/quicktime" : "image/jpeg") }
+                             mediaType: videoNodeIDs.contains($0.nodeUid.nodeID) ? "video/quicktime" : "image/jpeg",
+                             tags: videoNodeIDs.contains($0.nodeUid.nodeID) ? [.videos] : []) }
             // Ascending (oldest first): oldest at the top, newest at the BOTTOM — like Apple Photos.
             // The grid opens scrolled to the bottom so the newest photos are shown first.
             .sorted { $0.captureTime < $1.captureTime }
@@ -336,6 +339,10 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         // uninterrupted justified run, which also keeps pinch-zoom smooth (no divider lines to
         // disturb the re-justify) and makes thumbnail sizing consistent across the whole library.
         return [TimelineSection(id: "all", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]
+    }
+
+    private static func tags(from rawValues: [Int]) -> Set<PhotoTag> {
+        Set(rawValues.compactMap(PhotoTag.init(rawValue:)))
     }
 }
 
@@ -356,10 +363,13 @@ final class PhotoTimelineStore {
         sqlite3_exec(db, "PRAGMA mmap_size=268435456;", nil, nil, nil)
         let create = """
         CREATE TABLE IF NOT EXISTS photos(
-          node TEXT PRIMARY KEY, vol TEXT, t REAL, mime TEXT, live INTEGER, relvid TEXT
+          node TEXT PRIMARY KEY, vol TEXT, t REAL, mime TEXT, live INTEGER, relvid TEXT, tags TEXT DEFAULT ''
         );
         """
         guard sqlite3_exec(db, create, nil, nil, nil) == SQLITE_OK else { return nil }
+        if !Self.columnExists(db, table: "photos", column: "tags") {
+            sqlite3_exec(db, "ALTER TABLE photos ADD COLUMN tags TEXT DEFAULT '';", nil, nil, nil)
+        }
         sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_photos_t ON photos(t ASC);", nil, nil, nil)
         sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_photos_vol_node ON photos(vol, node);", nil, nil, nil)
         PhotoDiagnostics.shared.recordDBQuery(
@@ -382,7 +392,7 @@ final class PhotoTimelineStore {
     func load() -> [PhotoItem] {
         let start = Date()
         var stmt: OpaquePointer?
-        let sql = "SELECT node, vol, t, mime, live, relvid FROM photos ORDER BY t ASC;"
+        let sql = "SELECT node, vol, t, mime, live, relvid, tags FROM photos ORDER BY t ASC;"
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
         var items: [PhotoItem] = []
@@ -390,12 +400,14 @@ final class PhotoTimelineStore {
             guard let nodeC = sqlite3_column_text(stmt, 0), let volC = sqlite3_column_text(stmt, 1) else { continue }
             let mime = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "image/jpeg"
             let relvid = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
+            let tags = sqlite3_column_text(stmt, 6).map { Self.decodeTags(String(cString: $0)) } ?? []
             items.append(PhotoItem(
                 uid: PhotoUID(volumeID: String(cString: volC), nodeID: String(cString: nodeC)),
                 captureTime: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 2)),
                 mediaType: mime,
                 isLivePhoto: sqlite3_column_int(stmt, 4) != 0,
-                relatedVideoID: relvid
+                relatedVideoID: relvid,
+                tags: tags
             ))
         }
         PhotoDiagnostics.shared.recordDBQuery(
@@ -411,7 +423,7 @@ final class PhotoTimelineStore {
         sqlite3_exec(db, "BEGIN;", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM photos;", nil, nil, nil)
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO photos(node,vol,t,mime,live,relvid) VALUES(?,?,?,?,?,?);", -1, &stmt, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO photos(node,vol,t,mime,live,relvid,tags) VALUES(?,?,?,?,?,?,?);", -1, &stmt, nil) == SQLITE_OK {
             for item in items {
                 sqlite3_reset(stmt)
                 sqlite3_bind_text(stmt, 1, item.uid.nodeID, -1, transient)
@@ -421,6 +433,7 @@ final class PhotoTimelineStore {
                 sqlite3_bind_int(stmt, 5, item.isLivePhoto ? 1 : 0)
                 if let rel = item.relatedVideoID { sqlite3_bind_text(stmt, 6, rel, -1, transient) }
                 else { sqlite3_bind_null(stmt, 6) }
+                sqlite3_bind_text(stmt, 7, Self.encodeTags(item.tags), -1, transient)
                 sqlite3_step(stmt)
             }
             sqlite3_finalize(stmt)
@@ -431,6 +444,27 @@ final class PhotoTimelineStore {
             durationMs: Date().timeIntervalSince(start) * 1000,
             rowsReturned: items.count
         )
+    }
+
+    private static func encodeTags(_ tags: Set<PhotoTag>) -> String {
+        tags.map(\.rawValue).sorted().map(String.init).joined(separator: ",")
+    }
+
+    private static func decodeTags(_ raw: String) -> Set<PhotoTag> {
+        Set(raw.split(separator: ",").compactMap { Int($0).flatMap(PhotoTag.init(rawValue:)) })
+    }
+
+    private static func columnExists(_ db: OpaquePointer?, table: String, column: String) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(table));", -1, &stmt, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(stmt) }
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let name = sqlite3_column_text(stmt, 1) else { continue }
+            if String(cString: name) == column { return true }
+        }
+        return false
     }
 }
 

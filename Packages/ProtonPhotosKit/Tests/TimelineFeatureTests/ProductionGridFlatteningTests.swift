@@ -20,7 +20,7 @@ import MediaCache
     }
 
     private func day(_ year: Int, _ month: Int, _ d: Int) -> Date {
-        Calendar.current.date(from: DateComponents(year: year, month: month, day: d))!
+        Self.calendar.date(from: DateComponents(year: year, month: month, day: d))!
     }
 
     private func item(_ id: String, _ date: Date, video: Bool = false) -> PhotoItem {
@@ -65,6 +65,22 @@ import MediaCache
         #expect(Set(markers.map(\.text)).count == 3, "each month label is distinct")
     }
 
+    @Test func productionDateMarkersSupportDayMonthYearGranularity() {
+        let sections = sampleSections()
+        let days = MetalGridProductionAdapter.dateMarkers(sections: sections, granularity: .day,
+                                                          calendar: Self.calendar, locale: Locale(identifier: "en_US_POSIX"))
+        let months = MetalGridProductionAdapter.dateMarkers(sections: sections, granularity: .month,
+                                                            calendar: Self.calendar, locale: Locale(identifier: "en_US_POSIX"))
+        let years = MetalGridProductionAdapter.dateMarkers(sections: sections, granularity: .year,
+                                                           calendar: Self.calendar, locale: Locale(identifier: "en_US_POSIX"))
+
+        #expect(days.map(\.index) == Array(0 ..< 16), "each sample item is on a distinct day")
+        #expect(months.map(\.index) == [0, 5, 12])
+        #expect(years.map(\.index) == [0])
+        #expect(Set(months.map(\.granularity)) == [.month])
+        #expect(years.first?.text == "2026")
+    }
+
     // ProductionBeginZoomTransactionIsAvailableTest
     @Test func productionBeginZoomTransactionIsAvailable() {
         // An engine built from production-style single-section counts can capture the live transaction.
@@ -91,6 +107,14 @@ import MediaCache
         let tx = engine.beginZoomTransaction(cursorContentPoint: CGPoint(x: 200, y: 500),
                                              viewportPoint: CGPoint(x: 200, y: 300), level: 3, width: 1400)
         #expect(tx != nil, "timeline sections must NOT disable the production live transaction")
+    }
+}
+
+private extension ProductionGridFlatteningTests {
+    static var calendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        return calendar
     }
 }
 

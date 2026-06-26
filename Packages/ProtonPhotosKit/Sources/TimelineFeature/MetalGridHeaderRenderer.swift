@@ -32,9 +32,10 @@ final class MetalGridHeaderRenderer {
             let v = labels[i]
             guard let rect = coordinator.cellContentRect(forFlatIndex: marker.index) else { v.isHidden = true; continue }
             let y = rect.minY - originY
-            guard y >= -28, y <= vh else { v.isHidden = true; continue }   // only labels whose row is on screen
+            guard y >= -42, y <= vh else { v.isHidden = true; continue }   // only labels whose row is on screen
             v.setText(marker.text)
-            v.frame = NSRect(x: 6, y: y + 4, width: v.fittingWidth, height: 22)
+            // The overlay is full-width; pin the label 6pt inside the unobscured layout area (right of the sidebar).
+            v.frame = NSRect(x: 12 + coordinator.leadingObstructionInset, y: y + 8, width: v.fittingWidth, height: 34)
             v.isHidden = false
         }
         for i in markers.count ..< labels.count { labels[i].isHidden = true }

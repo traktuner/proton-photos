@@ -18,8 +18,17 @@ public final class GridProxy {
     /// Scrolls the grid so the photo is vertically centred (used before a fly-back-to-cell close).
     public var scrollToItem: ((PhotoItem) -> Void)?
 
+    /// Scrolls the grid to a flattened timeline index. Used by date navigation overlays; the Metal host resolves
+    /// the index through the same production geometry as visible cells, so no SwiftUI layout math is duplicated.
+    public var scrollToFlatIndex: ((Int) -> Void)?
+
     /// Scrolls to the newest timeline position. The grid is ordered oldest at top, newest at bottom.
     public var scrollToLatest: (() -> Void)?
+
+    /// A layout-invariant snapshot of the grid's current scroll position (the top photo + its sub-offset), or
+    /// nil before the grid is wired. The shell reads this when leaving a route to remember where the user was,
+    /// so it can reopen that route EXACTLY there later (robust to zoom/resize). Read-only — never scrolls.
+    public var currentScrollAnchor: (() -> GridScrollAnchor?)?
 
     /// The `+` toolbar button: one discrete zoom-IN step (bigger thumbnails). Wired to the SAME
     /// `zoomInStep` the trackpad pinch-in calls, so the button and pinch are identical by construction.

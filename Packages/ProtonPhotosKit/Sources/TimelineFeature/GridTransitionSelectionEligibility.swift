@@ -1,18 +1,25 @@
 // GridTransitionSelectionEligibility.swift
 //
-// Conservative selection rule (matches the V3.x decision): animate only when the selection cannot
-// produce a double-outline. Empty selection ⇒ eligible. All selected identities stable on the same
-// relative key ⇒ eligible. ANY selected identity relocates ⇒ ineligible ⇒ stable instant snap.
+// Selection no longer gates transition eligibility.
+//
+// The Metal transition renderer draws only image quads while a transition is active; selection outlines and
+// badges are settled-grid decorations and are intentionally not emitted by `renderTransitionDraws`. Therefore a
+// relocating selected identity cannot produce a double outline during the animation. Blocking such transitions
+// forced the selected/focused-photo pinch onto the legacy reflow fallback, which can diverge at release from the
+// single-lattice endpoint the user was visually following.
 
 import Foundation
 
 enum GridTransitionSelectionEligibility {
-    /// `relocatingIdentities` are the flat indices that change relative key between source and target.
+    /// Kept as a named policy because the controller still owns the decision point. Today, selection is a
+    /// decoration-layer concern, not a geometry eligibility concern.
     static func isEligible(selection: Set<Int>, relocatingIdentities: Set<Int>) -> Bool {
-        if selection.isEmpty { return true }
-        return selection.isDisjoint(with: relocatingIdentities)
+        _ = selection
+        _ = relocatingIdentities
+        return true
     }
 
+    /// `relocatingIdentities` are the flat indices that change relative key between source and target.
     /// Derive the set of relocating identities from a built lattice.
     static func relocatingIdentities(in lattice: GridTransitionLattice) -> Set<Int> {
         var srcKeyOf: [Int: RelativeSlotKey] = [:], tgtKeyOf: [Int: RelativeSlotKey] = [:]

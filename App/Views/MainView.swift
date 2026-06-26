@@ -23,10 +23,21 @@ struct MainView: View {
     @State private var gridContentMode: TileContentDisplayMode = .aspectFitInsideSquare
     @State private var sidebarOpen: Bool
     @State private var sidebarWidth: CGFloat
-    @State private var columnVisibility: NavigationSplitViewVisibility
+    @State private var columnVisibility: NavigationSplitViewVisibility   // native sidebar show/hide
     @State private var albums: [PhotoAlbum] = []
     @State private var selection: PhotoFilter = .all
+    @State private var routeScrollGeneration = 0
+    /// Per-route scroll-position memory: leaving a route stores a layout-invariant photo anchor here; returning
+    /// re-pins it (so the route reopens exactly where the user was, even across zoom/resize). `nil` for a route
+    /// never visited → opens at newest.
+    @State private var routeScrollPositions: [PhotoFilter: GridScrollAnchor] = [:]
+    /// The placement target for the CURRENT route generation: a remembered photo anchor (restore) or nil
+    /// (newest). Set synchronously when the route changes, BEFORE the async load, so the grid host has the
+    /// correct target by the time the new sections arrive.
+    @State private var routeInitialScrollAnchor: GridScrollAnchor? = nil
     @State private var searchText = ""
+    @State private var committedSearchText = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
     // Shared-element zoom transition (photo ↔ its grid cell).
     @State private var gridProxy = GridProxy()
     @State private var zoom: ZoomTransition?
@@ -74,58 +85,79 @@ struct MainView: View {
 
     var body: some View {
         ZStack {
+            // NATIVE shell: NavigationSplitView gives the macOS-26 floating Liquid-Glass sidebar (native title,
+            // toggle, glass to the top corner) for free. The detail's Metal grid extends UNDER the floating
+            // sidebar via `.ignoresSafeArea(.container, edges: [.top, .leading])`, while its content is laid out
+            // only in the unobscured area (the leading-obstruction inset = the detail's leading safe-area inset).
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(albums: albums, selection: $selection)
-                    .navigationSplitViewColumnWidth(
-                        min: SidebarMetrics.minWidth,
-                        ideal: sidebarWidth,
-                        max: SidebarMetrics.maxWidth
-                    )
+                    .navigationSplitViewColumnWidth(min: SidebarMetrics.minWidth,
+                                                    ideal: sidebarWidth, max: SidebarMetrics.maxWidth)
             } detail: {
-                TimelineView(model: timelineModel, aspects: aspects, level: $level, proxy: gridProxy,
-                             searchText: searchText,
-                             selectionMode: selectionMode, media: backend, metadataProvider: backend, favoriteUIDs: favorites,
-                             onSelectionChange: { selectedUIDs = $0 }) { item, items in
-                    openPhoto(item, items)
-                }
-                .ignoresSafeArea(.container, edges: .top)   // photos scroll under the glass toolbar
-                .overlay(alignment: .top) {
-                    if viewerModel == nil {
-                        gridToolbarGlassFade
+                GeometryReader { geo in
+                    TimelineView(model: timelineModel, aspects: aspects, level: $level, proxy: gridProxy,
+                                 routeScrollGeneration: routeScrollGeneration,
+                                 routeInitialScrollAnchor: routeInitialScrollAnchor,
+                                 searchText: committedSearchText,
+                                 selectionMode: selectionMode, media: backend, metadataProvider: backend, favoriteUIDs: favorites,
+                                 onSelectionChange: { selectedUIDs = $0 }) { item, items in
+                        openPhoto(item, items)
                     }
+                    .ignoresSafeArea(.container, edges: [.top, .leading])   // MTKView renders under the floating sidebar
+                    .overlay(alignment: .top) {
+                        if viewerModel == nil {
+                            GridTopFrost(height: topBarInset + 12)
+                        }
+                    }
+                    .navigationTitle(viewerModel == nil ? title : "")
+                    .searchable(text: $searchText, placement: .toolbar, prompt: "Search \(title)")
+                    .toolbar { toolbarContent }
+                    .modifier(WindowToolbarChrome(isViewer: viewerModel != nil))
+                    // The detail's leading safe-area inset == the floating sidebar width. It drives event
+                    // exclusion (hit-test decline) plus the grid's layout/render obstruction inset.
+                    .environment(\.gridLeadingEventInset, viewerModel == nil ? geo.safeAreaInsets.leading : 0)
+                    .onChange(of: searchText) { _, value in scheduleSearchCommit(value) }
                 }
-                .navigationTitle(viewerModel == nil ? title : "")
-                .searchable(text: $searchText, placement: .toolbar, prompt: "Search \(title)")
-                .toolbar { toolbarContent }
-                // Viewer: opaque, warm top bar matching the media background. Grid: default glass material
-                // that appears as photos scroll under it.
-                .toolbarBackground(viewerModel != nil
-                                   ? AnyShapeStyle(ViewerVisualConstants.backgroundColor)
-                                   : AnyShapeStyle(.bar),
-                                   for: .windowToolbar)
-                .toolbarBackground(viewerModel != nil ? .visible : .automatic, for: .windowToolbar)
             }
             .task { await loadAlbums() }
             .onAppear {
                 attachOfflineManager()
                 publishMetalGridLabData()
+                if librarySettled { model.markLibraryReady() }
             }
-            .onChange(of: selection) { _, newValue in
-                Task {
-                    await timelineModel.select(newValue)
-                    if newValue == .all {
-                        DispatchQueue.main.async {
-                            gridProxy.scrollToLatest?()
-                        }
-                    }
+            .onChange(of: librarySettled) { _, settled in
+                if settled { model.markLibraryReady() }   // lift the launch veil once the grid is ready
+            }
+            .onChange(of: selection) { oldValue, newValue in
+                // Remember where the user was in the route they're leaving (the grid still shows it at this
+                // point, so the proxy reports the OLD route's anchor). Returning to that route re-pins it.
+                if let anchor = gridProxy.currentScrollAnchor?() {
+                    routeScrollPositions[oldValue] = anchor
                 }
+                // The new route opens at its remembered position, or at the newest end on first visit. Both the
+                // target and the generation are set SYNCHRONOUSLY here — BEFORE the async `select(...)` that loads
+                // the route — so the generation is already pending when the new sections (and the new data token)
+                // arrive in the grid. The host owns the one-shot placement; we never scroll from here. (Not
+                // `scrollToLatest`: that re-arms sticky bottom-pinning and would fight the user's first scroll.)
+                routeInitialScrollAnchor = routeScrollPositions[newValue]
+                routeScrollGeneration += 1
+                Task { await timelineModel.select(newValue) }
             }
             .onChange(of: timelineModel.allItems.count) { _, count in
                 OfflineLibraryManager.shared.liveAssetCount = count
                 publishMetalGridLabData()
             }
+            .onDisappear {
+                searchDebounceTask?.cancel()
+                searchDebounceTask = nil
+            }
             .onChange(of: columnVisibility) { _, newValue in
-                syncSidebarVisibility(from: newValue)
+                // The NATIVE split-view toggle drives columnVisibility — mirror it back into our open-state +
+                // persistence (the ⌥⌘S path goes through toggleSidebar() which sets both).
+                let visible = newValue != .detailOnly
+                guard visible != sidebarOpen else { return }
+                sidebarOpen = visible
+                SidebarPersistence.saveVisible(visible)
             }
             .onReceive(NotificationCenter.default.publisher(for: .protonPhotosToggleSidebar)) { _ in
                 toggleSidebar()
@@ -210,28 +242,6 @@ struct MainView: View {
         } message: {
             Text(trashConfirmationMessage)
         }
-    }
-
-    private var gridToolbarGlassFade: some View {
-        GeometryReader { geo in
-            let height = max(148, geo.safeAreaInsets.top + 92)
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(.bar)
-                    .frame(height: height)
-                    .mask(
-                        LinearGradient(stops: [
-                            .init(color: .black, location: 0),
-                            .init(color: .black, location: 0.18),
-                            .init(color: .clear, location: 1)
-                        ], startPoint: .top, endPoint: .bottom)
-                    )
-                Spacer(minLength: 0)
-            }
-            .ignoresSafeArea()
-            .allowsHitTesting(false)
-        }
-        .allowsHitTesting(false)
     }
 
     @ViewBuilder private var uploadRefreshBanner: some View {
@@ -372,6 +382,12 @@ struct MainView: View {
     }
 
     // MARK: - Chrome
+
+    /// True once the timeline has settled (loaded / empty / failed) — the signal that lifts the launch veil.
+    private var librarySettled: Bool {
+        if case .loading = timelineModel.state { return false }
+        return true
+    }
 
     private var title: String {
         switch selection {
@@ -532,6 +548,21 @@ struct MainView: View {
 
     private var selectedItems: [PhotoItem] { timelineModel.allItems.filter { selectedUIDs.contains($0.uid) } }
 
+    private func scheduleSearchCommit(_ value: String) {
+        searchDebounceTask?.cancel()
+        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            committedSearchText = ""
+            searchDebounceTask = nil
+            return
+        }
+        searchDebounceTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(280))
+            guard !Task.isCancelled else { return }
+            committedSearchText = value
+            searchDebounceTask = nil
+        }
+    }
+
     private func trashSelected() {
         let items = selectedItems
         requestTrash(items, closeViewer: false)
@@ -623,6 +654,8 @@ struct MainView: View {
                 .accessibilityLabel("Move to trash")
             }
         } else {
+            // The sidebar toggle is the NATIVE NavigationSplitView one (it returns automatically + moves with the
+            // sidebar). The ⌥⌘S command still posts `.protonPhotosToggleSidebar` → `toggleSidebar()`.
             // No explicit "select mode": click / ⌘-click / ⇧-click / drag-marquee select directly, double
             // click opens. The toolbar is stable — the download (or restore) + trash actions are always
             // present and just enable when something is selected.
@@ -742,38 +775,15 @@ struct MainView: View {
         #endif
     }
 
+    // MARK: - Sidebar overlay
+
     private func toggleSidebar() {
-        let targetVisible = !sidebarOpen
-        postGridResizeHint(reason: .sidebarToggle, phase: "begin")
         withAnimation(.easeInOut(duration: 0.22)) {
-            sidebarOpen = targetVisible
-            columnVisibility = targetVisible ? .all : .detailOnly
+            sidebarOpen.toggle()
+            columnVisibility = sidebarOpen ? .all : .detailOnly   // drive the native split view
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
-            postGridResizeHint(reason: .sidebarToggle, phase: "end")
-        }
-        SidebarPersistence.saveVisible(targetVisible)
+        SidebarPersistence.saveVisible(sidebarOpen)
         logSidebar(dragging: false)
-    }
-
-    private func syncSidebarVisibility(from visibility: NavigationSplitViewVisibility) {
-        let visible = visibility != .detailOnly
-        guard visible != sidebarOpen else { return }
-        postGridResizeHint(reason: .sidebarToggle, phase: "begin")
-        sidebarOpen = visible
-        SidebarPersistence.saveVisible(visible)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
-            postGridResizeHint(reason: .sidebarToggle, phase: "end")
-        }
-        logSidebar(dragging: false)
-    }
-
-    private func postGridResizeHint(reason: GridResizeReason, phase: String) {
-        NotificationCenter.default.post(
-            name: .protonPhotosGridResizeHint,
-            object: nil,
-            userInfo: ["reason": reason.rawValue, "phase": phase]
-        )
     }
 
     private func logSidebar(dragging: Bool) {
@@ -872,6 +882,82 @@ struct MainView: View {
 }
 
 
+/// Apple-Photos-style top-bar frost over the grid: a public within-window `NSVisualEffectView` (which DOES
+/// blur the Metal grid behind it, unlike the native toolbar glass, which can't sample a `CAMetalLayer`),
+/// masked to a vertical gradient — strongest frost at the very top, fading to fully clear below the toolbar
+/// band. It never covers the sidebar (it is an overlay on the detail), never paints a flat opaque strip, and
+/// never blocks pointer/scroll events. When the grid scrolls, the photos show through the fading edge.
+private struct GridTopFrost: View {
+    /// Total band height — the toolbar inset plus the fade region below it.
+    let height: CGFloat
+
+    var body: some View {
+        // A LIGHT, UNIFORM frost across the toolbar band (no gradient) — held at full strength over the
+        // toolbar height, with only a soft fade at the very bottom edge so it doesn't read as a hard strip.
+        // Lighter overall (reduced opacity) so the photos show through as a subtle frosted contrast.
+        WithinWindowBlur(material: .headerView)
+            .frame(height: max(48, height))
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .black, location: 0.00),   // uniform frost…
+                        .init(color: .black, location: 0.80),   // …held across the toolbar
+                        .init(color: .clear, location: 1.00),   // soft bottom edge only
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
+            .opacity(0.5)                                        // lighter — a subtle frost, not a dark band
+            .frame(maxWidth: .infinity, alignment: .top)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+    }
+}
+
+/// Minimal public-AppKit bridge: a within-window vibrancy view whose material adapts to the content (and to
+/// active/inactive window state) on its own. Used only as the frosted material for `GridTopFrost`; the
+/// gradient shape is applied by SwiftUI's `.mask` so there is no AppKit coordinate-flip to reason about.
+private struct WithinWindowBlur: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .headerView
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .withinWindow    // sample + blur the photos rendered behind it in this window
+        view.material = material
+        view.state = .followsWindowActiveState   // system-driven active/inactive vividness
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+    }
+}
+
+/// Window-toolbar chrome, the two distinct modes the app has:
+///
+/// • **Viewer** — a deliberately OPAQUE, warm bar that matches the photo-viewer media background, so the
+///   viewer reads as a focused, distraction-free surface (Apple Photos does the same in its single-photo view).
+///
+/// • **Grid** — NOTHING is applied. The system renders its native macOS Liquid Glass toolbar, which samples
+///   and adapts to the photos that scroll underneath it (the window is `fullSizeContentView` with a
+///   transparent titlebar and the grid ignores the top safe area). That gives Apple's content-adaptive glass
+///   refraction + scroll-edge blur for free — no painted strip, no fake `LinearGradient`/`Rectangle` overlay,
+///   and no forced `.toolbarBackground` material (which would also paint an opaque band over the sidebar's
+///   titlebar region and make the sidebar look boxed). Active/inactive vividness is left to the system.
+private struct WindowToolbarChrome: ViewModifier {
+    let isViewer: Bool
+
+    func body(content: Content) -> some View {
+        if isViewer {
+            content
+                .toolbarBackground(ViewerVisualConstants.backgroundColor, for: .windowToolbar)
+                .toolbarBackground(.visible, for: .windowToolbar)
+        } else {
+            content   // native Liquid Glass — see the type doc above
+        }
+    }
+}
+
 /// Collapsible left sidebar — a native macOS sidebar `List` (Liquid-Glass vibrant material, native
 /// selection): Proton smart filters (tags) on top, user albums below.
 private struct SidebarView: View {
@@ -902,5 +988,6 @@ private struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)   // let the within-window glass (and the grid behind it) show through
     }
 }

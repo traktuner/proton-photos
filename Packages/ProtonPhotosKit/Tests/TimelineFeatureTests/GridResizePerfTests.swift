@@ -12,6 +12,9 @@ import CoreGraphics
     private func src(_ name: String) -> String {
         (try? String(contentsOf: repoRoot().appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/\(name)"), encoding: .utf8)) ?? ""
     }
+    private func appSrc(_ path: String) -> String {
+        (try? String(contentsOf: repoRoot().appendingPathComponent("App/\(path)"), encoding: .utf8)) ?? ""
+    }
 
     // 1 — pure-height resize: width-derived metrics + contentSize are unchanged (no recompute needed).
     @Test func pureHeightResizeDoesNotRecomputeWidthMetrics() {
@@ -69,6 +72,16 @@ import CoreGraphics
         let coord = src("MetalGridCoordinator.swift")
         #expect(coord.contains("lastResizeDiagTime") && coord.contains("> 0.33"), "GridResize logs must be time-throttled")
         #expect(src("GridZoomCommit.swift").contains("throttleSeconds: 0.5"), "MetalGridPerf signposts must be throttled")
+    }
+
+    // 5b — the old STEP-1 sidebar probe printed/logged every safe-area animation frame. That synchronous DEBUG
+    // IO sits directly in the sidebar-toggle hot path and must not come back.
+    @Test func sidebarAnimationHasNoPerFrameProbeLogging() {
+        let main = appSrc("Views/MainView.swift")
+        #expect(!main.contains("SidebarProbe"))
+        #expect(!main.contains("logSidebarProbe"))
+        #expect(!main.contains(".onChange(of: geo.safeAreaInsets.leading)"))
+        #expect(!main.contains(".onChange(of: geo.size.width)"))
     }
 
     // 6 — no synchronous decode on the resize path: the rebase is pure geometry; texture work stays in the cache.

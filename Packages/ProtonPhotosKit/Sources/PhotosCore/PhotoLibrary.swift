@@ -1,7 +1,7 @@
 import Foundation
 
 /// Proton's built-in photo tags (server-side smart filters). Raw values are the API's PhotoTag enum.
-public enum PhotoTag: Int, Sendable, CaseIterable {
+public enum PhotoTag: Int, Sendable, CaseIterable, Codable {
     case favorites = 0
     case screenshots = 1
     case videos = 2

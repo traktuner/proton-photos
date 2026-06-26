@@ -2,7 +2,8 @@
 //
 // Phase-B grid transition driver — PRODUCTION DEFAULT (no feature flag). The controller builds the
 // single-presentation-lattice click/pinch transition for every eligible step and falls back to the stable
-// instant snap ONLY for ineligible geometry (lattice build failed, relocating selection, degenerate plan).
+// instant snap ONLY for ineligible geometry (lattice build failed, degenerate plan). Selection is a settled-grid
+// decoration concern and must not force the grid onto a reflow/snap fallback.
 
 import Testing
 import Foundation
@@ -35,7 +36,7 @@ import CoreGraphics
         #expect(c.isActive == false)        // settled and ended itself (host clock owns q, no timer)
     }
 
-    @Test func relocatingSelectionFallsBackToSnap() {
+    @Test func relocatingSelectionDoesNotBlockClickPlan() {
         let (src, tgt) = plans()
         let viewport = CGSize(width: 1400, height: 900)
         guard let lat = GridTransitionComponentBuilder.build(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport) else {
@@ -44,9 +45,9 @@ import CoreGraphics
         let relocating = GridTransitionSelectionEligibility.relocatingIdentities(in: lat)
         guard let r = relocating.first else { Issue.record("no relocating identity"); return }
         let c = GridTransitionController()
-        #expect(c.beginClick(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport, selection: [r]) == false)
-        #expect(c.lastFallback == .selectionRelocates)   // ⇒ host uses the stable instant snap (invalid case)
-        #expect(c.isActive == false)
+        #expect(c.beginClick(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport, selection: [r]))
+        #expect(c.lastFallback == .none)
+        #expect(c.isActive)
     }
 
     // ── live pinch: host-driven q (no timer), default-on like the click ──
@@ -84,7 +85,7 @@ import CoreGraphics
         #expect(forward == back)            // pure function of q ⇒ no hysteresis
     }
 
-    @Test func pinchRelocatingSelectionFallsBack() {
+    @Test func pinchRelocatingSelectionStillBuildsPlan() {
         let (src, tgt) = plans()
         let viewport = CGSize(width: 1400, height: 900)
         guard let lat = GridTransitionComponentBuilder.build(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport) else {
@@ -94,8 +95,8 @@ import CoreGraphics
             Issue.record("no relocating identity"); return
         }
         let c = GridTransitionController()
-        #expect(c.beginPinch(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport, selection: [r]) == false)
-        #expect(c.lastFallback == .selectionRelocates)
-        #expect(c.isActive == false)
+        #expect(c.beginPinch(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport, selection: [r]))
+        #expect(c.lastFallback == .none)
+        #expect(c.isActive)
     }
 }

@@ -29,6 +29,34 @@ final class AppModel {
     private(set) var backend: BackendState = .idle
     /// High-level client composition (uploads + albums), built alongside the backend.
     private(set) var facade: ProtonClientFacade?
+    /// True once the signed-in library has finished its first load (loaded / empty / failed). Drives the
+    /// launch veil, which lifts only after the real grid is ready to be revealed. Reset on sign-out and on a
+    /// fresh backend build so a new session shows the veil again.
+    private(set) var libraryReady = false
+
+    /// The launch veil covers the whole window while the app is still preparing the session/library (the
+    /// initial auth check, the backend build, or the first library load) — but NOT once a presentable
+    /// terminal state is reached (the login screen, a backend error, or a loaded library).
+    var isPreparing: Bool {
+        switch auth {
+        case .checking:
+            return true
+        case .signedOut, .authenticating:
+            return false
+        case .signedIn:
+            switch backend {
+            case .idle, .preparing:
+                return true
+            case .failed:
+                return false
+            case .ready:
+                return facade == nil || !libraryReady
+            }
+        }
+    }
+
+    /// Called by the main UI once the timeline has settled (loaded / empty / failed) so the launch veil fades.
+    func markLibraryReady() { libraryReady = true }
 
     private let store = SessionKeychainStore()
     private let authenticator = ProtonForkAuthenticator()
@@ -84,6 +112,7 @@ final class AppModel {
         backendTask?.cancel()
         backend = .idle
         facade = nil
+        libraryReady = false
         // Erase the account's encrypted thumbnail/preview blobs + any legacy cache keys and streamed video
         // blocks before dropping the session, so nothing decryptable is left for the signed-out account.
         OfflineLibraryManager.shared.purgeOnSignOut()
@@ -97,6 +126,7 @@ final class AppModel {
 
     private func prepareBackend(_ session: ProtonSession) {
         backendTask?.cancel()
+        libraryReady = false           // a fresh build isn't ready until its first library load lands
         // Install the per-account encrypted-cache key derived from the restored session (and purge any legacy
         // plaintext cache) before the grid renders or the crawl begins.
         OfflineLibraryManager.shared.configure(session: session)

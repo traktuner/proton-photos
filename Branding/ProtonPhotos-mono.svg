@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="ProtonPhotos">
+  <defs>
+    <clipPath id="ppm-clip"><rect x="252" y="310" width="460" height="460" rx="96"></rect></clipPath>
+  </defs>
+  <g fill="none" stroke="#11313F" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="312" y="254" width="460" height="460" rx="96" stroke-opacity="0.45"></rect>
+    <rect x="252" y="310" width="460" height="460" rx="96"></rect>
+  </g>
+  <circle cx="560" cy="540" r="50" fill="#11313F"></circle>
+  <g clip-path="url(#ppm-clip)">
+    <path d="M252 648 Q396 548 520 648 Q612 724 712 612" fill="none" stroke="#11313F" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"></path>
+  </g>
+</svg>

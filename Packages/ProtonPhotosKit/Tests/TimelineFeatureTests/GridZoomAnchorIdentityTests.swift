@@ -42,6 +42,12 @@ import CoreGraphics
         return (try? String(contentsOf: url.appendingPathComponent("Sources/TimelineFeature/MetalGridScrollHost.swift"), encoding: .utf8)) ?? ""
     }
 
+    private func coordinatorSource() -> String {
+        var url = URL(fileURLWithPath: #filePath)
+        url.deleteLastPathComponent(); url.deleteLastPathComponent(); url.deleteLastPathComponent()
+        return (try? String(contentsOf: url.appendingPathComponent("Sources/TimelineFeature/MetalGridCoordinator.swift"), encoding: .utf8)) ?? ""
+    }
+
     private let cursorVP = CGPoint(x: 430, y: 360)
     private let scenarios: [Int?] = [.none, .some(1), .some(3), .some(5)]   // canonical + several committed phases
 
@@ -97,6 +103,38 @@ import CoreGraphics
         #expect(host.contains("scrollLockOrigin = CGPoint(x: 0, y: targetY)"), "scrollLock must be set to the committed targetY")
     }
 
+    // MARK: 5b — PinchEndpointUsesClampedScrollBeforeReleaseTest
+    @Test func pinchEndpointUsesClampedScrollBeforeRelease() {
+        let e = engine()
+        let target = 1
+
+        let topPhase = e.columnPhase(forItem: 0, targetColumn: 0, level: target, width: width)
+        let rawTop = e.anchoredScrollOffset(flatIndex: 0,
+                                            localFraction: CGPoint(x: 0.5, y: 0.5),
+                                            viewportPoint: CGPoint(x: 20, y: viewport.height - 8),
+                                            level: target, width: width, columnPhase: topPhase).y
+        let clampedTop = e.clampScrollOffsetY(rawTop, level: target, width: width,
+                                              viewportHeight: viewport.height, columnPhase: topPhase)
+        #expect(rawTop < 0, "test must cover a top-edge impossible cursor anchor")
+        #expect(clampedTop == 0, "top-edge target detent must be built at the committed top clamp")
+
+        let last = count - 1
+        let bottomPhase = e.columnPhase(forItem: last, targetColumn: 0, level: target, width: width)
+        let targetMaxY = max(0, e.contentSize(level: target, width: width, columnPhase: bottomPhase).height - viewport.height)
+        let rawBottom = e.anchoredScrollOffset(flatIndex: last,
+                                               localFraction: CGPoint(x: 0.5, y: 0.5),
+                                               viewportPoint: CGPoint(x: 20, y: 8),
+                                               level: target, width: width, columnPhase: bottomPhase).y
+        let clampedBottom = e.clampScrollOffsetY(rawBottom, level: target, width: width,
+                                                 viewportHeight: viewport.height, columnPhase: bottomPhase)
+        #expect(rawBottom > targetMaxY, "test must cover a bottom-edge impossible cursor anchor")
+        #expect(clampedBottom == targetMaxY, "bottom-edge target detent must be built at the committed bottom clamp")
+
+        let coordinator = coordinatorSource()
+        #expect(coordinator.contains("engine.clampScrollOffsetY(y, level: lv"),
+                "normal live-pinch detent endpoints must be built from the same clamped scrollY the release commit adopts")
+    }
+
     // MARK: 6 — CommitUsesSameCursorPointAsBeginTest
     @Test func commitUsesSameCursorPointAsBegin() {
         let r = simulatePinch(sourceLevel: 3, sourcePhase: 3, targetLevel: 5, cursorVP: cursorVP, sourceScrollY: 5000)
@@ -134,8 +172,10 @@ import CoreGraphics
     @Test func plusMinusZoomUsesViewportCenterAnchor() {
         let host = hostSource()
         // setLevel(+/-) anchors at the grid viewport centre.
-        #expect(host.contains("anchorContentPoint ?? CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)"),
-                "+/- must anchor at the grid viewport centre")
+        // Viewport CENTRE — now in LAYOUT space (the unobscured width, sidebar inset removed), so the engine
+        // receives a layout-space anchor; the render translation happens once at the coordinator's draw chokepoint.
+        #expect(host.contains("anchorContentPoint ?? CGPoint(x: max(1, bounds.width - coordinator.leadingObstructionInset) / 2, y: origin.y + vh / 2)"),
+                "+/- must anchor at the grid viewport centre (layout space)")
         // It must NOT use a stale mouse/hover content point (that field was removed; the toolbar button location is never read).
         #expect(!host.contains("lastMouseContentPoint"), "+/- must not reuse a stale mouse/hover point")
     }

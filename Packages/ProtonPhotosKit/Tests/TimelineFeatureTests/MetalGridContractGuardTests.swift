@@ -105,9 +105,25 @@ import CoreGraphics
     // 7
     @Test func plusMinusUsesViewportCenterGuard() {
         let host = src("MetalGridScrollHost.swift")
-        #expect(host.contains("anchorContentPoint ?? CGPoint(x: bounds.width / 2, y: origin.y + vh / 2)"),
-                "+/- must anchor at the grid viewport centre")
+        // Viewport CENTRE in LAYOUT space (unobscured width, sidebar inset removed) — see MetalGridScrollHost.
+        #expect(host.contains("anchorContentPoint ?? CGPoint(x: max(1, bounds.width - coordinator.leadingObstructionInset) / 2, y: origin.y + vh / 2)"),
+                "+/- must anchor at the grid viewport centre (layout space)")
         #expect(!host.contains("lastMouseContentPoint"), "+/- must not use a stale mouse/hover point")
+    }
+
+    // 7b — normal AppKit scroll/rubber-band owns the clip origin. The settled draw path may render at the
+    // elastic origin, but it must not programmatically clamp/scroll the NSClipView or arm a second rebase.
+    @Test func settledDrawDoesNotFightNativeScrollElasticityGuard() throws {
+        let coordinator = src("MetalGridCoordinator.swift")
+        guard let start = coordinator.range(of: "private func drawEngineFrame"),
+              let end = coordinator[start.lowerBound...].range(of: "/// Real thumbnails: resident images") else {
+            Issue.record("Could not locate drawEngineFrame body")
+            return
+        }
+        let body = String(coordinator[start.lowerBound..<end.lowerBound])
+        #expect(!body.contains("clip.scroll(to:"), "settled draw must not clamp the NSClipView during native rubber-band")
+        #expect(!body.contains("beginScrollRebase(fromY:"), "normal draw must not arm a second scroll rebase")
+        #expect(body.contains("renderY = rawOrigin.y"), "normal draw should render at AppKit's native clip origin")
     }
 
     // 8 — trackpad pinch anchors the item under the cursor (resolved in the displayed/phased grid).

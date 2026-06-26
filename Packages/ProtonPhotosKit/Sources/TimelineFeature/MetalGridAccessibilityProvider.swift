@@ -57,8 +57,9 @@ final class MetalGridAccessibilityProvider {
             guard cell.flatIndex < items.count else { continue }
             let item = items[cell.flatIndex]
             let vp = MetalGridGeometry.viewportRect(contentRect: cell.rect, visibleOrigin: CGPoint(x: 0, y: coordinator.scrollOriginY))
+            // cell.rect is LAYOUT-space (X from 0); translate +inset into render space before the screen conversion.
             // viewport (top-left, y-down) → host-local (y-up) → window → screen.
-            let localYUp = CGRect(x: vp.minX, y: hostHeight - vp.maxY, width: vp.width, height: vp.height)
+            let localYUp = CGRect(x: vp.minX + coordinator.leadingObstructionInset, y: hostHeight - vp.maxY, width: vp.width, height: vp.height)
             let screen = window.convertToScreen(host.convert(localYUp, to: nil))
             let element = MetalGridA11yElement()
             element.setAccessibilityParent(host)

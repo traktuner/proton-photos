@@ -24,6 +24,9 @@ public struct PhotoItem: Identifiable, Hashable, Sendable, Codable {
     /// For a Live Photo, the node ID (same volume) of the paired video file.
     public let relatedVideoID: String?
     public let durationSeconds: Double?  // for videos
+    /// Proton's server-side smart tags when the current backend path exposes them. SDK timeline enumeration
+    /// can omit these; callers must treat this as enrichment, not the source of all truth.
+    public let tags: Set<PhotoTag>
 
     public var id: PhotoUID { uid }
 
@@ -40,7 +43,8 @@ public struct PhotoItem: Identifiable, Hashable, Sendable, Codable {
         mediaType: String,
         isLivePhoto: Bool = false,
         relatedVideoID: String? = nil,
-        durationSeconds: Double? = nil
+        durationSeconds: Double? = nil,
+        tags: Set<PhotoTag> = []
     ) {
         self.uid = uid
         self.captureTime = captureTime
@@ -48,6 +52,33 @@ public struct PhotoItem: Identifiable, Hashable, Sendable, Codable {
         self.isLivePhoto = isLivePhoto
         self.relatedVideoID = relatedVideoID
         self.durationSeconds = durationSeconds
+        self.tags = tags
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case uid, captureTime, mediaType, isLivePhoto, relatedVideoID, durationSeconds, tags
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        uid = try container.decode(PhotoUID.self, forKey: .uid)
+        captureTime = try container.decode(Date.self, forKey: .captureTime)
+        mediaType = try container.decode(String.self, forKey: .mediaType)
+        isLivePhoto = try container.decodeIfPresent(Bool.self, forKey: .isLivePhoto) ?? false
+        relatedVideoID = try container.decodeIfPresent(String.self, forKey: .relatedVideoID)
+        durationSeconds = try container.decodeIfPresent(Double.self, forKey: .durationSeconds)
+        tags = try container.decodeIfPresent(Set<PhotoTag>.self, forKey: .tags) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(uid, forKey: .uid)
+        try container.encode(captureTime, forKey: .captureTime)
+        try container.encode(mediaType, forKey: .mediaType)
+        try container.encode(isLivePhoto, forKey: .isLivePhoto)
+        try container.encodeIfPresent(relatedVideoID, forKey: .relatedVideoID)
+        try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
+        try container.encode(tags, forKey: .tags)
     }
 }
 

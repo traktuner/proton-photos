@@ -4,15 +4,35 @@ import Metal
 import PhotosCore
 import MediaCache
 
+/// Leading event-inset (in points) for the grid: while a translucent sidebar overlays the grid's leading
+/// edge, the host declines hit-testing for `x < inset` so those events reach the sidebar. The grid still
+/// renders + lays out full-width (photos animate behind the sidebar). Set by the shell; 0 by default.
+public struct GridLeadingEventInsetKey: EnvironmentKey {
+    public static let defaultValue: CGFloat = 0
+}
+
+public extension EnvironmentValues {
+    var gridLeadingEventInset: CGFloat {
+        get { self[GridLeadingEventInsetKey.self] }
+        set { self[GridLeadingEventInsetKey.self] = newValue }
+    }
+}
+
 /// The production wrapper around `MetalGridScrollHost` — the Metal-backed library grid (the only timeline
 /// grid). The canonical `SquareTileGridEngine` owns all geometry; this adds real-data binding, selection,
 /// double-click viewer handoff, zoom-level changes, month labels, badges, and `GridProxy` wiring
 /// (windowFrame / scrollToItem / scrollToLatest / zoom).
 struct MetalProductionGridView: NSViewRepresentable {
+    @Environment(\.gridLeadingEventInset) private var leadingEventInset
     let sections: [TimelineSection]
     let allItems: [PhotoItem]
     let feed: ThumbnailFeed
     @Binding var level: Int
+    var routeScrollGeneration: Int = 0
+    /// The target the next route placement should open at: a remembered photo anchor (returning to a
+    /// previously-visited route), or `nil` to open at the newest end (first visit / launch). Set by the shell
+    /// alongside `routeScrollGeneration`; consumed once per generation as the host's initial-viewport policy.
+    var routeInitialScrollAnchor: GridScrollAnchor? = nil
     let onOpen: (PhotoItem, [PhotoItem]) -> Void
     var proxy: GridProxy?
     var selectionMode: Bool = false
@@ -33,11 +53,24 @@ struct MetalProductionGridView: NSViewRepresentable {
             return NSView()
         }
         host.coordinator.decorationsEnabled = true
+        host.eventLeadingInset = leadingEventInset
         coord.host = host
         coord.allItems = allItems
         coord.onOpen = onOpen
         coord.onSelectionChange = onSelectionChange
         coord.dataToken = MetalGridProductionAdapter.dataToken(sections: sections)
+        // A freshly created host opens at its route's initial viewport. At launch (generation 0) the host's
+        // default `stickToBottom` already opens at newest, so leave the generation untouched. When the host is
+        // (re)created mid-session at a non-zero generation — e.g. returning to a large route after an empty/small
+        // one destroyed the host — arm the one-shot policy so a REAL placement happens via the host's layout
+        // path, then record the generation as satisfied by THAT placement. The shell sets `routeInitialScrollAnchor`
+        // synchronously before the generation bumps, so it is already correct here. This couples "mark applied"
+        // to a real placement: `makeNSView` never marks a generation applied without also installing the policy
+        // that will place it, so host recreation can't swallow the route placement.
+        if routeScrollGeneration != coord.appliedRouteScrollGeneration {
+            host.requestInitialViewport(routeInitialViewport)
+            coord.appliedRouteScrollGeneration = routeScrollGeneration
+        }
 
         let selection = MetalGridSelectionController()
         let interaction = MetalGridInteractionController(coordinator: host.coordinator, selection: selection)
@@ -83,6 +116,7 @@ struct MetalProductionGridView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let host = nsView as? MetalGridScrollHost else { return }
+        host.eventLeadingInset = leadingEventInset
         let coord = context.coordinator
         coord.allItems = allItems
         coord.onOpen = onOpen
@@ -91,17 +125,43 @@ struct MetalProductionGridView: NSViewRepresentable {
         coord.a11y?.items = allItems
         coord.a11y?.selected = host.coordinator.selectedUIDs
 
+        // A sidebar route switch bumps `routeScrollGeneration` SYNCHRONOUSLY (before the async `select(...)` that
+        // loads the route), so by the time the new route's sections arrive (the data token changes) the
+        // generation is already pending. The route's target — open at its remembered position or at the newest
+        // end — is expressed as a one-shot initial-viewport POLICY installed ALONGSIDE the new data and consumed
+        // by the host once layout geometry is valid (NOT an immediate scroll from here). The placement and the
+        // generation-consume are coupled to the token change: because the generation is bumped before the data,
+        // `routeChangePending` is already true when the new token lands — so the policy is installed exactly once
+        // against the new data, regardless of how SwiftUI splits/coalesces the passes. An incremental data update
+        // (token changes with no pending generation) installs `.preserve`, never yanking a scrolled-up user.
+        let routeChangePending = routeScrollGeneration != coord.appliedRouteScrollGeneration
         let token = MetalGridProductionAdapter.dataToken(sections: sections)
         if token != coord.dataToken {
             coord.dataToken = token
-            host.setDataSource(MetalGridProductionAdapter.makeDataSource(sections: sections, feed: feed))
+            host.setDataSource(MetalGridProductionAdapter.makeDataSource(sections: sections, feed: feed),
+                               initialViewport: routeChangePending ? routeInitialViewport : .preserve)
             coord.header?.markers = MetalGridProductionAdapter.monthMarkers(sections: sections)
+            if routeChangePending { coord.appliedRouteScrollGeneration = routeScrollGeneration }
         }
+        // NOTE: the generation is reconciled ONLY inside the token-change branch above. This is deliberate — it
+        // is what makes the placement race-free (the generation is bumped before the load, so it is already
+        // pending when the new token lands). It must NOT be advanced unconditionally: doing so would consume the
+        // generation in the old-data pass, before the new token arrives, re-creating the very race this fixes.
+        // The only residual is a rare leak if two consecutive routes share a `dataToken`
+        // (hash(count, firstUID, lastUID)) — then the token never changes, the generation stays pending, and a
+        // later incremental update re-pins the route's remembered anchor. It is benign (re-pins ≈ the user's
+        // current spot) and self-heals on the next route switch.
         host.coordinator.setSelectionMode(selectionMode)
         host.coordinator.setFavorites(favoriteUIDs)
         if level != host.coordinator.level { host.animateToLevel(level) }
         wireProxy(host: host, levelBinding: $level)
         coord.header?.reposition()
+    }
+
+    /// The host initial-viewport policy for the current route: restore a remembered photo anchor, or open at
+    /// the newest end when there is none (first visit / launch).
+    private var routeInitialViewport: GridInitialViewport {
+        routeInitialScrollAnchor.map { .restore($0) } ?? .newest
     }
 
     private func wireProxy(host: MetalGridScrollHost, levelBinding: Binding<Int>) {
@@ -113,7 +173,9 @@ struct MetalProductionGridView: NSViewRepresentable {
         guard let proxy else { return }
         proxy.windowFrameForItem = { [weak host] item in host?.windowFrame(forUID: item.uid) }
         proxy.scrollToItem = { [weak host] item in host?.scrollToItem(item.uid) }
+        proxy.scrollToFlatIndex = { [weak host] index in host?.scrollToFlatIndex(index) }
         proxy.scrollToLatest = { [weak host] in host?.scrollToBottom() }
+        proxy.currentScrollAnchor = { [weak host] in host?.currentScrollAnchor() }   // read-only; shell remembers it per route
         proxy.zoomIn = stepIn
         proxy.zoomOut = stepOut
         // Aspect/square toggle → the coordinator's content-mode preference (content fit only; no geometry change).
@@ -135,5 +197,6 @@ struct MetalProductionGridView: NSViewRepresentable {
         var onOpen: ((PhotoItem, [PhotoItem]) -> Void)?
         var onSelectionChange: ((Set<PhotoUID>) -> Void)?
         var dataToken = 0
+        var appliedRouteScrollGeneration = 0
     }
 }

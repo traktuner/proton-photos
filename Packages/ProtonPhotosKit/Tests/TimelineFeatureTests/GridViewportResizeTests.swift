@@ -146,6 +146,41 @@ import CoreGraphics
         #expect(!host.contains("restoreScroll") && !host.contains("oldScrollOrigin"))
     }
 
+    // 9b — sidebar animation changes the LAYOUT viewport width, even though the MTKView keeps rendering
+    // full-width under the translucent sidebar. The resize camera must therefore measure and rebase in
+    // layout-space (`full.width - leadingObstructionInset`) and must react to safe-area inset changes directly
+    // instead of waiting for a later AppKit layout/scroll tick.
+    @Test func hostUsesLayoutSpaceFrameForSidebarResize() {
+        let host = src("MetalGridScrollHost.swift")
+        #expect(host.contains("let inset = coordinator.leadingObstructionInset"))
+        #expect(host.contains("full.width - inset"))
+        #expect(host.contains("private func applyLeadingInsetChange(from oldValue: CGFloat)"))
+        #expect(host.contains("coordinator.sidebarObstructionInset = eventLeadingInset"))
+        #expect(host.contains("rebaseForResize(oldFrame: oldFrame, newFrame: newFrame)"))
+        #expect(host.contains("lastViewportScreenFrame = newFrame"))
+    }
+
+    // 9c — runtime host policy holds the stationary vertical edge: bottom-edge drags preserve the top,
+    // top-edge drags preserve the bottom, and width-only/sidebar changes preserve the top. The engine stays
+    // generic; this guard only constrains the production coordinator policy.
+    @Test func coordinatorUsesStationaryEdgeResizeAnchors() {
+        let coord = src("MetalGridCoordinator.swift")
+        guard let range = coord.range(of: "private func resizeAnchorFraction") else {
+            Issue.record("resizeAnchorFraction missing"); return
+        }
+        let body = String(coord[range.lowerBound ..< (coord.index(range.lowerBound, offsetBy: 700, limitedBy: coord.endIndex) ?? coord.endIndex)])
+        #expect(body.contains("delta.movedBottomEdge && !delta.movedTopEdge { return 0 }"))
+        #expect(body.contains("delta.movedTopEdge && !delta.movedBottomEdge { return 1 }"))
+        #expect(body.contains("return 0.5"))
+        #expect(body.contains("return 0"))
+        guard let rebase = coord.range(of: "func rebaseForViewportChange") else {
+            Issue.record("rebaseForViewportChange missing"); return
+        }
+        let rebaseBody = String(coord[rebase.lowerBound ..< (coord.index(rebase.lowerBound, offsetBy: 900, limitedBy: coord.endIndex) ?? coord.endIndex)])
+        #expect(rebaseBody.contains("let anchorFractionY = resizeAnchorFraction(for: delta)"))
+        #expect(!rebaseBody.contains("anchorFractionY: 0.5)   // normalized viewport-centre camera anchor"))
+    }
+
     // 10
     @Test func bottomPinnedResizeStaysBottomPinned() {
         let e = engine()
