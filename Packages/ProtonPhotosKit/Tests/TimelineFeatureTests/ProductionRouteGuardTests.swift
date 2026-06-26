@@ -23,7 +23,7 @@ struct ProductionRouteGuardTests {
     @Test func noRemovedProductionRoutesRemain() {
         // The spike tuning UI, the rejected focusRow crossfade flag, AND the single-lattice gating flag must
         // all be gone — the accepted Phase-B effect path is the production default, with no flag of any kind.
-        let forbidden = ["anim-tuning", "TuningView", "AnimationTuning.shared",
+        let forbidden = ["anim-tuning", "TuningView", "AnimationTuning",
                          "MetalGrid.focusRowTransition", "MetalGridFocusRowTransitionFlag",
                          "MetalGrid.singleLatticeTransition", "MetalGridSingleLatticeTransitionFlag"]
         let roots = [Self.repoRoot.appendingPathComponent("App"),
@@ -47,5 +47,14 @@ struct ProductionRouteGuardTests {
         // The grid feed must be built with the account-configured shared cache, never a throwaway instance.
         #expect(text.contains("ThumbnailFeed(cache: OfflineLibraryManager.shared.cache"))
         #expect(!text.contains("ThumbnailFeed(cache: ThumbnailCache()"))
+    }
+
+    @Test func mainViewUsesNativeSplitViewChrome() throws {
+        let mainView = Self.repoRoot.appendingPathComponent("App/Views/MainView.swift")
+        let text = try String(contentsOf: mainView, encoding: .utf8)
+        #expect(text.contains("NavigationSplitView(columnVisibility:"))
+        #expect(text.contains(".navigationSplitViewColumnWidth("))
+        #expect(text.contains(".searchable(text: $searchText"))
+        #expect(!text.contains("SidebarResizeHandle"))
     }
 }

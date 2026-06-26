@@ -30,17 +30,14 @@ struct InfoPanelView: View {
     private var header: some View {
         HStack {
             Text("Info")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(.headline)
             Spacer()
             Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .frame(width: 26, height: 26)
+                Label("Close info", systemImage: "xmark")
+                    .labelStyle(.iconOnly)
             }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: Circle())
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Close info")
         }
         .padding(.horizontal, 20)
         .padding(.top, 18)
@@ -52,15 +49,14 @@ struct InfoPanelView: View {
     private var captureSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(item.captureTime, format: .dateTime.weekday(.wide).day().month(.wide).year())
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(.headline)
             Text(item.captureTime, format: .dateTime.hour().minute())
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.6))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             if let device = metadata?.device, !device.isEmpty {
                 Label(device, systemImage: "camera")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                     .padding(.top, 4)
             }
         }
@@ -107,12 +103,11 @@ struct InfoPanelView: View {
     private func row(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.45))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
                 .textCase(.uppercase)
             Text(value)
-                .font(.system(size: 13))
-                .foregroundStyle(.white)
+                .font(.body)
                 .textSelection(.enabled)
         }
     }

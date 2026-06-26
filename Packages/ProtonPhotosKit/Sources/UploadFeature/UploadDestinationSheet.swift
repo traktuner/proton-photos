@@ -20,46 +20,49 @@ public struct UploadDestinationSheet: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Upload")
-                .font(.title3.weight(.semibold))
+        NavigationStack {
+            Form {
+                Section("Destination") {
+                    Picker("Destination", selection: $mode) {
+                        Text("Library").tag(Mode.library)
+                        Text("Existing Album").tag(Mode.existing)
+                            .disabled(!coordinator.canAddToAlbum)
+                        Text("New Album").tag(Mode.newAlbum)
+                            .disabled(!coordinator.canCreateAlbum)
+                    }
+                    .pickerStyle(.radioGroup)
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Destination")
-                    .font(.headline)
-
-                Picker("", selection: $mode) {
-                    Text("Library").tag(Mode.library)
-                    Text("Existing Album").tag(Mode.existing)
-                        .disabled(!coordinator.canAddToAlbum)
-                    Text("New Album").tag(Mode.newAlbum)
-                        .disabled(!coordinator.canCreateAlbum)
+                    destinationDetails
                 }
-                .labelsHidden()
-                .pickerStyle(.radioGroup)
 
-                destinationDetails
+                if mode != .library, coordinator.canSetAlbumCover {
+                    Section {
+                        Toggle("Use first uploaded photo as album cover", isOn: $useFirstAsCover)
+                            .toggleStyle(.checkbox)
+                    }
+                }
+
+                Section {
+                    Text(summary)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
-
-            if mode != .library, coordinator.canSetAlbumCover {
-                Toggle("Use first uploaded photo as album cover", isOn: $useFirstAsCover)
-                    .toggleStyle(.checkbox)
-            }
-
-            HStack {
-                Text(summary)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Cancel") { coordinator.cancelDestination(); dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Upload") { confirm(); dismiss() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canConfirm)
+            .formStyle(.grouped)
+            .navigationTitle("Upload")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { coordinator.cancelDestination(); dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Upload") { confirm(); dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(!canConfirm)
+                }
             }
         }
-        .padding(18)
-        .frame(width: 360)
+        .frame(width: 420, height: 360)
     }
 
     @ViewBuilder private var destinationDetails: some View {
@@ -72,19 +75,24 @@ public struct UploadDestinationSheet: View {
             } else if coordinator.albums.isEmpty {
                 caption("No albums are available.")
             } else {
-                Picker("Album", selection: $selectedAlbumID) {
-                    Text("Choose…").tag(String?.none)
-                    ForEach(coordinator.albums) { album in
-                        Text(album.title).tag(String?.some(album.id))
+                LabeledContent("Album") {
+                    Picker("Album", selection: $selectedAlbumID) {
+                        Text("Choose…").tag(String?.none)
+                        ForEach(coordinator.albums) { album in
+                            Text(album.title).tag(String?.some(album.id))
+                        }
                     }
+                    .labelsHidden()
                 }
             }
         case .newAlbum:
             if !coordinator.canCreateAlbum {
                 readOnlyAlbumsMessage
             } else {
-                TextField("Album name", text: $newAlbumName)
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent("Album name") {
+                    TextField("Album name", text: $newAlbumName)
+                        .textFieldStyle(.roundedBorder)
+                }
             }
         }
     }

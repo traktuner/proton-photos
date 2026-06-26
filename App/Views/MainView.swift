@@ -23,8 +23,10 @@ struct MainView: View {
     @State private var gridContentMode: TileContentDisplayMode = .aspectFitInsideSquare
     @State private var sidebarOpen: Bool
     @State private var sidebarWidth: CGFloat
+    @State private var columnVisibility: NavigationSplitViewVisibility
     @State private var albums: [PhotoAlbum] = []
     @State private var selection: PhotoFilter = .all
+    @State private var searchText = ""
     // Shared-element zoom transition (photo ↔ its grid cell).
     @State private var gridProxy = GridProxy()
     @State private var zoom: ZoomTransition?
@@ -35,6 +37,9 @@ struct MainView: View {
     @State private var selectionMode = false
     @State private var selectedUIDs: Set<PhotoUID> = []
     @State private var isExporting = false
+    @State private var pendingTrashItems: [PhotoItem] = []
+    @State private var closeViewerAfterTrash = false
+    @State private var confirmTrash = false
     // Favorites (read from server so iOS favorites show up; toggle writes back).
     @State private var favorites: Set<PhotoUID> = []
     @State private var uploadRefreshTask: Task<Void, Never>?
@@ -42,6 +47,8 @@ struct MainView: View {
     @State private var uploadRefreshBusy = false
     private let feed: ThumbnailFeed
     private let aspects: AspectRegistry
+    private let zoomOpenSpring = (response: 0.34, damping: 0.86)
+    private let zoomCloseSpring = (response: 0.32, damping: 0.88)
 
     init(model: AppModel, facade: ProtonClientFacade) {
         self.model = model
@@ -58,37 +65,32 @@ struct MainView: View {
         let feed = ThumbnailFeed(cache: OfflineLibraryManager.shared.cache, loader: backend, aspects: aspects)
         self.feed = feed
         _timelineModel = State(initialValue: TimelineViewModel(repository: backend, feed: feed, library: backend))
-        _sidebarOpen = State(initialValue: SidebarPersistence.resolvedVisible())
-        _sidebarWidth = State(initialValue: SidebarPersistence.resolvedWidth())
+        let sidebarVisible = SidebarPersistence.resolvedVisible()
+        let width = SidebarPersistence.resolvedWidth()
+        _sidebarOpen = State(initialValue: sidebarVisible)
+        _sidebarWidth = State(initialValue: width)
+        _columnVisibility = State(initialValue: sidebarVisible ? .all : .detailOnly)
     }
 
     var body: some View {
         ZStack {
-            NavigationStack {
-                HStack(spacing: 0) {
-                    SidebarView(albums: albums, selection: $selection)
-                        .frame(width: sidebarWidth)
-                        .opacity(sidebarOpen ? 1 : 0)
-                        .frame(width: sidebarOpen ? sidebarWidth : 0, alignment: .leading)
-                        .clipped()
-                        .allowsHitTesting(sidebarOpen)
-                    SidebarResizeHandle(width: $sidebarWidth) { dragging in
-                        // The width change is the cause; the grid viewport change goes through the SAME
-                        // stabilizer as a window resize (.sidebarDrag begin/end). The handle emits the
-                        // [Sidebar] dragBegin/dragChanged/dragEnd lines itself.
-                        postGridResizeHint(reason: .sidebarDrag, phase: dragging ? "begin" : "end")
-                    }
-                    .frame(width: sidebarOpen ? 8 : 0)
-                    .opacity(sidebarOpen ? 1 : 0)
-                    .allowsHitTesting(sidebarOpen)
-                    TimelineView(model: timelineModel, aspects: aspects, level: $level, proxy: gridProxy,
-                                 selectionMode: selectionMode, media: backend, metadataProvider: backend, favoriteUIDs: favorites,
-                                 onSelectionChange: { selectedUIDs = $0 }) { item, items in
-                        openPhoto(item, items)
-                    }
-                    .ignoresSafeArea(.container, edges: .top)   // photos scroll under the glass toolbar
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                SidebarView(albums: albums, selection: $selection)
+                    .navigationSplitViewColumnWidth(
+                        min: SidebarMetrics.minWidth,
+                        ideal: sidebarWidth,
+                        max: SidebarMetrics.maxWidth
+                    )
+            } detail: {
+                TimelineView(model: timelineModel, aspects: aspects, level: $level, proxy: gridProxy,
+                             searchText: searchText,
+                             selectionMode: selectionMode, media: backend, metadataProvider: backend, favoriteUIDs: favorites,
+                             onSelectionChange: { selectedUIDs = $0 }) { item, items in
+                    openPhoto(item, items)
                 }
+                .ignoresSafeArea(.container, edges: .top)   // photos scroll under the glass toolbar
                 .navigationTitle(viewerModel == nil ? title : "")
+                .searchable(text: $searchText, placement: .toolbar, prompt: "Search \(title)")
                 .toolbar { toolbarContent }
                 // Viewer: opaque, warm top bar matching the media background. Grid: default glass material
                 // that appears as photos scroll under it.
@@ -146,7 +148,7 @@ struct MainView: View {
                 PhotoViewerView(model: viewerModel,
                                 isFavorite: { favorites.contains($0) },
                                 onToggleFavorite: toggleFavorite,
-                                onTrash: { trashPhotos([$0]); closePhoto() }) { closePhoto() }
+                                onTrash: { requestTrash([$0], closeViewer: true) }) { closePhoto() }
             }
 
             // Shared-element zoom overlay: a single image morphing between the cell and fullscreen.
@@ -154,11 +156,12 @@ struct MainView: View {
 
             if isExporting {
                 VStack(spacing: 10) {
-                    ProgressView().controlSize(.large).tint(.white)
-                    Text("Preparing…").font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
+                    ProgressView().controlSize(.large)
+                    Text("Preparing…")
+                        .font(.callout.weight(.medium))
                 }
                 .padding(22)
-                .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
 
             uploadRefreshBanner
@@ -177,6 +180,27 @@ struct MainView: View {
         .animation(.easeInOut(duration: 0.22), value: sidebarOpen)
         .popover(isPresented: $uploadCoordinator.isQueueVisible, arrowEdge: .top) {
             UploadQueuePanel(coordinator: uploadCoordinator)
+        }
+        .confirmationDialog(trashConfirmationTitle, isPresented: $confirmTrash) {
+            Button("Move to Trash", role: .destructive) {
+                let items = pendingTrashItems
+                let shouldClose = closeViewerAfterTrash
+                pendingTrashItems = []
+                closeViewerAfterTrash = false
+                trashPhotos(items)
+                if shouldClose {
+                    closePhoto()
+                } else {
+                    selectionMode = false
+                    selectedUIDs = []
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingTrashItems = []
+                closeViewerAfterTrash = false
+            }
+        } message: {
+            Text(trashConfirmationMessage)
         }
     }
 
@@ -246,7 +270,7 @@ struct MainView: View {
         }
         zoom = ZoomTransition(item: item, image: img, cellFrame: cell, expanded: false)
         DispatchQueue.main.async {
-            withAnimation(.spring(response: AnimationTuning.zoomOpenResponse, dampingFraction: AnimationTuning.zoomOpenDamping)) {
+            withAnimation(.spring(response: zoomOpenSpring.response, dampingFraction: zoomOpenSpring.damping)) {
                 zoom?.expanded = true
             } completion: {
                 viewerModel = makeViewer(item, items)
@@ -269,7 +293,7 @@ struct MainView: View {
         zoom = ZoomTransition(item: item, image: img, cellFrame: cell, expanded: true)
         viewerModel = nil
         DispatchQueue.main.async {
-            withAnimation(.spring(response: AnimationTuning.zoomCloseResponse, dampingFraction: AnimationTuning.zoomCloseDamping)) {
+            withAnimation(.spring(response: zoomCloseSpring.response, dampingFraction: zoomCloseSpring.damping)) {
                 zoom?.expanded = false
             } completion: {
                 zoom = nil
@@ -480,14 +504,30 @@ struct MainView: View {
 
     private func trashSelected() {
         let items = selectedItems
-        selectionMode = false; selectedUIDs = []
-        trashPhotos(items)
+        requestTrash(items, closeViewer: false)
     }
 
     private func restoreSelected() {
         let items = selectedItems
         selectionMode = false; selectedUIDs = []
         restorePhotos(items)
+    }
+
+    private func requestTrash(_ items: [PhotoItem], closeViewer: Bool) {
+        guard !items.isEmpty else { return }
+        pendingTrashItems = items
+        closeViewerAfterTrash = closeViewer
+        confirmTrash = true
+    }
+
+    private var trashConfirmationTitle: String {
+        pendingTrashItems.count == 1 ? "Move photo to Trash?" : "Move \(pendingTrashItems.count) photos to Trash?"
+    }
+
+    private var trashConfirmationMessage: String {
+        pendingTrashItems.count == 1
+            ? "The photo will move to Recently Deleted."
+            : "The selected photos will move to Recently Deleted."
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
@@ -505,49 +545,61 @@ struct MainView: View {
                 VStack(spacing: 1) {
                     Text(t.line1)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
                         .lineLimit(1)
                     Text(t.line2)
                         .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 .multilineTextAlignment(.center)
                 .fixedSize()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-                .background(.white.opacity(0.09), in: Capsule())
+                .background(.regularMaterial, in: Capsule())
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.22)) { viewerModel.toggleInfo() }
                 } label: {
-                    Image(systemName: viewerModel.showInfo ? "info.circle.fill" : "info.circle")
+                    Label("Info", systemImage: viewerModel.showInfo ? "info.circle.fill" : "info.circle")
+                        .labelStyle(.iconOnly)
                 }
                 .help("Info")
+                .accessibilityLabel("Info")
 
                 Button {
                     Task { await performExport([viewerModel.current]) }
                 } label: {
-                    Image(systemName: "square.and.arrow.down")
+                    Label("Download original", systemImage: "square.and.arrow.down")
+                        .labelStyle(.iconOnly)
                 }
                 .disabled(isExporting)
                 .help("Download original")
+                .accessibilityLabel("Download original")
 
                 Button { toggleFavorite(viewerModel.current.uid) } label: {
-                    Image(systemName: favorites.contains(viewerModel.current.uid) ? "heart.fill" : "heart")
+                    Label(favorites.contains(viewerModel.current.uid) ? "Remove favorite" : "Favorite",
+                          systemImage: favorites.contains(viewerModel.current.uid) ? "heart.fill" : "heart")
+                        .labelStyle(.iconOnly)
                 }
                 .help(favorites.contains(viewerModel.current.uid) ? "Remove favorite" : "Favorite")
+                .accessibilityLabel(favorites.contains(viewerModel.current.uid) ? "Remove favorite" : "Favorite")
 
                 Button { onTrashViewerItem(viewerModel.current) } label: {
-                    Image(systemName: "trash")
+                    Label("Move to trash", systemImage: "trash")
+                        .labelStyle(.iconOnly)
                 }
                 .help("Move to trash")
+                .accessibilityLabel("Move to trash")
             }
         } else {
             ToolbarItem(placement: .navigation) {
-                Button { toggleSidebar() } label: { Image(systemName: "sidebar.left") }
+                Button { toggleSidebar() } label: {
+                    Label("Toggle sidebar", systemImage: "sidebar.left")
+                        .labelStyle(.iconOnly)
+                }
                     .help("Toggle sidebar")
+                    .accessibilityLabel("Toggle sidebar")
             }
             // No explicit "select mode": click / ⌘-click / ⇧-click / drag-marquee select directly, double
             // click opens. The toolbar is stable — the download (or restore) + trash actions are always
@@ -564,6 +616,7 @@ struct MainView: View {
                     }
                     .disabled(selectedUIDs.isEmpty)
                     .help("Restore from trash")
+                    .accessibilityLabel(selectedUIDs.isEmpty ? "Restore selected from trash" : "Restore \(selectedUIDs.count) selected from trash")
                 } else {
                     Button { downloadSelected() } label: {
                         if selectedUIDs.isEmpty {
@@ -574,17 +627,30 @@ struct MainView: View {
                     }
                     .disabled(selectedUIDs.isEmpty || isExporting)
                     .help(selectedUIDs.count > 1 ? "Download \(selectedUIDs.count) photos to a folder" : "Download original")
-                    Button { trashSelected() } label: { Image(systemName: "trash") }
+                    .accessibilityLabel(selectedUIDs.isEmpty ? "Download selected originals" : "Download \(selectedUIDs.count) selected originals")
+                    Button { trashSelected() } label: {
+                        Label("Move selected to trash", systemImage: "trash")
+                            .labelStyle(.iconOnly)
+                    }
                         .disabled(selectedUIDs.isEmpty)
                         .help("Move to trash")
+                        .accessibilityLabel("Move selected to trash")
                 }
                 ControlGroup {
-                    Button { gridProxy.zoomOut?() } label: { Image(systemName: "minus") }
+                    Button { gridProxy.zoomOut?() } label: {
+                        Label("Smaller thumbnails", systemImage: "minus")
+                            .labelStyle(.iconOnly)
+                    }
                         .help("Smaller thumbnails")
                         .disabled(level >= 5)
-                    Button { gridProxy.zoomIn?() } label: { Image(systemName: "plus") }
+                        .accessibilityLabel("Smaller thumbnails")
+                    Button { gridProxy.zoomIn?() } label: {
+                        Label("Larger thumbnails", systemImage: "plus")
+                            .labelStyle(.iconOnly)
+                    }
                         .help("Larger thumbnails")
                         .disabled(level <= 0)
+                        .accessibilityLabel("Larger thumbnails")
                 }
                 aspectSquareToggleButton
                 Menu {
@@ -624,11 +690,11 @@ struct MainView: View {
             Label("Upload", systemImage: "tray.and.arrow.up")
         }
         .help("Upload photos or a folder")
+        .accessibilityLabel("Upload")
     }
 
     private func onTrashViewerItem(_ item: PhotoItem) {
-        trashPhotos([item])
-        closePhoto()
+        requestTrash([item], closeViewer: true)
     }
 
     /// Center-title metadata for the viewer top bar. `placeName` is the reverse-geocoded POI/location
@@ -658,6 +724,7 @@ struct MainView: View {
         postGridResizeHint(reason: .sidebarToggle, phase: "begin")
         withAnimation(.easeInOut(duration: 0.22)) {
             sidebarOpen.toggle()
+            columnVisibility = sidebarOpen ? .all : .detailOnly
         } completion: {
             postGridResizeHint(reason: .sidebarToggle, phase: "end")
         }
@@ -768,76 +835,6 @@ struct MainView: View {
 
 }
 
-
-/// Draggable divider between the sidebar and the grid (Deliverable 4). Updates the bound width live
-/// (clamped to `SidebarMetrics`) and persists it ONCE on release — never per drag tick. The width
-/// change is the *only* thing the handle does to the grid: it never mutates grid layout directly. The
-/// resulting viewport-width change is bracketed via the `onDraggingChanged` callback (`.sidebarDrag`
-/// begin/end) — the Metal grid relayouts natively on the width change. Shows the resize cursor on hover.
-private struct SidebarResizeHandle: View {
-    @Binding var width: CGFloat
-    var onDraggingChanged: (Bool) -> Void = { _ in }
-    @State private var dragStart: CGFloat?
-    #if DEBUG
-    @State private var lastLoggedWidth: CGFloat = -1
-    #endif
-
-    var body: some View {
-        Rectangle()
-            .fill(Color.clear)
-            .frame(width: 8)
-            .overlay(Divider(), alignment: .center)
-            .contentShape(Rectangle())
-            .onHover { inside in
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
-            }
-            .gesture(
-                // Measure the drag in GLOBAL (screen) space, not the handle's local space. The handle
-                // moves right/left as the sidebar widens/narrows; a `.local` translation is therefore
-                // measured against a coordinate system that shifts with the drag, so the reported delta
-                // fights itself — the divider lags and never "locks" to the cursor. Global space is fixed,
-                // so `base + translation.width` tracks the mouse 1:1.
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { value in
-                        let base = dragStart ?? width
-                        if dragStart == nil {
-                            dragStart = base
-                            onDraggingChanged(true)            // → beginResize(reason:.sidebarDrag) (shared path)
-                            logDrag(event: "dragBegin", raw: base, clamped: base)
-                        }
-                        let raw = base + value.translation.width
-                        let clamped = SidebarMetrics.clamp(raw)
-                        width = clamped                         // clamped live; the grid relayouts via the frame change
-                        logDragChanged(raw: raw, clamped: clamped)
-                    }
-                    .onEnded { _ in
-                        dragStart = nil
-                        SidebarPersistence.saveWidth(width)     // persist ONCE on release (clamped in saveWidth)
-                        onDraggingChanged(false)                // → endResize() (shared path)
-                        logDrag(event: "dragEnd", raw: width, clamped: width, persisted: true)
-                    }
-            )
-    }
-
-    private func logDrag(event: String, raw: CGFloat, clamped: CGFloat, persisted: Bool = false) {
-        #if DEBUG
-        if persisted {
-            print("[Sidebar] event=\(event) width=\(Int(clamped)) persisted=true")
-        } else {
-            print("[Sidebar] event=\(event) width=\(Int(clamped))")
-        }
-        #endif
-    }
-
-    /// Throttled so a 120 Hz drag doesn't flood the log: emit only when the clamped width moved ≥ 1 pt.
-    private func logDragChanged(raw: CGFloat, clamped: CGFloat) {
-        #if DEBUG
-        guard abs(clamped - lastLoggedWidth) >= 1 else { return }
-        lastLoggedWidth = clamped
-        print("[Sidebar] event=dragChanged width=\(Int(raw)) clampedWidth=\(Int(clamped))")
-        #endif
-    }
-}
 
 /// Collapsible left sidebar — a native macOS sidebar `List` (Liquid-Glass vibrant material, native
 /// selection): Proton smart filters (tags) on top, user albums below.

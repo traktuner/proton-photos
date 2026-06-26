@@ -25,7 +25,7 @@ public struct UploadQueuePanel: View {
             }
         }
         .frame(width: 380, height: coordinator.items.isEmpty ? 220 : 360)
-        .background(.regularMaterial)
+        .presentationBackground(.regularMaterial)
     }
 
     private var header: some View {
@@ -50,13 +50,10 @@ public struct UploadQueuePanel: View {
     }
 
     private var empty: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "tray")
-                .font(.system(size: 28))
-                .foregroundStyle(.secondary)
-            Text("No uploads")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+        ContentUnavailableView {
+            Label("No uploads", systemImage: "tray")
+        } description: {
+            Text("Uploads you start from the toolbar appear here.")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -120,6 +117,7 @@ public struct UploadQueuePanel: View {
                 }
                 .buttonStyle(.borderless)
                 .help(help(for: action))
+                .accessibilityLabel("\(help(for: action)) \(item.displayName)")
             }
         }
         .font(.system(size: 12))

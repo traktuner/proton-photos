@@ -118,58 +118,53 @@ public struct PhotoViewerView: View {
         VStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 30))
-                .foregroundStyle(.white)
             Text("Wiedergabe fehlgeschlagen")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
+                .font(.headline)
             Text(error.userMessage)
-                .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.8))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
             if error.isRetryable {
                 Button("Erneut versuchen") { model.retry() }
                     .buttonStyle(.borderedProminent)
-                    .tint(.white.opacity(0.2))
                     .padding(.top, 4)
             }
         }
         .padding(22)
-        .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder private var busyOverlay: some View {
         let progress = model.videoState.progress
         if case .downloading = model.videoState, progress > 0.001, progress < 0.995 {
             VStack(spacing: 8) {
-                ProgressView().controlSize(.large).tint(.white)
+                ProgressView().controlSize(.large)
                 Text("\(Int(progress * 100))%")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.headline.monospacedDigit())
             }
             .padding(18)
-            .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         } else {
-            ProgressView().controlSize(.large).tint(.white)
+            ProgressView().controlSize(.large)
                 .padding(16)
-                .glassEffect(in: Circle())
+                .background(.regularMaterial, in: Circle())
         }
     }
 
     @ViewBuilder private var imageLoadingOverlay: some View {
         if model.originalProgress > 0.001, model.originalProgress < 0.995 {
             VStack(spacing: 8) {
-                ProgressView().controlSize(.large).tint(.white)
+                ProgressView().controlSize(.large)
                 Text("\(Int(model.originalProgress * 100))%")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.headline.monospacedDigit())
             }
             .padding(18)
-            .glassEffect(in: RoundedRectangle(cornerRadius: 16))
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         } else {
-            ProgressView().controlSize(.large).tint(.white)
+            ProgressView().controlSize(.large)
                 .padding(16)
-                .glassEffect(in: Circle())
+                .background(.regularMaterial, in: Circle())
         }
     }
 
@@ -202,16 +197,24 @@ public struct PhotoViewerView: View {
 
     private func iconButton(_ symbol: String, size: CGFloat, enabled: Bool = true, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
+            Label(accessibilityTitle(for: symbol), systemImage: symbol)
+                .labelStyle(.iconOnly)
                 .font(.system(size: size * 0.42, weight: .semibold))
-                .foregroundStyle(.white)
                 .frame(width: size, height: size)
                 .contentShape(Rectangle())   // whole frame is clickable, not just the glyph pixels
         }
         .buttonStyle(.plain)
-        // Dark-tinted glass so the white glyphs stay legible over light photos too.
-        .glassEffect(.regular.tint(.black.opacity(0.32)).interactive(), in: Circle())
+        .background(.regularMaterial, in: Circle())
         .opacity(enabled ? 1 : 0.25)
         .disabled(!enabled)
+        .accessibilityLabel(accessibilityTitle(for: symbol))
+    }
+
+    private func accessibilityTitle(for symbol: String) -> String {
+        switch symbol {
+        case "chevron.left": "Previous photo"
+        case "chevron.right": "Next photo"
+        default: "Action"
+        }
     }
 }

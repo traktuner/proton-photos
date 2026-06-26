@@ -11,6 +11,7 @@ public struct TimelineView: View {
     private let aspects: AspectRegistry
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
     private let proxy: GridProxy?
+    private let searchText: String
     private let selectionMode: Bool
     private let onSelectionChange: (Set<PhotoUID>) -> Void
     private let media: FullMediaProvider?
@@ -22,6 +23,7 @@ public struct TimelineView: View {
         aspects: AspectRegistry,
         level: Binding<Int> = .constant(3),
         proxy: GridProxy? = nil,
+        searchText: String = "",
         selectionMode: Bool = false,
         media: FullMediaProvider? = nil,
         metadataProvider: PhotoMetadataProvider? = nil,
@@ -33,6 +35,7 @@ public struct TimelineView: View {
         self.aspects = aspects
         _level = level
         self.proxy = proxy
+        self.searchText = searchText
         self.selectionMode = selectionMode
         self.media = media
         self.metadataProvider = metadataProvider
@@ -51,24 +54,30 @@ public struct TimelineView: View {
             case let .failed(message):
                 errorState(message)
             case let .loaded(sections):
+                let visibleSections = Self.filteredSections(sections, query: searchText)
+                let visibleItems = visibleSections.flatMap(\.items)
                 // Production timeline is MetalGrid-ONLY: the canonical `SquareTileGridEngine` owns all
                 // geometry (square slots). No legacy-grid fallback, no aspect-driven justified layout,
                 // no silent feature-flag switch — media aspect never reaches the layout (it lives only in
                 // `TileContentFitter`, inside the renderer).
-                MetalProductionGridView(
-                    sections: sections,
-                    allItems: model.allItems,
-                    feed: model.feed,
-                    level: $level,
-                    onOpen: onOpen,
-                    proxy: proxy,
-                    selectionMode: selectionMode,
-                    onSelectionChange: onSelectionChange,
-                    favoriteUIDs: favoriteUIDs,
-                    media: media,
-                    metadataProvider: metadataProvider
-                )
-                .ignoresSafeArea(edges: .bottom)
+                if visibleSections.isEmpty, !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    searchEmptyState
+                } else {
+                    MetalProductionGridView(
+                        sections: visibleSections,
+                        allItems: visibleItems,
+                        feed: model.feed,
+                        level: $level,
+                        onOpen: onOpen,
+                        proxy: proxy,
+                        selectionMode: selectionMode,
+                        onSelectionChange: onSelectionChange,
+                        favoriteUIDs: favoriteUIDs,
+                        media: media,
+                        metadataProvider: metadataProvider
+                    )
+                    .ignoresSafeArea(edges: .bottom)
+                }
             }
         }
         .background(ProtonColor.backgroundNorm)
@@ -77,38 +86,66 @@ public struct TimelineView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 44))
-                .foregroundStyle(ProtonColor.textHint)
-            Text("No photos yet")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(ProtonColor.textNorm)
+        ContentUnavailableView {
+            Label("No photos yet", systemImage: "photo.on.rectangle.angled")
+        } description: {
             Text("Photos you upload to Proton will appear here.")
-                .font(.system(size: 13))
-                .foregroundStyle(ProtonColor.textWeak)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func errorState(_ message: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 40))
-                .foregroundStyle(ProtonColor.warning)
-            Text("Couldn’t load your library")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(ProtonColor.textNorm)
+        ContentUnavailableView {
+            Label("Couldn’t load your library", systemImage: "exclamationmark.triangle")
+        } description: {
             Text(message)
-                .font(.system(size: 12))
-                .foregroundStyle(ProtonColor.textWeak)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 360)
+                .textSelection(.enabled)
+        } actions: {
             Button("Retry") { Task { await model.load() } }
-                .buttonStyle(.glassProminent)
-                .frame(width: 140)
+                .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+
+    private var searchEmptyState: some View {
+        ContentUnavailableView.search(text: searchText)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    nonisolated static func filteredSections(_ sections: [TimelineSection], query: String) -> [TimelineSection] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return sections }
+        return sections.compactMap { section in
+            let sectionMatches = searchableText(for: section).contains(q)
+            let items = sectionMatches ? section.items : section.items.filter { searchableText(for: $0).contains(q) }
+            guard !items.isEmpty else { return nil }
+            return TimelineSection(id: section.id, date: section.date, title: section.title, items: items)
+        }
+    }
+
+    private nonisolated static func searchableText(for section: TimelineSection) -> String {
+        [
+            section.id,
+            section.title,
+            section.date.formatted(date: .abbreviated, time: .omitted),
+            section.date.formatted(.dateTime.year().month().day())
+        ]
+        .joined(separator: " ")
+        .lowercased()
+    }
+
+    private nonisolated static func searchableText(for item: PhotoItem) -> String {
+        [
+            item.uid.nodeID,
+            item.uid.volumeID,
+            item.mediaType,
+            item.isVideo ? "video" : "photo",
+            item.isLivePhoto ? "live photo" : "",
+            item.captureTime.formatted(date: .abbreviated, time: .shortened),
+            item.captureTime.formatted(.dateTime.year().month().day().hour().minute())
+        ]
+        .joined(separator: " ")
+        .lowercased()
     }
 }

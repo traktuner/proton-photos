@@ -77,7 +77,7 @@ private struct LibrarySettingsTab: View {
         }
         .formStyle(.grouped)
         .task { await refreshSize() }
-        .alert("Offline-Cache löschen?", isPresented: $confirmDelete) {
+        .confirmationDialog("Offline-Cache löschen?", isPresented: $confirmDelete) {
             Button("Abbrechen", role: .cancel) {}
             Button("Löschen", role: .destructive) { Task { await delete() } }
         } message: {
@@ -148,11 +148,9 @@ private struct CacheStatusTab: View {
     }
 
     private func row(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).font(.system(size: 12))
-            Spacer()
+        LabeledContent(label) {
             Text(value)
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .font(.body.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
         }
