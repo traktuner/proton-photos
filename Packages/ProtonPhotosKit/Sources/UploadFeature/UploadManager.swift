@@ -189,7 +189,6 @@ public actor UploadManager: UploadManaging {
     // MARK: - Per-item run
 
     private func run(_ id: UploadQueueItemID, request: PhotoUploadRequest) async {
-        let token = request.cancellationToken
         do {
             let uid = try await uploader.upload(request) { [weak self] progress in
                 Task { await self?.applyProgress(id, progress) }
@@ -221,7 +220,6 @@ public actor UploadManager: UploadManaging {
                 transition(id, to: .failed(message: message(error)))
             }
         }
-        _ = token
         log(uploadLogLine(id))
         finish(id)
     }

@@ -1,10 +1,8 @@
 // GridTransitionTuning.swift
 //
-// Centralized, tunable surface for the L0↔L1 single-presentation-lattice transition spike.
-// EVERY value here is a TEMPORARY SPIKE CONSTANT derived from the V3.4 / V3.5 / V3.6 offline
-// evidence passes (candidate CLICKV2_420_FULLER_CORNER). They are deliberately gathered in one
-// place so duration / curve / window parameters can be fine-tuned after the spike WITHOUT any
-// architecture rewrite. No constants for this transition live anywhere else.
+// Centralized production defaults for the normal-grid single-presentation-lattice transition.
+// Values are gathered here so duration / curve / window parameters can be tuned without changing
+// renderer, geometry, or gesture architecture. No constants for this transition live elsewhere.
 
 import Foundation
 import CoreGraphics

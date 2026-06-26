@@ -115,6 +115,7 @@ final class MetalGridRenderer {
 
     /// Draw the frame: each group is drawn in order (back → front). `sharedTexture` groups draw all their
     /// quads in one call; `perQuadTexture` groups draw one call per quad.
+    @MainActor
     func render(in view: MTKView, viewportSize: CGSize, groups: [MetalGridRenderGroup]) {
         let start = CFAbsoluteTimeGetCurrent()
         guard let drawable = view.currentDrawable,
@@ -207,6 +208,7 @@ final class MetalGridRenderer {
     /// under-weighting / background bleed (the artifact a single-pass source-over dissolve would produce).
     /// `t` is the (already-eased) progress 0…1. Falls back to the target settled render if compositing is
     /// unavailable. The normal `render(...)` path is untouched.
+    @MainActor
     func renderLayerDissolve(in view: MTKView, viewportSize: CGSize,
                              sourceGroups: [MetalGridRenderGroup], targetGroups: [MetalGridRenderGroup], t: Float) {
         let start = CFAbsoluteTimeGetCurrent()

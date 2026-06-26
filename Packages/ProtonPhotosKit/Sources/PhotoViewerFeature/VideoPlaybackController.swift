@@ -56,8 +56,7 @@ public final class VideoPlaybackController {
         isStreaming = true
         streamingAsset = retaining
         transition(.preparingStream)
-        attach(AVPlayerItem(asset: asset), uid: uid, initial: .buffering(nil),
-               assetPlayable: asset.isPlayable)
+        attach(AVPlayerItem(asset: asset), uid: uid, initial: .buffering(nil))
     }
 
     /// Plays a fully-downloaded local file. Becomes `.ready` then `.playing` quickly.
@@ -67,7 +66,7 @@ public final class VideoPlaybackController {
         isStreaming = false
         let asset = AVURLAsset(url: url)
         transition(.ready)
-        attach(AVPlayerItem(asset: asset), uid: uid, initial: .ready, assetPlayable: asset.isPlayable)
+        attach(AVPlayerItem(asset: asset), uid: uid, initial: .ready)
     }
 
     /// Hard failure (resolution/download path gave up). Shows the error; no player.
@@ -79,7 +78,7 @@ public final class VideoPlaybackController {
 
     // MARK: - Attach + observe
 
-    private func attach(_ item: AVPlayerItem, uid: PhotoUID, initial: VideoViewerState, assetPlayable: Bool) {
+    private func attach(_ item: AVPlayerItem, uid: PhotoUID, initial: VideoViewerState) {
         didReachPlaying = false
         let player = AVPlayer(playerItem: item)
         player.automaticallyWaitsToMinimizeStalling = true

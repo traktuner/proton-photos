@@ -289,7 +289,7 @@ public final class PhotoViewerModel {
             state: videoState,
             strategy: strategy,
             localURLExists: false,
-            assetPlayable: player?.currentItem?.asset.isPlayable ?? false,
+            assetPlayable: player?.currentItem?.status == .readyToPlay,
             playerItemStatus: player?.currentItem?.status.rawValue ?? 0,
             error: nil
         ))

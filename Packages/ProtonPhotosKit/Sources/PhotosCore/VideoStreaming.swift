@@ -7,7 +7,7 @@ import AVFoundation
 /// Holds the `AVURLAsset` plus the object that must stay alive for the custom resource loader to
 /// keep serving (AVFoundation holds the resource-loader delegate weakly). Keep a strong reference
 /// to this for as long as the player is in use.
-public final class StreamingVideoAsset {
+public final class StreamingVideoAsset: @unchecked Sendable {
     public let asset: AVURLAsset
     private let retained: AnyObject
 
