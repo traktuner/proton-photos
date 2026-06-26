@@ -56,5 +56,6 @@ struct ProductionRouteGuardTests {
         #expect(text.contains(".navigationSplitViewColumnWidth("))
         #expect(text.contains(".searchable(text: $searchText"))
         #expect(!text.contains("SidebarResizeHandle"))
+        #expect(!text.contains("Label(\"Toggle sidebar\""))
     }
 }

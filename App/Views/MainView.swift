@@ -100,6 +100,11 @@ struct MainView: View {
                                    for: .windowToolbar)
                 .toolbarBackground(viewerModel != nil ? .visible : .automatic, for: .windowToolbar)
             }
+            .overlay(alignment: .top) {
+                if viewerModel == nil {
+                    gridToolbarGlassFade
+                }
+            }
             .task { await loadAlbums() }
             .onAppear {
                 attachOfflineManager()
@@ -118,6 +123,9 @@ struct MainView: View {
             .onChange(of: timelineModel.allItems.count) { _, count in
                 OfflineLibraryManager.shared.liveAssetCount = count
                 publishMetalGridLabData()
+            }
+            .onChange(of: columnVisibility) { _, newValue in
+                syncSidebarVisibility(from: newValue)
             }
             .onReceive(NotificationCenter.default.publisher(for: .protonPhotosToggleSidebar)) { _ in
                 toggleSidebar()
@@ -202,6 +210,28 @@ struct MainView: View {
         } message: {
             Text(trashConfirmationMessage)
         }
+    }
+
+    private var gridToolbarGlassFade: some View {
+        GeometryReader { geo in
+            let height = max(84, geo.safeAreaInsets.top + 34)
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(.bar)
+                    .frame(height: height)
+                    .mask(
+                        LinearGradient(stops: [
+                            .init(color: .black, location: 0),
+                            .init(color: .black, location: 0.50),
+                            .init(color: .clear, location: 1)
+                        ], startPoint: .top, endPoint: .bottom)
+                    )
+                Spacer(minLength: 0)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+        }
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder private var uploadRefreshBanner: some View {
@@ -291,11 +321,11 @@ struct MainView: View {
             return
         }
         zoom = ZoomTransition(item: item, image: img, cellFrame: cell, expanded: true)
-        viewerModel = nil
         DispatchQueue.main.async {
             withAnimation(.spring(response: zoomCloseSpring.response, dampingFraction: zoomCloseSpring.damping)) {
                 zoom?.expanded = false
             } completion: {
+                viewerModel = nil
                 zoom = nil
             }
         }
@@ -593,14 +623,6 @@ struct MainView: View {
                 .accessibilityLabel("Move to trash")
             }
         } else {
-            ToolbarItem(placement: .navigation) {
-                Button { toggleSidebar() } label: {
-                    Label("Toggle sidebar", systemImage: "sidebar.left")
-                        .labelStyle(.iconOnly)
-                }
-                    .help("Toggle sidebar")
-                    .accessibilityLabel("Toggle sidebar")
-            }
             // No explicit "select mode": click / ⌘-click / ⇧-click / drag-marquee select directly, double
             // click opens. The toolbar is stable — the download (or restore) + trash actions are always
             // present and just enable when something is selected.
@@ -721,14 +743,28 @@ struct MainView: View {
     }
 
     private func toggleSidebar() {
+        let targetVisible = !sidebarOpen
         postGridResizeHint(reason: .sidebarToggle, phase: "begin")
         withAnimation(.easeInOut(duration: 0.22)) {
-            sidebarOpen.toggle()
-            columnVisibility = sidebarOpen ? .all : .detailOnly
-        } completion: {
+            sidebarOpen = targetVisible
+            columnVisibility = targetVisible ? .all : .detailOnly
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
             postGridResizeHint(reason: .sidebarToggle, phase: "end")
         }
-        SidebarPersistence.saveVisible(sidebarOpen)
+        SidebarPersistence.saveVisible(targetVisible)
+        logSidebar(dragging: false)
+    }
+
+    private func syncSidebarVisibility(from visibility: NavigationSplitViewVisibility) {
+        let visible = visibility != .detailOnly
+        guard visible != sidebarOpen else { return }
+        postGridResizeHint(reason: .sidebarToggle, phase: "begin")
+        sidebarOpen = visible
+        SidebarPersistence.saveVisible(visible)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.24) {
+            postGridResizeHint(reason: .sidebarToggle, phase: "end")
+        }
         logSidebar(dragging: false)
     }
 
