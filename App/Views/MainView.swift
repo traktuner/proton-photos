@@ -89,6 +89,11 @@ struct MainView: View {
                     openPhoto(item, items)
                 }
                 .ignoresSafeArea(.container, edges: .top)   // photos scroll under the glass toolbar
+                .overlay(alignment: .top) {
+                    if viewerModel == nil {
+                        gridToolbarGlassFade
+                    }
+                }
                 .navigationTitle(viewerModel == nil ? title : "")
                 .searchable(text: $searchText, placement: .toolbar, prompt: "Search \(title)")
                 .toolbar { toolbarContent }
@@ -99,11 +104,6 @@ struct MainView: View {
                                    : AnyShapeStyle(.bar),
                                    for: .windowToolbar)
                 .toolbarBackground(viewerModel != nil ? .visible : .automatic, for: .windowToolbar)
-            }
-            .overlay(alignment: .top) {
-                if viewerModel == nil {
-                    gridToolbarGlassFade
-                }
             }
             .task { await loadAlbums() }
             .onAppear {
@@ -214,7 +214,7 @@ struct MainView: View {
 
     private var gridToolbarGlassFade: some View {
         GeometryReader { geo in
-            let height = max(84, geo.safeAreaInsets.top + 34)
+            let height = max(148, geo.safeAreaInsets.top + 92)
             VStack(spacing: 0) {
                 Rectangle()
                     .fill(.bar)
@@ -222,7 +222,7 @@ struct MainView: View {
                     .mask(
                         LinearGradient(stops: [
                             .init(color: .black, location: 0),
-                            .init(color: .black, location: 0.50),
+                            .init(color: .black, location: 0.18),
                             .init(color: .clear, location: 1)
                         ], startPoint: .top, endPoint: .bottom)
                     )

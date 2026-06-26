@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import PhotosCore
 import DesignSystem
 import MediaCache
@@ -48,7 +49,7 @@ public struct TimelineView: View {
         Group {
             switch model.state {
             case .loading:
-                ProtonLoadingView(caption: "Building your library…")
+                libraryLoadingState
             case .empty:
                 emptyState
             case let .failed(message):
@@ -80,9 +81,65 @@ public struct TimelineView: View {
                 }
             }
         }
-        .background(ProtonColor.backgroundNorm)
+        .background(timelineSurfaceBackground)
         .task { await model.load() }
         .onAppear { MetalGridRuntime.logResolutionOnce() }
+    }
+
+    private var timelineSurfaceBackground: Color {
+        Color(nsColor: MetalGridPalette.background)
+    }
+
+    private var libraryLoadingState: some View {
+        ZStack {
+            timelineSurfaceBackground.ignoresSafeArea()
+            loadingGridSkeleton
+            VStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.large)
+                Text("Preparing Library")
+                    .font(.headline)
+                Text("Decrypting metadata and warming thumbnails")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 18)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .shadow(color: .black.opacity(0.18), radius: 24, y: 10)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var loadingGridSkeleton: some View {
+        GeometryReader { geometry in
+            let columns = max(4, Int(geometry.size.width / 190))
+            let spacing: CGFloat = 8
+            let tileWidth = max(80, (geometry.size.width - CGFloat(columns + 1) * spacing) / CGFloat(columns))
+            let tileHeight = max(72, tileWidth * 0.78)
+            let rowCount = max(4, Int(geometry.size.height / (tileHeight + spacing)) + 1)
+            VStack(spacing: spacing) {
+                ForEach(0..<rowCount, id: \.self) { row in
+                    HStack(spacing: spacing) {
+                        ForEach(0..<columns, id: \.self) { column in
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(placeholderColor(row: row, column: column))
+                                .frame(width: tileWidth, height: tileHeight)
+                        }
+                    }
+                }
+            }
+            .padding(spacing)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .opacity(0.82)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func placeholderColor(row: Int, column: Int) -> Color {
+        let phase = Double((row * 7 + column * 3) % 9) / 100
+        return Color.white.opacity(0.045 + phase)
     }
 
     private var emptyState: some View {
@@ -92,6 +149,7 @@ public struct TimelineView: View {
             Text("Photos you upload to Proton will appear here.")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(timelineSurfaceBackground)
     }
 
     private func errorState(_ message: String) -> some View {
@@ -106,11 +164,13 @@ public struct TimelineView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+        .background(timelineSurfaceBackground)
     }
 
     private var searchEmptyState: some View {
         ContentUnavailableView.search(text: searchText)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(timelineSurfaceBackground)
     }
 
     nonisolated static func filteredSections(_ sections: [TimelineSection], query: String) -> [TimelineSection] {
