@@ -49,6 +49,10 @@ final class RealMetalGridDataSource: MetalGridDataSource {
     /// Decode at most this many disk→RAM per in-flight batch so thumbnails STREAM in (≈100 ms/batch)
     /// instead of the actor blocking on one huge sequential decode of the whole visible+overscan set.
     private let maxWarmBatch = 48
+    /// Coalesces the per-frame visible set so the NETWORK reprioritisation (`.visibleNow`) is enqueued once
+    /// per stable viewport (~100 ms), not every scroll frame. Disk→RAM decode below stays immediate.
+    private let networkDebouncer = ViewportRequestDebouncer(window: 0.1)
+    private var settleCheckScheduled = false
 
     init(sections: [TimelineSection], feed: ThumbnailFeed) {
         let uids = sections.flatMap { $0.items.map(\.uid) }
@@ -72,6 +76,35 @@ final class RealMetalGridDataSource: MetalGridDataSource {
         // frame). No permanent suppression — a cell evicted from the RAM cache must be able to re-warm.
         pendingWarm = uids
         pumpWarm()
+        // Reprioritise the background crawl toward what's on screen, but only once the viewport has been
+        // stable for ~100 ms — so a fast scroll doesn't re-enqueue the visible set every frame.
+        networkDebouncer.note(uids, at: CACurrentMediaTime())
+        scheduleSettleCheck()
+    }
+
+    /// After the debounce window, if the viewport has settled, enqueue the still-missing visible cells at
+    /// `.visibleNow` so they interrupt the crawl. Self-terminating: re-arms only while the viewport is still
+    /// in flux. The decode pump above is unaffected — on-screen cells already on disk fill immediately.
+    private func scheduleSettleCheck() {
+        guard !settleCheckScheduled else { return }
+        settleCheckScheduled = true
+        let window = networkDebouncer.settleWindow
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(window + 0.02))
+            guard let self else { return }
+            self.settleCheckScheduled = false
+            guard let settled = self.networkDebouncer.flushIfStable(at: CACurrentMediaTime()) else {
+                // Re-arm off the DEBOUNCER's own pending state, not `pendingWarm` (which `pumpWarm` clears
+                // immediately) — otherwise a fast scroll's final viewport would never get emitted.
+                if self.networkDebouncer.hasPendingUnflushed() { self.scheduleSettleCheck() }
+                return
+            }
+            let missing = settled.filter { self.feed.memoryImage(for: $0) == nil }
+            guard !missing.isEmpty else { return }
+            Task { [feed = self.feed] in
+                for uid in missing { await feed.requestPriority(uid, priority: .visibleNow) }
+            }
+        }
     }
 
     /// Decode the next bounded batch disk→RAM (or queue network for missing), then pump the rest. Bounding

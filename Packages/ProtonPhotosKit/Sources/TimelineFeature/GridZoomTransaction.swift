@@ -92,6 +92,24 @@ public struct GridZoomTransaction: Equatable, Sendable {
 
     func lattice(continuousLevel x: CGFloat, width rawWidth: CGFloat) -> Lattice {
         let width = max(rawWidth, 1)
+        // RUBBER-BAND over-zoom past the largest detent (x < 0): the level-0 grid is GEOMETRICALLY SCALED
+        // around the cursor (fixed columns, NO reflow) — "zooming the image", restoring the original working
+        // rubber band. Cell, gap and pitch all scale by the same factor `f`, so the whole grid grows uniformly
+        // about the anchor; the column reflow happens only on release (commit at level 0). For x ≥ 0 the
+        // in-band / densest behaviour below is unchanged.
+        if x < 0 {
+            let columns = max(1, levels[0].nominalColumns)
+            let baseSide = SquareTileGridEngine.nominalSlotSide(columns: columns, gap: levels[0].gap, width: width)
+            let f = apparentSlotSide(at: x, width: width) / max(baseSide, 0.001)   // > 1 past level 0 (grows)
+            let side = baseSide * f
+            let gap = levels[0].gap * f
+            let pitch = side + gap
+            let anchorCellX = anchorViewportPoint.x - anchorLocalFraction.x * side
+            let anchorCellY = anchorViewportPoint.y - anchorLocalFraction.y * side
+            let cA = min(max(Int((anchorViewportPoint.x / pitch).rounded(.down)), 0), columns - 1)
+            return Lattice(columns: columns, side: side, gap: gap, pitch: pitch, anchorColumn: cA,
+                           gridOriginX: anchorCellX - CGFloat(cA) * pitch, gridOriginY: anchorCellY)
+        }
         let gap = apparentGap(at: x)
         let target = apparentSlotSide(at: x, width: width)
         // Columns fill the width. AT (or extremely near) an integer level use that level's nominalColumns

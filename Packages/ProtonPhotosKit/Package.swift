@@ -23,6 +23,7 @@ let package = Package(
         .target(name: "PhotosCore"),
         .target(name: "DesignSystem", dependencies: ["PhotosCore"]),
         .target(name: "ProtonAuth", dependencies: ["PhotosCore"]),
+        .testTarget(name: "ProtonAuthTests", dependencies: ["ProtonAuth"]),
         .target(name: "MediaCache", dependencies: ["PhotosCore"]),
         .target(
             name: "TimelineFeature",

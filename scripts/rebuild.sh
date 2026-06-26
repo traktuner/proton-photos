@@ -14,9 +14,28 @@ cd "$(dirname "$0")/.."
 DD="build/DD.noindex"
 rm -rf build/DD   # remove any legacy INDEXED build dir so its product stops appearing in Spotlight
 
+SIGNING_IDENTITY_HASH="${PROTONPHOTOS_CODE_SIGN_IDENTITY:-}"
+SIGNING_IDENTITY_NAME=""
+if [[ -z "$SIGNING_IDENTITY_HASH" ]]; then
+  SIGNING_LINE="$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development:/ { print; exit }')"
+  SIGNING_IDENTITY_HASH="$(awk '{ print $2 }' <<<"$SIGNING_LINE")"
+  SIGNING_IDENTITY_NAME="$(awk -F'"' '{ print $2 }' <<<"$SIGNING_LINE")"
+fi
+
+SIGN_ARGS=(CODE_SIGNING_ALLOWED=YES)
+if [[ -n "$SIGNING_IDENTITY_HASH" ]]; then
+  SIGN_ARGS+=(CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$SIGNING_IDENTITY_HASH")
+  if [[ "$SIGNING_IDENTITY_NAME" =~ \(([A-Z0-9]+)\)$ ]]; then
+    SIGN_ARGS+=(DEVELOPMENT_TEAM="${BASH_REMATCH[1]}")
+  fi
+  echo "Signing with: ${SIGNING_IDENTITY_NAME:-$SIGNING_IDENTITY_HASH}"
+else
+  echo "Signing with: Xcode default (no Apple Development identity found)"
+fi
+
 xcodebuild build -project ProtonPhotos.xcodeproj -scheme ProtonPhotos \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath "$DD" \
-  -skipPackagePluginValidation -skipMacroValidation CODE_SIGNING_ALLOWED=YES
+  -skipPackagePluginValidation -skipMacroValidation "${SIGN_ARGS[@]}"
 
 APP="$DD/Build/Products/Debug/ProtonPhotos.app"
 DST="/Applications/ProtonPhotos.app"

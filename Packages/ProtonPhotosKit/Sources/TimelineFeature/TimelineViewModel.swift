@@ -129,7 +129,7 @@ public final class TimelineViewModel {
             let items = sections.flatMap(\.items)
             allItems = items
             state = items.isEmpty ? .empty : .loaded(sections)
-            await feed.startPrefetch(items.map(\.uid))
+            await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
         } catch is CancellationError {
         } catch {
             // Surface the error — the user explicitly switched filter, so silently keeping the old
@@ -180,7 +180,7 @@ public final class TimelineViewModel {
             let deduped = Self.deduplicatedSections(cached)
             allItems = deduped.flatMap(\.items)
             state = .loaded(deduped)
-            await feed.startPrefetch(allItems.map(\.uid))
+            await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(allItems))
         } else {
             state = .loading
         }
@@ -193,7 +193,7 @@ public final class TimelineViewModel {
             if fresh != allItems {
                 allItems = fresh
                 state = sections.isEmpty ? .empty : .loaded(sections)
-                await feed.startPrefetch(allItems.map(\.uid))
+                await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(allItems))
             }
         } catch is CancellationError {
             // ignore
@@ -212,7 +212,7 @@ public final class TimelineViewModel {
             let items = sections.flatMap(\.items)
             allItems = items
             state = items.isEmpty ? .empty : .loaded(sections)
-            await feed.startPrefetch(items.map(\.uid))
+            await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
             let foundItem = uploadedUID.flatMap { uid in items.first { $0.uid == uid } }
             return TimelineRefreshResult(
                 uploadedUID: uploadedUID,

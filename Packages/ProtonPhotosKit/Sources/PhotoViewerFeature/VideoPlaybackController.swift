@@ -18,10 +18,6 @@ public final class VideoPlaybackController {
     /// The single AVPlayer (streaming or local file). `nil` for images / before a video is attached.
     public private(set) var player: AVPlayer?
 
-    /// Asked when a *streaming* attempt fails or times out and a full-download fallback should run.
-    /// The model wires this to its `downloadOriginal(expecting: .video)`.
-    public var onNeedsDownloadFallback: ((PhotoUID) -> Void)?
-
     /// Retains the streaming asset + its resource-loader delegate for as long as the player lives
     /// (AVFoundation holds the resource-loader delegate weakly).
     private var streamingAsset: AnyObject?
@@ -203,18 +199,11 @@ public final class VideoPlaybackController {
         if let player { logPlayer(item: player.currentItem, player: player) }
     }
 
-    /// A player-level failure: streaming → ask the model to full-download; local → surface the error.
+    /// A player-level failure is surfaced directly. We deliberately do not fall back to a full local video
+    /// download: that would require a decrypted plaintext temp file, violating the app-wide local E2EE rule.
     private func handleFailure(_ error: VideoPlaybackError, uid: PhotoUID) {
-        if isStreaming, let fallback = onNeedsDownloadFallback {
-            PhotoDiagnostics.shared.emit("VideoPlayer", [
-                "uid": key(uid), "event": "streamFailed-fallbackToDownload", "error": error.token,
-            ])
-            teardown()
-            fallback(uid)
-        } else {
-            teardownKeepingState()
-            transition(.failed(error))
-        }
+        teardownKeepingState()
+        transition(.failed(error))
     }
 
     // MARK: - Watchdog

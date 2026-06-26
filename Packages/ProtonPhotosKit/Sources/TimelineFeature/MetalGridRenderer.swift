@@ -44,6 +44,13 @@ final class MetalGridRenderer {
     private let commandQueue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let sampler: MTLSamplerState
+    /// Opaque 2-texture linear-mix pipeline for the OVERVIEW LAYER DISSOLVE (offscreen compositing). nil if the
+    /// composite functions failed to build ⇒ `renderLayerDissolve` falls back to the target settled render.
+    private let compositePipeline: MTLRenderPipelineState?
+    /// Offscreen per-layer render targets (source, target), lazily sized to the drawable. ONLY used by
+    /// `renderLayerDissolve`; the normal `render(...)` path never touches them.
+    private var layerA: MTLTexture?
+    private var layerB: MTLTexture?
 
     private(set) var lastDrawMs: Double = 0
     private(set) var lastDrawCalls = 0
@@ -81,6 +88,19 @@ final class MetalGridRenderer {
             descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
             self.pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
 
+            // Composite pipeline: opaque (no blending) fullscreen linear mix of two layer textures.
+            if let cv = library.makeFunction(name: "metalGridCompositeVertex"),
+               let cf = library.makeFunction(name: "metalGridCompositeFragment") {
+                let cd = MTLRenderPipelineDescriptor()
+                cd.vertexFunction = cv
+                cd.fragmentFunction = cf
+                cd.colorAttachments[0].pixelFormat = .bgra8Unorm
+                cd.colorAttachments[0].isBlendingEnabled = false
+                self.compositePipeline = try? device.makeRenderPipelineState(descriptor: cd)
+            } else {
+                self.compositePipeline = nil
+            }
+
             let sd = MTLSamplerDescriptor()
             sd.minFilter = .linear
             sd.magFilter = .linear
@@ -105,11 +125,29 @@ final class MetalGridRenderer {
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             commandBuffer.commit(); return
         }
+        configure(encoder, viewportSize: viewportSize)
+        let (drawCalls, instances) = encode(groups: groups, into: encoder)
+        encoder.endEncoding()
+        commandBuffer.present(drawable)
+        commandBuffer.commit()
+        lastDrawMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
+        lastDrawCalls = drawCalls
+        lastInstanceCount = instances
+    }
+
+    /// Set the shared per-frame state (pipeline, sampler, viewport uniforms) on an encoder. Used by the
+    /// normal `render(...)` AND the offscreen layer passes, so both rasterise identically.
+    private func configure(_ encoder: MTLRenderCommandEncoder, viewportSize: CGSize) {
         var uniforms = Uniforms(viewportSize: SIMD2(Float(max(viewportSize.width, 1)), Float(max(viewportSize.height, 1))))
         encoder.setRenderPipelineState(pipeline)
         encoder.setFragmentSamplerState(sampler, index: 0)
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+    }
 
+    /// Encode all groups (back → front) onto an already-configured encoder. Returns (drawCalls, instances).
+    /// Pure w.r.t. the encoder — identical work whether the target is the drawable or an offscreen texture.
+    @discardableResult
+    private func encode(groups: [MetalGridRenderGroup], into encoder: MTLRenderCommandEncoder) -> (Int, Int) {
         var drawCalls = 0
         var instances = 0
         for group in groups where !group.quads.isEmpty {
@@ -135,13 +173,67 @@ final class MetalGridRenderer {
                 break
             }
         }
+        return (drawCalls, instances)
+    }
 
-        encoder.endEncoding()
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
+    // MARK: - Overview layer dissolve (offscreen, two-layer linear cross-dissolve)
+
+    private func ensureLayerTextures(width: Int, height: Int) {
+        if let a = layerA, a.width == width, a.height == height, layerB != nil { return }
+        guard width > 0, height > 0 else { return }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+        d.usage = [.renderTarget, .shaderRead]
+        d.storageMode = .private
+        layerA = device.makeTexture(descriptor: d)
+        layerB = device.makeTexture(descriptor: d)
+    }
+
+    private func encodeLayerPass(into cmd: MTLCommandBuffer, texture: MTLTexture,
+                                 groups: [MetalGridRenderGroup], viewportSize: CGSize) {
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MetalGridPalette.clearColor   // each layer is composited over the SAME bg
+        pass.colorAttachments[0].storeAction = .store
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        configure(enc, viewportSize: viewportSize)
+        _ = encode(groups: groups, into: enc)
+        enc.endEncoding()
+    }
+
+    /// Render the OVERVIEW LAYER DISSOLVE: rasterise the source layer to texA and the target layer to texB
+    /// (each a COMPLETE settled grid over the uniform bg), then composite to the drawable as the LINEAR mix
+    /// `A·(1−t) + B·t`. Because each layer is composited independently first, there is NO `(1−t)²` source
+    /// under-weighting / background bleed (the artifact a single-pass source-over dissolve would produce).
+    /// `t` is the (already-eased) progress 0…1. Falls back to the target settled render if compositing is
+    /// unavailable. The normal `render(...)` path is untouched.
+    func renderLayerDissolve(in view: MTKView, viewportSize: CGSize,
+                             sourceGroups: [MetalGridRenderGroup], targetGroups: [MetalGridRenderGroup], t: Float) {
+        let start = CFAbsoluteTimeGetCurrent()
+        guard let drawable = view.currentDrawable,
+              let drawablePass = view.currentRenderPassDescriptor,
+              let composite = compositePipeline,
+              let cmd = commandQueue.makeCommandBuffer() else { return }
+        ensureLayerTextures(width: drawable.texture.width, height: drawable.texture.height)
+        guard let texA = layerA, let texB = layerB else {
+            render(in: view, viewportSize: viewportSize, groups: targetGroups); return   // safe fallback
+        }
+        encodeLayerPass(into: cmd, texture: texA, groups: sourceGroups, viewportSize: viewportSize)
+        encodeLayerPass(into: cmd, texture: texB, groups: targetGroups, viewportSize: viewportSize)
+        drawablePass.colorAttachments[0].loadAction = .clear
+        drawablePass.colorAttachments[0].clearColor = MetalGridPalette.clearColor
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: drawablePass) else { cmd.commit(); return }
+        enc.setRenderPipelineState(composite)
+        enc.setFragmentTexture(texA, index: 0)
+        enc.setFragmentTexture(texB, index: 1)
+        enc.setFragmentSamplerState(sampler, index: 0)
+        var tt = max(0, min(1, t))
+        enc.setFragmentBytes(&tt, length: MemoryLayout<Float>.stride, index: 0)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)   // fullscreen triangle
+        enc.endEncoding()
+        cmd.present(drawable)
+        cmd.commit()
         lastDrawMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
-        lastDrawCalls = drawCalls
-        lastInstanceCount = instances
     }
 
     private func appendQuad(into verts: inout [Vertex], _ q: MetalGridQuad) {
@@ -243,6 +335,29 @@ final class MetalGridRenderer {
             float coverage = in.alpha * fillMask;
             return float4(t.rgb * coverage, t.a * coverage);
         }
+    }
+
+    // Overview layer dissolve composite: fullscreen triangle that LINEARLY mixes two opaque layer textures
+    // (each already a complete grid over the SAME bg). out = mix(A, B, t) = A·(1−t) + B·t — no background bleed.
+    struct CompositeOut { float4 position [[position]]; float2 uv; };
+    vertex CompositeOut metalGridCompositeVertex(uint vid [[vertex_id]]) {
+        float2 pos[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
+        float2 p = pos[vid];
+        CompositeOut o;
+        o.position = float4(p, 0.0, 1.0);
+        o.uv = float2((p.x + 1.0) * 0.5, 1.0 - (p.y + 1.0) * 0.5);   // texel-centre exact at matching resolution
+        return o;
+    }
+    fragment float4 metalGridCompositeFragment(
+        CompositeOut in [[stage_in]],
+        texture2d<float> texA [[texture(0)]],
+        texture2d<float> texB [[texture(1)]],
+        constant float &t [[buffer(0)]],
+        sampler s [[sampler(0)]]
+    ) {
+        float4 a = texA.sample(s, in.uv);
+        float4 b = texB.sample(s, in.uv);
+        return float4(mix(a.rgb, b.rgb, t), 1.0);
     }
     """
 }

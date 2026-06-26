@@ -1,33 +1,34 @@
 import SwiftUI
+import AppKit
 
-/// Proton design tokens (dark "Carbon" theme).
+/// Proton design tokens.
 ///
-/// Values mirror Proton's `@proton/colors` dark theme. They are centralised here so the
-/// whole app references tokens, never raw hex — when we reconcile 1:1 against the Proton
-/// Storybook, only this file changes.
+/// Neutrals (backgrounds / text / borders) map to **semantic system colors**, so the whole app adapts to
+/// light/dark appearance, increased-contrast, and material vibrancy automatically — and inherits Apple's
+/// refined Liquid Glass on macOS 27 with no per-token work. Only the brand accent + signal hues stay fixed
+/// (they are brand identity and read correctly in both appearances). Call sites keep using these token names.
 public enum ProtonColor {
-    // Brand
+    // Brand accent — legitimately custom (the only fixed brand hue; readable on light + dark).
     public static let primary = Color(hex: 0x6D4AFF)
-    public static let primaryHover = Color(hex: 0x7C5CFF)
-    public static let primaryActive = Color(hex: 0x5C3FD6)
 
-    // Backgrounds (dark)
-    public static let backgroundNorm = Color(hex: 0x16141C)
-    public static let backgroundWeak = Color(hex: 0x1C1A24)
-    public static let backgroundStrong = Color(hex: 0x292637)
-    public static let backgroundElevated = Color(hex: 0x211F2B)
+    // Backgrounds → semantic, appearance-adaptive. Prefer letting native materials/window background show;
+    // these are for the few chrome surfaces that need an explicit fill.
+    public static let backgroundNorm = Color(nsColor: .windowBackgroundColor)
+    public static let backgroundWeak = Color(nsColor: .underPageBackgroundColor)
+    public static let backgroundStrong = Color(nsColor: .controlBackgroundColor)
+    public static let backgroundElevated = Color(nsColor: .controlBackgroundColor)
 
-    // Text
-    public static let textNorm = Color(hex: 0xFFFFFF)
-    public static let textWeak = Color(hex: 0xA7A4B5)
-    public static let textHint = Color(hex: 0x6D697D)
-    public static let textInverted = Color(hex: 0x16141C)
+    // Text → semantic label roles (Dynamic-Type + vibrancy aware).
+    public static let textNorm = Color.primary
+    public static let textWeak = Color.secondary
+    public static let textHint = Color(nsColor: .tertiaryLabelColor)
+    public static let textInverted = Color.white   // text drawn ON the brand accent
 
-    // Borders / separators
-    public static let borderNorm = Color(hex: 0x4A4658)
-    public static let borderWeak = Color(hex: 0x322F3E)
+    // Borders / separators → semantic.
+    public static let borderNorm = Color(nsColor: .separatorColor)
+    public static let borderWeak = Color(nsColor: .separatorColor)
 
-    // Signal
+    // Signal — brand-tuned, readable in both appearances.
     public static let danger = Color(hex: 0xDC3251)
     public static let success = Color(hex: 0x1EA885)
     public static let warning = Color(hex: 0xFF9900)

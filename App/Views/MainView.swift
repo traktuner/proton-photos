@@ -40,8 +40,6 @@ struct MainView: View {
     @State private var uploadRefreshTask: Task<Void, Never>?
     @State private var uploadRefreshMessage: String?
     @State private var uploadRefreshBusy = false
-    private let tuning = AnimationTuning.shared
-    @Environment(\.openWindow) private var openWindow
     private let feed: ThumbnailFeed
     private let aspects: AspectRegistry
 
@@ -52,7 +50,12 @@ struct MainView: View {
         self.uploadCoordinator = facade.uploadCoordinator
         let aspects = AspectRegistry()
         self.aspects = aspects
-        let feed = ThumbnailFeed(cache: ThumbnailCache(), loader: backend, aspects: aspects)
+        // Use the SHARED, account-configured cache (AppModel.prepareBackend calls
+        // OfflineLibraryManager.shared.configure(session:) before this view is built) so the encrypted
+        // disk cache uses the durable per-account session-derived key and survives relaunch. A fresh
+        // ThumbnailCache() here would stay on a per-process ephemeral key and re-crawl the whole library
+        // every launch.
+        let feed = ThumbnailFeed(cache: OfflineLibraryManager.shared.cache, loader: backend, aspects: aspects)
         self.feed = feed
         _timelineModel = State(initialValue: TimelineViewModel(repository: backend, feed: feed, library: backend))
         _sidebarOpen = State(initialValue: SidebarPersistence.resolvedVisible())
@@ -97,7 +100,6 @@ struct MainView: View {
             }
             .task { await loadAlbums() }
             .onAppear {
-                openWindow(id: "anim-tuning")             // dev: live animation tuning panel
                 attachOfflineManager()
                 publishMetalGridLabData()
             }
@@ -244,7 +246,7 @@ struct MainView: View {
         }
         zoom = ZoomTransition(item: item, image: img, cellFrame: cell, expanded: false)
         DispatchQueue.main.async {
-            withAnimation(.spring(response: tuning.zoomOpenResponse, dampingFraction: tuning.zoomOpenDamping)) {
+            withAnimation(.spring(response: AnimationTuning.zoomOpenResponse, dampingFraction: AnimationTuning.zoomOpenDamping)) {
                 zoom?.expanded = true
             } completion: {
                 viewerModel = makeViewer(item, items)
@@ -267,7 +269,7 @@ struct MainView: View {
         zoom = ZoomTransition(item: item, image: img, cellFrame: cell, expanded: true)
         viewerModel = nil
         DispatchQueue.main.async {
-            withAnimation(.spring(response: tuning.zoomCloseResponse, dampingFraction: tuning.zoomCloseDamping)) {
+            withAnimation(.spring(response: AnimationTuning.zoomCloseResponse, dampingFraction: AnimationTuning.zoomCloseDamping)) {
                 zoom?.expanded = false
             } completion: {
                 zoom = nil
@@ -283,15 +285,12 @@ struct MainView: View {
     }
 
     /// Registers this window's thumbnail feed with the shared offline-cache manager, so the Settings
-    /// scene can toggle prefetch / delete the cache / read status. Applies the persisted toggle and
-    /// gives the manager a hook to restart the library crawl when offline mode is re-enabled.
+    /// scene can delete the cache and read status. The thumbnail crawl is mandatory grid infrastructure,
+    /// independent of the Offline Photo Library toggle.
     private func attachOfflineManager() {
         let manager = OfflineLibraryManager.shared
         manager.attach(feed: feed, stats: backend)
         manager.liveAssetCount = timelineModel.allItems.count
-        manager.restartPrefetch = { [feed, timelineModel] in
-            Task { await feed.startPrefetch(timelineModel.allItems.map(\.uid)) }
-        }
     }
 
     /// Hands the live timeline sections + shared thumbnail feed to the (separate-window) Metal Grid Lab
@@ -574,7 +573,7 @@ struct MainView: View {
                         }
                     }
                     .disabled(selectedUIDs.isEmpty || isExporting)
-                    .help(selectedUIDs.count > 1 ? "Download \(selectedUIDs.count) photos as ZIP" : "Download original")
+                    .help(selectedUIDs.count > 1 ? "Download \(selectedUIDs.count) photos to a folder" : "Download original")
                     Button { trashSelected() } label: { Image(systemName: "trash") }
                         .disabled(selectedUIDs.isEmpty)
                         .help("Move to trash")
@@ -689,64 +688,70 @@ struct MainView: View {
         Task { await performExport(items) }
     }
 
-    /// Downloads the original(s): a single item goes through a Save panel; multiple originals are
-    /// downloaded into a temp folder and zipped into one archive the user picks a destination for.
+    /// Downloads original(s) only to explicit user-selected destinations. The app does not stage decrypted
+    /// originals in its own temp/cache directories.
     @MainActor private func performExport(_ items: [PhotoItem]) async {
         isExporting = true
         defer { isExporting = false }
         do {
             if items.count == 1 {
                 let item = items[0]
-                let src = try await backend.downloadOriginal(for: item.uid)
-                let name = (try? await backend.metadata(for: item.uid))?.filename ?? defaultName(item, ext: src.pathExtension)
-                saveSingle(src: src, suggestedName: name)
+                let meta = try? await backend.metadata(for: item.uid)
+                let name = meta?.filename ?? defaultName(item, ext: defaultExtension(item, metadata: meta))
+                guard let dest = chooseSingleDestination(suggestedName: name) else { return }
+                let data = try await backend.originalData(for: item.uid)
+                try? FileManager.default.removeItem(at: dest)
+                try data.write(to: dest, options: .atomic)
+                NSWorkspace.shared.activateFileViewerSelecting([dest])
             } else {
-                // Download every original into a temp folder, then zip the folder.
-                let folder = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("ProtonPhotos-\(UUID().uuidString)/Photos", isDirectory: true)
-                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                guard let folder = chooseExportFolder() else { return }
                 var used = Set<String>()
                 for item in items {
-                    let src = try await backend.downloadOriginal(for: item.uid)
-                    let base = (try? await backend.metadata(for: item.uid))?.filename ?? defaultName(item, ext: src.pathExtension)
+                    let meta = try? await backend.metadata(for: item.uid)
+                    let base = meta?.filename ?? defaultName(item, ext: defaultExtension(item, metadata: meta))
                     let name = uniqueName(base, used: &used)
-                    try? FileManager.default.copyItem(at: src, to: folder.appendingPathComponent(name))
+                    let dest = folder.appendingPathComponent(name)
+                    let data = try await backend.originalData(for: item.uid)
+                    try? FileManager.default.removeItem(at: dest)
+                    try data.write(to: dest, options: .atomic)
                 }
-                saveZip(of: folder)
+                NSWorkspace.shared.activateFileViewerSelecting([folder])
             }
         } catch {
             DebugLog.log("export failed: \(error)")
         }
     }
 
-    private func saveSingle(src: URL, suggestedName: String) {
+    private func chooseSingleDestination(suggestedName: String) -> URL? {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = suggestedName
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let dest = panel.url else { return }
-        try? FileManager.default.removeItem(at: dest)
-        try? FileManager.default.copyItem(at: src, to: dest)
-        NSWorkspace.shared.activateFileViewerSelecting([dest])
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
     }
 
-    private func saveZip(of folder: URL) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "Photos.zip"
-        panel.allowedContentTypes = [.zip]
+    private func chooseExportFolder() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let dest = panel.url else { return }
-        // NSFileCoordinator's .forUploading option zips the folder into a temporary archive.
-        var coordError: NSError?
-        NSFileCoordinator().coordinate(readingItemAt: folder, options: .forUploading, error: &coordError) { zipURL in
-            try? FileManager.default.removeItem(at: dest)
-            try? FileManager.default.copyItem(at: zipURL, to: dest)
-        }
-        NSWorkspace.shared.activateFileViewerSelecting([dest])
+        panel.prompt = "Export"
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
     }
 
     private func defaultName(_ item: PhotoItem, ext: String) -> String {
         let e = ext.isEmpty ? "jpg" : ext
         return "\(item.uid.nodeID.prefix(8)).\(e)"
+    }
+
+    private func defaultExtension(_ item: PhotoItem, metadata: PhotoMetadata?) -> String {
+        let mime = metadata?.mimeType ?? item.mediaType
+        if mime.contains("png") { return "png" }
+        if mime.contains("heic") || mime.contains("heif") { return "heic" }
+        if mime.contains("quicktime") { return "mov" }
+        if mime.hasPrefix("video/") { return "mp4" }
+        return "jpg"
     }
 
     private func uniqueName(_ name: String, used: inout Set<String>) -> String {

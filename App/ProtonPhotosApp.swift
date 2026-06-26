@@ -12,7 +12,6 @@ struct ProtonPhotosApp: App {
         WindowGroup {
             RootView(model: model)
                 .frame(minWidth: 720, minHeight: 480)
-                .preferredColorScheme(.dark)
                 .background(WindowConfigurator())
                 .task { model.bootstrap() }
         }
@@ -67,18 +66,10 @@ struct ProtonPhotosApp: App {
             SettingsView()
         }
 
-        // Dev: live animation-tuning panel (opened from MainView at launch).
-        Window("Animation Tuning", id: "anim-tuning") {
-            TuningView()
-        }
-        .defaultSize(width: 340, height: 460)
-        .defaultPosition(.topTrailing)
-
         // Dev: Metal Grid Lab (Debug ▸ Metal Grid Lab… / ⌥⇧⌘M). Renders the real library when
         // the main UI has published it, else synthetic streaming tiles.
         Window("Metal Grid Lab", id: MetalGridLabWindowID) {
             MetalGridLab()
-                .preferredColorScheme(.dark)
         }
         .defaultSize(width: 1180, height: 820)
     }

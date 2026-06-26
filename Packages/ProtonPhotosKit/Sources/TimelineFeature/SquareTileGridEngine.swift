@@ -232,6 +232,23 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     public func clampLevel(_ l: Int) -> Int { min(max(l, 0), levels.count - 1) }
     public func metrics(level: Int) -> GridLevelMetrics { levels[clampLevel(level)] }
 
+    /// The transition kind for the ADJACENT step between `a` and `b` (keyed off the lower level's
+    /// `transitionKindToNext`). nil if the two levels are not adjacent (`|a-b| != 1`). Pure.
+    public func adjacentTransitionKind(_ a: Int, _ b: Int) -> GridTransitionKind? {
+        guard abs(a - b) == 1 else { return nil }
+        return metrics(level: min(a, b)).transitionKindToNext
+    }
+
+    /// Whether the adjacent step `a↔b` crosses an OVERVIEW boundary (`.overviewWarp` = last normal → first
+    /// dense overview, or `.denseOverviewZoom` = between the two dense overviews). These are the boundaries the
+    /// V3.10 overview WARP owns; the normal-level `.focusRowRelayout` steps stay on the accepted V3.9 pinch.
+    public func isOverviewBoundary(_ a: Int, _ b: Int) -> Bool {
+        switch adjacentTransitionKind(a, b) {
+        case .overviewWarp, .denseOverviewZoom: return true
+        default: return false
+        }
+    }
+
     /// THE content-mode policy (single source of truth, used by the coordinator AND tests): the user's
     /// preferred mode where the level supports it, else the forced `squareFillCrop` (the only mode the dense
     /// overview levels L4–L5 offer). Pure — it reads only the level's `supportedContentModes`.

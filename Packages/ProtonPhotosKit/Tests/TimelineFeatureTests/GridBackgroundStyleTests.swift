@@ -4,8 +4,8 @@ import CoreGraphics
 @testable import TimelineFeature
 
 // The production grid is ONE uniform Apple-like dark-gray surface behind the thumbnails: gaps + aspectFit
-// letterbox + clear color all use `MetalGridPalette.background`. No per-cell card backgrounds (except a
-// placeholder while an image is genuinely missing), no grid lines, no debug tile colors in production.
+// letterbox + clear color all use `MetalGridPalette.background`. No per-cell card backgrounds, no missing-image
+// placeholder cards, no grid lines, no debug tile colors in production.
 @Suite struct GridBackgroundStyleTests {
     private let eps: CGFloat = 0.5
     private func repoRoot() -> URL { var u = URL(fileURLWithPath: #filePath); for _ in 0 ..< 5 { u.deleteLastPathComponent() }; return u }
@@ -26,17 +26,14 @@ import CoreGraphics
         #expect(!host.contains("red: 0.043"), "no leftover hardcoded warm-brown clear color")
     }
 
-    // 2 — production renderRealSlots draws NO per-cell card for a resident image (only when missing).
+    // 2 — production grid build draws NO per-cell card for resident or missing images. Missing thumbnails should
+    // reveal the same bottom-most grid surface instead of a darker rounded square.
     @Test func rendererDoesNotDrawGridCellBackgroundsInProduction() {
         let coord = src("MetalGridCoordinator.swift")
-        guard let range = coord.range(of: "private func renderRealSlots") else { Issue.record("renderRealSlots missing"); return }
+        guard let range = coord.range(of: "private func buildRealGroups") else { Issue.record("buildRealGroups missing"); return }
         let body = String(coord[range.lowerBound ..< (coord.index(range.lowerBound, offsetBy: 2800, limitedBy: coord.endIndex) ?? coord.endIndex)])
-        // The background card append must live in the `else` (image missing) branch, not unconditionally.
-        guard let elseIdx = body.range(of: "} else {"),
-              let cardIdx = body.range(of: "backgrounds.append(MetalGridQuad(rect: cell, radius: r))") else {
-            Issue.record("expected a guarded background-card append"); return
-        }
-        #expect(elseIdx.lowerBound < cardIdx.lowerBound, "background card must only be drawn when the image is missing")
+        #expect(!body.contains("backgrounds.append"), "missing thumbnails must not draw placeholder background cards")
+        #expect(!body.contains("quads: backgrounds"), "production must not submit a placeholder-background render group")
     }
 
     // 3 — aspectFit leaves letterbox INSIDE the square slot; with no card drawn, it shows the grid background.
@@ -57,7 +54,7 @@ import CoreGraphics
         // Debug path uses synthetic solid colors.
         #expect(coord.contains("renderSyntheticSlots") && coord.contains("mode: .solid"))
         // Production path: resident tiles draw an image quad, never a solid colored card.
-        guard let range = coord.range(of: "private func renderRealSlots") else { Issue.record("renderRealSlots missing"); return }
+        guard let range = coord.range(of: "private func buildRealGroups") else { Issue.record("buildRealGroups missing"); return }
         let body = String(coord[range.lowerBound ..< (coord.index(range.lowerBound, offsetBy: 2800, limitedBy: coord.endIndex) ?? coord.endIndex)])
         #expect(!body.contains("mode: .solid"), "production must not draw synthetic solid-colored tiles")
         #expect(!body.contains("SquareGridDebugMode"), "production must not use the debug synthetic palette")

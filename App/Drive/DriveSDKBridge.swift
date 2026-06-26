@@ -41,15 +41,24 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ProtonPhotos/sdk", isDirectory: true)
         try? FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
+        // Purge any plaintext secret cache left by an older build (we now keep secrets in-memory only).
+        for name in ["secrets.sqlite", "secrets.sqlite-wal", "secrets.sqlite-shm"] {
+            try? FileManager.default.removeItem(at: caches.appendingPathComponent(name))
+        }
         // Persisted timeline (per account) for instant startup — now SQLite (v3) for a faster cold
         // start at 20k+ photos than decoding a multi-MB JSON blob.
         self.timelineStore = PhotoTimelineStore(url: caches.appendingPathComponent("timeline-v3-\(session.uid).sqlite"))
 
+        // SECURITY: the SDK secret cache holds DECRYPTED Proton key material (share/node/content keys). The
+        // SDK writes it UNENCRYPTED unless a `secretCacheEncryptionKey` is supplied — and the ProtonPhotos
+        // client create-path doesn't forward that key to the native core anyway. So we keep secrets
+        // IN-MEMORY only (omit `secretCachePath`): nothing decryptable is persisted at rest. Cost: the
+        // secret cache is re-derived on each cold start. `entityCachePath` (non-secret node metadata) stays
+        // on disk for fast startup. See OFFLINE_THUMBNAIL_SECURITY_REPORT.md.
         let config = ProtonDriveClientConfiguration(
             baseURL: "https://drive-api.proton.me/",   // trailing slash required by the C# core
             clientUID: session.uid,
-            entityCachePath: caches.appendingPathComponent("entities.sqlite").path,
-            secretCachePath: caches.appendingPathComponent("secrets.sqlite").path
+            entityCachePath: caches.appendingPathComponent("entities.sqlite").path
         )
 
         self.photosClient = try await ProtonPhotosClient(
@@ -146,24 +155,9 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         try await singleThumbnail(uid, type: .preview)
     }
 
-    func downloadOriginal(for uid: PhotoUID) async throws -> URL {
-        try await downloadOriginal(for: uid, onProgress: { _ in })
-    }
-
-    func downloadOriginal(for uid: PhotoUID, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL {
-        let sdkUid = SDKNodeUid(volumeID: uid.volumeID, nodeID: uid.nodeID)
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ProtonPhotos/originals", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dest = dir.appendingPathComponent("\(uid.nodeID.replacingOccurrences(of: "/", with: "_"))")
-        if FileManager.default.fileExists(atPath: dest.path) { onProgress(1); return dest }
-        _ = try await photosClient.download(
-            photoUid: sdkUid,
-            destinationUrl: dest,
-            cancellationToken: UUID(),
-            progressCallback: { onProgress($0.fractionCompleted) },
-            onRetriableErrorReceived: { _ in }
-        )
-        return dest
+    func originalData(for uid: PhotoUID, onProgress: @escaping @Sendable (Double) -> Void) async throws -> Data {
+        let source = try await fileSource()
+        return try await source.originalData(uid: uid, onProgress: onProgress)
     }
 
     private func singleThumbnail(_ uid: PhotoUID, type: ThumbnailData.ThumbnailType) async throws -> Data {

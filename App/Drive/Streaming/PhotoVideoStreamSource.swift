@@ -64,9 +64,41 @@ actor PhotoVideoStreamSource {
     /// Resolves keys + block map for the file `uid`. Throws `.notAVideo` cheaply (before any key
     /// derivation) if the link isn't a video, so the viewer can fall back to the image path.
     func prepare(uid: PhotoUID) async throws -> PreparedVideo {
+        let prepared = try await prepareAnyFile(uid: uid)
+        guard prepared.contentTypeUTI.hasPrefix("public.movie")
+                || prepared.contentTypeUTI.hasPrefix("public.video")
+                || prepared.contentTypeUTI == "com.apple.quicktime-movie"
+                || UTType(prepared.contentTypeUTI)?.conforms(to: .movie) == true else {
+            throw VideoStreamError.notAVideo
+        }
+        return prepared
+    }
+
+    /// Decrypts the original into RAM without persisting app-owned plaintext. Used by image viewing and
+    /// explicit user exports; videos normally use the range-streaming path above.
+    func originalData(uid: PhotoUID, onProgress: @Sendable (Double) -> Void) async throws -> Data {
+        let prepared = try await prepareAnyFile(uid: uid)
+        var out = Data()
+        out.reserveCapacity(prepared.totalSize)
+        let total = max(prepared.totalSize, 1)
+        onProgress(0)
+        for block in prepared.blocks.sorted(by: { $0.index < $1.index }) {
+            try Task.checkCancellation()
+            let encrypted = try await encryptedBlockData(block)
+            let clear = try crypto.decryptBlock(encrypted, sessionKey: prepared.sessionKey)
+            out.append(clear.prefix(block.clearSize))
+            onProgress(min(1, Double(out.count) / Double(total)))
+        }
+        if out.count > prepared.totalSize {
+            out.removeSubrange(prepared.totalSize..<out.count)
+        }
+        onProgress(1)
+        return out
+    }
+
+    private func prepareAnyFile(uid: PhotoUID) async throws -> PreparedVideo {
         let linkID = uid.nodeID
         let link = try await fetchLink(linkID)
-        guard (link.mimeType ?? "").hasPrefix("video/") else { throw VideoStreamError.notAVideo }
         guard let fp = link.fileProperties, let rev = fp.activeRevision else { throw StreamingError.noRevision }
 
         let nodeKey = try await nodeKey(for: link)
@@ -94,7 +126,7 @@ actor PhotoVideoStreamSource {
         }
         // Prefer the authoritative total from XAttr; fall back to the summed block sizes.
         let total = xattr.common.size > 0 ? xattr.common.size : offset
-        let uti = UTType(mimeType: link.mimeType ?? "") ?? .movie
+        let uti = UTType(mimeType: link.mimeType ?? "") ?? .data
         return PreparedVideo(uid: uid, totalSize: total, contentTypeUTI: uti.identifier,
                              blocks: blocks, sessionKey: sessionKey)
     }

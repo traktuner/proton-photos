@@ -51,6 +51,38 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// The live continuous level position (for the host's snap-on-release).
     var liveZoomLevel: CGFloat { zoomTransactionLevel }
 
+    // MARK: - Single presentation lattice transition (Phase-B — PRODUCTION DEFAULT)
+    //
+    // CLICKV2_420_FULLER_CORNER (click) / PINCH071 (pinch), per the V3.4–V3.6 offline evidence.
+    // The transition layer is a SEPARATE module that consumes the engine's GridFramePlan; it never
+    // touches engine geometry, the fitter, or resize. This is the accepted production effect path (no
+    // feature flag): it is attempted for every eligible normal-level +/- and pinch, falling back to the
+    // stable instant snap / legacy reflow ONLY when the geometry is ineligible (invalid case), never as a
+    // switch. The clean instant settle remains the fallback for those invalid cases.
+    let gridTransition = GridTransitionController()
+    private var transitionPrevNow: CFTimeInterval = 0
+    private var selectedFlatIndices: Set<Int> { Set(selectedUIDs.compactMap { indexByUID[$0] }) }
+
+    // V3.9 LIVE PINCH (continuous multi-level): each adjacent SEGMENT is a `.pinch` single-lattice plan driven
+    // by the host's scrub driver (`setPinchProgress`). Nothing is committed until release; segments rebuild
+    // seamlessly as the finger crosses detents (a shared detent's frame is deterministic, so prev-q=1 == next-q=0).
+    //
+    // Per-detent frames: the gesture-START detent uses the ACTUAL on-screen state (so q at the start matches the
+    // live screen and a return lands exactly back); every OTHER detent uses the cursor-aligned phase + anchored
+    // scroll (so the photo under the cursor stays pinned through the whole chain). Captured at gesture start:
+    private var pinchStartLevel: Int = 0
+    private var pinchStartPhase: Int?
+    private var pinchStartScrollY: CGFloat = 0
+    /// The segment currently built into `gridTransition` (source = denser end, target = larger-tile end).
+    private(set) var pinchSegmentSource: Int?
+    private(set) var pinchSegmentTarget: Int?
+
+    // OVERVIEW LAYER DISSOLVE (replaces the rejected warp): two COMPLETE settled grids blended by opacity via
+    // the offscreen compositor. Active only during an L3↔L4 / L4↔L5 gesture. Separate from
+    // `gridTransition` — it NEVER uses the relocation lattice. nil ⇒ inactive.
+    private(set) var overviewDissolve: OverviewLayerDissolvePlan?
+    var isOverviewDissolving: Bool { overviewDissolve != nil }
+
     // The settled grid is always BOTTOM-RIGHT anchored (newest in the corner, the only partial row is the
     // OLDEST at the top-left). A cursor-aligned "column phase" was tried for a seamless live-zoom commit but
     // is incompatible with bottom-right anchoring (it moves the partial row to the bottom-right → black
@@ -73,35 +105,28 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var bridgeDelta: GridZoomCommitDelta?
     var isCommitBridging: Bool { bridgeTransaction != nil }
 
-    // MARK: - Normal-level visual transition (discrete +/- crossfade; engine plans as the source of truth)
+    // MARK: - Scroll rebase bridge (edge/corner clamp → animated, never an instant snap)
     //
-    // The FIRST Apple-like level-transition effect, for the NORMAL levels L0↔L1↔L2↔L3 (`focusRowRelayout`).
-    // A discrete +/- step today snaps instantly; with the flag on it instead plays a short crossfade driven by
-    // `GridNormalZoomVisualPlanner` — a PURE consumer of the engine's source/target `GridFramePlan`s plus a
-    // live `GridZoomTransaction` focus band. NO identity ever flies old-rect→new-rect (the planner only fades
-    // source-out / target-in and holds the anchored focus band). The committed level/scroll/phase are set
-    // SYNCHRONOUSLY exactly as before (the crossfade is a transient visual overlay), so the settled end-state
-    // is byte-identical to the prior behaviour — the flag is an instant revert. The continuous trackpad pinch
-    // (already Apple-like anchored scale via the transaction) is untouched. NOT for the overview transitions.
-    private struct NormalTransition: Equatable {
-        let fromLevel: Int
-        let toLevel: Int
-        let fromScrollY: CGFloat
-        var toScrollY: CGFloat
-        let fromPhase: Int?
-        var toPhase: Int?
-        let anchorGlobalIndex: Int
-        let anchorLocalFraction: CGPoint
-        let cursorViewportPoint: CGPoint
+    // When a commit (or a content-shrinking zoom-out) leaves the camera at an out-of-bounds scroll, the
+    // SETTLED grid must move from the gesture/anchored scroll to the legal clamped scroll. Rather than snap
+    // (`scroll(to:)`), the settled render draws the grid at a short ease-out interpolation of the scroll Y
+    // (`GridScrollRebase`), ending exactly at the legal value. Uniform translation ⇒ identity-stable. The
+    // engine stays the source of truth; this only eases the camera Y between two engine-derived scrolls.
+    private var rebaseActive = false
+    private var rebaseFromY: CGFloat = 0
+    private var rebaseToY: CGFloat = 0
+    private var rebaseStart: CFTimeInterval = 0
+    var isScrollRebasing: Bool { rebaseActive }
+
+    /// Arm a scroll-rebase: the settled grid slides from `fromY` (gesture/anchored) to `toY` (legal clamped).
+    /// No-op (returns false) when the delta is imperceptible — the caller then settles instantly.
+    @discardableResult
+    func beginScrollRebase(fromY: CGFloat, toY: CGFloat) -> Bool {
+        guard GridScrollRebase.shouldArm(fromY: fromY, toY: toY) else { rebaseActive = false; return false }
+        rebaseFromY = fromY; rebaseToY = toY; rebaseStart = CACurrentMediaTime(); rebaseActive = true
+        requestRedraw()
+        return true
     }
-    private var pendingTransition: NormalTransition?      // armed at source level, before the settle mutates state
-    private var normalTransition: NormalTransition?       // active (finalized) transition
-    private var normalTransitionLoggedBegin = false
-    private var lastTransitionDiag: GridTransitionDiagnostics?
-    /// 0→1, advanced by the host's display-link tick; eased inside the planner.
-    var normalTransitionProgress: CGFloat = 0
-    /// True while a discrete-step normal-level crossfade is in flight (the host keeps ticking redraws).
-    var isNormalTransitioning: Bool { normalTransition != nil }
 
     // MARK: - Camera column phase (persistent, cursor-anchor preserving)
     //
@@ -212,8 +237,6 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         // Rebuild the canonical engine from the new section structure (single source of truth).
         engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts)
         committedPhase = nil                      // a stale phase could point past the new data → canonical
-        pendingTransition = nil; normalTransition = nil   // a mid-flight crossfade can't reference new data
-        normalTransitionLoggedBegin = false; lastTransitionDiag = nil
     }
 
     func flatIndex(forUID uid: PhotoUID) -> Int? { indexByUID[uid] }
@@ -256,6 +279,12 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                                       viewportPoint: viewportPoint, level: level, width: width,
                                                       columnPhase: currentPhase())   // resolve in the DISPLAYED (phased) grid
         zoomTransactionLevel = CGFloat(level)
+        // V3.9: capture the gesture-start (actual) state — the start detent uses this frame in every segment.
+        pinchStartLevel = level
+        pinchStartPhase = currentPhase()
+        pinchStartScrollY = clipView?.bounds.origin.y ?? 0
+        pinchSegmentSource = nil
+        pinchSegmentTarget = nil
         gestureTrigger = .pinch
         gestureCursorVP = viewportPoint
         gestureAnchorIndex = zoomTransaction?.anchorGlobalIndex
@@ -278,10 +307,20 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return engine.hitTest(contentPoint: CGPoint(x: vp.x, y: vp.y + scrollY), level: level, width: width, columnPhase: currentPhase())?.index
     }
 
-    /// Update the live continuous level position (fractional = mid-pinch).
+    /// Update the live continuous level position (fractional = mid-pinch) from a RAW pinch level. Past the
+    /// largest detent (raw level < 0) the visual level carries a bounded ELASTIC overshoot — the rubber-band —
+    /// instead of being hard-clamped to 0. The committed level stays clamped to valid detents separately.
     func updateLiveZoom(continuousLevel x: CGFloat) {
         guard zoomTransaction != nil else { return }
-        zoomTransactionLevel = min(max(x, 0), CGFloat(engine.levelCount - 1))
+        zoomTransactionLevel = GridLiveZoomBounds.visualLevel(rawLevel: x, levelCount: engine.levelCount)
+        requestRedraw()
+    }
+
+    /// Set the live VISUAL level directly (already resolved, e.g. by the release spring-back), clamped to the
+    /// safe live range `[-maxOverZoom, densest]`. Distinct from `updateLiveZoom`, which resists a RAW level.
+    func setLiveVisualLevel(_ v: CGFloat) {
+        guard zoomTransaction != nil else { return }
+        zoomTransactionLevel = GridLiveZoomBounds.clampVisual(v, levelCount: engine.levelCount)
         requestRedraw()
     }
 
@@ -447,61 +486,6 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                            viewportPoint: viewportPoint, level: lv, width: width, columnPhase: committedPhase).y
     }
 
-    // MARK: - Normal-level crossfade transition (discrete +/- step)
-
-    /// Arm a normal-level crossfade for a discrete +/- step IF eligible (flag on, single section, an adjacent
-    /// L0–L3 `focusRowRelayout` step, an anchor resolvable at the current level/phase). Call BEFORE the settle
-    /// mutates level/scroll/phase — it snapshots the SOURCE level/scroll/phase + the anchor. Returns whether a
-    /// transition was armed; the host completes it with `finalizeNormalLevelTransition(toScrollY:)` after the
-    /// settle. No-op (returns false) when ineligible → the caller keeps the prior instant behaviour.
-    func armNormalLevelTransition(toLevel rawTo: Int, anchorContentPoint: CGPoint, viewportPoint: CGPoint) -> Bool {
-        pendingTransition = nil
-        guard MetalGridFocusRowTransitionFlag.isEnabled else { return false }
-        let from = level
-        let to = engine.clampLevel(rawTo)
-        guard abs(to - from) == 1 else { return false }                       // single adjacent step only
-        guard engine.sectionCount <= 1, totalItems > 0 else { return false }  // transaction is single-section
-        // Only the NORMAL↔NORMAL relayout transitions (the lower level's kind classifies the pair).
-        guard engine.metrics(level: min(from, to)).transitionKindToNext == .focusRowRelayout else { return false }
-        let width = metalView?.bounds.width ?? clipView?.bounds.width ?? 1
-        guard width > 1 else { return false }
-        let fromPhase = currentPhase()
-        guard let a = engine.anchorItem(nearContentPoint: anchorContentPoint, level: from, width: width, columnPhase: fromPhase) else { return false }
-        let fromScrollY = clipView?.bounds.origin.y ?? 0
-        pendingTransition = NormalTransition(fromLevel: from, toLevel: to, fromScrollY: fromScrollY, toScrollY: fromScrollY,
-                                             fromPhase: fromPhase, toPhase: nil, anchorGlobalIndex: a.flatIndex,
-                                             anchorLocalFraction: a.localFraction, cursorViewportPoint: viewportPoint)
-        return true
-    }
-
-    /// Complete a previously-armed transition with the ACTUAL settled scroll Y (and now-committed phase). Starts
-    /// the crossfade at progress 0. No-op if nothing was armed.
-    func finalizeNormalLevelTransition(toScrollY: CGFloat) {
-        guard var t = pendingTransition else { return }
-        pendingTransition = nil
-        t.toScrollY = toScrollY
-        t.toPhase = currentPhase()
-        normalTransition = t
-        normalTransitionProgress = 0
-        normalTransitionLoggedBegin = false
-        lastTransitionDiag = nil
-        requestRedraw()
-    }
-
-    /// Drop any armed-but-not-finalized transition (the caller decided not to animate).
-    func cancelNormalLevelTransition() { pendingTransition = nil }
-
-    /// End the crossfade → normal settled rendering at the committed level. Logs `[GridTransition] end`.
-    func endNormalTransition() {
-        if let d = lastTransitionDiag {
-            GridTransitionLog.end(completed: true, maxIdentityMovementPx: d.maxIdentityMovementPx, focusRowStable: d.focusAnchorStable)
-        }
-        normalTransition = nil
-        normalTransitionLoggedBegin = false
-        lastTransitionDiag = nil
-        requestRedraw()
-    }
-
     /// A photo's cell rect in CONTENT coordinates at the current level/width (nil if unknown).
     func cellContentRect(forUID uid: PhotoUID) -> CGRect? {
         guard let index = indexByUID[uid] else { return nil }
@@ -570,19 +554,292 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let viewportSize = view.bounds.size
         guard viewportSize.width > 1, viewportSize.height > 1 else { return }
         let now = CACurrentMediaTime()
+        // OVERVIEW LAYER DISSOLVE (offscreen two-layer mix) — active only during an L3↔L4 / L4↔L5 gesture.
+        if let plan = overviewDissolve {
+            drawOverviewDissolve(in: view, plan: plan, viewportSize: viewportSize, now: now)
+            return
+        }
+        // Single-lattice transition. q is HOST-owned: advanced by this display tick's wall-clock delta
+        // (the same host-clock model the commit bridge uses), NOT a component-local timer; component
+        // localProgress is a pure function of q.
+        if gridTransition.isActive {
+            // LIVE PINCH (V3.8): q is HOST-driven via `setPinchProgress` (the scrub driver), NOT a timer —
+            // render at the current q and stop. The host paces redraws (magnify events + the settle tick)
+            // and ends the plan on commit; there is no self-looping setNeedsDisplay here.
+            if gridTransition.activeKind == .pinch {
+                drawTransition(in: view, viewportSize: viewportSize, now: now)
+                return
+            }
+            // CLICK: q is the host-clock trapezoidal profile advanced per display tick.
+            let dt = transitionPrevNow == 0 ? 1.0 / 60.0 : max(0, now - transitionPrevNow)
+            transitionPrevNow = now
+            if gridTransition.advanceClick(bySeconds: dt) {
+                drawTransition(in: view, viewportSize: viewportSize, now: now)
+                view.setNeedsDisplay(view.bounds)        // keep ticking while the transition runs
+                return
+            }
+            // settled this tick (q==1, controller ended itself) → fall through to the canonical render
+        }
         // Commit bridge (post-release geometry settle) takes precedence over the settled render.
         if isCommitBridging {
             drawCommitBridge(in: view, viewportSize: viewportSize, now: now)
             return
         }
-        // Normal-level crossfade (discrete +/- step) — a transient visual overlay over the (already-committed)
-        // settled target. When it ends, the next frame is the plain settled render at the same level/scroll.
-        if let nt = normalTransition {
-            drawNormalTransition(nt, in: view, viewportSize: viewportSize, now: now)
-            return
-        }
         // THE canonical production path: input → engine → GridFramePlan → renderer draws exactly that plan.
         drawEngineFrame(in: view, clip: clip, viewportSize: viewportSize, now: now)
+    }
+
+    // MARK: - Single-lattice transition render (Phase-B spike)
+
+    /// Try to start a CLICKV2_420_FULLER_CORNER click transition
+    /// for a toolbar/keyboard +/- to `newLevel`, pinning `anchorIndex` at `viewportPoint`. Commits the
+    /// settled level/phase (so the post-settle frame is the target) and overlays the crossfade for the
+    /// duration. Returns the target scroll-Y to apply if started, else nil ⇒ caller uses the stable snap.
+    func tryBeginClickTransition(toLevel newLevel: Int, anchorContentPoint: CGPoint,
+                                 viewportPoint: CGPoint, viewportSize: CGSize) -> CGFloat? {
+        let lv = engine.clampLevel(newLevel)
+        guard abs(lv - level) == 1 else { return nil }                       // single-level steps only
+        let lo = min(lv, level)
+        guard engine.metrics(level: lo).transitionKindToNext == .focusRowRelayout else { return nil }  // normal-level scope
+        let width = viewportSize.width
+        guard let a = engine.anchorItem(nearContentPoint: anchorContentPoint, level: level, width: width,
+                                        columnPhase: currentPhase()) else { return nil }
+        let overscan = budget.overscanFraction * viewportSize.height
+        let srcScroll = clipView?.bounds.origin ?? .zero
+        let src = engine.framePlan(level: level, viewportSize: viewportSize, scrollOffset: srcScroll,
+                                   overscan: overscan, columnPhase: currentPhase())
+        let desiredColumn = engine.cursorColumn(viewportX: viewportPoint.x, level: lv, width: width)
+        let tgtPhase = engine.columnPhase(forItem: a.flatIndex, targetColumn: desiredColumn, level: lv, width: width)
+        let tgtScroll = engine.anchoredScrollOffset(flatIndex: a.flatIndex, localFraction: a.localFraction,
+                                                    viewportPoint: viewportPoint, level: lv, width: width, columnPhase: tgtPhase)
+        let tgt = engine.framePlan(level: lv, viewportSize: viewportSize, scrollOffset: CGPoint(x: 0, y: tgtScroll.y),
+                                   overscan: overscan, columnPhase: tgtPhase)
+        guard gridTransition.beginClick(source: src, target: tgt, anchorIndex: a.flatIndex,
+                                        viewportSize: viewportSize, selection: selectedFlatIndices) else { return nil }
+        committedPhase = tgtPhase                 // commit settled target state (post-transition frame is the target)
+        level = lv
+        transitionPrevNow = 0
+        metalView?.setNeedsDisplay(metalView?.bounds ?? .zero)
+        return tgtScroll.y
+    }
+
+    // MARK: - Live pinch single-lattice transition (V3.9, host scrub-driven, continuous multi-level)
+
+    /// The contiguous adjacent-step band around the current `level` that is lattice-eligible (every step
+    /// `lo→lo+1` is `.focusRowRelayout`). For the normal levels this is `[0, 3]`; an overview start gives a
+    /// degenerate band (`lo == hi`) ⇒ the host uses the legacy reflow. The host chains within this band.
+    func eligiblePinchChainBand() -> (lo: Int, hi: Int) {
+        var lo = level, hi = level
+        while lo > 0, engine.metrics(level: lo - 1).transitionKindToNext == .focusRowRelayout { lo -= 1 }
+        while hi < engine.levelCount - 1, engine.metrics(level: hi).transitionKindToNext == .focusRowRelayout { hi += 1 }
+        return (lo, hi)
+    }
+
+    /// The presentation frame parameters for one detent in the current gesture: the gesture-START detent keeps
+    /// the ACTUAL on-screen (phase, scroll) — so q matches the live screen there and a return lands exactly —
+    /// while every OTHER detent is cursor-aligned (anchor pinned under the cursor). Because these are a pure
+    /// function of the (fixed) anchor + the detent, ANY two adjacent segments sharing a detent get the IDENTICAL
+    /// frame for it ⇒ the inter-segment seam (prev q=1 == next q=0) is exact by construction.
+    private func pinchDetentParams(level lv: Int, viewportSize: CGSize) -> (phase: Int?, scrollY: CGFloat) {
+        if lv == pinchStartLevel { return (pinchStartPhase, pinchStartScrollY) }
+        guard let tx = zoomTransaction else { return (currentPhase(), pinchStartScrollY) }
+        let width = viewportSize.width
+        let col = engine.cursorColumn(viewportX: tx.anchorViewportPoint.x, level: lv, width: width)
+        let phase = engine.columnPhase(forItem: tx.anchorGlobalIndex, targetColumn: col, level: lv, width: width)
+        let y = engine.anchoredScrollOffset(flatIndex: tx.anchorGlobalIndex, localFraction: tx.anchorLocalFraction,
+                                            viewportPoint: tx.anchorViewportPoint, level: lv, width: width, columnPhase: phase).y
+        return (phase, y)
+    }
+
+    /// Build (or rebuild) the `.pinch` plan for one adjacent segment `[source → target]` (source = denser end).
+    /// Both detents resolve through `pinchDetentParams`, so a rebuild at a detent crossing is seam-continuous
+    /// with the previous segment. NOTHING is committed (level/phase/scroll stay at the gesture-start state; the
+    /// actual scroll view stays frozen) — the plan renders the crossfade in viewport space. Returns false ⇒
+    /// the host uses the legacy reflow (only happens outside the eligible band).
+    func tryBuildPinchSegment(source: Int, target: Int, viewportSize: CGSize) -> Bool {
+        guard zoomTransaction != nil else { return false }
+        let s = engine.clampLevel(source), t = engine.clampLevel(target)
+        guard abs(s - t) == 1 else { return false }
+        guard engine.metrics(level: min(s, t)).transitionKindToNext == .focusRowRelayout else { return false }
+        let overscan = budget.overscanFraction * viewportSize.height
+        let sp = pinchDetentParams(level: s, viewportSize: viewportSize)
+        let tp = pinchDetentParams(level: t, viewportSize: viewportSize)
+        let srcPlan = engine.framePlan(level: s, viewportSize: viewportSize, scrollOffset: CGPoint(x: 0, y: sp.scrollY),
+                                       overscan: overscan, columnPhase: sp.phase)
+        let tgtPlan = engine.framePlan(level: t, viewportSize: viewportSize, scrollOffset: CGPoint(x: 0, y: tp.scrollY),
+                                       overscan: overscan, columnPhase: tp.phase)
+        guard let tx = zoomTransaction,
+              gridTransition.beginPinch(source: srcPlan, target: tgtPlan, anchorIndex: tx.anchorGlobalIndex,
+                                        viewportSize: viewportSize, selection: selectedFlatIndices) else { return false }
+        pinchSegmentSource = s
+        pinchSegmentTarget = t
+        requestRedraw()
+        return true
+    }
+
+    /// Drive the active segment's progress (the scrub driver's `segmentQ`). q is authoritative; the plan's
+    /// per-component crossfade is a pure function of it (reversible).
+    func setPinchProgress(_ q: Double) {
+        guard gridTransition.activeKind == .pinch else { return }
+        gridTransition.setProgress(q)
+        requestRedraw()
+    }
+
+    /// Commit the chain to the settled detent `finalLevel` (the level the gesture landed on): adopt that
+    /// detent's (phase, scroll), end the plan, clear the transaction. Returns the scroll-Y the host scrolls to
+    /// — the settled frame then matches the plan's `finalLevel` endpoint exactly (no seam). For the gesture
+    /// START detent this is the actual scroll (a no-op return-to-start). `logPostCommitAnchor` after scrolling.
+    @discardableResult
+    func commitPinchChain(toLevel finalLevel: Int, viewportSize: CGSize) -> CGFloat {
+        let lv = engine.clampLevel(finalLevel)
+        let p = pinchDetentParams(level: lv, viewportSize: viewportSize)
+        if lv != pinchStartLevel {
+            committedPhase = p.phase
+            level = lv
+        }
+        gridTransition.end()
+        zoomTransaction = nil
+        endPinchTransition()
+        requestRedraw()
+        return p.scrollY
+    }
+
+    /// End the active pinch plan WITHOUT committing a level change, keeping the live `GridZoomTransaction` so
+    /// the host can hand off to the legacy reflow. Defensive: only reachable if a mid-chain segment build ever
+    /// fails (the eligible band guarantees it does not), so this prevents a stranded/frozen plan in that case.
+    func abortPinchPlan() {
+        gridTransition.end()
+        endPinchTransition()
+        requestRedraw()
+    }
+
+    private func endPinchTransition() {
+        pinchSegmentSource = nil
+        pinchSegmentTarget = nil
+        transitionPrevNow = 0
+    }
+
+    // MARK: - Overview layer dissolve (offscreen two-layer cross-dissolve; replaces the rejected warp)
+
+    /// Begin an overview layer dissolve for an overview-boundary step `s→t`. Builds the two SETTLED plans once
+    /// (source = the current on-screen grid; target = the adjacent overview, cursor-anchored, square). The live
+    /// transaction (captured at gesture start in `beginLiveZoom`) supplies the cursor anchor. Returns false ⇒
+    /// caller falls back to the legacy reflow. Nothing is committed (scroll stays frozen).
+    func beginOverviewDissolve(sourceLevel s: Int, targetLevel t: Int, viewportSize: CGSize) -> Bool {
+        guard let tx = zoomTransaction,
+              engine.isOverviewBoundary(s, t) else { return false }
+        let srcScrollY = clipView?.bounds.origin.y ?? 0
+        let overscan = budget.overscanFraction * viewportSize.height
+        let cursorContent = CGPoint(x: tx.anchorViewportPoint.x, y: tx.anchorViewportPoint.y + srcScrollY)
+        guard let plan = engine.overviewLayerDissolvePlan(
+            from: s, to: t, viewportSize: viewportSize, sourceScrollY: srcScrollY, sourceColumnPhase: currentPhase(),
+            preferredNormalMode: preferredNormalLevelContentMode,
+            anchorContentPoint: cursorContent, anchorViewportPoint: tx.anchorViewportPoint, overscan: overscan)
+        else { return false }
+        overviewDissolve = plan
+        requestRedraw()
+        return true
+    }
+
+    /// Update the dissolve progress (0 = source, 1 = target). Rebuilds nothing — only the blend moves.
+    func setOverviewDissolveProgress(_ q: Double) {
+        guard let d = overviewDissolve else { return }
+        overviewDissolve = d.withProgress(q)
+        requestRedraw()
+    }
+
+    /// Commit the dissolve to source (no change) or target (adopt the target level/phase + anchored scroll).
+    /// Returns the scroll-Y to settle at; the settled render then matches the chosen endpoint exactly.
+    @discardableResult
+    func commitOverviewDissolve(toTarget: Bool, viewportSize: CGSize) -> CGFloat {
+        let srcScrollY = clipView?.bounds.origin.y ?? 0
+        guard let d = overviewDissolve else { return srcScrollY }
+        let scrollY: CGFloat
+        if toTarget {
+            committedPhase = d.targetColumnPhase
+            level = d.targetLevel
+            scrollY = d.targetScrollY
+        } else {
+            scrollY = srcScrollY
+        }
+        overviewDissolve = nil
+        zoomTransaction = nil
+        requestRedraw()
+        return scrollY
+    }
+
+    /// Render the active dissolve: build each layer's settled groups (source keeps its mode; target square),
+    /// stream both layers' textures, and hand them to the offscreen compositor as `mix(source, target, ease(q))`.
+    private func drawOverviewDissolve(in view: MTKView, plan: OverviewLayerDissolvePlan, viewportSize: CGSize, now: CFTimeInterval) {
+        let flatUIDs = dataSource.flatUIDs
+        let srcSlots = plan.source.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) }
+        let tgtSlots = plan.target.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) }
+        var uids: [PhotoUID] = []
+        for s in srcSlots where s.index < flatUIDs.count { uids.append(flatUIDs[s.index]) }
+        for s in tgtSlots where s.index < flatUIDs.count { uids.append(flatUIDs[s.index]) }
+        streamTextures(visibleUIDs: uids, overscanUIDs: [])
+        let (srcGroups, _) = buildRealGroups(slots: srcSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.sourceDisplayMode)
+        let (tgtGroups, _) = buildRealGroups(slots: tgtSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.targetDisplayMode)
+        cache.evictToBudget()
+        renderer.renderLayerDissolve(in: view, viewportSize: viewportSize,
+                                     sourceGroups: srcGroups, targetGroups: tgtGroups, t: Float(plan.targetOpacity))
+        hasPendingVisibleThumbnails = uids.contains { !cache.isResident($0) }
+        publishLightDiagnostics(visibleCount: uids.count, realCount: srcSlots.count + tgtSlots.count,
+                                cellCount: srcSlots.count + tgtSlots.count,
+                                visibleRect: CGRect(origin: .zero, size: viewportSize),
+                                contentSize: engine.contentSize(level: plan.targetLevel, width: viewportSize.width,
+                                                                columnPhase: plan.targetColumnPhase), now: now)
+    }
+
+    private func drawTransition(in view: MTKView, viewportSize: CGSize, now: CFTimeInterval) {
+        let draws = gridTransition.currentDraws()
+        let flatUIDs = dataSource.flatUIDs
+        // stream textures for the union of source+target occupants currently drawn
+        var uids: [PhotoUID] = []
+        for d in draws where d.index < flatUIDs.count { uids.append(flatUIDs[d.index]) }
+        streamTextures(visibleUIDs: uids, overscanUIDs: [])
+        renderTransitionDraws(in: view, draws: draws, flatUIDs: flatUIDs, viewportSize: viewportSize)
+        publishLightDiagnostics(visibleCount: uids.count, realCount: draws.count, cellCount: draws.count,
+                                visibleRect: CGRect(origin: .zero, size: viewportSize),
+                                contentSize: engine.contentSize(level: level, width: viewportSize.width, columnPhase: currentPhase()),
+                                now: now)
+    }
+
+    /// Full-slot mix render (no global/full-screen crossfade). `GridTransitionRendererInput` already
+    /// encodes the correct per-draw alpha for the renderer's premultiplied source-over blend: a mixed
+    /// source↔target dissolve emits an OPAQUE source draw (alpha 1) followed by a target draw at alpha
+    /// lp, so source-over composites to src·(1-lp)+tgt·lp; single-sided background dissolves stay
+    /// translucent and fade against the background.
+    ///
+    /// ONE uniform background: like the settled path's resident tiles, transition tiles are drawn
+    /// DIRECTLY on the render pass's clear colour (`MetalGridPalette.clearColor`) — NO per-slot
+    /// background card. So gaps, aspectFit letterbox, and a tile fading to/from background all show the
+    /// single constant grid surface (a per-slot placeholder card here gave a mismatched colour during
+    /// the animation). Reuses the texture cache + TileContentFitter; geometry comes from the plan.
+    private func renderTransitionDraws(in view: MTKView, draws: [GridTransitionDraw], flatUIDs: [PhotoUID],
+                                       viewportSize: CGSize) {
+        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
+        let displayMode = effectiveDisplayMode
+        var images: [MetalGridQuad] = []
+        var imageTextures: [MTLTexture] = []
+        for d in draws where d.index < flatUIDs.count {
+            let cell = d.rect
+            let uid = flatUIDs[d.index]
+            guard cache.isResident(uid) else { continue }   // not-yet-loaded tile ⇒ show the clear surface
+            cache.noteUsed(uid)
+            let texture = cache.texture(for: uid)
+            let fit = TileContentFitter.fit(slotRect: cell,
+                                            mediaPixelSize: CGSize(width: texture.width, height: texture.height),
+                                            displayMode: displayMode)
+            images.append(MetalGridQuad(rect: fit.contentRect, uvMin: fit.uvMin, uvMax: fit.uvMax,
+                                        radius: cellRadius(cardRadius, cell: cell),
+                                        alpha: Float(max(0, min(1, d.alpha)))))
+            imageTextures.append(texture)
+        }
+        cache.evictToBudget()
+        renderer.render(in: view, viewportSize: viewportSize, groups: [
+            MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
+        ])
     }
 
     /// The geometry-only commit bridge: smooth only the SUB-CELL residual between the transaction-final frame
@@ -623,126 +880,6 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                 contentSize: settledContentSize, now: now)
     }
 
-    /// The normal-level crossfade: build the SOURCE and TARGET settled `GridFramePlan`s (both in the same
-    /// viewport frame, anchor at the same point) plus the live transaction's focus band, hand them to the PURE
-    /// `GridNormalZoomVisualPlanner`, and draw the resulting tiles with per-tile alpha. The planner owns ALL
-    /// classification; the coordinator only maps tile → quad (texture by globalIndex, content fit by
-    /// `TileContentFitter`, alpha from the tile). No geometry math here, no rect lerp, no second surface.
-    private func drawNormalTransition(_ nt: NormalTransition, in view: MTKView, viewportSize: CGSize, now: CFTimeInterval) {
-        let overscan = budget.overscanFraction * viewportSize.height
-        let progress = min(max(normalTransitionProgress, 0), 1)
-        // Source & target settled plans, each at its OWN scroll/phase but mapped into the SAME viewport space.
-        let sourcePlan = engine.framePlan(level: nt.fromLevel, viewportSize: viewportSize,
-                                          scrollOffset: CGPoint(x: 0, y: nt.fromScrollY), overscan: overscan, columnPhase: nt.fromPhase)
-        let targetPlan = engine.framePlan(level: nt.toLevel, viewportSize: viewportSize,
-                                          scrollOffset: CGPoint(x: 0, y: nt.toScrollY), overscan: overscan, columnPhase: nt.toPhase)
-        // The focus band's source of truth: a transaction pinned at the cursor, sampled at the eased continuous
-        // level so the anchored neighbourhood scales smoothly between source and target density.
-        let tx = GridZoomTransaction(totalItems: totalItems, anchorGlobalIndex: nt.anchorGlobalIndex,
-                                     anchorViewportPoint: nt.cursorViewportPoint, anchorLocalFraction: nt.anchorLocalFraction,
-                                     levels: engine.levels, sourceLevel: nt.fromLevel)
-        let eased = Self.smoothstep(progress)
-        let continuous = CGFloat(nt.fromLevel) + (CGFloat(nt.toLevel) - CGFloat(nt.fromLevel)) * eased
-        let txFrame = tx.frame(continuousLevel: continuous, viewportSize: viewportSize, overscan: overscan)
-
-        let input = GridTransitionVisualInput(sourcePlan: sourcePlan, targetPlan: targetPlan, transactionFrame: txFrame,
-                                              transitionKind: .focusRowRelayout, anchorGlobalIndex: nt.anchorGlobalIndex,
-                                              cursorViewportPoint: nt.cursorViewportPoint, progress: progress,
-                                              contentMode: effectiveDisplayMode)
-        let plan = GridNormalZoomVisualPlanner.plan(input)
-        if !normalTransitionLoggedBegin { GridTransitionLog.begin(plan.diagnostics); normalTransitionLoggedBegin = true }
-        GridTransitionLog.frame(plan.diagnostics)
-        lastTransitionDiag = plan.diagnostics
-
-        let diagRect = CGRect(x: 0, y: nt.toScrollY, width: viewportSize.width, height: viewportSize.height)
-        let settledContentSize = engine.contentSize(level: nt.toLevel, width: viewportSize.width, columnPhase: nt.toPhase)
-        if debugSyntheticGrid {
-            renderSyntheticTransition(in: view, tiles: plan.tiles, viewportSize: viewportSize)
-            hasPendingVisibleThumbnails = false
-            publishLightDiagnostics(visibleCount: plan.tiles.count, realCount: plan.tiles.count, cellCount: plan.tiles.count,
-                                    visibleRect: diagRect, contentSize: settledContentSize, now: now)
-            return
-        }
-        let realCount = renderTransitionTiles(in: view, tiles: plan.tiles, viewportSize: viewportSize)
-        publishLightDiagnostics(visibleCount: plan.tiles.count, realCount: realCount, cellCount: plan.tiles.count,
-                                visibleRect: diagRect, contentSize: settledContentSize, now: now)
-    }
-
-    /// Draw transition tiles with real thumbnails: texture by globalIndex, content fit by `TileContentFitter`
-    /// (so the aspect/square toggle still only changes the inner fit), per-tile alpha for the crossfade, drawn
-    /// back→front by `zIndex`. A globalIndex may legitimately appear twice (source-fade + target-fade) — each
-    /// is a separate pinned quad, never one tile sliding between rects. Returns the real-texture count.
-    @discardableResult
-    private func renderTransitionTiles(in view: MTKView, tiles: [GridTransitionVisualTile], viewportSize: CGSize) -> Int {
-        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
-        let flatUIDs = dataSource.flatUIDs
-        let pureViewport = CGRect(origin: .zero, size: viewportSize)
-        // Stream textures for the union of tile UIDs (dedup; a crossfade lists a UID twice).
-        var visibleUIDs: [PhotoUID] = []
-        var overscanUIDs: [PhotoUID] = []
-        var seen: Set<PhotoUID> = []
-        for t in tiles where t.globalIndex >= 0 && t.globalIndex < flatUIDs.count {
-            let uid = flatUIDs[t.globalIndex]
-            guard seen.insert(uid).inserted else { continue }
-            if t.rect.intersects(pureViewport) { visibleUIDs.append(uid) } else { overscanUIDs.append(uid) }
-        }
-        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
-
-        // Back→front draw order (stable within a zIndex), so premultiplied-over alpha composites correctly.
-        let ordered = tiles.enumerated().sorted { ($0.element.zIndex, $0.offset) < ($1.element.zIndex, $1.offset) }.map(\.element)
-        let displayMode = effectiveDisplayMode
-        var backgrounds: [MetalGridQuad] = []
-        var images: [MetalGridQuad] = []
-        var imageTextures: [MTLTexture] = []
-        var realCount = 0
-        for t in ordered where t.globalIndex >= 0 && t.globalIndex < flatUIDs.count {
-            let uid = flatUIDs[t.globalIndex]
-            let cell = t.rect                                  // viewport-space, square (planner guarantee)
-            let r = cellRadius(cardRadius, cell: cell)
-            let a = Float(min(max(t.alpha, 0), 1))
-            if cache.isResident(uid) {
-                cache.noteUsed(uid)
-                let texture = cache.texture(for: uid)
-                let fit = TileContentFitter.fit(slotRect: cell,
-                                                mediaPixelSize: CGSize(width: texture.width, height: texture.height),
-                                                displayMode: displayMode)
-                images.append(MetalGridQuad(rect: fit.contentRect, uvMin: fit.uvMin, uvMax: fit.uvMax, radius: r, alpha: a))
-                imageTextures.append(texture)
-                realCount += 1
-            } else {
-                backgrounds.append(MetalGridQuad(rect: cell, radius: r, alpha: a))
-            }
-        }
-        cache.evictToBudget()
-        renderer.render(in: view, viewportSize: viewportSize, groups: [
-            MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: backgrounds),
-            MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
-        ])
-        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
-        return realCount
-    }
-
-    /// Synthetic transition: one solid square per tile, coloured by GLOBAL INDEX (stable per identity) with the
-    /// tile's alpha. Validates the crossfade WITHOUT thumbnails — if any identity flew, you'd see a coloured
-    /// square translate; instead identities fade in/out in place while the focus band holds.
-    private func renderSyntheticTransition(in view: MTKView, tiles: [GridTransitionVisualTile], viewportSize: CGSize) {
-        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
-        let ordered = tiles.enumerated().sorted { ($0.element.zIndex, $0.offset) < ($1.element.zIndex, $1.offset) }.map(\.element)
-        var quads: [MetalGridQuad] = []
-        quads.reserveCapacity(ordered.count)
-        for t in ordered {
-            let r = cellRadius(cardRadius, cell: t.rect)
-            quads.append(MetalGridQuad(rect: t.rect, radius: r, alpha: Float(min(max(t.alpha, 0), 1)),
-                                       color: SquareGridDebugMode.color(forIndex: t.globalIndex), mode: .solid))
-        }
-        cache.evictToBudget()
-        renderer.render(in: view, viewportSize: viewportSize,
-                        groups: [MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: quads)])
-    }
-
-    /// Smoothstep easing (no spring / no bounce) for the transition's continuous-level + progress.
-    private static func smoothstep(_ x: CGFloat) -> CGFloat { let t = min(max(x, 0), 1); return t * t * (3 - 2 * t) }
-
     // MARK: - Canonical engine render: GridFramePlan → Metal quads (no edge-fill, no second surface)
 
     /// THE production render. Resolves a `GridFramePlan` from the engine and draws exactly its square
@@ -776,12 +913,30 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             let maxY = max(0, content.height - viewportSize.height)
             let rawOrigin = clip.bounds.origin
             let clampedY = min(max(0, rawOrigin.y), maxY)
-            if abs(clampedY - rawOrigin.y) > 0.5 {
+            // The Y the grid actually RENDERS at: normally the legal clamped scroll, but while a rebase is in
+            // flight it eases from the gesture scroll to legal — never an instant jump.
+            let renderY: CGFloat
+            if rebaseActive {
+                let p = GridScrollRebase.progress(start: rebaseStart, now: now)
+                renderY = GridScrollRebase.scrollY(fromY: rebaseFromY, toY: rebaseToY, progress: p)
+                if p >= 1 { rebaseActive = false }                 // settled exactly at toY this frame
+            } else if abs(clampedY - rawOrigin.y) > GridScrollRebase.minPx {
+                // Out-of-bounds camera (a content-shrinking zoom-out left it past the legal extent): ANIMATE to
+                // the legal scroll instead of snapping. This frame stays at the current position; the clip is
+                // set legal now and the next frames render the ease-out slide via the `rebaseActive` branch.
+                renderY = rawOrigin.y
+                beginScrollRebase(fromY: rawOrigin.y, toY: clampedY)
                 clip.scroll(to: CGPoint(x: rawOrigin.x, y: clampedY))
                 clip.enclosingScrollView?.reflectScrolledClipView(clip)
+            } else {
+                renderY = clampedY
+                if abs(clampedY - rawOrigin.y) > 0.5 {             // sub-px-tier residual: imperceptible, snap
+                    clip.scroll(to: CGPoint(x: rawOrigin.x, y: clampedY))
+                    clip.enclosingScrollView?.reflectScrolledClipView(clip)
+                }
             }
             let plan = engine.framePlan(level: level, viewportSize: viewportSize,
-                                        scrollOffset: CGPoint(x: rawOrigin.x, y: clampedY), overscan: overscan, columnPhase: phase)
+                                        scrollOffset: CGPoint(x: rawOrigin.x, y: renderY), overscan: overscan, columnPhase: phase)
             slots = plan.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) }
             contentSizeForDiag = plan.contentSize
         }
@@ -811,13 +966,26 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                 contentSize: contentSizeForDiag, now: now)
     }
 
-    /// Real thumbnails: a square outer card + the image cover-filled INSIDE the square slot (aspect only via
-    /// the UV window — never changes the slot), plus production decorations. Returns the real-texture count.
+    /// Real thumbnails: resident images are cover-filled INSIDE the square slot (aspect only via the UV window
+    /// — never changes the slot), directly over the single uniform grid background, plus production decorations.
+    /// Missing thumbnails draw nothing, so the bottom-most clear surface remains one continuous field.
     @discardableResult
     private func renderRealSlots(in view: MTKView, slots: [GridRenderSlot], flatUIDs: [PhotoUID], viewportSize: CGSize) -> Int {
+        let (groups, realCount) = buildRealGroups(slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize,
+                                                  displayMode: effectiveDisplayMode)
+        cache.evictToBudget()
+        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
+        return realCount
+    }
+
+    /// Build the settled-grid render groups for a set of slots at an EXPLICIT display mode (the canonical
+    /// settled appearance: rounded thumbnail cover-fit on the uniform bg + production decorations). Shared by
+    /// `renderRealSlots` (settled, `effectiveDisplayMode`) and the overview layer dissolve (each layer with its
+    /// OWN mode). Pure builder — no eviction, no draw. Returns (groups, resident-texture count).
+    private func buildRealGroups(slots: [GridRenderSlot], flatUIDs: [PhotoUID], viewportSize: CGSize,
+                                 displayMode: TileContentDisplayMode) -> (groups: [MetalGridRenderGroup], realCount: Int) {
         let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
         let accent = Self.colorVector(.controlAccentColor)
-        var backgrounds: [MetalGridQuad] = []
         var images: [MetalGridQuad] = []
         var imageTextures: [MTLTexture] = []
         var outlineQuads: [MetalGridQuad] = []
@@ -825,9 +993,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         var checkFilledQuads: [MetalGridQuad] = []
         var checkEmptyQuads: [MetalGridQuad] = []
         var videoQuads: [MetalGridQuad] = []
-        backgrounds.reserveCapacity(slots.count)
         var realCount = 0
-        let displayMode = effectiveDisplayMode               // aspect/square toggle — same for every slot this frame
         for s in slots where s.index < flatUIDs.count {
             let uid = flatUIDs[s.index]
             let cell = s.rect                               // viewport-space, ALWAYS square (engine guarantee)
@@ -846,9 +1012,6 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                 images.append(MetalGridQuad(rect: fit.contentRect, uvMin: fit.uvMin, uvMax: fit.uvMax, radius: r))
                 imageTextures.append(texture)
                 realCount += 1
-            } else {
-                // Only a genuinely MISSING image gets a placeholder card (a loading tile shouldn't be a hole).
-                backgrounds.append(MetalGridQuad(rect: cell, radius: r))
             }
             if decorationsEnabled {
                 appendDecorations(uid: uid, cell: cell, displayed: cell, cardRadius: r, accent: accent,
@@ -856,9 +1019,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                   checkFilled: &checkFilledQuads, checkEmpty: &checkEmptyQuads, video: &videoQuads)
             }
         }
-        cache.evictToBudget()
         var groups: [MetalGridRenderGroup] = [
-            MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: backgrounds),
             MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
         ]
         if !outlineQuads.isEmpty { groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: outlineQuads)) }
@@ -866,8 +1027,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         if !favoriteQuads.isEmpty, let t = cache.glyphTexture(symbol: "heart.fill", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: favoriteQuads)) }
         if !checkEmptyQuads.isEmpty, let t = cache.glyphTexture(symbol: "circle", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkEmptyQuads)) }
         if !checkFilledQuads.isEmpty, let t = cache.glyphTexture(symbol: "checkmark.circle.fill", color: .controlAccentColor) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkFilledQuads)) }
-        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
-        return realCount
+        return (groups, realCount)
     }
 
     /// Synthetic debug grid: one solid colored square per visible slot (geometry only — no textures, no

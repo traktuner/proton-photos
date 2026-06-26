@@ -33,10 +33,9 @@ private struct LibrarySettingsTab: View {
                                      set: { offline.setOfflineEnabled($0) })) {
                     Text("Offline-Mediathek")
                 }
-                Text("Wenn aktiviert, behält ProtonPhotos Metadaten, Vorschaubilder und Anzeige-"
-                   + "Previews lokal, damit die Mediathek auch ohne Warten auf Netzwerk-Thumbnails "
-                   + "durchsuch- und zoombar bleibt.")
-                    .font(.system(size: 11))
+                Text("Vorschaubilder werden immer lokal verschlüsselt geladen, damit das Grid funktioniert. "
+                   + "Dieser Schalter ist für zukünftige größere Offline-Derivate reserviert.")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } header: {
@@ -69,7 +68,7 @@ private struct LibrarySettingsTab: View {
                     }
                     .disabled(deleting)
                 }
-                Text("Der Cache bleibt beim Deaktivieren der Offline-Mediathek erhalten und wird nur "
+                Text("Der verschlüsselte Thumbnail-/Preview-Cache bleibt beim Deaktivieren der Offline-Mediathek erhalten und wird nur "
                    + "über diese Schaltfläche gelöscht.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)

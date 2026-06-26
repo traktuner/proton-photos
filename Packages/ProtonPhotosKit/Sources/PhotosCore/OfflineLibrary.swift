@@ -4,8 +4,8 @@ import Foundation
 /// Centralised here (in the SDK-agnostic core) so the App glue and the test target share one
 /// source of truth — UserDefaults key strings drift silently otherwise.
 public enum AppSettingsKey {
-    /// Offline Photo Library master switch. When on, the app keeps metadata, thumbnails, and
-    /// display previews locally and runs the background prefetcher.
+    /// Offline Photo Library master switch for future larger derivatives/originals. Grid thumbnails are
+    /// mandatory infrastructure and crawl independently of this toggle.
     public static let offlineLibraryEnabled = "ProtonPhotos.offlineLibraryEnabled"
     /// Future tier (off by default): keep full-resolution originals/videos locally.
     public static let offlineOriginalsEnabled = "ProtonPhotos.offlineOriginalsEnabled"
@@ -18,9 +18,8 @@ public enum AppSettingsKey {
 }
 
 public enum AppSettingsDefault {
-    /// Offline Photo Library is **ON by default**: the app already cached thumbnails for the whole
-    /// library in the background, so defaulting on preserves existing behaviour while making it
-    /// user-controllable. Turning it off stops the prefetcher and keeps the cache.
+    /// Offline Photo Library is **ON by default** for the future larger-derivative tier. Thumbnails are
+    /// always crawled while signed in, regardless of this value.
     public static let offlineLibraryEnabled = true
     public static let offlineOriginalsEnabled = false
 }

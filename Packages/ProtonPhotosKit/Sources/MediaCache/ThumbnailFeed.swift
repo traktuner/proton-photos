@@ -41,13 +41,24 @@ public actor ThumbnailFeed {
     private var prefetchDecodeStarted = 0
     private var prefetchDecodeCompleted = 0
 
+    // Background-crawl yield (app-level starvation mitigation — see PROTONPHOTOS_… security report). The
+    // sequential crawl shares one rate-limit gate + URLSession with visible thumbnail loads, so a heavy
+    // crawl can trip a 429 that stalls what's on screen. We therefore PAUSE the sequential crawl (never the
+    // priority queue) while there is recent visible demand or just after a rate-limited/empty batch.
+    private let clock: @Sendable () -> Date
+    private var lastDemandAt: Date?            // last non-idle (visible/near-viewport) thumbnail request
+    private var crawlBackoffUntil: Date?       // sequential crawl suspended until this instant after a 429/empty batch
+    private nonisolated let visibleQuietWindow: TimeInterval = 0.25
+    private nonisolated let crawlBackoffSeconds: TimeInterval = 5
+
     public init(
         cache: ThumbnailCache,
         loader: ThumbnailBatchLoader,
         aspects: AspectRegistry,
         targetPixels: CGFloat = 320,
         concurrency: Int = 10,
-        batch: Int = 8
+        batch: Int = 8,
+        clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.cache = cache
         self.loader = loader
@@ -55,6 +66,7 @@ public actor ThumbnailFeed {
         self.targetPixels = targetPixels
         self.concurrency = concurrency
         self.batch = batch
+        self.clock = clock
         decoded.countLimit = 1500
     }
 
@@ -138,8 +150,11 @@ public actor ThumbnailFeed {
 
     /// Visible cell asks for its thumbnail to be fetched soon. Cheap + idempotent.
     public func requestPriority(_ uid: PhotoUID, priority requestedPriority: ThumbnailPriority = .visibleNow) {
+        // Any non-idle request is live visible demand: mark it so the sequential crawl yields the shared
+        // rate-limit budget to on-screen work (it resumes `visibleQuietWindow` after demand goes quiet).
+        if requestedPriority != .idleLibraryCrawl { lastDemandAt = clock() }
         PhotoDiagnostics.shared.recordDiskPresenceCheckDuringPinch()
-        let diskHit = cache.has(uid)
+        let diskHit = cache.hasUsableDiskData(uid)   // skip the network ONLY for a decryptable blob
         diskPresence.set(uid, present: diskHit)
         guard !diskHit else {
             PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
@@ -201,10 +216,10 @@ public actor ThumbnailFeed {
                 decoded.setObject(img, forKey: key)
                 aspects.record(uid, aspect: img.size.width / max(img.size.height, 1))
                 decodedFromDisk += 1
-            } else if cache.has(uid) {
+            } else if cache.hasUsableDiskData(uid) {
                 diskPresence.set(uid, present: true)
                 PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
-                missing += 1   // on disk but undecodable (corrupt/partial) — rare
+                missing += 1   // on disk but undecodable (corrupt/partial) — rare (diskData already drops it)
             } else {
                 diskPresence.set(uid, present: false)
                 PhotoDiagnostics.shared.increment("thumb.diskCacheMiss")
@@ -361,7 +376,15 @@ public actor ThumbnailFeed {
         }
     }
 
-    private func workersStopped() { workersRunning = false }
+    private func workersStopped() {
+        workersRunning = false
+        // Close a lost-wakeup window: `startWorkers()` reaches `workersStopped()` via an `await`
+        // suspension, so a `requestPriority`/`startPrefetch` that enqueued work during the task-group
+        // teardown would have seen `workersRunning == true` and skipped starting a worker. Re-check and
+        // relaunch so the last-requested thumbnail is never stranded. (Workers only return when the queues
+        // are drained, so this restarts strictly when new work arrived in the gap — no spin.)
+        if !priority.isEmpty || sequentialIndex < sequential.count { startWorkers() }
+    }
 
     private func worker() async {
         while !Task.isCancelled {
@@ -382,6 +405,9 @@ public actor ThumbnailFeed {
             prefetchFailed += failed
             if completed == 0, !chunk.isEmpty {
                 recordError("thumbnail fetch returned 0/\(chunk.count) (network or rate-limit)")
+                // Likely rate-limited: back the sequential crawl off so it stops compounding the 429 and
+                // hurting visible loads. Priority/visible work continues (takeBatch drains it regardless).
+                crawlBackoffUntil = clock().addingTimeInterval(crawlBackoffSeconds)
             }
             if let checkpointKey, sequentialIndex > 0 {
                 UserDefaults.standard.set(sequentialIndex, forKey: checkpointKey)
@@ -429,15 +455,21 @@ public actor ThumbnailFeed {
             let uid = priority.remove(at: bestIndex)
             priorityByUID.removeValue(forKey: uid)
             PhotoDiagnostics.shared.recordDiskPresenceCheckDuringPinch()
-            let diskHit = cache.has(uid)
+            let diskHit = cache.hasUsableDiskData(uid)   // decryptable-only → corrupt blobs still refetch
             diskPresence.set(uid, present: diskHit)
             if !diskHit { out.append(uid) } else { prefetchDiskHit += 1 }
         }
-        guard !interactionActive, !prefetchPaused, prefetchEnabled else { return out }
+        // Sequential background fill ONLY when the crawl isn't paused/disabled, there's no recent visible
+        // demand, and we're not in a post-429 backoff. The priority queue above is ALWAYS served — visible
+        // fetches are never gated here.
+        let now = clock()
+        let recentDemand = lastDemandAt.map { now.timeIntervalSince($0) < visibleQuietWindow } ?? false
+        let backingOff = crawlBackoffUntil.map { now < $0 } ?? false
+        guard !interactionActive, !prefetchPaused, prefetchEnabled, !recentDemand, !backingOff else { return out }
         while out.count < batch, sequentialIndex < sequential.count {
             let uid = sequential[sequentialIndex]
             sequentialIndex += 1
-            let diskHit = cache.has(uid)
+            let diskHit = cache.hasUsableDiskData(uid)   // decryptable-only → corrupt blobs still refetch
             diskPresence.set(uid, present: diskHit)
             if !diskHit && !out.contains(uid) {
                 out.append(uid)

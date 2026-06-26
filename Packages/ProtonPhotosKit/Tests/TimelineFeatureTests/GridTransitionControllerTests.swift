@@ -1,0 +1,101 @@
+// GridTransitionControllerTests.swift
+//
+// Phase-B grid transition driver — PRODUCTION DEFAULT (no feature flag). The controller builds the
+// single-presentation-lattice click/pinch transition for every eligible step and falls back to the stable
+// instant snap ONLY for ineligible geometry (lattice build failed, relocating selection, degenerate plan).
+
+import Testing
+import Foundation
+import CoreGraphics
+@testable import TimelineFeature
+
+@Suite struct GridTransitionControllerTests {
+
+    private func plans() -> (GridFramePlan, GridFramePlan) {
+        let viewport = CGSize(width: 1400, height: 900)
+        let engine = SquareTileGridEngine(sectionCounts: [4000])
+        let src = engine.framePlan(level: 0, viewportSize: viewport, scrollOffset: .zero, overscan: 0)
+        let tgt = engine.framePlan(level: 1, viewportSize: viewport, scrollOffset: .zero, overscan: 0)
+        return (src, tgt)
+    }
+
+    // The transition is on by DEFAULT — no flag, no UserDefaults — and builds/draws/settles a click.
+    @Test func clickBuildsPlanAndDrawsAndSettlesByDefault() {
+        let (src, tgt) = plans()
+        let c = GridTransitionController()
+        #expect(c.beginClick(source: src, target: tgt, anchorIndex: 0,
+                             viewportSize: CGSize(width: 1400, height: 900), selection: []))
+        #expect(c.isActive)
+        #expect(!c.currentDraws().isEmpty)
+        #expect(c.q == 0)
+        // advance to settle (420 ms in 60 Hz steps); one partial component at a time throughout
+        var partialOK = true
+        for _ in 0 ..< 40 { if c.partialComponentCount() > 1 { partialOK = false }; _ = c.advanceClick(bySeconds: 1.0 / 60.0) }
+        #expect(partialOK)
+        #expect(c.isActive == false)        // settled and ended itself (host clock owns q, no timer)
+    }
+
+    @Test func relocatingSelectionFallsBackToSnap() {
+        let (src, tgt) = plans()
+        let viewport = CGSize(width: 1400, height: 900)
+        guard let lat = GridTransitionComponentBuilder.build(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport) else {
+            Issue.record("lattice nil"); return
+        }
+        let relocating = GridTransitionSelectionEligibility.relocatingIdentities(in: lat)
+        guard let r = relocating.first else { Issue.record("no relocating identity"); return }
+        let c = GridTransitionController()
+        #expect(c.beginClick(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport, selection: [r]) == false)
+        #expect(c.lastFallback == .selectionRelocates)   // ⇒ host uses the stable instant snap (invalid case)
+        #expect(c.isActive == false)
+    }
+
+    // ── live pinch: host-driven q (no timer), default-on like the click ──
+
+    @Test func pinchBuildsHostDrivenPlanByDefault() {
+        let (src, tgt) = plans()
+        let viewport = CGSize(width: 1400, height: 900)
+        let c = GridTransitionController()
+        #expect(c.beginPinch(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport, selection: []))
+        #expect(c.isActive)
+        #expect(c.activeKind == .pinch)
+        #expect(c.q == 0)
+        let atZero = c.currentDraws()
+        #expect(!atZero.isEmpty)
+        #expect(atZero.allSatisfy { $0.localProgress <= 1e-9 })
+        #expect(c.partialComponentCount() == 0)
+        c.setProgress(0.5); #expect(abs(c.q - 0.5) < 1e-12)
+        c.setProgress(1.0); #expect(abs(c.q - 1) < 1e-12)
+        #expect(c.partialComponentCount() == 0)          // q=1: fully handed off, nothing dissolving
+        #expect(c.currentDraws() != atZero)              // the transition actually changed the frame
+        c.setProgress(2.0); #expect(c.q == 1)            // setProgress clamps to [0,1]
+        c.setProgress(-1.0); #expect(c.q == 0)
+    }
+
+    @Test func pinchProgressIsReversible() {
+        let (src, tgt) = plans()
+        let viewport = CGSize(width: 1400, height: 900)
+        let c = GridTransitionController()
+        #expect(c.beginPinch(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport, selection: []))
+        c.setProgress(0.37)
+        let forward = c.currentDraws()
+        c.setProgress(0.8)
+        c.setProgress(0.37)                 // scrub back to the same q
+        let back = c.currentDraws()
+        #expect(forward == back)            // pure function of q ⇒ no hysteresis
+    }
+
+    @Test func pinchRelocatingSelectionFallsBack() {
+        let (src, tgt) = plans()
+        let viewport = CGSize(width: 1400, height: 900)
+        guard let lat = GridTransitionComponentBuilder.build(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport) else {
+            Issue.record("lattice nil"); return
+        }
+        guard let r = GridTransitionSelectionEligibility.relocatingIdentities(in: lat).first else {
+            Issue.record("no relocating identity"); return
+        }
+        let c = GridTransitionController()
+        #expect(c.beginPinch(source: src, target: tgt, anchorIndex: 0, viewportSize: viewport, selection: [r]) == false)
+        #expect(c.lastFallback == .selectionRelocates)
+        #expect(c.isActive == false)
+    }
+}

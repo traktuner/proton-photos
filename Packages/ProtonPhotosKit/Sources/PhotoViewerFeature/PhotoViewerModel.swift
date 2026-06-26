@@ -7,13 +7,14 @@ import MediaCache
 /// Drives the full-screen viewer with progressive quality (blur-up):
 ///  1. show the grid thumbnail instantly (blurred — it's small for full-screen),
 ///  2. swap to the larger preview when it arrives (disk-cached for offline),
-///  3. swap to the full original (sharp) once downloaded.
+    ///  3. swap to the full original (sharp) once decrypted into RAM.
 ///
 /// Video (Deliverable 5) runs an explicit `VideoViewerState` machine instead of inferring "loading"
 /// from a tangle of optionals: try range-streaming first (which also detects image-vs-video reliably
 /// even though the main timeline reports every item as `image/jpeg`), observe `AVPlayerItem.status`,
-/// and fall back to a full download if streaming setup fails. One `AVPlayer` for both paths, so the
-/// view never re-creates the player on a redraw.
+    /// Streaming is the only video path: falling back to a decrypted local temp file is forbidden by the
+    /// app-wide local E2EE rule. One `AVPlayer` is retained for the streaming path, so the view never
+    /// re-creates the player on a redraw.
 @MainActor
 @Observable
 public final class PhotoViewerModel {
@@ -63,12 +64,6 @@ public final class PhotoViewerModel {
         self.streamer = streamer
         self.metadataProvider = metadataProvider
         self.previewCache = previewCache
-        // When a streaming attempt fails/times out, the controller asks us to full-download instead.
-        video.onNeedsDownloadFallback = { [weak self] uid in
-            guard let self, self.current.uid == uid else { return }
-            let item = self.current
-            Task { await self.downloadOriginal(for: item, expecting: .video) }
-        }
     }
 
     public func toggleInfo() {
@@ -207,7 +202,7 @@ public final class PhotoViewerModel {
     /// through to the (unchanged) image path.
     private func resolveMedia(for item: PhotoItem) async {
         guard let streamer else {
-            await downloadOriginal(for: item, expecting: item.isVideo ? .video : .unknown)
+            await loadOriginalBytes(for: item, expecting: item.isVideo ? .video : .unknown)
             return
         }
         video.setResolving()
@@ -223,39 +218,42 @@ public final class PhotoViewerModel {
             guard !Task.isCancelled, self.current == item else { return }
             video.reset()
             logViewer(item, strategy: "image", kind: .image)
-            await downloadOriginal(for: item, expecting: .image)
+            await loadOriginalBytes(for: item, expecting: .image)
         } catch {
-            // A real video (or unknown) whose stream setup failed → full-download fallback.
+            // A real video (or unknown) whose stream setup failed stays failed rather than writing a
+            // decrypted full-video temp file.
             guard !Task.isCancelled, self.current == item else { return }
             video.reset()
-            await downloadOriginal(for: item, expecting: item.isVideo ? .video : .unknown)
+            if item.isVideo {
+                video.fail(VideoPlaybackError.classify(error), uid: item.uid)
+            } else {
+                await loadOriginalBytes(for: item, expecting: .unknown)
+            }
         }
     }
 
     private enum Expecting { case unknown, image, video }
 
-    /// Downloads the original to a local file, reporting real progress, then renders it: a decodable
-    /// image is shown sharp; anything else is handed to the video controller (which sniffs/﻿wraps the
-    /// extensionless temp file so AVFoundation opens it reliably).
-    private func downloadOriginal(for item: PhotoItem, expecting: Expecting) async {
+    /// Decrypts the original into RAM, reporting real progress, then renders it if it is an image. Videos are
+    /// never written to a decrypted local temp file; they must use the range-streaming path.
+    private func loadOriginalBytes(for item: PhotoItem, expecting: Expecting) async {
         isLoadingOriginal = true
         if expecting == .video { video.setDownloading(0) }
         let ref = WeakViewerRef(self)
         do {
-            let url = try await media.downloadOriginal(for: item.uid) { p in
+            let data = try await media.originalData(for: item.uid) { p in
                 Task { @MainActor in ref.model?.updateDownloadProgress(p, for: item) }
             }
             guard !Task.isCancelled, self.current == item else { return }
             isLoadingOriginal = false
-            if expecting != .video, let full = NSImage(contentsOf: url) {
+            if expecting != .video, let full = NSImage(data: data) {
                 image = full
                 isSharp = true
                 video.reset()
                 Self.fullImageCache.setObject(full, forKey: Self.cacheKey(item.uid))
             } else {
-                let playable = Self.fileWithVideoExtension(url)
-                logViewer(item, strategy: "fullDownload", kind: .video)
-                video.playLocalFile(url: playable, uid: item.uid)
+                video.fail(.streamURLUnavailable, uid: item.uid)
+                logViewer(item, strategy: "streamRequired", kind: .video)
             }
         } catch is CancellationError {
             isLoadingOriginal = false
@@ -263,7 +261,7 @@ public final class PhotoViewerModel {
             isLoadingOriginal = false
             if expecting == .video {
                 video.fail(.classify(error), uid: item.uid)
-                logViewer(item, strategy: "fullDownload", kind: .video)
+                logViewer(item, strategy: "streamRequired", kind: .video)
             }
             // Image case: keep showing the best interim image (thumbnail/preview).
         }
@@ -295,20 +293,6 @@ public final class PhotoViewerModel {
             playerItemStatus: player?.currentItem?.status.rawValue ?? 0,
             error: nil
         ))
-    }
-
-    /// AVFoundation opens extensionless local files unreliably. Sniff the ISO-BMFF `ftyp` brand and
-    /// hand back a sibling URL with the right extension (copying once), so playback is deterministic.
-    private static func fileWithVideoExtension(_ url: URL) -> URL {
-        guard url.pathExtension.isEmpty else { return url }
-        let head = (try? FileHandle(forReadingFrom: url))
-            .flatMap { handle -> Data? in defer { try? handle.close() }; return try? handle.read(upToCount: 12) }
-        let ext = head.flatMap(VideoContentSniffer.videoExtension(forHeader:)) ?? "mov"
-        let dest = url.appendingPathExtension(ext)
-        if !FileManager.default.fileExists(atPath: dest.path) {
-            try? FileManager.default.copyItem(at: url, to: dest)
-        }
-        return FileManager.default.fileExists(atPath: dest.path) ? dest : url
     }
 }
 

@@ -94,20 +94,18 @@ public protocol ThumbnailBatchLoader: Sendable {
     ) async
 }
 
-/// Loads the full-resolution image/video file for a photo to a local URL (for the viewer).
+/// Loads full-resolution original bytes without creating an app-owned plaintext cache file.
 public protocol FullMediaProvider: Sendable {
     /// Larger preview image bytes (shown immediately in the viewer before the original arrives).
     func preview(for uid: PhotoUID) async throws -> Data
-    /// Downloads the original file to a temporary URL.
-    func downloadOriginal(for uid: PhotoUID) async throws -> URL
-    /// Downloads the original, reporting download progress (0…1) — used to show a progress
-    /// indicator while a large video downloads.
-    func downloadOriginal(for uid: PhotoUID, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL
+    /// Decrypts the original into RAM, reporting progress (0…1). Callers that export may write these bytes
+    /// only to a user-selected destination; the app must not persist plaintext originals in its own cache/temp dirs.
+    func originalData(for uid: PhotoUID, onProgress: @escaping @Sendable (Double) -> Void) async throws -> Data
 }
 
 public extension FullMediaProvider {
-    func downloadOriginal(for uid: PhotoUID, onProgress: @escaping @Sendable (Double) -> Void) async throws -> URL {
-        try await downloadOriginal(for: uid)
+    func originalData(for uid: PhotoUID) async throws -> Data {
+        try await originalData(for: uid, onProgress: { _ in })
     }
 }
 

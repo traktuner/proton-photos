@@ -43,6 +43,9 @@ final class AppModel {
     /// Restore a persisted session on launch.
     func bootstrap() {
         if let session = store.load() {
+            // Re-save once under the current app signature. This migrates older debug Keychain items whose
+            // ACL was bound to a previous local build identity, without introducing any plaintext fallback.
+            store.save(session)
             auth = .signedIn(session)
             prepareBackend(session)
         } else {
@@ -81,6 +84,9 @@ final class AppModel {
         backendTask?.cancel()
         backend = .idle
         facade = nil
+        // Erase the account's encrypted thumbnail/preview blobs + any legacy cache keys and streamed video
+        // blocks before dropping the session, so nothing decryptable is left for the signed-out account.
+        OfflineLibraryManager.shared.purgeOnSignOut()
         store.clear()
         auth = .signedOut(error: nil)
     }
@@ -91,6 +97,9 @@ final class AppModel {
 
     private func prepareBackend(_ session: ProtonSession) {
         backendTask?.cancel()
+        // Install the per-account encrypted-cache key derived from the restored session (and purge any legacy
+        // plaintext cache) before the grid renders or the crawl begins.
+        OfflineLibraryManager.shared.configure(session: session)
         backend = .preparing("Building your library…")
         backendTask = Task { [weak self] in
             guard let self else { return }
