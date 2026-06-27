@@ -153,7 +153,10 @@ struct MetalProductionGridView: NSViewRepresentable {
         // current spot) and self-heals on the next route switch.
         host.coordinator.setSelectionMode(selectionMode)
         host.coordinator.setFavorites(favoriteUIDs)
-        if level != host.coordinator.level { host.animateToLevel(level) }
+        // Honour a genuine external (+/- / keyboard / programmatic) level change, but IGNORE a stale `level`
+        // binding value left over from a host-led pinch commit — re-driving it would re-anchor at the viewport
+        // centre and jump a different photo under the cursor. See `LevelBindingReconciler`.
+        host.reconcileLevelBinding(level)
         wireProxy(host: host, levelBinding: $level)
         coord.header?.reposition()
     }

@@ -58,6 +58,15 @@ final class MetalGridScrollHost: NSView {
     /// The level the live pinch settled on — so the SwiftUI `level` binding stays in sync after a commit.
     var onZoomCommit: ((Int) -> Void)?
 
+    /// The pre-commit level whose lingering SwiftUI `@Binding level` echo must be ignored after a host-led
+    /// commit. A pinch advances `coordinator.level` to the settled level and pushes it to the binding; until
+    /// SwiftUI propagates that write, an `updateNSView` pass driven by some OTHER coincident parent-state change
+    /// can deliver the stale pre-commit value and (via the legacy reconciliation) re-issue a viewport-centre
+    /// zoom — jumping a different photo under the cursor. Armed at the commit sites only when the level actually
+    /// changed; consumed/cleared by `reconcileLevelBinding`. nil = no host-led commit awaiting binding sync.
+    /// See `LevelBindingReconciler`.
+    private var pendingLevelEcho: Int?
+
     /// The leading obstruction inset (points) for the native floating sidebar. ONE value drives three things:
     /// (1) event hit-testing is declined for `x < eventLeadingInset` (those events reach the sidebar); (2) input
     /// content/viewport points are converted render→layout by subtracting it before any engine/coordinator API;
@@ -475,6 +484,7 @@ final class MetalGridScrollHost: NSView {
     /// endpoint exactly — no hard snap, no flash.
     private func commitLivePinch() {
         pinchSettling = false
+        let previousLevel = coordinator.level
         let anchoredY = coordinator.commitPinchChain(toLevel: pinchDriver.finalLevel, viewportSize: metalView.bounds.size)
         let clipH = scrollView.contentView.bounds.height
         let content = coordinator.contentSize()
@@ -491,7 +501,7 @@ final class MetalGridScrollHost: NSView {
         pinchBuiltSegment = nil
         pinchAdvancePrevTime = 0
         pinchDriver.reset()
-        onZoomCommit?(coordinator.level)                      // sync the SwiftUI level binding
+        commitLevelToBinding(previousLevel: previousLevel)    // sync the SwiftUI level binding (+ arm echo guard)
         metalView.needsDisplay = true
     }
 
@@ -536,6 +546,7 @@ final class MetalGridScrollHost: NSView {
     /// adopts the target level/phase + anchored scroll; the settled frame matches the dissolve endpoint exactly.
     private func commitOverviewDissolve() {
         pinchSettling = false
+        let previousLevel = coordinator.level
         let toTarget = pinchOverviewSettleTo >= 0.5
         let anchoredY = coordinator.commitOverviewDissolve(toTarget: toTarget, viewportSize: metalView.bounds.size)
         let clipH = scrollView.contentView.bounds.height
@@ -551,13 +562,14 @@ final class MetalGridScrollHost: NSView {
         coordinator.logPostCommitAnchor()
         pinchMode = .undecided
         pinchOverviewQ = 0
-        onZoomCommit?(coordinator.level)                      // sync the SwiftUI level binding
+        commitLevelToBinding(previousLevel: previousLevel)    // sync the SwiftUI level binding (+ arm echo guard)
         metalView.needsDisplay = true
     }
 
     /// Commit the live zoom: rebase scroll from the anchor, then run a short geometry-only BRIDGE that slides
     /// the transaction-final frame to the settled frame (so the column-phase reflow is smooth, not a snap).
     private func finishLiveZoom(target: Int) {
+        let previousLevel = coordinator.level
         let clamped = max(0, min(target, coordinator.levelCount - 1))
         let newY = coordinator.beginCommitBridge(finalLevel: clamped)   // rebase + capture tx + set level + start bridge
         let clipH = scrollView.contentView.bounds.height
@@ -579,7 +591,7 @@ final class MetalGridScrollHost: NSView {
         }
         if !coordinator.isCommitBridging { coordinator.logPostCommitAnchor() }   // instant commit: probe now (bridge logs at end)
         metalView.needsDisplay = true
-        onZoomCommit?(coordinator.level)                            // sync the SwiftUI level binding
+        commitLevelToBinding(previousLevel: previousLevel)         // sync the SwiftUI level binding (+ arm echo guard)
     }
 
     /// The cursor's CURRENT content-space point from a gesture event (fresh — never the stale last
@@ -600,6 +612,35 @@ final class MetalGridScrollHost: NSView {
     /// live trackpad pinch is the continuous path, handled in `handleMagnify`).
     func animateToLevel(_ target: Int) {
         setLevel(target)
+    }
+
+    /// Reconcile a SwiftUI `level`-binding value delivered to `updateNSView` against the host's authoritative
+    /// `coordinator.level`. Drives `animateToLevel` for a genuine external (+/- / keyboard / programmatic)
+    /// change; IGNORES a stale echo of a host-led pinch commit (which would otherwise re-issue a viewport-centre
+    /// zoom and jump a different photo under the cursor). Pure decision in `LevelBindingReconciler`.
+    func reconcileLevelBinding(_ bindingLevel: Int) {
+        let action = LevelBindingReconciler.decide(binding: bindingLevel, hostLevel: coordinator.level, staleEcho: pendingLevelEcho)
+        switch action {
+        case .ignore:
+            if pendingLevelEcho != nil, bindingLevel != coordinator.level {        // a suppressed post-commit echo
+                GridLevelSyncLog.decision(binding: bindingLevel, hostLevel: coordinator.level, staleEcho: pendingLevelEcho, action: "suppressStaleEcho")
+            }
+        case .clearLatch:
+            pendingLevelEcho = nil
+        case .reDrive(let target):
+            pendingLevelEcho = nil
+            GridLevelSyncLog.decision(binding: bindingLevel, hostLevel: coordinator.level, staleEcho: nil, action: "reDrive")
+            animateToLevel(target)
+        }
+    }
+
+    /// Push the settled level to the SwiftUI `level` binding AND arm the stale-echo guard, so a not-yet-
+    /// propagated pre-commit binding value can't re-issue a viewport-centre zoom. The guard is armed ONLY when
+    /// the commit actually changed the level — a no-op commit can produce no echo, and arming it would wrongly
+    /// swallow the next genuine external change. Call at every host-led commit, in place of `onZoomCommit`.
+    private func commitLevelToBinding(previousLevel: Int) {
+        if coordinator.level != previousLevel { pendingLevelEcho = previousLevel }
+        onZoomCommit?(coordinator.level)
     }
 
     private func pinToBottom() {

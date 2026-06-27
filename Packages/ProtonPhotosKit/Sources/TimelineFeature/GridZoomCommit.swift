@@ -64,6 +64,23 @@ enum GridZoomAnchorLog {
     private static func idx(_ i: Int?) -> String { i.map { "\($0)" } ?? "nil" }
 }
 
+// MARK: - Level-binding sync diagnostics
+//
+// `[GridLevelSync]` traces the `updateNSView` level reconciliation — logged ONLY for the meaningful outcomes (a
+// genuine external re-drive, or a SUPPRESSED stale post-commit echo), so the trace is silent in steady state
+// but makes a post-commit binding echo (the suspected commit-jump trigger) impossible to miss. If, after a
+// pinch commit, a `suppressStaleEcho` line appears, the stale `@Binding level` echo DID arrive and the guard
+// caught it — proving the mechanism live. See `LevelBindingReconciler`.
+@MainActor
+enum GridLevelSyncLog {
+    static func decision(binding: Int, hostLevel: Int, staleEcho: Int?, action: String) {
+        PhotoDiagnostics.shared.emit("GridLevelSync", [
+            "binding": "\(binding)", "hostLevel": "\(hostLevel)",
+            "pendingEcho": staleEcho.map { "\($0)" } ?? "nil", "action": action,
+        ])
+    }
+}
+
 // MARK: - Viewport-resize diagnostics
 //
 // `[GridResize]` traces the resize/sidebar rebase so a jump is observable: the validation line's

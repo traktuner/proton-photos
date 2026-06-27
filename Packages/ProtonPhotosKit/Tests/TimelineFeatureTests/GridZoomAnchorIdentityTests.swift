@@ -232,4 +232,99 @@ import CoreGraphics
         #expect(GridZoomTrigger.pinch.isPlusMinus == false)
         #expect(GridZoomTrigger.keyboardMinus.isPlusMinus == true)
     }
+
+    // MARK: GUARANTEE 2 — RepeatedPinchIdentityTest. The same item under the cursor survives EACH begin/commit
+    // pair across a CHAIN of gestures (commit, then pinch back, then again) — each gesture begins on the grid the
+    // previous one COMMITTED (its phase + scroll), so a stale committed phase can't swap the anchor on gesture 2+.
+    @Test func repeatedPinchIdentitySurvivesEachGesture() {
+        // Gesture 1: 3 → 1 from the canonical phase.
+        let g1 = simulatePinch(sourceLevel: 3, sourcePhase: nil, targetLevel: 1, cursorVP: cursorVP, sourceScrollY: 5000)
+        #expect(g1.txAnchor == g1.displayed, "gesture 1 begin anchored a different item than displayed")
+        #expect(g1.after == g1.displayed, "gesture 1: anchor left the cursor")
+        // Gesture 2 (pinch back 1 → 4) BEGINS on gesture 1's committed grid (level 1, phase g1.phase, scroll g1.scrollY).
+        let g2 = simulatePinch(sourceLevel: 1, sourcePhase: g1.phase, targetLevel: 4, cursorVP: cursorVP, sourceScrollY: g1.scrollY)
+        #expect(g2.displayed == g1.after, "the grid gesture 2 begins on must be exactly what gesture 1 committed")
+        #expect(g2.txAnchor == g2.displayed, "gesture 2 begin anchored a different item than displayed (committed-phase swap)")
+        #expect(g2.after == g2.displayed, "gesture 2: anchor left the cursor on the repeated gesture")
+        // Gesture 3 (pinch in again 4 → 2) on gesture 2's committed grid.
+        let g3 = simulatePinch(sourceLevel: 4, sourcePhase: g2.phase, targetLevel: 2, cursorVP: cursorVP, sourceScrollY: g2.scrollY)
+        #expect(g3.displayed == g2.after, "the grid gesture 3 begins on must be exactly what gesture 2 committed")
+        #expect(g3.after == g3.displayed, "gesture 3: anchor left the cursor after two prior commits")
+    }
+
+    // MARK: GUARANTEE 3 — PinchChainEndpointEqualityTest. The production LATTICE commit (`commitPinchChain` ->
+    // `pinchDetentParams`) builds the target detent with a cursor-aligned phase + anchor scroll CLAMPED via
+    // `engine.clampScrollOffsetY`. The first settled frame at that exact (phase, clampedScroll) must keep the
+    // gesture anchor under the cursor — i.e. the commit endpoint equals the terminal live-transition endpoint.
+    @Test func pinchChainEndpointEqualsFirstSettledFrame() {
+        let e = engine()
+        let sourceScrollY: CGFloat = 5000
+        let cursorContent = CGPoint(x: cursorVP.x, y: cursorVP.y + sourceScrollY)
+        let displayed = itemUnderCursor(e, vp: cursorVP, level: 3, phase: 3, scrollY: sourceScrollY)!
+        let tx = e.beginZoomTransaction(cursorContentPoint: cursorContent, viewportPoint: cursorVP,
+                                        level: 3, width: width, columnPhase: 3)!
+        #expect(tx.anchorGlobalIndex == displayed, "begin anchor must equal the displayed item")
+        for target in [1, 2] {   // adjacent + multi-level detents within the normal band, mid-content (no edge clamp)
+            // Replicate pinchDetentParams(target): cursor-aligned phase + anchored scroll, CLAMPED exactly as the
+            // segment build AND the release commit do.
+            let col = e.cursorColumn(viewportX: tx.anchorViewportPoint.x, level: target, width: width)
+            let phase = e.columnPhase(forItem: tx.anchorGlobalIndex, targetColumn: col, level: target, width: width)
+            let rawY = e.anchoredScrollOffset(flatIndex: tx.anchorGlobalIndex, localFraction: tx.anchorLocalFraction,
+                                              viewportPoint: tx.anchorViewportPoint, level: target, width: width, columnPhase: phase).y
+            let clampedY = e.clampScrollOffsetY(rawY, level: target, width: width, viewportHeight: viewport.height, columnPhase: phase)
+            #expect(abs(clampedY - rawY) < 0.5, "scenario must be mid-content (no edge clamp) for a clean endpoint check at level \(target)")
+            let plan = e.framePlan(level: target, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: clampedY), overscan: 0, columnPhase: phase)
+            let underCursor = plan.visibleSlots.first { $0.viewportRect.contains(cursorVP) }?.index
+            #expect(underCursor == tx.anchorGlobalIndex,
+                    "endpoint equality: settled frame under cursor \(String(describing: underCursor)) ≠ anchor \(tx.anchorGlobalIndex) at level \(target)")
+        }
+    }
+
+    // MARK: GUARANTEE 4 — SidebarLayoutSpaceAnchorTest. With a non-zero leading obstruction inset, the render-
+    // space cursor x is converted to layout space by subtracting the inset ONCE, and ALL engine/anchor math runs
+    // at the inset-removed layout width. The anchor resolved at begin must equal the displayed item, and the
+    // settled frame keeps it under the (layout-space) cursor — no double translation post-commit.
+    @Test func sidebarLayoutSpaceAnchorIsConsistent() {
+        let e = engine()                                     // the engine works purely in layout space
+        let inset: CGFloat = 282 + MetalGridScrollHost.normalLevelLeadingGap   // sidebar + normal-level gap
+        let fullWidth = width + inset                        // render-space full viewport width
+        let layoutW = fullWidth - inset                      // == `width`, the inset-removed engine layout width
+        #expect(layoutW == width)
+        let renderCursorX = inset + 430                      // a render-space cursor x (to the right of the sidebar)
+        let layoutCursorX = renderCursorX - inset            // host rule: subtract the inset exactly once
+        #expect(layoutCursorX == 430)
+        let scrollY: CGFloat = 5000
+        let cursorVPLayout = CGPoint(x: layoutCursorX, y: 360)
+        let cursorContent = CGPoint(x: layoutCursorX, y: cursorVPLayout.y + scrollY)
+        let displayed = e.hitTest(contentPoint: cursorContent, level: 2, width: layoutW, columnPhase: 3)?.index
+        let tx = e.beginZoomTransaction(cursorContentPoint: cursorContent, viewportPoint: cursorVPLayout,
+                                        level: 2, width: layoutW, columnPhase: 3)!
+        #expect(tx.anchorGlobalIndex == displayed, "sidebar: anchor must resolve in layout space at the inset-removed width")
+        let col = e.cursorColumn(viewportX: cursorVPLayout.x, level: 4, width: layoutW)
+        let phase = e.columnPhase(forItem: tx.anchorGlobalIndex, targetColumn: col, level: 4, width: layoutW)
+        let y = e.anchoredScrollOffset(flatIndex: tx.anchorGlobalIndex, localFraction: tx.anchorLocalFraction,
+                                       viewportPoint: cursorVPLayout, level: 4, width: layoutW, columnPhase: phase).y
+        let plan = e.framePlan(level: 4, viewportSize: CGSize(width: layoutW, height: viewport.height),
+                               scrollOffset: CGPoint(x: 0, y: y), overscan: 0, columnPhase: phase)
+        let under = plan.visibleSlots.first { $0.viewportRect.contains(cursorVPLayout) }?.index
+        #expect(under == tx.anchorGlobalIndex, "sidebar: settled frame anchor must stay under the layout-space cursor")
+        // Source guards: the host converts render→layout once; the coordinator's layout width removes the inset.
+        #expect(hostSource().contains("CGPoint(x: raw.x - inset, y: raw.y)"),
+                "cursor x must be converted render→layout by subtracting the inset exactly once")
+        #expect(coordinatorSource().contains("fullViewportWidth - leadingObstructionInset"),
+                "the engine layout width must remove the leading inset")
+    }
+
+    // MARK: GUARANTEE 5 — LatticeCommitScrollLockOrderingTest. The production lattice commit (`commitLivePinch`)
+    // must set the scroll lock to the COMMITTED Y BEFORE it scrolls, or the post-magnify grace window's
+    // `scrolled()` backstop would restore the pre-pinch origin and undo the commit scroll.
+    @Test func latticeCommitSetsScrollLockBeforeScrolling() {
+        let host = hostSource()
+        guard let lockIdx = host.range(of: "scrollLockOrigin = CGPoint(x: 0, y: committedY)"),
+              let scrollIdx = host.range(of: "scrollView.contentView.scroll(to: CGPoint(x: 0, y: committedY))") else {
+            Issue.record("commitLivePinch scroll-lock / scroll lines not found"); return
+        }
+        #expect(lockIdx.lowerBound < scrollIdx.lowerBound,
+                "commitLivePinch must set the scroll lock to committedY BEFORE scrolling (grace window must not restore the pre-pinch origin)")
+    }
 }
