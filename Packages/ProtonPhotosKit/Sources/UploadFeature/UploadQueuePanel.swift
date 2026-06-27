@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosCore
 
 /// Compact upload-queue panel: total progress, per-item status, and per-item retry/cancel/pause.
 public struct UploadQueuePanel: View {
@@ -32,10 +33,10 @@ public struct UploadQueuePanel: View {
         let s = coordinator.stats
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Uploads", systemImage: "square.and.arrow.up")
+                Label(L10n.string("upload.queue_title"), systemImage: "square.and.arrow.up")
                     .font(.headline)
                 Spacer()
-                Button("Clear finished") { coordinator.clearFinished() }
+                Button(L10n.string("upload.clear_finished")) { coordinator.clearFinished() }
                     .buttonStyle(.borderless)
                     .disabled(!UploadQueuePresentation.canClearFinished(s))
             }
@@ -51,9 +52,9 @@ public struct UploadQueuePanel: View {
 
     private var empty: some View {
         ContentUnavailableView {
-            Label("No uploads", systemImage: "tray")
+            Label(L10n.string("upload.no_uploads"), systemImage: "tray")
         } description: {
-            Text("Uploads you start from the toolbar appear here.")
+            Text(L10n.string("upload.empty_description"))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -79,7 +80,7 @@ public struct UploadQueuePanel: View {
             VStack(alignment: .leading, spacing: 2) {
                 ProgressView(value: p)
                     .frame(maxWidth: 170)
-                Text("Uploading \(Int(p * 100))%")
+                Text(L10n.string("upload.state_uploading \(Int(p * 100))"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -151,10 +152,10 @@ public struct UploadQueuePanel: View {
 
     private func help(for action: UploadQueueRowAction) -> String {
         switch action {
-        case .cancel: "Cancel"
-        case .pause: "Pause"
-        case .resume: "Resume"
-        case .retry: "Retry"
+        case .cancel: L10n.string("action.cancel")
+        case .pause: L10n.string("upload.action_pause")
+        case .resume: L10n.string("upload.action_resume")
+        case .retry: L10n.string("action.retry")
         }
     }
 }

@@ -56,6 +56,9 @@ struct MainView: View {
     @State private var uploadRefreshTask: Task<Void, Never>?
     @State private var uploadRefreshMessage: String?
     @State private var uploadRefreshBusy = false
+    /// Whether the current banner message represents success (drives the icon/colour). Tracked
+    /// explicitly so the banner never compares against localized message text.
+    @State private var uploadRefreshSuccess = false
     private let feed: ThumbnailFeed
     private let aspects: AspectRegistry
     private let zoomOpenSpring = (response: 0.34, damping: 0.86)
@@ -110,7 +113,7 @@ struct MainView: View {
                         }
                     }
                     .navigationTitle(viewerModel == nil ? title : "")
-                    .searchable(text: $searchText, placement: .toolbar, prompt: "Search \(title)")
+                    .searchable(text: $searchText, placement: .toolbar, prompt: Text("search.prompt \(title)"))
                     .toolbar { toolbarContent }
                     .modifier(WindowToolbarChrome(isViewer: viewerModel != nil))
                     // The detail's leading safe-area inset == the floating sidebar width. It drives event
@@ -197,7 +200,7 @@ struct MainView: View {
             if isExporting {
                 VStack(spacing: 10) {
                     ProgressView().controlSize(.large)
-                    Text("Preparing…")
+                    Text("export.preparing")
                         .font(.callout.weight(.medium))
                 }
                 .padding(22)
@@ -222,7 +225,7 @@ struct MainView: View {
             UploadQueuePanel(coordinator: uploadCoordinator)
         }
         .confirmationDialog(trashConfirmationTitle, isPresented: $confirmTrash) {
-            Button("Move to Trash", role: .destructive) {
+            Button("alert.move_to_trash", role: .destructive) {
                 let items = pendingTrashItems
                 let shouldClose = closeViewerAfterTrash
                 pendingTrashItems = []
@@ -235,7 +238,7 @@ struct MainView: View {
                     selectedUIDs = []
                 }
             }
-            Button("Cancel", role: .cancel) {
+            Button("action.cancel", role: .cancel) {
                 pendingTrashItems = []
                 closeViewerAfterTrash = false
             }
@@ -253,8 +256,8 @@ struct MainView: View {
                         ProgressView()
                             .controlSize(.small)
                     } else {
-                        Image(systemName: uploadRefreshMessage == "Uploaded" || uploadRefreshMessage == "Library refreshed" ? "checkmark.circle.fill" : "exclamationmark.circle")
-                            .foregroundStyle(uploadRefreshMessage == "Uploaded" || uploadRefreshMessage == "Library refreshed" ? .green : .secondary)
+                        Image(systemName: uploadRefreshSuccess ? "checkmark.circle.fill" : "exclamationmark.circle")
+                            .foregroundStyle(uploadRefreshSuccess ? .green : .secondary)
                     }
                     Text(uploadRefreshMessage)
                         .font(.system(size: 12, weight: .medium))
@@ -391,10 +394,10 @@ struct MainView: View {
 
     private var title: String {
         switch selection {
-        case .all: "Library"
+        case .all: String(localized: "library.title")
         case .tag(let t): t.title
         case .album(_, let name): name
-        case .trash: "Recently Deleted"
+        case .trash: String(localized: "sidebar.recently_deleted")
         }
     }
 
@@ -426,7 +429,7 @@ struct MainView: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
         panel.allowedContentTypes = [.image, .movie]
-        panel.message = "Choose photos or videos to upload"
+        panel.message = String(localized: "upload.choose_photos_message")
         guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
         uploadCoordinator.chooseDestination(files: panel.urls)
     }
@@ -436,7 +439,7 @@ struct MainView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.message = "Choose a folder to upload (media is discovered recursively)"
+        panel.message = String(localized: "upload.choose_folder_message")
         guard panel.runModal() == .OK, let folder = panel.url else { return }
         uploadCoordinator.chooseDestination(folder: folder)
     }
@@ -448,12 +451,13 @@ struct MainView: View {
 
     @MainActor private func runUploadRefresh(_ event: UploadCompletedEvent) async {
         uploadRefreshBusy = true
-        uploadRefreshMessage = "Upload complete, refreshing library…"
+        uploadRefreshSuccess = false
+        uploadRefreshMessage = String(localized: "upload.refreshing_after_upload")
         let schedule = TimelineRefreshRetrySchedule.uploadDefault.delays
         for (attempt, delay) in schedule.enumerated() {
             guard !Task.isCancelled else { return }
             if delay > .zero {
-                uploadRefreshMessage = "Upload complete, waiting for library refresh…"
+                uploadRefreshMessage = String(localized: "upload.waiting_for_refresh")
                 try? await Task.sleep(for: delay)
             }
             let result = await timelineModel.refreshAfterUpload(uploadedUID: event.uploadedUID)
@@ -464,14 +468,16 @@ struct MainView: View {
             logUploadRefresh(upload: event, attempt: attempt, result: result)
             if let found = result.foundItem {
                 uploadRefreshBusy = false
-                uploadRefreshMessage = "Uploaded"
+                uploadRefreshSuccess = true
+                uploadRefreshMessage = String(localized: "upload.uploaded")
                 gridProxy.scrollToItem?(found)
                 clearUploadRefreshMessage(after: .seconds(2))
                 return
             }
         }
         uploadRefreshBusy = false
-        uploadRefreshMessage = "Upload completed, but the library has not indexed it yet. Use Refresh Library."
+        uploadRefreshSuccess = false
+        uploadRefreshMessage = String(localized: "upload.not_yet_indexed")
     }
 
     private func refreshLibraryManually() {
@@ -480,13 +486,15 @@ struct MainView: View {
 
     @MainActor private func performManualLibraryRefresh() async {
         uploadRefreshBusy = true
-        uploadRefreshMessage = "Refreshing library…"
+        uploadRefreshSuccess = false
+        uploadRefreshMessage = String(localized: "library.refreshing")
         let result = await timelineModel.refreshLibrary()
         OfflineLibraryManager.shared.liveAssetCount = timelineModel.allItems.count
         await loadAlbums()
         logUploadRefresh(uploadedNode: "-", attempt: 0, result: result)
         uploadRefreshBusy = false
-        uploadRefreshMessage = result.errorMessage == nil ? "Library refreshed" : "Library refresh failed"
+        uploadRefreshSuccess = result.errorMessage == nil
+        uploadRefreshMessage = result.errorMessage == nil ? String(localized: "library.refreshed") : String(localized: "library.refresh_failed")
         clearUploadRefreshMessage(after: .seconds(2))
     }
 
@@ -582,22 +590,24 @@ struct MainView: View {
     }
 
     private var trashConfirmationTitle: String {
-        pendingTrashItems.count == 1 ? "Move photo to Trash?" : "Move \(pendingTrashItems.count) photos to Trash?"
+        pendingTrashItems.count == 1
+            ? String(localized: "alert.trash_confirmation_title_one")
+            : String(localized: "alert.trash_confirmation_title_other \(pendingTrashItems.count)")
     }
 
     private var trashConfirmationMessage: String {
         pendingTrashItems.count == 1
-            ? "The photo will move to Recently Deleted."
-            : "The selected photos will move to Recently Deleted."
+            ? String(localized: "alert.trash_confirmation_message_one")
+            : String(localized: "alert.trash_confirmation_message_other")
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         if let viewerModel {
             ToolbarItem(placement: .navigation) {
                 Button { closePhoto() } label: {
-                    Label("Back", systemImage: "chevron.left")
+                    Label("toolbar.back", systemImage: "chevron.left")
                 }
-                .help("Back to library")
+                .help("toolbar.back_to_library")
             }
             // Apple-Photos centered two-line metadata in a pill: location/POI (or date) over the
             // secondary line, both inside a capsule padded comfortably larger than the text.
@@ -622,36 +632,36 @@ struct MainView: View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.22)) { viewerModel.toggleInfo() }
                 } label: {
-                    Label("Info", systemImage: viewerModel.showInfo ? "info.circle.fill" : "info.circle")
+                    Label("toolbar.info", systemImage: viewerModel.showInfo ? "info.circle.fill" : "info.circle")
                         .labelStyle(.iconOnly)
                 }
-                .help("Info")
-                .accessibilityLabel("Info")
+                .help("toolbar.info")
+                .accessibilityLabel("toolbar.info")
 
                 Button {
                     Task { await performExport([viewerModel.current]) }
                 } label: {
-                    Label("Download original", systemImage: "square.and.arrow.down")
+                    Label("toolbar.download_original", systemImage: "square.and.arrow.down")
                         .labelStyle(.iconOnly)
                 }
                 .disabled(isExporting)
-                .help("Download original")
-                .accessibilityLabel("Download original")
+                .help("toolbar.download_original")
+                .accessibilityLabel("toolbar.download_original")
 
                 Button { toggleFavorite(viewerModel.current.uid) } label: {
-                    Label(favorites.contains(viewerModel.current.uid) ? "Remove favorite" : "Favorite",
+                    Label(favorites.contains(viewerModel.current.uid) ? "toolbar.remove_favorite" : "toolbar.favorite",
                           systemImage: favorites.contains(viewerModel.current.uid) ? "heart.fill" : "heart")
                         .labelStyle(.iconOnly)
                 }
-                .help(favorites.contains(viewerModel.current.uid) ? "Remove favorite" : "Favorite")
-                .accessibilityLabel(favorites.contains(viewerModel.current.uid) ? "Remove favorite" : "Favorite")
+                .help(favorites.contains(viewerModel.current.uid) ? "toolbar.remove_favorite" : "toolbar.favorite")
+                .accessibilityLabel(favorites.contains(viewerModel.current.uid) ? "toolbar.remove_favorite" : "toolbar.favorite")
 
                 Button { onTrashViewerItem(viewerModel.current) } label: {
-                    Label("Move to trash", systemImage: "trash")
+                    Label("toolbar.move_to_trash", systemImage: "trash")
                         .labelStyle(.iconOnly)
                 }
-                .help("Move to trash")
-                .accessibilityLabel("Move to trash")
+                .help("toolbar.move_to_trash")
+                .accessibilityLabel("toolbar.move_to_trash")
             }
         } else {
             // The sidebar toggle is the NATIVE NavigationSplitView one (it returns automatically + moves with the
@@ -670,8 +680,8 @@ struct MainView: View {
                         }
                     }
                     .disabled(selectedUIDs.isEmpty)
-                    .help("Restore from trash")
-                    .accessibilityLabel(selectedUIDs.isEmpty ? "Restore selected from trash" : "Restore \(selectedUIDs.count) selected from trash")
+                    .help("toolbar.restore_from_trash")
+                    .accessibilityLabel(selectedUIDs.isEmpty ? "a11y.restore_selected_from_trash" : "a11y.restore_count_from_trash \(selectedUIDs.count)")
                 } else {
                     Button { downloadSelected() } label: {
                         if selectedUIDs.isEmpty {
@@ -681,35 +691,35 @@ struct MainView: View {
                         }
                     }
                     .disabled(selectedUIDs.isEmpty || isExporting)
-                    .help(selectedUIDs.count > 1 ? "Download \(selectedUIDs.count) photos to a folder" : "Download original")
-                    .accessibilityLabel(selectedUIDs.isEmpty ? "Download selected originals" : "Download \(selectedUIDs.count) selected originals")
+                    .help(selectedUIDs.count > 1 ? "toolbar.download_count_photos_help \(selectedUIDs.count)" : "toolbar.download_original")
+                    .accessibilityLabel(selectedUIDs.isEmpty ? "a11y.download_selected_originals" : "a11y.download_count_selected_originals \(selectedUIDs.count)")
                     Button { trashSelected() } label: {
-                        Label("Move selected to trash", systemImage: "trash")
+                        Label("toolbar.move_selected_to_trash", systemImage: "trash")
                             .labelStyle(.iconOnly)
                     }
                         .disabled(selectedUIDs.isEmpty)
-                        .help("Move to trash")
-                        .accessibilityLabel("Move selected to trash")
+                        .help("toolbar.move_to_trash")
+                        .accessibilityLabel("toolbar.move_selected_to_trash")
                 }
                 ControlGroup {
                     Button { gridProxy.zoomOut?() } label: {
-                        Label("Smaller thumbnails", systemImage: "minus")
+                        Label("toolbar.smaller_thumbnails", systemImage: "minus")
                             .labelStyle(.iconOnly)
                     }
-                        .help("Smaller thumbnails")
+                        .help("toolbar.smaller_thumbnails")
                         .disabled(level >= 5)
-                        .accessibilityLabel("Smaller thumbnails")
+                        .accessibilityLabel("toolbar.smaller_thumbnails")
                     Button { gridProxy.zoomIn?() } label: {
-                        Label("Larger thumbnails", systemImage: "plus")
+                        Label("toolbar.larger_thumbnails", systemImage: "plus")
                             .labelStyle(.iconOnly)
                     }
-                        .help("Larger thumbnails")
+                        .help("toolbar.larger_thumbnails")
                         .disabled(level <= 0)
-                        .accessibilityLabel("Larger thumbnails")
+                        .accessibilityLabel("toolbar.larger_thumbnails")
                 }
                 aspectSquareToggleButton
                 Menu {
-                    Button("Sign out", role: .destructive) { model.signOut() }
+                    Button("action.sign_out", role: .destructive) { model.signOut() }
                 } label: {
                     Image(systemName: "person.crop.circle")
                 }
@@ -735,17 +745,17 @@ struct MainView: View {
 
     private var uploadToolbarMenu: some View {
         Menu {
-            Button("Upload Photos…") { performUploadUIAction("uploadPhotos", trigger: .toolbar) }
+            Button("menu.upload_photos") { performUploadUIAction("uploadPhotos", trigger: .toolbar) }
                 .disabled(!uploadCoordinator.uploadCapabilities.canUpload)
-            Button("Upload Folder…") { performUploadUIAction("uploadFolder", trigger: .toolbar) }
+            Button("menu.upload_folder") { performUploadUIAction("uploadFolder", trigger: .toolbar) }
                 .disabled(!uploadCoordinator.uploadCapabilities.canUpload)
             Divider()
-            Button("Show Uploads") { performUploadUIAction("showQueue", trigger: .toolbar) }
+            Button("menu.show_uploads") { performUploadUIAction("showQueue", trigger: .toolbar) }
         } label: {
-            Label("Upload", systemImage: "tray.and.arrow.up")
+            Label("toolbar.upload", systemImage: "tray.and.arrow.up")
         }
-        .help("Upload photos or a folder")
-        .accessibilityLabel("Upload")
+        .help("toolbar.upload_menu_help")
+        .accessibilityLabel("toolbar.upload")
     }
 
     private func onTrashViewerItem(_ item: PhotoItem) {
@@ -848,7 +858,7 @@ struct MainView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
-        panel.prompt = "Export"
+        panel.prompt = String(localized: "export.button")
         guard panel.runModal() == .OK else { return nil }
         return panel.url
     }
@@ -967,7 +977,7 @@ private struct SidebarView: View {
     var body: some View {
         List(selection: Binding(get: { selection }, set: { if let v = $0 { selection = v } })) {
             Section {
-                Label("All Photos", systemImage: "photo.on.rectangle.angled")
+                Label("sidebar.all_photos", systemImage: "photo.on.rectangle.angled")
                     .tag(PhotoFilter.all)
                 ForEach(PhotoTag.allCases, id: \.self) { tag in
                     Label(tag.title, systemImage: tag.systemImage)
@@ -975,7 +985,7 @@ private struct SidebarView: View {
                 }
             }
             if !albums.isEmpty {
-                Section("Albums") {
+                Section("sidebar.albums") {
                     ForEach(albums) { album in
                         Label(album.title, systemImage: "rectangle.stack")
                             .tag(PhotoFilter.album(id: album.id, title: album.title))
@@ -983,7 +993,7 @@ private struct SidebarView: View {
                 }
             }
             Section {
-                Label("Recently Deleted", systemImage: "trash")
+                Label("sidebar.recently_deleted", systemImage: "trash")
                     .tag(PhotoFilter.trash)
             }
         }

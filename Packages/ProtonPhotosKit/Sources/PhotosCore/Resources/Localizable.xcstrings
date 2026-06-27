@@ -1,0 +1,1642 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "action.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abbrechen"
+          }
+        }
+      }
+    },
+    "action.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erneut versuchen"
+          }
+        }
+      }
+    },
+    "tag.favorites": {
+      "extractionState": "manual",
+      "comment": "Smart-filter tag.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorites"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favoriten"
+          }
+        }
+      }
+    },
+    "tag.screenshots": {
+      "extractionState": "manual",
+      "comment": "Smart-filter tag.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screenshots"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bildschirmfotos"
+          }
+        }
+      }
+    },
+    "tag.videos": {
+      "extractionState": "manual",
+      "comment": "Smart-filter tag.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Videos"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Videos"
+          }
+        }
+      }
+    },
+    "tag.live_photos": {
+      "extractionState": "manual",
+      "comment": "Smart-filter tag (Apple term, unchanged in German).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live Photos"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live Photos"
+          }
+        }
+      }
+    },
+    "tag.motion": {
+      "extractionState": "manual",
+      "comment": "Smart-filter tag (kept in both languages).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Motion"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Motion"
+          }
+        }
+      }
+    },
+    "tag.selfies": {
+      "extractionState": "manual",
+      "comment": "Smart-filter tag.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selfies"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selfies"
+          }
+        }
+      }
+    },
+    "tag.portraits": {
+      "extractionState": "manual",
+      "comment": "Smart-filter tag.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Portraits"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Porträts"
+          }
+        }
+      }
+    },
+    "tag.bursts": {
+      "extractionState": "manual",
+      "comment": "Smart-filter tag (Apple Photos uses “Serien”).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bursts"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serien"
+          }
+        }
+      }
+    },
+    "tag.panoramas": {
+      "extractionState": "manual",
+      "comment": "Smart-filter tag.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Panoramas"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Panoramen"
+          }
+        }
+      }
+    },
+    "tag.raw": {
+      "extractionState": "manual",
+      "comment": "Smart-filter tag (technical term).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RAW"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "RAW"
+          }
+        }
+      }
+    },
+    "error.video.not_a_video": {
+      "extractionState": "manual",
+      "comment": "Shown when an item isn’t actually a video.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This is not a video."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dies ist kein Video."
+          }
+        }
+      }
+    },
+    "error.video.metadata_unavailable": {
+      "extractionState": "manual",
+      "comment": "Video metadata could not be resolved.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video information could not be loaded."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video-Informationen konnten nicht geladen werden."
+          }
+        }
+      }
+    },
+    "error.video.unsupported_codec": {
+      "extractionState": "manual",
+      "comment": "AVFoundation can’t decode the codec.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This video format isn’t supported."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Videoformat wird nicht unterstützt."
+          }
+        }
+      }
+    },
+    "error.video.stream_unavailable": {
+      "extractionState": "manual",
+      "comment": "Backend exposes no stream URL.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No stream is available for this video."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Für dieses Video ist kein Stream verfügbar."
+          }
+        }
+      }
+    },
+    "error.video.range_not_supported": {
+      "extractionState": "manual",
+      "comment": "Backend can’t serve byte ranges.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This video can’t be streamed."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Video kann nicht gestreamt werden."
+          }
+        }
+      }
+    },
+    "error.video.decryption_failed": {
+      "extractionState": "manual",
+      "comment": "A block failed to decrypt.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The video couldn’t be decrypted."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Video konnte nicht entschlüsselt werden."
+          }
+        }
+      }
+    },
+    "error.video.network_unavailable": {
+      "extractionState": "manual",
+      "comment": "Network/transport error.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No network connection."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Netzwerkverbindung."
+          }
+        }
+      }
+    },
+    "error.video.auth_expired": {
+      "extractionState": "manual",
+      "comment": "Auth token expired.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your session has expired. Please sign in again."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Sitzung ist abgelaufen. Bitte erneut anmelden."
+          }
+        }
+      }
+    },
+    "error.video.quota_rate_limited": {
+      "extractionState": "manual",
+      "comment": "Server returned 429 / quota.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too many requests. Please try again later."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zu viele Anfragen. Bitte später erneut versuchen."
+          }
+        }
+      }
+    },
+    "error.video.local_file_error": {
+      "extractionState": "manual",
+      "comment": "Local cache/temp file error.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The video file couldn’t be read."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Videodatei konnte nicht gelesen werden."
+          }
+        }
+      }
+    },
+    "error.video.player_item_failed": {
+      "extractionState": "manual",
+      "comment": "Generic AVPlayerItem failure.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The video couldn’t be played."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Video konnte nicht abgespielt werden."
+          }
+        }
+      }
+    },
+    "error.video.timed_out": {
+      "extractionState": "manual",
+      "comment": "Player stalled past the watchdog deadline.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading the video timed out."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeitüberschreitung beim Laden des Videos."
+          }
+        }
+      }
+    },
+    "error.video.unknown": {
+      "extractionState": "manual",
+      "comment": "Unclassified playback failure.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The video couldn’t be played."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Das Video konnte nicht abgespielt werden."
+          }
+        }
+      }
+    },
+    "viewer.playback_failed": {
+      "extractionState": "manual",
+      "comment": "Title on the video failure card.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Playback failed"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wiedergabe fehlgeschlagen"
+          }
+        }
+      }
+    },
+    "a11y.previous_photo": {
+      "extractionState": "manual",
+      "comment": "VoiceOver label for the previous-photo button.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous photo"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vorheriges Foto"
+          }
+        }
+      }
+    },
+    "a11y.next_photo": {
+      "extractionState": "manual",
+      "comment": "VoiceOver label for the next-photo button.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next photo"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nächstes Foto"
+          }
+        }
+      }
+    },
+    "a11y.action": {
+      "extractionState": "manual",
+      "comment": "Fallback VoiceOver label for an icon button.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Action"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aktion"
+          }
+        }
+      }
+    },
+    "infopanel.info": {
+      "extractionState": "manual",
+      "comment": "Info-panel header title.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Info"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Info"
+          }
+        }
+      }
+    },
+    "infopanel.close": {
+      "extractionState": "manual",
+      "comment": "Close button in the info panel.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close info"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Informationen schließen"
+          }
+        }
+      }
+    },
+    "infopanel.name": {
+      "extractionState": "manual",
+      "comment": "Metadata field label: file name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name"
+          }
+        }
+      }
+    },
+    "infopanel.dimensions": {
+      "extractionState": "manual",
+      "comment": "Metadata field label: pixel dimensions.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dimensions"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abmessungen"
+          }
+        }
+      }
+    },
+    "infopanel.size": {
+      "extractionState": "manual",
+      "comment": "Metadata field label: file size.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Size"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Größe"
+          }
+        }
+      }
+    },
+    "infopanel.duration": {
+      "extractionState": "manual",
+      "comment": "Metadata field label: video duration.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Duration"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dauer"
+          }
+        }
+      }
+    },
+    "infopanel.type": {
+      "extractionState": "manual",
+      "comment": "Metadata field label: MIME type.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Typ"
+          }
+        }
+      }
+    },
+    "a11y.photo_library_grid": {
+      "extractionState": "manual",
+      "comment": "VoiceOver label for the main grid.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo library grid"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Foto-Mediathek-Raster"
+          }
+        }
+      }
+    },
+    "a11y.video": {
+      "extractionState": "manual",
+      "comment": "VoiceOver kind for a video cell.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video"
+          }
+        }
+      }
+    },
+    "a11y.photo": {
+      "extractionState": "manual",
+      "comment": "VoiceOver kind for a photo cell.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Foto"
+          }
+        }
+      }
+    },
+    "a11y.show_full_aspect": {
+      "extractionState": "manual",
+      "comment": "Aspect toggle: switch to full aspect.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show full aspect ratio thumbnails"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vorschaubilder im vollen Seitenverhältnis anzeigen"
+          }
+        }
+      }
+    },
+    "a11y.crop_to_squares": {
+      "extractionState": "manual",
+      "comment": "Aspect toggle: switch to square crop.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Crop thumbnails to squares"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vorschaubilder quadratisch zuschneiden"
+          }
+        }
+      }
+    },
+    "empty.no_photos_title": {
+      "extractionState": "manual",
+      "comment": "Empty-library title.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No photos yet"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch keine Fotos"
+          }
+        }
+      }
+    },
+    "empty.no_photos_description": {
+      "extractionState": "manual",
+      "comment": "Empty-library description.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos you upload to Proton will appear here."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fotos, die Sie zu Proton hochladen, erscheinen hier."
+          }
+        }
+      }
+    },
+    "error.load_library_title": {
+      "extractionState": "manual",
+      "comment": "Library load-error title.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t load your library"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ihre Mediathek konnte nicht geladen werden"
+          }
+        }
+      }
+    },
+    "error.auth_api %lld %@": {
+      "extractionState": "manual",
+      "comment": "Sign-in API error. %lld is the API code, %@ the server message (kept as detail).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proton API error %lld: %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proton-API-Fehler %lld: %@"
+          }
+        }
+      }
+    },
+    "error.auth_invalid_response": {
+      "extractionState": "manual",
+      "comment": "Sign-in: malformed/unexpected server response.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unexpected response from Proton."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unerwartete Antwort von Proton."
+          }
+        }
+      }
+    },
+    "error.auth_timed_out": {
+      "extractionState": "manual",
+      "comment": "Sign-in timed out.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign-in timed out. Please try again."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zeitüberschreitung bei der Anmeldung. Bitte erneut versuchen."
+          }
+        }
+      }
+    },
+    "error.auth_decryption_failed": {
+      "extractionState": "manual",
+      "comment": "Sign-in payload could not be decrypted.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not decrypt the sign-in payload."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Anmeldedaten konnten nicht entschlüsselt werden."
+          }
+        }
+      }
+    },
+    "error.auth_cancelled": {
+      "extractionState": "manual",
+      "comment": "Sign-in was cancelled.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign-in was cancelled."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Anmeldung wurde abgebrochen."
+          }
+        }
+      }
+    },
+    "error.album_not_found %@": {
+      "extractionState": "manual",
+      "comment": "Album lookup failed. %@ is the album id.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album %@ was not found."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album %@ wurde nicht gefunden."
+          }
+        }
+      }
+    },
+    "error.album_name_empty": {
+      "extractionState": "manual",
+      "comment": "Validation when creating an album with no name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album name can’t be empty."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Albumname darf nicht leer sein."
+          }
+        }
+      }
+    },
+    "error.album_action_unavailable": {
+      "extractionState": "manual",
+      "comment": "Shown for unsupported album writes. The technical SDK-gap detail (AlbumError.unsupported's `gap`/`operation`) is intentionally NOT shown to users — it stays in the error's associated values for logs/diagnostics.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This action isn’t available yet."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Aktion ist noch nicht verfügbar."
+          }
+        }
+      }
+    },
+    "upload.summary_library": {
+      "extractionState": "manual",
+      "comment": "Upload destination summary: the library.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo Library"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fotomediathek"
+          }
+        }
+      }
+    },
+    "upload.summary_existing_album %@": {
+      "extractionState": "manual",
+      "comment": "Upload destination summary: existing album. %@ is the album name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album “%@”"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album „%@“"
+          }
+        }
+      }
+    },
+    "upload.summary_new_album %@": {
+      "extractionState": "manual",
+      "comment": "Upload destination summary: a new album. %@ is the album name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New album “%@”"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neues Album „%@“"
+          }
+        }
+      }
+    },
+    "upload.state_queued": {
+      "extractionState": "manual",
+      "comment": "Upload queue item state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Queued"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In Warteschlange"
+          }
+        }
+      }
+    },
+    "upload.state_preparing": {
+      "extractionState": "manual",
+      "comment": "Upload queue item state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird vorbereitet …"
+          }
+        }
+      }
+    },
+    "upload.state_hashing": {
+      "extractionState": "manual",
+      "comment": "Upload queue item state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hashing…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hash wird berechnet …"
+          }
+        }
+      }
+    },
+    "upload.state_uploading %lld": {
+      "extractionState": "manual",
+      "comment": "Upload progress. %lld is a percentage.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uploading %lld%%"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird hochgeladen %lld %%"
+          }
+        }
+      }
+    },
+    "upload.state_finalizing": {
+      "extractionState": "manual",
+      "comment": "Upload queue item state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finishing…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wird abgeschlossen …"
+          }
+        }
+      }
+    },
+    "upload.state_completed": {
+      "extractionState": "manual",
+      "comment": "Upload queue item state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fertig"
+          }
+        }
+      }
+    },
+    "upload.state_failed %@": {
+      "extractionState": "manual",
+      "comment": "Upload failed. %@ is the failure reason.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed — %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fehlgeschlagen – %@"
+          }
+        }
+      }
+    },
+    "upload.state_cancelled": {
+      "extractionState": "manual",
+      "comment": "Upload queue item state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelled"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abgebrochen"
+          }
+        }
+      }
+    },
+    "upload.state_paused": {
+      "extractionState": "manual",
+      "comment": "Upload queue item state.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paused"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausiert"
+          }
+        }
+      }
+    },
+    "upload.queue_stats %lld %lld %lld": {
+      "extractionState": "manual",
+      "comment": "Upload queue roll-up: completed/active/failed counts.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld completed · %lld active · %lld failed"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld abgeschlossen · %lld aktiv · %lld fehlgeschlagen"
+          }
+        }
+      }
+    },
+    "error.upload_unsupported_file %@": {
+      "extractionState": "manual",
+      "comment": "Unsupported file type. %@ is the file name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” isn’t a supported photo or video."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@“ ist kein unterstütztes Foto oder Video."
+          }
+        }
+      }
+    },
+    "error.upload_file_missing %@": {
+      "extractionState": "manual",
+      "comment": "File not found. %@ is the file name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” could not be found."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„%@“ konnte nicht gefunden werden."
+          }
+        }
+      }
+    },
+    "error.upload_permission_denied %@": {
+      "extractionState": "manual",
+      "comment": "Permission error. %@ is the file name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No permission to read “%@”."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Berechtigung zum Lesen von „%@“."
+          }
+        }
+      }
+    },
+    "error.upload_album_step %@": {
+      "extractionState": "manual",
+      "comment": "Partial success. %@ is the error message.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uploaded, but the album step failed: %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hochgeladen, aber der Album-Schritt ist fehlgeschlagen: %@"
+          }
+        }
+      }
+    },
+    "error.upload_cancelled": {
+      "extractionState": "manual",
+      "comment": "Upload cancelled.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancelled."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abgebrochen."
+          }
+        }
+      }
+    },
+    "upload.destination_section": {
+      "extractionState": "manual",
+      "comment": "Section header in the destination sheet.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Destination"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ziel"
+          }
+        }
+      }
+    },
+    "upload.destination_library": {
+      "extractionState": "manual",
+      "comment": "Destination option: the library.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mediathek"
+          }
+        }
+      }
+    },
+    "upload.destination_existing_album": {
+      "extractionState": "manual",
+      "comment": "Destination option: an existing album.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Existing Album"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vorhandenes Album"
+          }
+        }
+      }
+    },
+    "upload.destination_new_album": {
+      "extractionState": "manual",
+      "comment": "Destination option: a new album.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Album"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neues Album"
+          }
+        }
+      }
+    },
+    "upload.use_first_as_cover": {
+      "extractionState": "manual",
+      "comment": "Toggle to set the album cover.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use first uploaded photo as album cover"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erstes hochgeladenes Foto als Albumcover verwenden"
+          }
+        }
+      }
+    },
+    "upload.title": {
+      "extractionState": "manual",
+      "comment": "Destination sheet navigation title.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hochladen"
+          }
+        }
+      }
+    },
+    "upload.confirm": {
+      "extractionState": "manual",
+      "comment": "Confirm button in the destination sheet.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hochladen"
+          }
+        }
+      }
+    },
+    "upload.library_caption": {
+      "extractionState": "manual",
+      "comment": "Caption for the library destination.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos will be added to your library."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fotos werden zu Ihrer Mediathek hinzugefügt."
+          }
+        }
+      }
+    },
+    "upload.no_albums": {
+      "extractionState": "manual",
+      "comment": "Caption when there are no albums.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No albums are available."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Alben verfügbar."
+          }
+        }
+      }
+    },
+    "upload.album_label": {
+      "extractionState": "manual",
+      "comment": "Label for the album picker.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album"
+          }
+        }
+      }
+    },
+    "upload.choose_placeholder": {
+      "extractionState": "manual",
+      "comment": "Placeholder option in the album picker.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose…"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auswählen …"
+          }
+        }
+      }
+    },
+    "upload.album_name": {
+      "extractionState": "manual",
+      "comment": "Label/placeholder for the new-album name field.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album name"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Albumname"
+          }
+        }
+      }
+    },
+    "upload.albums_readonly": {
+      "extractionState": "manual",
+      "comment": "Shown when album writes are unsupported.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Albums are currently read-only in this build."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alben sind in diesem Build derzeit schreibgeschützt."
+          }
+        }
+      }
+    },
+    "upload.choose_destination": {
+      "extractionState": "manual",
+      "comment": "Prompt when no destination is chosen yet.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a destination"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ziel auswählen"
+          }
+        }
+      }
+    },
+    "upload.destination_summary %@": {
+      "extractionState": "manual",
+      "comment": "Destination summary line. %@ is the destination description.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Destination: %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ziel: %@"
+          }
+        }
+      }
+    },
+    "upload.queue_title": {
+      "extractionState": "manual",
+      "comment": "Upload queue panel header.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uploads"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uploads"
+          }
+        }
+      }
+    },
+    "upload.clear_finished": {
+      "extractionState": "manual",
+      "comment": "Button to remove finished items.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear finished"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abgeschlossene entfernen"
+          }
+        }
+      }
+    },
+    "upload.no_uploads": {
+      "extractionState": "manual",
+      "comment": "Empty upload queue title.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No uploads"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Uploads"
+          }
+        }
+      }
+    },
+    "upload.empty_description": {
+      "extractionState": "manual",
+      "comment": "Empty upload queue description.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uploads you start from the toolbar appear here."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uploads, die Sie über die Symbolleiste starten, erscheinen hier."
+          }
+        }
+      }
+    },
+    "upload.action_pause": {
+      "extractionState": "manual",
+      "comment": "Per-item pause action.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausieren"
+          }
+        }
+      }
+    },
+    "upload.action_resume": {
+      "extractionState": "manual",
+      "comment": "Per-item resume action.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resume"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fortsetzen"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

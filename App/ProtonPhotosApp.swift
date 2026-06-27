@@ -20,7 +20,7 @@ struct ProtonPhotosApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(after: .newItem) {
-                Button("Upload Photos…") {
+                Button("menu.upload_photos") {
                     NotificationCenter.default.post(
                         name: .protonPhotosUploadPhotos,
                         object: nil,
@@ -28,7 +28,7 @@ struct ProtonPhotosApp: App {
                     )
                 }
                 .keyboardShortcut("u", modifiers: [.command])
-                Button("Upload Folder…") {
+                Button("menu.upload_folder") {
                     NotificationCenter.default.post(
                         name: .protonPhotosUploadFolder,
                         object: nil,
@@ -37,7 +37,7 @@ struct ProtonPhotosApp: App {
                 }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 Divider()
-                Button("Show Uploads") {
+                Button("menu.show_uploads") {
                     NotificationCenter.default.post(
                         name: .protonPhotosShowUploadQueue,
                         object: nil,
@@ -46,11 +46,11 @@ struct ProtonPhotosApp: App {
                 }
             }
             CommandGroup(after: .sidebar) {
-                Button("Toggle Sidebar") {
+                Button("menu.toggle_sidebar") {
                     NotificationCenter.default.post(name: .protonPhotosToggleSidebar, object: nil)
                 }
                 .keyboardShortcut("s", modifiers: [.command, .option])
-                Button("Refresh Library") {
+                Button("menu.refresh_library") {
                     NotificationCenter.default.post(name: .protonPhotosRefreshLibrary, object: nil)
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
@@ -234,12 +234,12 @@ struct RootView: View {
             if let facade = model.facade {
                 MainView(model: model, facade: facade)
             } else {
-                ProtonLoadingView(caption: "Building your library…")
+                ProtonLoadingView(caption: String(localized: "loading.building_library"))
             }
         case let .failed(message):
             BackendErrorView(message: message, retry: { model.retryBackend() }, signOut: { model.signOut() })
         case .preparing, .idle:
-            ProtonLoadingView(caption: "Building your library…")
+            ProtonLoadingView(caption: String(localized: "loading.building_library"))
         }
     }
 }
@@ -254,7 +254,7 @@ private struct BackendErrorView: View {
             Image(systemName: "exclamationmark.icloud")
                 .font(.system(size: 42))
                 .foregroundStyle(ProtonColor.warning)
-            Text("Couldn’t open your library")
+            Text("error.library_open_failed")
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(ProtonColor.textNorm)
             Text(message)
@@ -263,8 +263,8 @@ private struct BackendErrorView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
             HStack(spacing: 10) {
-                Button("Retry", action: retry).buttonStyle(.glassProminent).frame(width: 120)
-                Button("Sign out", action: signOut)
+                Button("action.retry", action: retry).buttonStyle(.glassProminent).frame(width: 120)
+                Button("action.sign_out", action: signOut)
                     .buttonStyle(.plain)
                     .foregroundStyle(ProtonColor.textHint)
             }

@@ -530,7 +530,7 @@ enum DriveBridgeError: LocalizedError {
     case noPhotosShare
     var errorDescription: String? {
         switch self {
-        case .noPhotosShare: "No Photos library was found on this account yet."
+        case .noPhotosShare: String(localized: "error.no_photos_library")
         }
     }
 }

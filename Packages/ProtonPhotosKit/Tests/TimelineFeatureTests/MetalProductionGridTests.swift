@@ -81,7 +81,9 @@ private func uids(_ n: Int) -> [PhotoUID] { (0 ..< n).map { PhotoUID(volumeID: "
     @Test func labelStatesKindAndDate() {
         let video = PhotoItem(uid: PhotoUID(volumeID: "v", nodeID: "1"), captureTime: Date(timeIntervalSince1970: 0), mediaType: "video/quicktime")
         let photo = PhotoItem(uid: PhotoUID(volumeID: "v", nodeID: "2"), captureTime: Date(timeIntervalSince1970: 0), mediaType: "image/jpeg")
-        #expect(MetalGridAccessibilityProvider.label(for: video).hasPrefix("Video, "))
-        #expect(MetalGridAccessibilityProvider.label(for: photo).hasPrefix("Photo, "))
+        // Kind labels are localized via the package catalog; assert against the resolved value so the
+        // test is locale-independent (e.g. German "Foto" vs English "Photo").
+        #expect(MetalGridAccessibilityProvider.label(for: video).hasPrefix(L10n.string("a11y.video") + ", "))
+        #expect(MetalGridAccessibilityProvider.label(for: photo).hasPrefix(L10n.string("a11y.photo") + ", "))
     }
 }

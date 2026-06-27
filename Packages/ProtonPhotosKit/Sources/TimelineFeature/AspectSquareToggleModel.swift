@@ -1,4 +1,5 @@
 import AppKit
+import PhotosCore
 
 // MARK: - AspectSquareToggleModel — presentation model for the aspect/square toolbar toggle
 //
@@ -57,7 +58,7 @@ public enum AspectSquareToggleModel {
 
     /// Accessibility label + tooltip describing the ACTION the button performs from the current mode.
     public static func accessibilityLabel(for currentMode: TileContentDisplayMode) -> String {
-        currentMode == .squareFillCrop ? "Show full aspect ratio thumbnails" : "Crop thumbnails to squares"
+        currentMode == .squareFillCrop ? L10n.string("a11y.show_full_aspect") : L10n.string("a11y.crop_to_squares")
     }
 
     /// The mode the toggle switches to from the current one.

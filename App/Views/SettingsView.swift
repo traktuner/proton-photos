@@ -9,9 +9,9 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             LibrarySettingsTab()
-                .tabItem { Label("Mediathek", systemImage: "photo.on.rectangle.angled") }
+                .tabItem { Label("settings.library_tab", systemImage: "photo.on.rectangle.angled") }
             CacheStatusTab()
-                .tabItem { Label("Entwickler", systemImage: "ladybug") }
+                .tabItem { Label("settings.developer_tab", systemImage: "ladybug") }
         }
         .frame(width: 520, height: 460)
     }
@@ -31,45 +31,42 @@ private struct LibrarySettingsTab: View {
             Section {
                 Toggle(isOn: Binding(get: { offline.offlineEnabled },
                                      set: { offline.setOfflineEnabled($0) })) {
-                    Text("Offline-Mediathek")
+                    Text("settings.offline_library_toggle")
                 }
-                Text("Vorschaubilder werden immer lokal verschlüsselt geladen, damit das Grid funktioniert. "
-                   + "Dieser Schalter ist für zukünftige größere Offline-Derivate reserviert.")
+                Text("settings.offline_library_help")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } header: {
-                Text("Mediathek / Offline")
+                Text("settings.library_offline_section")
             }
 
             Section {
-                Toggle(isOn: $keepOriginals) { Text("Originale & Videos offline behalten") }
+                Toggle(isOn: $keepOriginals) { Text("settings.keep_originals_toggle") }
                     .disabled(true)
-                Text("Demnächst. Aktuell werden Originale und Videos bei Bedarf gestreamt bzw. "
-                   + "geladen und nicht dauerhaft gespeichert.")
+                Text("settings.originals_offline_help")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } header: {
-                Text("Zukünftig")
+                Text("settings.future_section")
             }
 
             Section {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Offline-Cache").font(.system(size: 12, weight: .medium))
+                        Text("settings.offline_cache_label").font(.system(size: 12, weight: .medium))
                         Text(byteString(cacheSize))
                             .font(.system(size: 11).monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
                     Button(role: .destructive) { confirmDelete = true } label: {
-                        if deleting { ProgressView().controlSize(.small) } else { Text("Offline-Cache löschen…") }
+                        if deleting { ProgressView().controlSize(.small) } else { Text("settings.delete_offline_cache_button") }
                     }
                     .disabled(deleting)
                 }
-                Text("Der verschlüsselte Thumbnail-/Preview-Cache bleibt beim Deaktivieren der Offline-Mediathek erhalten und wird nur "
-                   + "über diese Schaltfläche gelöscht.")
+                Text("settings.cache_deletion_help")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -77,12 +74,11 @@ private struct LibrarySettingsTab: View {
         }
         .formStyle(.grouped)
         .task { await refreshSize() }
-        .confirmationDialog("Offline-Cache löschen?", isPresented: $confirmDelete) {
-            Button("Abbrechen", role: .cancel) {}
-            Button("Löschen", role: .destructive) { Task { await delete() } }
+        .confirmationDialog("alert.delete_offline_cache_title", isPresented: $confirmDelete) {
+            Button("action.cancel", role: .cancel) {}
+            Button("action.delete", role: .destructive) { Task { await delete() } }
         } message: {
-            Text("Vorschaubilder und Previews (\(byteString(cacheSize))) werden entfernt. "
-               + "Metadaten und Originale sind nicht betroffen; Thumbnails werden bei Bedarf neu geladen.")
+            Text("alert.delete_offline_cache_message \(byteString(cacheSize))")
         }
     }
 
@@ -109,30 +105,30 @@ private struct CacheStatusTab: View {
     var body: some View {
         Form {
             Section {
-                row("Assets gesamt", "\(status.totalAssets)")
-                row("Metadaten-Zeilen", "\(status.metadataRows)")
-                row("Thumbnails auf Disk", "\(status.thumbnailsOnDisk)")
-                row("Thumbnails fehlend", "\(status.thumbnailsMissing)")
-                row("Disk-Abdeckung", percent(status.thumbnailCoverage))
-            } header: { Text("Abdeckung") }
+                row(String(localized: "settings.dev_total_assets"), "\(status.totalAssets)")
+                row(String(localized: "settings.dev_metadata_rows"), "\(status.metadataRows)")
+                row(String(localized: "settings.dev_thumbnails_on_disk"), "\(status.thumbnailsOnDisk)")
+                row(String(localized: "settings.dev_thumbnails_missing"), "\(status.thumbnailsMissing)")
+                row(String(localized: "settings.dev_disk_coverage"), percent(status.thumbnailCoverage))
+            } header: { Text("settings.coverage_section") }
 
             Section {
-                row("RAM dekodiert (≤)", "\(status.ramDecodedEstimate)")
-                row("Prefetch-Warteschlange", "\(status.prefetchQueueDepth)")
-                row("Aktive Prefetch-Jobs", "\(status.activePrefetchJobs)")
-                row("Prefetch-Pause-Grund", status.prefetchPausedReason)
-                row("Fehlgeschlagene Thumbnails", "\(status.failedThumbnailCount)")
-            } header: { Text("Prefetch") }
+                row(String(localized: "settings.dev_ram_decoded"), "\(status.ramDecodedEstimate)")
+                row(String(localized: "settings.dev_prefetch_queue"), "\(status.prefetchQueueDepth)")
+                row(String(localized: "settings.dev_active_prefetch"), "\(status.activePrefetchJobs)")
+                row(String(localized: "settings.dev_prefetch_pause_reason"), status.prefetchPausedReason)
+                row(String(localized: "settings.dev_failed_thumbnails"), "\(status.failedThumbnailCount)")
+            } header: { Text("settings.prefetch_section") }
 
             Section {
-                row("Cache-Größe (Disk)", byteString(status.cacheSizeBytes))
-                row("Preview-Cache (Disk)", byteString(status.previewCacheSizeBytes))
-                row("Letzter Fehler", status.lastError ?? "—")
-            } header: { Text("Speicher") }
+                row(String(localized: "settings.dev_cache_size_disk"), byteString(status.cacheSizeBytes))
+                row(String(localized: "settings.dev_preview_cache_disk"), byteString(status.previewCacheSizeBytes))
+                row(String(localized: "settings.dev_last_error"), status.lastError ?? "—")
+            } header: { Text("settings.storage_section") }
 
             Section {
                 Button { Task { await refresh() } } label: {
-                    if refreshing { ProgressView().controlSize(.small) } else { Text("Aktualisieren") }
+                    if refreshing { ProgressView().controlSize(.small) } else { Text("action.refresh") }
                 }
             }
         }

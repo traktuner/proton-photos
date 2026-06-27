@@ -15,16 +15,16 @@ public enum PhotoTag: Int, Sendable, CaseIterable, Codable {
 
     public var title: String {
         switch self {
-        case .favorites: "Favorites"
-        case .screenshots: "Screenshots"
-        case .videos: "Videos"
-        case .livePhotos: "Live Photos"
-        case .motionPhotos: "Motion"
-        case .selfies: "Selfies"
-        case .portraits: "Portraits"
-        case .bursts: "Bursts"
-        case .panoramas: "Panoramas"
-        case .raw: "RAW"
+        case .favorites: L10n.string("tag.favorites")
+        case .screenshots: L10n.string("tag.screenshots")
+        case .videos: L10n.string("tag.videos")
+        case .livePhotos: L10n.string("tag.live_photos")
+        case .motionPhotos: L10n.string("tag.motion")
+        case .selfies: L10n.string("tag.selfies")
+        case .portraits: L10n.string("tag.portraits")
+        case .bursts: L10n.string("tag.bursts")
+        case .panoramas: L10n.string("tag.panoramas")
+        case .raw: L10n.string("tag.raw")
         }
     }
 

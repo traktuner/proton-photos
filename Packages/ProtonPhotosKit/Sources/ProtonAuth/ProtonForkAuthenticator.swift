@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import PhotosCore
 
 public enum ProtonAuthError: LocalizedError {
     case apiError(code: Int, message: String)
@@ -10,11 +11,12 @@ public enum ProtonAuthError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case let .apiError(code, message): "Proton API error \(code): \(message)"
-        case .invalidResponse: "Unexpected response from Proton."
-        case .timedOut: "Sign-in timed out. Please try again."
-        case .payloadDecryptionFailed: "Could not decrypt the sign-in payload."
-        case .cancelled: "Sign-in was cancelled."
+        // The API code + server message are kept as interpolated detail inside a localized frame.
+        case let .apiError(code, message): L10n.string("error.auth_api \(code) \(message)")
+        case .invalidResponse: L10n.string("error.auth_invalid_response")
+        case .timedOut: L10n.string("error.auth_timed_out")
+        case .payloadDecryptionFailed: L10n.string("error.auth_decryption_failed")
+        case .cancelled: L10n.string("error.auth_cancelled")
         }
     }
 }

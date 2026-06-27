@@ -46,9 +46,9 @@ public struct UploadDestination: Sendable, Equatable {
     /// Human-readable one-line summary for the destination UI.
     public var summary: String {
         switch target {
-        case .library: return "Photo Library"
-        case let .existingAlbum(_, title): return "Album “\(title)”"
-        case let .newAlbum(name): return "New album “\(name)”"
+        case .library: return L10n.string("upload.summary_library")
+        case let .existingAlbum(_, title): return L10n.string("upload.summary_existing_album \(title)")
+        case let .newAlbum(name): return L10n.string("upload.summary_new_album \(name)")
         }
     }
 }
@@ -84,15 +84,15 @@ public enum UploadItemState: Sendable, Equatable {
     /// Short label for the queue UI.
     public var label: String {
         switch self {
-        case .queued: return "Queued"
-        case .preparing: return "Preparing…"
-        case .hashing: return "Hashing…"
-        case let .uploading(p): return "Uploading \(Int(p * 100))%"
-        case .finalizing: return "Finishing…"
-        case .completed: return "Done"
-        case let .failed(message): return "Failed — \(message)"
-        case .cancelled: return "Cancelled"
-        case .paused: return "Paused"
+        case .queued: return L10n.string("upload.state_queued")
+        case .preparing: return L10n.string("upload.state_preparing")
+        case .hashing: return L10n.string("upload.state_hashing")
+        case let .uploading(p): return L10n.string("upload.state_uploading \(Int(p * 100))")
+        case .finalizing: return L10n.string("upload.state_finalizing")
+        case .completed: return L10n.string("upload.state_completed")
+        case let .failed(message): return L10n.string("upload.state_failed \(message)")
+        case .cancelled: return L10n.string("upload.state_cancelled")
+        case .paused: return L10n.string("upload.state_paused")
         }
     }
 }
@@ -189,7 +189,7 @@ public struct UploadQueueStats: Sendable, Equatable {
     }
 
     public var summaryText: String {
-        "\(completed) completed · \(active) active · \(failed) failed"
+        L10n.string("upload.queue_stats \(completed) \(active) \(failed)")
     }
 }
 
@@ -271,12 +271,12 @@ public enum UploadError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case let .unsupportedFile(name): "“\(name)” isn’t a supported photo or video."
-        case let .fileMissing(name): "“\(name)” could not be found."
-        case let .permissionDenied(name): "No permission to read “\(name)”."
+        case let .unsupportedFile(name): L10n.string("error.upload_unsupported_file \(name)")
+        case let .fileMissing(name): L10n.string("error.upload_file_missing \(name)")
+        case let .permissionDenied(name): L10n.string("error.upload_permission_denied \(name)")
         case let .backend(message): message
-        case let .albumStep(message): "Uploaded, but album step failed: \(message)"
-        case .cancelled: "Cancelled."
+        case let .albumStep(message): L10n.string("error.upload_album_step \(message)")
+        case .cancelled: L10n.string("error.upload_cancelled")
         }
     }
 }

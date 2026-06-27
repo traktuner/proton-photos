@@ -49,8 +49,11 @@ final class ViewerTitleFormatterTests: XCTestCase {
         XCTAssertEqual(title.line2, "1 of 10")
     }
 
-    func testFotoFallbackWhenNoDateOrFilename() {
-        let title = ViewerTitleFormatter.make(captureDate: nil, index: 0, total: 10, locale: english)
-        XCTAssertEqual(title.line1, "Foto")
+    func testFallbackTitleIsLocalizedWhenNoDateOrFilename() {
+        // The date-less/filename-less fallback now respects the locale: "Photo" (en) / "Foto" (de).
+        let en = ViewerTitleFormatter.make(captureDate: nil, index: 0, total: 10, locale: english)
+        XCTAssertEqual(en.line1, "Photo")
+        let de = ViewerTitleFormatter.make(captureDate: nil, index: 0, total: 10, locale: german)
+        XCTAssertEqual(de.line1, "Foto")
     }
 }

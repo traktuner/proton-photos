@@ -33,22 +33,22 @@ public enum VideoPlaybackError: Error, Equatable, Sendable {
     /// Anything not otherwise classified — `detail` carries the original description.
     case unknown(detail: String?)
 
-    /// Readable, user-facing message (German UI, matching the rest of the viewer).
+    /// Readable, user-facing message, localized via the package String Catalog.
     public var userMessage: String {
         switch self {
-        case .notVideo: return "Dies ist kein Video."
-        case .metadataUnavailable: return "Video-Informationen konnten nicht geladen werden."
-        case .unsupportedCodec: return "Dieses Videoformat wird nicht unterstützt."
-        case .streamURLUnavailable: return "Für dieses Video ist kein Stream verfügbar."
-        case .rangeNotSupported: return "Dieses Video kann nicht gestreamt werden."
-        case .decryptionFailed: return "Das Video konnte nicht entschlüsselt werden."
-        case .networkUnavailable: return "Keine Netzwerkverbindung."
-        case .authExpired: return "Die Sitzung ist abgelaufen. Bitte erneut anmelden."
-        case .quotaOrRateLimited: return "Zu viele Anfragen. Bitte später erneut versuchen."
-        case .localFileError: return "Die Videodatei konnte nicht gelesen werden."
-        case .playerItemFailed: return "Das Video konnte nicht abgespielt werden."
-        case .timedOut: return "Zeitüberschreitung beim Laden des Videos."
-        case .unknown: return "Das Video konnte nicht abgespielt werden."
+        case .notVideo: return L10n.string("error.video.not_a_video")
+        case .metadataUnavailable: return L10n.string("error.video.metadata_unavailable")
+        case .unsupportedCodec: return L10n.string("error.video.unsupported_codec")
+        case .streamURLUnavailable: return L10n.string("error.video.stream_unavailable")
+        case .rangeNotSupported: return L10n.string("error.video.range_not_supported")
+        case .decryptionFailed: return L10n.string("error.video.decryption_failed")
+        case .networkUnavailable: return L10n.string("error.video.network_unavailable")
+        case .authExpired: return L10n.string("error.video.auth_expired")
+        case .quotaOrRateLimited: return L10n.string("error.video.quota_rate_limited")
+        case .localFileError: return L10n.string("error.video.local_file_error")
+        case .playerItemFailed: return L10n.string("error.video.player_item_failed")
+        case .timedOut: return L10n.string("error.video.timed_out")
+        case .unknown: return L10n.string("error.video.unknown")
         }
     }
 

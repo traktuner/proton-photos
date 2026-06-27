@@ -29,15 +29,15 @@ struct InfoPanelView: View {
 
     private var header: some View {
         HStack {
-            Text("Info")
+            Text(L10n.string("infopanel.info"))
                 .font(.headline)
             Spacer()
             Button(action: onClose) {
-                Label("Close info", systemImage: "xmark")
+                Label(L10n.string("infopanel.close"), systemImage: "xmark")
                     .labelStyle(.iconOnly)
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("Close info")
+            .accessibilityLabel(L10n.string("infopanel.close"))
         }
         .padding(.horizontal, 20)
         .padding(.top, 18)
@@ -78,19 +78,19 @@ struct InfoPanelView: View {
     private var fileSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let name = metadata?.filename, !name.isEmpty {
-                row("Name", name)
+                row(L10n.string("infopanel.name"), name)
             }
             if let w = metadata?.pixelWidth, let h = metadata?.pixelHeight {
-                row("Dimensions", "\(w) × \(h)  (\(megapixels(w, h)) MP)")
+                row(L10n.string("infopanel.dimensions"), "\(w) × \(h)  (\(megapixels(w, h)) MP)")
             }
             if let size = metadata?.fileSize {
-                row("Size", ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
+                row(L10n.string("infopanel.size"), ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
             }
             if let d = metadata?.durationSeconds, d > 0 {
-                row("Duration", durationString(d))
+                row(L10n.string("infopanel.duration"), durationString(d))
             }
             if let mime = metadata?.mimeType, !mime.isEmpty {
-                row("Type", mime)
+                row(L10n.string("infopanel.type"), mime)
             }
             if metadata == nil {
                 ProgressView()

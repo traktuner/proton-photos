@@ -70,17 +70,21 @@ public struct AlbumCapabilities: Sendable, Equatable {
 /// signal for "the SDK has no album API and no encrypted-write HTTP path exists yet" — never a crash,
 /// never silently downgraded to a library-only upload.
 public enum AlbumError: LocalizedError, Equatable {
-    /// The operation isn't implemented by the wired backend; `gap` names the exact missing capability.
+    /// The operation isn't implemented by the wired backend. `operation`/`gap` are developer-facing
+    /// diagnostics (the exact missing capability + a stable operation token used by tests/logs) and are
+    /// deliberately NOT surfaced in `errorDescription` — users see a clean, localized message instead.
     case unsupported(operation: String, gap: String)
     case notFound(AlbumID)
     case backend(String)
 
     public var errorDescription: String? {
         switch self {
-        case let .unsupported(operation, gap):
-            "“\(operation)” isn’t available yet: \(gap)"
+        case .unsupported:
+            // The technical SDK-gap prose (operation/gap) stays in the associated values for
+            // diagnostics; the user sees only this localized line.
+            L10n.string("error.album_action_unavailable")
         case let .notFound(id):
-            "Album \(id) was not found."
+            L10n.string("error.album_not_found \(id)")
         case let .backend(message):
             message
         }

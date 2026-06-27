@@ -3,10 +3,11 @@ import Foundation
 /// Derives the Apple-Photos-style two-line center title for the viewer top bar.
 ///
 /// Priority (per the UX spec):
-///  - Line 1: POI / location name if available, else capture date/time, else filename, else "Foto".
+///  - Line 1: POI / location name if available, else capture date/time, else filename, else a
+///    localized "Photo"/"Foto" fallback.
 ///  - Line 2: when a location is on line 1 → "date/time · position"; otherwise → just the position
-///    ("4.454 von 35.666"). When there is no date at all, line 1 falls back to filename/"Foto" and
-///    line 2 is the position.
+///    ("4.454 von 35.666"). When there is no date at all, line 1 falls back to filename/the localized
+///    "Photo"/"Foto" fallback and line 2 is the position.
 ///
 /// Pure value type so it is unit-testable without any view layer.
 public struct ViewerTitle: Equatable, Sendable {
@@ -48,7 +49,9 @@ public enum ViewerTitleFormatter {
         if let filename, !filename.isEmpty {
             return ViewerTitle(line1: filename, line2: position)
         }
-        return ViewerTitle(line1: "Foto", line2: position)
+        // Localized via the same `locale` parameter the rest of this formatter honors (kept locale-driven
+        // rather than bundle-driven so the formatter stays deterministically unit-testable per locale).
+        return ViewerTitle(line1: isGerman(locale) ? "Foto" : "Photo", line2: position)
     }
 
     /// "17. Juni 2026 um 16:53:58" for German locales, otherwise the locale's natural date+time string.

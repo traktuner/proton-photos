@@ -238,6 +238,17 @@ final class UploadManagerTests: XCTestCase {
         XCTAssertFalse(UploadQueuePresentation.canClearFinished(stats))
         stats.completed = 1
         XCTAssertTrue(UploadQueuePresentation.canClearFinished(stats))
-        XCTAssertEqual(stats.summaryText, "1 completed · 0 active · 0 failed")
+        // summaryText is localized via the package catalog (compiled by Xcode; under plain SwiftPM the
+        // raw key + interpolated counts is returned). Either way the three counts — completed=1,
+        // active=0, failed=0 — must appear in that order. Asserting their order keeps the test
+        // independent of language and of whether the catalog is compiled.
+        let s = stats.summaryText
+        var cursor = s.startIndex
+        for expected in ["1", "0", "0"] {
+            guard let r = s.range(of: expected, range: cursor..<s.endIndex) else {
+                return XCTFail("summaryText missing count \(expected) in order: \(s)")
+            }
+            cursor = r.upperBound
+        }
     }
 }

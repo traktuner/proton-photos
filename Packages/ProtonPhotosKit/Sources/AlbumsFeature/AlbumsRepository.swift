@@ -31,7 +31,7 @@ public actor AlbumsRepository: AlbumManaging {
     public func createAlbum(name: String) async throws -> AlbumID {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            throw AlbumError.backend("Album name can’t be empty.")
+            throw AlbumError.backend(L10n.string("error.album_name_empty"))
         }
         guard backend.capabilities.canCreate else {
             throw AlbumError.unsupported(

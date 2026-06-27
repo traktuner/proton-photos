@@ -1,0 +1,67 @@
+# Localization sync (DISABLED SKELETON)
+#
+# This workflow is intentionally inert: it is manual-trigger only (`workflow_dispatch`) and never runs on
+# push/PR, contains NO credentials, and its real Crowdin/XLIFF steps are commented out. It documents the
+# intended round-trip so it can be enabled later. See docs/localization.md.
+#
+# To enable:
+#   1. Add a repository secret `CROWDIN_PERSONAL_TOKEN` (and `CROWDIN_PROJECT_ID`).
+#   2. Uncomment the real steps below and remove the placeholder step.
+#   3. Optionally add `push`/`schedule` triggers.
+#
+# Source of truth in this repo: the two String Catalogs
+#   - App/Localizable.xcstrings
+#   - Packages/ProtonPhotosKit/Sources/PhotosCore/Resources/Localizable.xcstrings
+# Round-trip to translators/Crowdin goes through Xcode localization export/import (XLIFF / .xcloc).
+
+name: Localization (disabled)
+
+on:
+  workflow_dispatch: {}   # manual only — never runs automatically, never on push/PR
+
+permissions:
+  contents: read
+
+jobs:
+  info:
+    name: Localization sync (placeholder — disabled)
+    runs-on: macos-latest
+    steps:
+      - name: Explain that this workflow is a disabled skeleton
+        run: |
+          echo "This is a disabled localization skeleton. No translation sync runs."
+          echo "Enable it by following the comments in .github/workflows/localization.yml and docs/localization.md."
+
+      # --- Real round-trip (commented out until Crowdin is adopted) -------------------------------------
+      #
+      # - uses: actions/checkout@v4
+      #
+      # # Export every target language from the String Catalogs to XLIFF (.xcloc per language).
+      # - name: Export localizations (XLIFF)
+      #   run: |
+      #     xcodebuild -exportLocalizations \
+      #       -project ProtonPhotos.xcodeproj \
+      #       -localizationPath ./localization-export \
+      #       -exportLanguage de
+      #
+      # # Push the source strings / pull translations via the Crowdin action.
+      # # Requires secrets CROWDIN_PROJECT_ID and CROWDIN_PERSONAL_TOKEN.
+      # - name: Crowdin upload sources + download translations
+      #   uses: crowdin/github-action@v2
+      #   with:
+      #     upload_sources: true
+      #     download_translations: true
+      #   env:
+      #     CROWDIN_PROJECT_ID: ${{ secrets.CROWDIN_PROJECT_ID }}
+      #     CROWDIN_PERSONAL_TOKEN: ${{ secrets.CROWDIN_PERSONAL_TOKEN }}
+      #
+      # # Import translated XLIFF back into the .xcstrings catalogs and open a PR.
+      # - name: Import localizations (XLIFF → .xcstrings)
+      #   run: |
+      #     xcodebuild -importLocalizations \
+      #       -project ProtonPhotos.xcodeproj \
+      #       -localizationPath ./localization-import/de.xcloc
+      # - uses: peter-evans/create-pull-request@v6
+      #   with:
+      #     title: "Update translations"
+      #     branch: chore/translations

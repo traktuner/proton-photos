@@ -19,7 +19,7 @@ final class MetalGridAccessibilityProvider {
         self.coordinator = coordinator
         host.setAccessibilityElement(true)
         host.setAccessibilityRole(.group)
-        host.setAccessibilityLabel("Photo library grid")
+        host.setAccessibilityLabel(L10n.string("a11y.photo_library_grid"))
     }
 
     // The full element rebuild (a framePlan + one NSAccessibilityElement per visible cell + coordinate
@@ -82,7 +82,7 @@ final class MetalGridAccessibilityProvider {
 
     /// VoiceOver label for a photo: kind + capture date.
     static func label(for item: PhotoItem) -> String {
-        let kind = item.isVideo ? "Video" : "Photo"
+        let kind = item.isVideo ? L10n.string("a11y.video") : L10n.string("a11y.photo")
         return "\(kind), \(labelFormatter.string(from: item.captureTime))"
     }
 }

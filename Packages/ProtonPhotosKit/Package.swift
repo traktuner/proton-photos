@@ -6,6 +6,9 @@ import PackageDescription
 // (HttpClient/AccountClient/Bridge) lives in the app target instead.
 let package = Package(
     name: "ProtonPhotosKit",
+    // Source language for every package String Catalog. Required by SwiftPM before a target may carry
+    // localized resources; unsupported languages fall back to this (English).
+    defaultLocalization: "en",
     platforms: [.macOS("26.0")],
     products: [
         .library(name: "PhotosCore", targets: ["PhotosCore"]),
@@ -20,7 +23,11 @@ let package = Package(
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
     ],
     targets: [
-        .target(name: "PhotosCore"),
+        // PhotosCore owns the package-wide localization catalog (Resources/Localizable.xcstrings),
+        // resolved via `L10n` / `Bundle.module`. Every package module depends on PhotosCore, so this is
+        // the single source of truth for package strings.
+        .target(name: "PhotosCore", resources: [.process("Resources")]),
+        .testTarget(name: "PhotosCoreTests", dependencies: ["PhotosCore"]),
         .target(name: "DesignSystem", dependencies: ["PhotosCore"], resources: [.process("Resources")]),
         .target(name: "ProtonAuth", dependencies: ["PhotosCore"]),
         .testTarget(name: "ProtonAuthTests", dependencies: ["ProtonAuth"]),

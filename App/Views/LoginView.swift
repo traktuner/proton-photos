@@ -34,7 +34,7 @@ struct LoginView: View {
             Text("Proton Photos")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(ProtonColor.textNorm)
-            Text("Your photos, end-to-end encrypted.")
+            Text("login.tagline")
                 .font(.system(size: 13))
                 .foregroundStyle(ProtonColor.textWeak)
         }
@@ -49,7 +49,7 @@ struct LoginView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(ProtonColor.textWeak)
                     .multilineTextAlignment(.center)
-                Button("Cancel") { model.cancelSignIn() }
+                Button("action.cancel") { model.cancelSignIn() }
                     .buttonStyle(.plain)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(ProtonColor.textHint)
@@ -59,7 +59,7 @@ struct LoginView: View {
                 Button {
                     model.signIn()
                 } label: {
-                    Text("Sign in with Proton")
+                    Text("login.sign_in_button")
                 }
                 .buttonStyle(.glassProminent)
 
@@ -70,7 +70,7 @@ struct LoginView: View {
                         .multilineTextAlignment(.center)
                 }
 
-                Text("Opens your browser to sign in securely. No password is ever entered in this app.")
+                Text("login.help_text")
                     .font(.system(size: 11))
                     .foregroundStyle(ProtonColor.textHint)
                     .multilineTextAlignment(.center)
@@ -79,7 +79,7 @@ struct LoginView: View {
     }
 
     private var footer: some View {
-        Text("Proton AG · Encrypted by default")
+        Text("login.footer")
             .font(.system(size: 11))
             .foregroundStyle(ProtonColor.textHint)
     }

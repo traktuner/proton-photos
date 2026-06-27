@@ -118,7 +118,7 @@ public struct PhotoViewerView: View {
         VStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 30))
-            Text("Wiedergabe fehlgeschlagen")
+            Text(L10n.string("viewer.playback_failed"))
                 .font(.headline)
             Text(error.userMessage)
                 .font(.subheadline)
@@ -126,7 +126,7 @@ public struct PhotoViewerView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
             if error.isRetryable {
-                Button("Erneut versuchen") { model.retry() }
+                Button(L10n.string("action.retry")) { model.retry() }
                     .buttonStyle(.borderedProminent)
                     .padding(.top, 4)
             }
@@ -212,9 +212,9 @@ public struct PhotoViewerView: View {
 
     private func accessibilityTitle(for symbol: String) -> String {
         switch symbol {
-        case "chevron.left": "Previous photo"
-        case "chevron.right": "Next photo"
-        default: "Action"
+        case "chevron.left": L10n.string("a11y.previous_photo")
+        case "chevron.right": L10n.string("a11y.next_photo")
+        default: L10n.string("a11y.action")
         }
     }
 }

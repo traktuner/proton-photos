@@ -146,9 +146,9 @@ public struct TimelineView: View {
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label("No photos yet", systemImage: "photo.on.rectangle.angled")
+            Label(L10n.string("empty.no_photos_title"), systemImage: "photo.on.rectangle.angled")
         } description: {
-            Text("Photos you upload to Proton will appear here.")
+            Text(L10n.string("empty.no_photos_description"))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(timelineSurfaceBackground)
@@ -156,12 +156,12 @@ public struct TimelineView: View {
 
     private func errorState(_ message: String) -> some View {
         ContentUnavailableView {
-            Label("Couldn’t load your library", systemImage: "exclamationmark.triangle")
+            Label(L10n.string("error.load_library_title"), systemImage: "exclamationmark.triangle")
         } description: {
             Text(message)
                 .textSelection(.enabled)
         } actions: {
-            Button("Retry") { Task { await model.load() } }
+            Button(L10n.string("action.retry")) { Task { await model.load() } }
                 .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

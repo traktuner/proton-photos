@@ -83,7 +83,7 @@ final class AppModel {
 
     func signIn() {
         signInTask?.cancel()
-        auth = .authenticating(status: "Requesting sign-in link…")
+        auth = .authenticating(status: String(localized: "auth.requesting_signin_link"))
         signInTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -130,7 +130,7 @@ final class AppModel {
         // Install the per-account encrypted-cache key derived from the restored session (and purge any legacy
         // plaintext cache) before the grid renders or the crawl begins.
         OfflineLibraryManager.shared.configure(session: session)
-        backend = .preparing("Building your library…")
+        backend = .preparing(String(localized: "loading.building_library"))
         backendTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -149,9 +149,9 @@ final class AppModel {
 
     private func apply(_ progress: ProtonForkAuthenticator.Progress) {
         switch progress {
-        case .requestingLink: auth = .authenticating(status: "Requesting sign-in link…")
-        case .waitingForBrowser: auth = .authenticating(status: "Waiting for you to sign in in your browser…")
-        case .finalizing: auth = .authenticating(status: "Finishing sign-in…")
+        case .requestingLink: auth = .authenticating(status: String(localized: "auth.requesting_signin_link"))
+        case .waitingForBrowser: auth = .authenticating(status: String(localized: "auth.waiting_for_browser"))
+        case .finalizing: auth = .authenticating(status: String(localized: "auth.finishing_signin"))
         }
     }
 }

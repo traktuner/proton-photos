@@ -4,6 +4,9 @@ options:
   deploymentTarget:
     macOS: "26.0"
   createIntermediateGroups: true
+  # English is the source/development language; the App String Catalog (App/Localizable.xcstrings)
+  # adds German. Unsupported system languages fall back to English automatically.
+  developmentLanguage: en
 
 settings:
   base:

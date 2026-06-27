@@ -22,12 +22,12 @@ public struct UploadDestinationSheet: View {
     public var body: some View {
         NavigationStack {
             Form {
-                Section("Destination") {
-                    Picker("Destination", selection: $mode) {
-                        Text("Library").tag(Mode.library)
-                        Text("Existing Album").tag(Mode.existing)
+                Section(L10n.string("upload.destination_section")) {
+                    Picker(L10n.string("upload.destination_section"), selection: $mode) {
+                        Text(L10n.string("upload.destination_library")).tag(Mode.library)
+                        Text(L10n.string("upload.destination_existing_album")).tag(Mode.existing)
                             .disabled(!coordinator.canAddToAlbum)
-                        Text("New Album").tag(Mode.newAlbum)
+                        Text(L10n.string("upload.destination_new_album")).tag(Mode.newAlbum)
                             .disabled(!coordinator.canCreateAlbum)
                     }
                     .pickerStyle(.radioGroup)
@@ -37,7 +37,7 @@ public struct UploadDestinationSheet: View {
 
                 if mode != .library, coordinator.canSetAlbumCover {
                     Section {
-                        Toggle("Use first uploaded photo as album cover", isOn: $useFirstAsCover)
+                        Toggle(L10n.string("upload.use_first_as_cover"), isOn: $useFirstAsCover)
                             .toggleStyle(.checkbox)
                     }
                 }
@@ -49,14 +49,14 @@ public struct UploadDestinationSheet: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle("Upload")
+            .navigationTitle(L10n.string("upload.title"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { coordinator.cancelDestination(); dismiss() }
+                    Button(L10n.string("action.cancel")) { coordinator.cancelDestination(); dismiss() }
                         .keyboardShortcut(.cancelAction)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Upload") { confirm(); dismiss() }
+                    Button(L10n.string("upload.confirm")) { confirm(); dismiss() }
                         .keyboardShortcut(.defaultAction)
                         .disabled(!canConfirm)
                 }
@@ -68,16 +68,16 @@ public struct UploadDestinationSheet: View {
     @ViewBuilder private var destinationDetails: some View {
         switch mode {
         case .library:
-            caption("Photos will be added to your library.")
+            caption(L10n.string("upload.library_caption"))
         case .existing:
             if !coordinator.canAddToAlbum {
                 readOnlyAlbumsMessage
             } else if coordinator.albums.isEmpty {
-                caption("No albums are available.")
+                caption(L10n.string("upload.no_albums"))
             } else {
-                LabeledContent("Album") {
-                    Picker("Album", selection: $selectedAlbumID) {
-                        Text("Choose…").tag(String?.none)
+                LabeledContent(L10n.string("upload.album_label")) {
+                    Picker(L10n.string("upload.album_label"), selection: $selectedAlbumID) {
+                        Text(L10n.string("upload.choose_placeholder")).tag(String?.none)
                         ForEach(coordinator.albums) { album in
                             Text(album.title).tag(String?.some(album.id))
                         }
@@ -89,8 +89,8 @@ public struct UploadDestinationSheet: View {
             if !coordinator.canCreateAlbum {
                 readOnlyAlbumsMessage
             } else {
-                LabeledContent("Album name") {
-                    TextField("Album name", text: $newAlbumName)
+                LabeledContent(L10n.string("upload.album_name")) {
+                    TextField(L10n.string("upload.album_name"), text: $newAlbumName)
                         .textFieldStyle(.roundedBorder)
                 }
             }
@@ -98,7 +98,7 @@ public struct UploadDestinationSheet: View {
     }
 
     private var readOnlyAlbumsMessage: some View {
-        Label("Albums are currently read-only in this build.", systemImage: "lock")
+        Label(L10n.string("upload.albums_readonly"), systemImage: "lock")
             .font(.footnote)
             .foregroundStyle(.secondary)
     }
@@ -121,9 +121,9 @@ public struct UploadDestinationSheet: View {
 
     private var summary: String {
         if let destination {
-            "Destination: \(destination.summary)"
+            L10n.string("upload.destination_summary \(destination.summary)")
         } else {
-            "Choose a destination"
+            L10n.string("upload.choose_destination")
         }
     }
 
