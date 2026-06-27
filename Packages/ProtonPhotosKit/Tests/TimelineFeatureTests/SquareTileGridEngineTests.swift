@@ -103,42 +103,44 @@ import CoreGraphics
         return max(0, h / 2 - viewport.height / 2)
     }
 
-    // 6/7/8. The grid fills the viewport width: a full visible row spans column 0…columns-1 and its right
-    // edge reaches the width (no black left, no black right when slots exist).
-    @Test func visibleQueryCoversBothEdgesAndFillsWidth() {
+    // 6/7/8. SIZE-BASED: the grid is LEADING-aligned — a full visible row starts at column 0 (x≈0) and runs to
+    // column count-1; the trailing edge carries a BOUNDED reveal margin (< one pitch), never a missing column.
+    @Test func visibleQueryIsLeadingAlignedWithBoundedTrailingMargin() {
         for level in 0 ..< engine().levelCount {
             let plan = settledPlan(level: level, scrollY: midScroll(level: level))   // mid-library → full rows
             let rows = fullRows(plan)
             #expect(!rows.isEmpty, "expected at least one full row at level \(level)")
             let row = rows.values.first!.sorted { $0.column < $1.column }
             #expect(row.first!.column == 0)                                  // left edge present
-            #expect(row.last!.column == plan.columns - 1)                    // right edge present
-            #expect(abs(row.first!.slotRect.minX) < 1.0)                     // left edge at x≈0
-            #expect(abs(row.last!.slotRect.maxX - width) < 1.0)              // right edge at x≈width (no black strip)
+            #expect(row.last!.column == plan.columns - 1)                    // last filled column present
+            #expect(abs(row.first!.slotRect.minX) < 1.0)                     // leading-aligned: left edge at x≈0
+            #expect(row.last!.slotRect.maxX <= width + 1.0)                  // never overflows the viewport
+            #expect(width - row.last!.slotRect.maxX < plan.pitch)            // trailing reveal margin < one column (no black gap)
         }
     }
 
-    // 9. Window resize is RESOLUTION-INDEPENDENT: a level keeps the SAME column count at every width (tiles
-    // grow on a wider viewport), the grid still fills the width, and adjacent slots never overlap.
-    @Test func windowResizeKeepsColumnsAndGrowsTiles() {
+    // 9. SIZE-BASED window resize: a level keeps a CONSTANT slot/photo size at every width; the COLUMN COUNT
+    // adapts (more columns on a wider viewport — no breathing). Leading-aligned, bounded trailing margin, no overlap.
+    @Test func windowResizeKeepsSlotSizeAndAddsColumns() {
         let e = engine()
         var sides: [CGFloat] = []
-        var columnsSeen: Set<Int> = []
+        var columnsSeen: [Int] = []
         for w in [CGFloat(600), 900, 1280, 1920] {
             let plan = e.framePlan(level: 2, viewportSize: CGSize(width: w, height: 900), scrollOffset: CGPoint(x: 0, y: 3000), overscan: 0)
-            #expect(plan.columns == e.metrics(level: 2).nominalColumns, "level 2 must keep its nominalColumns at width \(w)")
             #expect(plan.contentSize.width == w)
-            columnsSeen.insert(plan.columns)
+            columnsSeen.append(plan.columns)
             sides.append(plan.slotSide)
             if let row = fullRows(plan).values.first?.sorted(by: { $0.column < $1.column }) {
                 for i in 1 ..< row.count {
                     #expect(row[i].slotRect.minX - row[i - 1].slotRect.maxX >= plan.gap - eps) // no overlap
                 }
-                #expect(abs(row.last!.slotRect.maxX - w) < 1.0)                                 // still fills width
+                #expect(row.last!.slotRect.maxX <= w + 1.0)                                     // never overflows
+                #expect(w - row.last!.slotRect.maxX < plan.pitch)                               // bounded trailing margin
             }
         }
-        #expect(columnsSeen.count == 1, "column count must NOT change with width (resolution independent)")
-        for i in 1 ..< sides.count { #expect(sides[i] > sides[i - 1], "tiles must grow as the viewport widens") }
+        for i in 1 ..< sides.count { #expect(abs(sides[i] - sides[0]) < eps, "slot size must stay CONSTANT across widths (no breathing)") }
+        #expect(columnsSeen.first! < columnsSeen.last!, "column count must grow with width")
+        for i in 1 ..< columnsSeen.count { #expect(columnsSeen[i] >= columnsSeen[i - 1], "columns monotone non-decreasing in width") }
     }
 
     // 10. Hit testing uses the SQUARE slot rect — a point in the slot corner that an aspectFit inner rect
@@ -164,12 +166,10 @@ import CoreGraphics
     @Test func zoomUsesMetrics() {
         let e = engine()
         let w = viewport.width
-        func nomSide(_ lvl: Int) -> CGFloat {
-            SquareTileGridEngine.nominalSlotSide(columns: e.metrics(level: lvl).nominalColumns, gap: e.metrics(level: lvl).gap, width: w)
-        }
-        #expect(abs(e.apparentSlotSide(at: 2, width: w) - nomSide(2)) < eps)        // at a detent → that level's derived side
+        func refSide(_ lvl: Int) -> CGFloat { e.metrics(level: lvl).referenceSlotSide }   // SIZE-BASED: FIXED per-level size
+        #expect(abs(e.apparentSlotSide(at: 2, width: w) - refSide(2)) < eps)        // at a detent → that level's fixed side
         let mid = e.apparentSlotSide(at: 2.5, width: w)
-        #expect(mid < nomSide(2) && mid > nomSide(3))                               // between detents
+        #expect(mid < refSide(2) && mid > refSide(3))                               // between detents
         let anchor = GridZoomAnchor(flatIndex: 1000, viewportPoint: CGPoint(x: 700, y: 450),
                                     contentFractionY: 0.5, relInCell: CGPoint(x: 0.5, y: 0.5))
         let inPlan = e.zoomFramePlan(continuousLevel: 2.0, viewportSize: viewport, anchor: anchor, overscan: 0)
@@ -178,8 +178,9 @@ import CoreGraphics
         for s in outPlan.visibleSlots { #expect(abs(s.slotRect.width - s.slotRect.height) < eps) } // still square
     }
 
-    // 11b. Zoom-out at fractional apparent levels still fills the width (no black strips mid-pinch).
-    @Test func zoomOutFillsWidthAtEveryApparentLevel() {
+    // 11b. SIZE-BASED zoom-out: at every apparent level the continuous lens is leading-aligned with a BOUNDED
+    // trailing reveal margin (< one pitch) — background, never a black strip or missing column.
+    @Test func zoomOutIsLeadingAlignedWithBoundedTrailingMargin() {
         let e = engine()
         let anchor = GridZoomAnchor(flatIndex: 1000, viewportPoint: CGPoint(x: 700, y: 450),
                                     contentFractionY: 0.5, relInCell: CGPoint(x: 0.5, y: 0.5))
@@ -188,8 +189,9 @@ import CoreGraphics
             let rows = fullRows(plan)
             #expect(!rows.isEmpty, "no full row at apparent level \(x)")
             let row = rows.values.first!.sorted { $0.column < $1.column }
-            #expect(abs(row.first!.slotRect.minX) < 1.0)            // left filled
-            #expect(abs(row.last!.slotRect.maxX - width) < 1.0)     // right filled (no black strip)
+            #expect(abs(row.first!.slotRect.minX) < 1.0)            // leading-aligned
+            #expect(row.last!.slotRect.maxX <= width + 1.0)         // never overflows
+            #expect(width - row.last!.slotRect.maxX < plan.pitch)   // bounded trailing margin (no black strip)
         }
     }
 

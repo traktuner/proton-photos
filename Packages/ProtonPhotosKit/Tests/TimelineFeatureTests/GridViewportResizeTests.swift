@@ -96,27 +96,31 @@ import CoreGraphics
                 > visibleSet(e, width: 1000, vh: 800, scrollY: 6000, level: 2, phase: nil).count)
     }
 
-    // 6 — width unchanged → no metric change at all.
+    // 6 — width unchanged → no width-derived metric change at all (pure height clips/reveals only).
     @Test func pureHeightResizeDoesNotChangeGridMetrics() {
         let e = engine()
-        let a = e.resolvedMetrics(level: 2, width: 1000)
-        #expect(a.columns == e.metrics(level: 2).nominalColumns)
-        // Pure height rebase reports identical metrics + unchanged content height.
+        // Pure height rebase reports identical width-derived metrics + unchanged content height.
+        let before = e.resolvedMetrics(level: 2, width: 1000)
         let r = rebase(e, oldFrame: CGRect(x: 0, y: 0, width: 1000, height: 1000), newFrame: CGRect(x: 0, y: 200, width: 1000, height: 800), scrollY: 6000, level: 2, phase: nil)
-        // width unchanged ⇒ content height (and all width-derived metrics) unchanged.
         #expect(r.newContentSize.height == e.contentSize(level: 2, width: 1000).height)
-        #expect(e.resolvedMetrics(level: 2, width: 1000) == e.resolvedMetrics(level: 2, width: 1000))
+        let after = e.resolvedMetrics(level: 2, width: 1000)
+        #expect(before.columns == after.columns && abs(before.slotSide - after.slotSide) < eps, "pure height must not change width-derived metrics")
     }
 
-    // 7 — width change: nominalColumns unchanged, slotSide changes, anchor preserved.
-    @Test func pureWidthResizeChangesTileSizeNotNominalColumns() {
+    // 7 — SIZE-BASED width change: the slot side stays CONSTANT, the column count ADAPTS (more on a wider
+    // viewport — no breathing), the gap is unchanged, and the anchor item is preserved under the same point.
+    @Test func pureWidthResizeKeepsTileSizeAndAdaptsColumns() {
         let e = engine()
         let old = CGRect(x: 0, y: 0, width: 1000, height: 800), new = CGRect(x: 0, y: 0, width: 1400, height: 800)
         for level in 0 ..< e.levelCount {
-            #expect(e.resolvedMetrics(level: level, width: 1000).columns == e.resolvedMetrics(level: level, width: 1400).columns)
-            #expect(e.resolvedMetrics(level: level, width: 1000).slotSide != e.resolvedMetrics(level: level, width: 1400).slotSide)
-            #expect(abs(e.resolvedMetrics(level: level, width: 1000).gap - e.resolvedMetrics(level: level, width: 1400).gap) < eps)
+            let narrow = e.resolvedMetrics(level: level, width: 1000)
+            let wide = e.resolvedMetrics(level: level, width: 1400)
+            #expect(abs(narrow.slotSide - wide.slotSide) < eps, "L\(level): slot size must stay constant across widths")
+            #expect(wide.columns >= narrow.columns, "L\(level): columns must not shrink on a wider viewport")
+            #expect(abs(narrow.gap - wide.gap) < eps)
         }
+        // 1000→1400 crosses a column threshold for the mid levels (verify the column count actually adapts somewhere).
+        #expect(e.resolvedMetrics(level: 2, width: 1400).columns > e.resolvedMetrics(level: 2, width: 1000).columns)
         let centerBefore = anchorAt(e, width: 1000, scrollY: 6000, vh: 800, level: 2, phase: nil)!
         let r = rebase(e, oldFrame: old, newFrame: new, scrollY: 6000, level: 2, phase: nil)
         #expect(r.anchorGlobalIndex == centerBefore)

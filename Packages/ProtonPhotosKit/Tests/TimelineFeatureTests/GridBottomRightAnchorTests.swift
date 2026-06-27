@@ -43,11 +43,15 @@ import CoreGraphics
                 // Camera at the very bottom (newest).
                 let scrollY = max(0, content.height - viewport.height)
                 let plan = e.framePlan(level: level, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: scrollY), overscan: 0)
-                // The bottom-most row's right edge reaches the width (a full row → no black strip on the right).
+                // SIZE-BASED: the bottom-most row is FULL (all columns filled — newest in the last filled column,
+                // bottom-right of the CONTENT). It is leading-aligned with a BOUNDED trailing reveal margin
+                // (< one pitch) that clears to the grid background — never a black gap wide enough for a column.
                 let bottomRow = plan.visibleSlots.filter { $0.row == plan.visibleSlots.map(\.row).max() }
                 #expect(!bottomRow.isEmpty)
                 #expect(bottomRow.count == plan.columns, "bottom row not full at level \(level), count \(count): \(bottomRow.count)/\(plan.columns)")
-                #expect(abs(bottomRow.map { $0.slotRect.maxX }.max()! - width) < 1.0, "black to the right of the bottom row at level \(level)")
+                let rightMost = bottomRow.map { $0.slotRect.maxX }.max()!
+                #expect(rightMost <= width + 1.0, "bottom row overflows the width at level \(level)")
+                #expect(width - rightMost < plan.pitch, "trailing margin must be < one column (no black gap) at level \(level)")
             }
         }
     }

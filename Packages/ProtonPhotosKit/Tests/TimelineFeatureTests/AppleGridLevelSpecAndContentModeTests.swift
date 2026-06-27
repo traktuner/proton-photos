@@ -37,20 +37,24 @@ import CoreGraphics
         #expect(engine().levelCount == 6)
     }
 
-    // 2 — a level shows the SAME column count at every width; the tile side grows with width.
-    @Test func levelSpecsAreResolutionIndependent() {
+    // 2 — SIZE-BASED: a level keeps a CONSTANT tile side at every width; the COLUMN COUNT adapts (more columns
+    // on a wider viewport — never a continuous rescale). At the calibration width it reproduces nominalColumns.
+    @Test func levelSpecsKeepFixedSizeAndAdaptColumns() {
         let e = engine()
         for level in 0 ..< e.levelCount {
             var sides: [CGFloat] = []
-            var cols: Set<Int> = []
+            var cols: [Int] = []
             for w in [CGFloat(700), 1000, 1440, 2560, 3840] {
                 let m = e.resolvedMetrics(level: level, width: w)
-                cols.insert(m.columns)
+                cols.append(m.columns)
                 sides.append(m.slotSide)
-                #expect(m.columns == e.metrics(level: level).nominalColumns, "level \(level) lost its nominalColumns at \(w)")
             }
-            #expect(cols.count == 1, "level \(level) column count must not vary with width")
-            for i in 1 ..< sides.count { #expect(sides[i] > sides[i - 1], "level \(level) tiles must grow with width") }
+            for i in 1 ..< sides.count { #expect(abs(sides[i] - sides[0]) < 0.5, "level \(level) tile side must stay CONSTANT across widths") }
+            #expect(cols.first! < cols.last!, "level \(level) column count must grow with width")
+            for i in 1 ..< cols.count { #expect(cols[i] >= cols[i - 1], "level \(level) columns monotone non-decreasing in width") }
+            // At the calibration width the level reproduces its nominalColumns (density seed preserved).
+            #expect(e.resolvedMetrics(level: level, width: GridSizePolicy.referenceWidth).columns == e.metrics(level: level).nominalColumns,
+                    "level \(level) must reproduce nominalColumns at the reference width")
         }
     }
 

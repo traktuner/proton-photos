@@ -63,7 +63,9 @@ import CoreGraphics
         for step in 0 ... 10 {
             #expect(p.withProgress(Double(step) / 10).target.visibleSlots.map(\.viewportRect) == finalRects)
         }
-        #expect(p.target.columns == 20)        // L4 settled density
+        // SIZE-BASED (D2): the overview adopts the fixed-size / adaptive-column model too — derive the expected
+        // L4 column count from the engine at this width rather than the old fixed literal (20).
+        #expect(p.target.columns == e.resolvedMetrics(level: 4, width: viewport.width).columns)
         #expect(p.targetLevel == 4 && p.sourceLevel == 3)
     }
 
@@ -219,8 +221,9 @@ import CoreGraphics
     }
 
     // 5 — target content shorter than the viewport ⇒ targetScrollY == 0 (never stretched/faked), even at bottom.
+    // (SIZE-BASED: L4 now shows ~15 columns at this width, so a smaller count is needed for a short overview.)
     @Test func targetShorterThanViewportSettlesAtZero() {
-        let e = engine(200)
+        let e = engine(100)
         #expect(e.contentSize(level: 4, width: viewport.width).height < viewport.height)   // precondition
         guard let p = dissolveAtBottom(3, 4, e) else { Issue.record("nil"); return }
         #expect(p.targetScrollY == 0)

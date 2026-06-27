@@ -98,8 +98,11 @@ public struct GridZoomTransaction: Equatable, Sendable {
         // about the anchor; the column reflow happens only on release (commit at level 0). For x ≥ 0 the
         // in-band / densest behaviour below is unchanged.
         if x < 0 {
-            let columns = max(1, levels[0].nominalColumns)
-            let baseSide = SquareTileGridEngine.nominalSlotSide(columns: columns, gap: levels[0].gap, width: width)
+            // Over-zoom past the largest level: geometrically SCALE the level-0 grid about the cursor. SIZE-BASED:
+            // the level-0 column count adapts to width (`columnsForFixedSide`) and the base side is the FIXED
+            // reference side — so the over-zoom anchors on the same constant-size grid the settled L0 shows.
+            let columns = SquareTileGridEngine.columnsForFixedSide(side: levels[0].referenceSlotSide, gap: levels[0].gap, width: width)
+            let baseSide = levels[0].referenceSlotSide
             let f = apparentSlotSide(at: x, width: width) / max(baseSide, 0.001)   // > 1 past level 0 (grows)
             let side = baseSide * f
             let gap = levels[0].gap * f
@@ -112,18 +115,20 @@ public struct GridZoomTransaction: Equatable, Sendable {
         }
         let gap = apparentGap(at: x)
         let target = apparentSlotSide(at: x, width: width)
-        // Columns fill the width. AT (or extremely near) an integer level use that level's nominalColumns
-        // EXACTLY — matching the settled grid, which uses fixedColumns. Deriving from the exact-fill side
-        // instead float-truncates to nc−1, and the commit would then fly the anchor a full column. Between
-        // levels (the live lens) derive from the apparent side (continuous reflow).
+        // SIZE-BASED: the slot side is the FIXED apparent size and the column count adapts to width via the
+        // SHARED `columnsForFixedSide` rule — the SAME rule the settled grid uses — so the transaction and the
+        // settled plan agree on (size, columns) at every integer detent (the commit seam closes; no vertical
+        // jump). At an integer detent resolve columns from that level's reference side + gap EXACTLY (matching
+        // the settled `resolvedForLevel`); between detents from the interpolated apparent side.
         let columns: Int
         let nearestLevel = x.rounded()
         if abs(x - nearestLevel) < 1e-6, nearestLevel >= 0, Int(nearestLevel) < levels.count {
-            columns = max(1, levels[Int(nearestLevel)].nominalColumns)
+            let lv = Int(nearestLevel)
+            columns = SquareTileGridEngine.columnsForFixedSide(side: levels[lv].referenceSlotSide, gap: levels[lv].gap, width: width)
         } else {
-            columns = max(1, Int((width + gap) / (target + gap)))
+            columns = SquareTileGridEngine.columnsForFixedSide(side: target, gap: gap, width: width)
         }
-        let side = (width - gap * CGFloat(columns - 1)) / CGFloat(columns)
+        let side = target            // FIXED size — no re-stretch to fill (no breathing; matches the settled grid)
         let pitch = side + gap
         // Pin the anchor under the cursor: its cell's local point sits at `anchorViewportPoint`.
         let anchorCellX = anchorViewportPoint.x - anchorLocalFraction.x * side
@@ -184,7 +189,7 @@ public struct GridZoomTransaction: Equatable, Sendable {
     // Apparent-metric interpolation (mirrors SquareTileGridEngine, with the soft rubber-band past the ends).
     public func apparentSlotSide(at x: CGFloat, width: CGFloat) -> CGFloat {
         let maxIndex = levels.count - 1
-        func side(_ i: Int) -> CGFloat { SquareTileGridEngine.nominalSlotSide(columns: levels[i].nominalColumns, gap: levels[i].gap, width: width) }
+        func side(_ i: Int) -> CGFloat { levels[i].referenceSlotSide }   // SIZE-BASED: FIXED per-level size (width-independent)
         if x <= 0 { return side(0) * (1 - x * 0.6) }
         if x >= CGFloat(maxIndex) { return side(maxIndex) }
         let lo = Int(x)

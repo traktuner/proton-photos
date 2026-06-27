@@ -1,13 +1,19 @@
 # MetalGrid Engine Contract
 
-**Status: FROZEN.** This document is the single source of truth for the production photo-grid architecture on
-macOS. It is a *contract*, not a tutorial: each section states who owns what and what is forbidden. The
-boundaries below are enforced by `MetalGridContractGuardTests` (and the older `GridCanonicalGuardTests` /
-`LegacyGridRemovalGuardTests`). Change the contract → update both this doc and the guard tests in the same PR.
+**Status: ENGINE CONTRACT, subordinate to product parity.** This document describes the production photo-grid
+architecture on macOS. It is a *contract*, not a tutorial: each section states who owns what and what is
+forbidden. The boundaries below are enforced by `MetalGridContractGuardTests` (and the older
+`GridCanonicalGuardTests` / `LegacyGridRemovalGuardTests`). Change the contract -> update both this doc and the
+guard tests in the same PR.
 
-> Behavior is accepted as of the `grid: 6-level model, aspect/square toggle, uniform background,
-> viewport-resize camera + perf` commit. The next branch is **transition effects**, which must build *on top of*
-> these boundaries without crossing them (see [§13](#13-future-transition-effects-high-level-plan)).
+Product-level Apple Photos parity is defined in
+[`apple-photos-parity-master-spec.md`](apple-photos-parity-master-spec.md). If this engine contract conflicts
+with observed Apple Photos behavior or the master spec, this contract is stale and must be changed. Architecture
+follows Apple behavior, not the other way around.
+
+> Historical note: behavior was once accepted as of the `grid: 6-level model, aspect/square toggle, uniform
+> background, viewport-resize camera + perf` commit. Later Apple reference analysis may supersede parts of this
+> contract, especially resize and zoom-level semantics.
 
 ---
 
