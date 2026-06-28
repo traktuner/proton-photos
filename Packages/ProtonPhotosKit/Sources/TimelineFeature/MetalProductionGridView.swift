@@ -176,6 +176,7 @@ struct MetalProductionGridView: NSViewRepresentable {
         guard let proxy else { return }
         proxy.windowFrameForItem = { [weak host] item in host?.windowFrame(forUID: item.uid) }
         proxy.scrollToItem = { [weak host] item in host?.scrollToItem(item.uid) }
+        proxy.redrawOnReveal = { [weak host] in host?.requestRevealRedraw() }
         proxy.scrollToFlatIndex = { [weak host] index in host?.scrollToFlatIndex(index) }
         proxy.scrollToLatest = { [weak host] in host?.scrollToBottom() }
         proxy.currentScrollAnchor = { [weak host] in host?.currentScrollAnchor() }   // read-only; shell remembers it per route

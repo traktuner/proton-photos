@@ -1,6 +1,29 @@
-# Grid Resize/Sidebar Redesign — Apple Parity (fixed photo size, adaptive columns)
+# Grid Resize/Sidebar Redesign — Apple Parity (adaptive columns, width-FILLING square slots)
 
-**Status:** design + initial implementation in progress. The size-based kernel, shared fixed-side column rule, live transaction lock-step, and core regression tests are implemented on this branch. Remaining visual polish items from the design, especially edge-aware presentation alignment and calm column-step tuning, stay governed by this document. Validated against the source by a 6-agent dependency map + 3 adversarial critiques. Corrections from the critiques are folded in below.
+> **2026-06-27 REVISION — WIDTH-FILLING (round + fill) supersedes "no breathing".**
+> The new Apple reference (`apple resize and sidebar animations.mov` + the All-Photos screenshot) proves the
+> grid **always fills the available width — there is no trailing gutter**. The original "constant photo size +
+> leading-aligned + trailing reveal margin (< one pitch)" model is REJECTED: at the largest levels one pitch is
+> a ~25%-of-window blank gutter (the rejected screenshots). Implemented model:
+> - `columnsForFixedSide` uses **round-to-nearest** (not floor): pick the column count whose width-filling tile
+>   is closest to the level's reference size.
+> - `resolved()` then sizes the square slot to **FILL the width exactly** (`nominalSlotSide`), so the trailing
+>   gutter is ~0 at every multi-column width.
+> - The tile therefore **breathes within a small BOUNDED band** (±9% at L3 … ±26% at L0). This *reverses* the
+>   old "non-negotiable: no breathing" — bounded fill-breathing is what Apple does and is the accepted product
+>   behavior; only the old *unbounded* fixed-columns rescale stays forbidden.
+> - Slots stay **square**; media still **aspect-fits inside the square slot** (default `aspectFitInsideSquare`,
+>   the observed Apple look) — variable visible image sizes come from content fit, NOT a justified outer layout.
+> - The live pinch lattice (`apparentSlotSide` / `GridZoomTransaction`) interpolates the **filled** per-level
+>   sides, so an integer detent's apparent size equals the settled size → the commit seam closes at any width
+>   (guarded by `pinchCommitSeamHoldsAtNonReferenceWidths`).
+> - The full Apple-default **aspect-justified** (variable-width) layout is explicitly OUT of scope this pass.
+>
+> Below sections §2–§7 still describe the (now superseded) fixed-size/trailing-margin model and the lock-step
+> couplings; read §5/§6 for the still-valid couplings, but the "constant size / trailing margin" framing is
+> historical.
+
+**Status:** IMPLEMENTED on `apple-normal-focusrow-transition` (round+fill + perf-storm coalescing, 394 tests green). Original design notes below. The size-based kernel, shared fixed-side column rule, live transaction lock-step, and core regression tests are implemented on this branch. Remaining visual polish items from the design, especially edge-aware presentation alignment and calm column-step tuning, stay governed by this document. Validated against the source by a 6-agent dependency map + 3 adversarial critiques. Corrections from the critiques are folded in below.
 
 **Goal (user-confirmed, frame-by-frame from the Apple/Proton videos):** a photo's on-screen size is **constant during any live resize**. On *any* resize path — horizontal edge, vertical edge, **corner**, or sidebar toggle — photos keep their exact size; the window/sidebar **clips or reveals** content; the **column count** steps **discretely**. No tile breathing/rescaling. The grid is leading(left)-aligned; a trailing reveal margin (< one tile) carries the sub-column remainder. Pinch zoom is the only thing that changes photo size.
 

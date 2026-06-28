@@ -76,20 +76,21 @@ import CoreGraphics
         }
     }
 
-    // 5 — SIZE-BASED contract: a level's tile side is CONSTANT across widths (no breathing); the column count
-    // adapts (more columns when wider). The reference width reproduces the level's nominalColumns.
-    @Test func fixedSlotSizeAdaptiveColumnsGuard() {
+    // 5 — SIZE-BASED, WIDTH-FILLING contract: a level FILLS the width across widths (no trailing gutter); the
+    // column count adapts (more columns when wider) and the tile breathes only within a bounded band. The
+    // reference width reproduces the level's nominalColumns.
+    @Test func fillWidthAdaptiveColumnsGuard() {
         let e = engine()
         for level in 0 ..< e.levelCount {
+            let nominal = e.metrics(level: level).nominalColumns
             var sides: [CGFloat] = []
-            var cols: [Int] = []
             for w in [CGFloat(800), 1400, 2400] {
                 let m = e.resolvedMetrics(level: level, width: w)
-                cols.append(m.columns)
+                #expect(m.columns == nominal, "L\(level) fixed-columns: count holds at \(nominal)")
                 sides.append(m.slotSide)
+                #expect(abs((CGFloat(m.columns) * m.pitch - m.gap) - w) < 2.0, "L\(level) must fill width \(w)")
             }
-            for i in 1 ..< sides.count { #expect(abs(sides[i] - sides[0]) < 0.5, "L\(level) tile side must stay CONSTANT across widths") }
-            #expect(cols.first! < cols.last!, "L\(level) columns must grow with width")
+            #expect(sides.first! < sides.last!, "L\(level) tile must SCALE with width (fixed-columns, no reflow)")
             #expect(e.resolvedMetrics(level: level, width: GridSizePolicy.referenceWidth).columns == e.metrics(level: level).nominalColumns,
                     "L\(level) must reproduce nominalColumns at the reference width")
         }

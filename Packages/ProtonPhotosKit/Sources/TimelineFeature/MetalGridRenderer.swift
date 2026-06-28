@@ -129,8 +129,19 @@ final class MetalGridRenderer {
         configure(encoder, viewportSize: viewportSize)
         let (drawCalls, instances) = encode(groups: groups, into: encoder)
         encoder.endEncoding()
-        commandBuffer.present(drawable)
-        commandBuffer.commit()
+        if view.presentsWithTransaction {
+            // LIVE-RESIZE SYNC: when the host has armed `presentsWithTransaction` (during a live window resize),
+            // present the drawable INSIDE the window's current CATransaction — commit, wait until scheduled, then
+            // present explicitly. This locks the Metal frame to the window border for that tick, killing the
+            // "rubber-band / content trails the cursor" lag. The normal (settled / scroll / zoom) path keeps the
+            // cheaper async `commandBuffer.present(drawable)` below.
+            commandBuffer.commit()
+            commandBuffer.waitUntilScheduled()
+            drawable.present()
+        } else {
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
+        }
         lastDrawMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
         lastDrawCalls = drawCalls
         lastInstanceCount = instances

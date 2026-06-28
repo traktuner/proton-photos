@@ -44,6 +44,12 @@ struct MainView: View {
     // Real height of the native window toolbar (its top safe-area inset). The viewer lays its media out
     // below this, so the open/close zoom must fly the photo into the SAME region to avoid a shrink/jump.
     @State private var topBarInset: CGFloat = 0
+    // The grid's leading obstruction inset == the floating sidebar's overlap when it's open, else 0. Derived from
+    // the KNOWN sidebar column width — SwiftUI coordinate spaces and preferences do NOT bridge across
+    // NavigationSplitView's AppKit-hosted sidebar column, so the detail can't measure the overlap (its leading
+    // safe-area inset reads 0 under a floating overlay sidebar). It changes only on a sidebar toggle (constant
+    // during any window resize → no per-tick Metal re-layout).
+    private var leadingObstructionInset: CGFloat { columnVisibility == .detailOnly ? 0 : sidebarWidth }
     // Selection + export.
     @State private var selectionMode = false
     @State private var selectedUIDs: Set<PhotoUID> = []
@@ -94,33 +100,33 @@ struct MainView: View {
             // only in the unobscured area (the leading-obstruction inset = the detail's leading safe-area inset).
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(albums: albums, selection: $selection)
-                    .navigationSplitViewColumnWidth(min: SidebarMetrics.minWidth,
-                                                    ideal: sidebarWidth, max: SidebarMetrics.maxWidth)
+                    // Fixed width. (The OS still draws a resize cursor on the divider even though the column is not
+                    // user-resizable — an AppKit quirk we accept; min==ideal==max did not change it.)
+                    .navigationSplitViewColumnWidth(sidebarWidth)
             } detail: {
-                GeometryReader { geo in
-                    TimelineView(model: timelineModel, aspects: aspects, level: $level, proxy: gridProxy,
-                                 routeScrollGeneration: routeScrollGeneration,
-                                 routeInitialScrollAnchor: routeInitialScrollAnchor,
-                                 searchText: committedSearchText,
-                                 selectionMode: selectionMode, media: backend, metadataProvider: backend, favoriteUIDs: favorites,
-                                 onSelectionChange: { selectedUIDs = $0 }) { item, items in
-                        openPhoto(item, items)
-                    }
-                    .ignoresSafeArea(.container, edges: [.top, .leading])   // MTKView renders under the floating sidebar
-                    .overlay(alignment: .top) {
-                        if viewerModel == nil {
-                            GridTopFrost(height: topBarInset + 12)
-                        }
-                    }
-                    .navigationTitle(viewerModel == nil ? title : "")
-                    .searchable(text: $searchText, placement: .toolbar, prompt: Text("search.prompt \(title)"))
-                    .toolbar { toolbarContent }
-                    .modifier(WindowToolbarChrome(isViewer: viewerModel != nil))
-                    // The detail's leading safe-area inset == the floating sidebar width. It drives event
-                    // exclusion (hit-test decline) plus the grid's layout/render obstruction inset.
-                    .environment(\.gridLeadingEventInset, viewerModel == nil ? geo.safeAreaInsets.leading : 0)
-                    .onChange(of: searchText) { _, value in scheduleSearchCommit(value) }
+                TimelineView(model: timelineModel, aspects: aspects, level: $level, proxy: gridProxy,
+                             routeScrollGeneration: routeScrollGeneration,
+                             routeInitialScrollAnchor: routeInitialScrollAnchor,
+                             searchText: committedSearchText,
+                             selectionMode: selectionMode, media: backend, metadataProvider: backend, favoriteUIDs: favorites,
+                             onSelectionChange: { selectedUIDs = $0 }) { item, items in
+                    openPhoto(item, items)
                 }
+                .ignoresSafeArea(.container, edges: [.top, .leading])   // MTKView renders full-width under the floating sidebar
+                .overlay(alignment: .top) {
+                    if viewerModel == nil {
+                        GridTopFrost(height: topBarInset + 12)
+                    }
+                }
+                .navigationTitle(viewerModel == nil ? title : "")
+                .searchable(text: $searchText, placement: .toolbar, prompt: Text("search.prompt \(title)"))
+                .toolbar { toolbarContent }
+                .modifier(WindowToolbarChrome(isViewer: viewerModel != nil))
+                // Always the real inset — do NOT flip to 0 when the viewer opens: the grid is covered by the
+                // viewer anyway, and a flip would arm a spurious full-width sidebar scale that plays when you
+                // close the viewer (and would move the cell the zoom transition flies from).
+                .environment(\.gridLeadingEventInset, leadingObstructionInset)
+                .onChange(of: searchText) { _, value in scheduleSearchCommit(value) }
             }
             .task { await loadAlbums() }
             .onAppear {
@@ -186,12 +192,23 @@ struct MainView: View {
                 UploadDestinationSheet(coordinator: uploadCoordinator)
             }
 
-            // The viewer is hidden while a zoom transition is animating (the overlay stands in).
-            if let viewerModel, zoom == nil {
+            // Hidden while a NON-interactive zoom (open/close spring) animates — the overlay stands in. During an
+            // INTERACTIVE pinch-dismiss it stays mounted but INVISIBLE, so the pinch gesture keeps delivering while
+            // the overlay shows the live shrink-into-the-cell.
+            if let viewerModel, zoom == nil || zoom?.interactive == true {
                 PhotoViewerView(model: viewerModel,
                                 isFavorite: { favorites.contains($0) },
                                 onToggleFavorite: toggleFavorite,
-                                onTrash: { requestTrash([$0], closeViewer: true) }) { closePhoto() }
+                                onTrash: { requestTrash([$0], closeViewer: true) },
+                                onClose: { closePhoto() },
+                                onPinchDismissBegan: beginInteractiveDismiss,
+                                onPinchDismissChanged: updateInteractiveDismiss,
+                                onPinchDismissEnded: { endInteractiveDismiss(shouldClose: $0) },
+                                isDismissing: zoom?.interactive == true)
+                // NOT `.opacity(0)` while dismissing — an alpha-0 NSView is non-hit-testable, so a fresh pinch would
+                // leak to the grid behind (it would scroll/zoom) and never return to the scroll view (the image
+                // "locks"). The viewer stays hit-testable and hides its OWN background + image while dismissing, so
+                // the gesture always reaches its scroll view and the grid behind stays frozen.
             }
 
             // Shared-element zoom overlay: a single image morphing between the cell and fullscreen.
@@ -279,20 +296,22 @@ struct MainView: View {
         let item: PhotoItem
         let image: NSImage
         var cellFrame: CGRect
-        var expanded: Bool
+        var progress: CGFloat    // 1 = fullscreen, 0 = collapsed into the grid cell
+        var interactive: Bool    // true = pinch-driven (the viewer is kept alive, invisible, behind this overlay)
     }
 
     @ViewBuilder private func zoomOverlay(_ z: ZoomTransition) -> some View {
         GeometryReader { geo in
             // Full-window coords (this layer ignores the safe area, matching the window-space cell frames).
-            // The expanded target is the media region BELOW the opaque top bar, identical to where the
-            // viewer will render the photo — so handing off to the viewer causes no shrink/jump.
+            // At progress 1 the photo is the media region BELOW the opaque top bar, identical to where the
+            // viewer renders it — so handing off to the viewer causes no shrink/jump; at 0 it is the grid cell.
             let contentRect = CGRect(x: 0, y: topBarInset,
                                      width: geo.size.width, height: max(0, geo.size.height - topBarInset))
             let full = fitRect(z.image, in: contentRect)
-            let frame = z.expanded ? full : z.cellFrame
+            let p = max(0, min(1, z.progress))
+            let frame = Self.lerpRect(z.cellFrame, full, p)
             ZStack {
-                ViewerVisualConstants.backgroundColor.opacity(z.expanded ? 1 : 0)
+                ViewerVisualConstants.backgroundColor.opacity(p)   // fades as the photo shrinks ⇒ the grid shows through
                 Image(nsImage: z.image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -304,6 +323,11 @@ struct MainView: View {
         .allowsHitTesting(false)
     }
 
+    private static func lerpRect(_ a: CGRect, _ b: CGRect, _ t: CGFloat) -> CGRect {
+        CGRect(x: a.minX + (b.minX - a.minX) * t, y: a.minY + (b.minY - a.minY) * t,
+               width: a.width + (b.width - a.width) * t, height: a.height + (b.height - a.height) * t)
+    }
+
     private func openPhoto(_ item: PhotoItem, _ items: [PhotoItem]) {
         // Need the cell's on-screen frame and a thumbnail to fly; otherwise just open directly.
         guard let cell = gridProxy.windowFrameForItem?(item), let img = feed.memoryImage(for: item.uid) else {
@@ -311,14 +335,48 @@ struct MainView: View {
             logViewerToolbar(mode: "viewer")
             return
         }
-        zoom = ZoomTransition(item: item, image: img, cellFrame: cell, expanded: false)
+        zoom = ZoomTransition(item: item, image: img, cellFrame: cell, progress: 0, interactive: false)
         DispatchQueue.main.async {
             withAnimation(.spring(response: zoomOpenSpring.response, dampingFraction: zoomOpenSpring.damping)) {
-                zoom?.expanded = true
+                zoom?.progress = 1
             } completion: {
                 viewerModel = makeViewer(item, items)
                 logViewerToolbar(mode: "viewer")
                 zoom = nil
+            }
+        }
+    }
+
+    // MARK: Interactive pinch-to-dismiss (drives the shared zoom overlay LIVE from the viewer's pinch)
+
+    /// Pinch-out at fit-scale began: hand the LIVE dismiss to the shared zoom overlay so the photo shrinks toward
+    /// its EXACT grid cell while the grid fades back in behind it. The viewer is kept alive (rendered invisible) so
+    /// its in-progress pinch gesture keeps delivering. Falls back to the spring close if the cell scrolled off-screen.
+    private func beginInteractiveDismiss() {
+        guard zoom == nil, let vm = viewerModel, let img = vm.image,
+              let cell = gridProxy.windowFrameForItem?(vm.current) else { return }
+        zoom = ZoomTransition(item: vm.current, image: img, cellFrame: cell, progress: 1, interactive: true)
+    }
+
+    /// Live pinch progress: 1 = fullscreen, 0 = collapsed into the cell.
+    private func updateInteractiveDismiss(_ progress: CGFloat) {
+        guard zoom?.interactive == true else { return }
+        zoom?.progress = max(0, min(1, progress))
+    }
+
+    /// Fingers up: commit the close (fly the rest of the way into the cell) or spring back to fullscreen.
+    private func endInteractiveDismiss(shouldClose: Bool) {
+        guard zoom?.interactive == true else { return }
+        zoom?.interactive = false   // gesture is over ⇒ the viewer may now fully hide
+        if shouldClose { logViewerToolbar(mode: "grid") }
+        DispatchQueue.main.async {
+            withAnimation(.spring(response: zoomCloseSpring.response, dampingFraction: zoomCloseSpring.damping)) {
+                zoom?.progress = shouldClose ? 0 : 1
+            } completion: {
+                if shouldClose { viewerModel = nil }
+                zoom = nil
+                // Only a real close reveals the grid (a snap-back keeps the viewer) — repaint it then.
+                if shouldClose { DispatchQueue.main.async { gridProxy.redrawOnReveal?() } }
             }
         }
     }
@@ -331,15 +389,20 @@ struct MainView: View {
         logViewerToolbar(mode: "grid")
         guard let img = vm.image, let cell = gridProxy.windowFrameForItem?(item) else {
             viewerModel = nil
+            DispatchQueue.main.async { gridProxy.redrawOnReveal?() }
             return
         }
-        zoom = ZoomTransition(item: item, image: img, cellFrame: cell, expanded: true)
+        zoom = ZoomTransition(item: item, image: img, cellFrame: cell, progress: 1, interactive: false)
         DispatchQueue.main.async {
             withAnimation(.spring(response: zoomCloseSpring.response, dampingFraction: zoomCloseSpring.damping)) {
-                zoom?.expanded = false
+                zoom?.progress = 0
             } completion: {
                 viewerModel = nil
                 zoom = nil
+                // The overlay is gone and the grid is uncovered — force one repaint (next runloop, after SwiftUI
+                // removes the overlay) so it paints from its resident textures instead of showing the purged clear
+                // surface until a stray relayout streams the tiles back top-to-bottom.
+                DispatchQueue.main.async { gridProxy.redrawOnReveal?() }
             }
         }
     }

@@ -102,6 +102,16 @@ final class MetalGridScrollHost: NSView {
     /// clips/reveals. `.zero` until the first layout with a window.
     private var lastViewportScreenFrame: NSRect = .zero
 
+    /// The viewport screen frame captured at the START of the current live WINDOW resize — used for the single
+    /// settle rebase on `didEndLiveResize`. `.zero` outside a live resize.
+    private var liveResizeStartFrame: NSRect = .zero
+    /// Release-settle (detent-crossing reflow) clock: the tiles fly from the scaled frame to the settled layout.
+    private var resizeSettleStart: CFTimeInterval = 0
+    private let resizeSettleDuration: CFTimeInterval = 0.22
+    /// Sidebar open/close scale clock: the grid scales (right-anchored) over the sidebar slide, then settles.
+    private var sidebarResizeStart: CFTimeInterval = 0
+    private let sidebarResizeDuration: CFTimeInterval = 0.3
+
     // Live focus-row pinch gesture state (engine-owned GridZoomTransaction).
     private var pinchActive = false
     private var pinchBaseLevel = 0
@@ -214,7 +224,10 @@ final class MetalGridScrollHost: NSView {
         coordinator.clipView = scrollView.contentView
         coordinator.metalView = metalView
         coordinator.normalLevelLeadingGap = Self.normalLevelLeadingGap
-        coordinator.onContentSizeChange = { [weak self] size in self?.applyContentSize(size) }
+        coordinator.onContentSizeChange = { [weak self] size in
+            guard let self, !self.coordinator.presentationResizeActive, !self.coordinator.isSidebarResizing else { return }   // frozen during the H-resize / sidebar scale
+            self.applyContentSize(size)
+        }
 
         spacer.onMouseMoved = { [weak self] point in
             guard let self else { return }
@@ -234,7 +247,7 @@ final class MetalGridScrollHost: NSView {
         // keeps scrolling the committed grid wildly when you push past the largest/densest stage).
         let block: (NSEvent) -> Bool = { [weak self] event in
             guard let self else { return false }
-            if pinchActive || pinchSettling || coordinator.isZoomingLive || coordinator.isCommitBridging { return true }
+            if pinchActive || pinchSettling || coordinator.isZoomingLive || coordinator.isCommitBridging || coordinator.isResizeSettling || coordinator.isSidebarResizing { return true }
             let sinceMagnify = CACurrentMediaTime() - lastMagnifyEventTime
             if sinceMagnify < 0.6 { return true }                               // grace after a pinch/commit
             return event.momentumPhase != [] && sinceMagnify < 1.5             // post-pinch inertia
@@ -261,7 +274,52 @@ final class MetalGridScrollHost: NSView {
     /// camera rebase (the user's bug: fresh-open resize was wrong; one tiny scroll "fixed" it because that
     /// cleared `stickToBottom`). Fires only for USER-initiated live resizes (not the initial-open layout), so
     /// "open at newest" is preserved. Observer is (re)wired in `viewDidMoveToWindow`.
-    @objc private func windowWillLiveResize() { stickToBottom = false }
+    @objc private func windowWillLiveResize() {
+        stickToBottom = false
+        // PHASE 1 — live horizontal resize presentation: snapshot the stable grid surface and arm the sync
+        // present so the Metal frame locks to the window border (no rubber-band). The axis (pure-horizontal vs
+        // vertical/corner) is resolved per tick in `layout()`; a vertical/corner drag drops the presentation and
+        // falls back to the existing rebase path (Phase 2/3 scope).
+        liveResizeStartFrame = viewportScreenFrame()
+        guard coordinator.canPresentResize else { return }
+        coordinator.beginPresentationResize()
+        // NOTE: presentsWithTransaction is NOT used — it locks each present to the window transaction but its
+        // `waitUntilScheduled` blocks ~80ms/present, throttling the whole resize to ~10fps. The per-tick synchronous
+        // `metalView.draw()` in layout() keeps content updating every tick; the async present's ~1-frame offset is
+        // imperceptible and FAR better than a 10fps chunky resize.
+    }
+
+    /// End of a live WINDOW resize: drop the presentation and SETTLE EXACTLY ONCE — resolve the real layout at the
+    /// final size, rebase the scroll once (item-identity, so the same region stays put), redraw normally. If the
+    /// gesture had already fallen back (vertical/corner), the presentation is inactive and the normal `layout()`
+    /// path already settled it, so this is a no-op beyond clearing the sync-present flag.
+    @objc private func windowDidEndLiveResize() {
+        guard coordinator.presentationResizeActive else { liveResizeStartFrame = .zero; return }
+        // SETTLE = NO snap. The settle scroll depends on the axis: a WIDTH/corner change scales the tiles (fixed
+        // columns, no reflow), so the grid settles to the resize anchor — at the newest end the LAST row stays at the
+        // viewport bottom, otherwise the centre item is re-centred (resolved ONCE here, not drifting per frame). A
+        // pure VERTICAL change does NOT reflow, so it settles to the COUNTER-SCROLLED scroll the live frame slid to
+        // (start scroll − the vertical slide) with no animation. No rebaseForResize (it re-anchored to the TOP).
+        let widthChanged = abs(viewportScreenFrame().width - liveResizeStartFrame.width) > 0.5
+        let finalScrollY = widthChanged
+            ? coordinator.windowResizeReleaseScrollY()
+            : coordinator.presentationStartScrollY - coordinator.presentationVerticalShift
+        stickToBottom = false
+        applyContentSize(coordinator.contentSize())
+        let maxScrollY = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
+        let settledY = min(max(0, finalScrollY), maxScrollY)
+        // The detent fly-into-place only applies to a width reflow; a pure vertical resize settles instantly.
+        let animating = widthChanged && coordinator.beginResizeSettle(targetScrollY: settledY)   // reads the snapshot (still active)
+        coordinator.endPresentationResize()
+        if abs(settledY - scrollView.contentView.bounds.origin.y) > 0.5 {
+            scrollView.contentView.scroll(to: CGPoint(x: 0, y: settledY))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+        if animating { resizeSettleStart = CACurrentMediaTime() }
+        lastViewportScreenFrame = viewportScreenFrame()
+        liveResizeStartFrame = .zero
+        metalView.needsDisplay = true
+    }
 
     // MARK: - Live focus-row pinch zoom (engine-owned GridZoomTransaction)
 
@@ -655,7 +713,7 @@ final class MetalGridScrollHost: NSView {
     /// grace after the magnify.
     private func isScrollBlocking() -> Bool {
         pinchActive || pinchSettling || coordinator.isZoomingLive || coordinator.isCommitBridging
-            || coordinator.isScrollRebasing
+            || coordinator.isScrollRebasing || coordinator.isResizeSettling || coordinator.isSidebarResizing
             || CACurrentMediaTime() - lastMagnifyEventTime < 0.6
     }
 
@@ -683,9 +741,12 @@ final class MetalGridScrollHost: NSView {
         super.viewDidMoveToWindow()
         // A manual window resize detaches the bottom-pin (so the camera rebase runs even on a fresh-open grid).
         NotificationCenter.default.removeObserver(self, name: NSWindow.willStartLiveResizeNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didEndLiveResizeNotification, object: nil)
         if let window {
             NotificationCenter.default.addObserver(self, selector: #selector(windowWillLiveResize),
                                                    name: NSWindow.willStartLiveResizeNotification, object: window)
+            NotificationCenter.default.addObserver(self, selector: #selector(windowDidEndLiveResize),
+                                                   name: NSWindow.didEndLiveResizeNotification, object: window)
         }
         if window != nil {
             if streamingTick == nil {
@@ -701,8 +762,18 @@ final class MetalGridScrollHost: NSView {
         }
     }
 
+    /// Force ONE on-demand repaint — used when the grid is revealed after a full-screen overlay (the photo viewer)
+    /// that fully covered it closes. The CAMetalLayer surface was purged by the window server under occlusion and
+    /// nothing else sets `needsDisplay` (every visible tile is still GPU-resident, so the streaming tick is idle), so
+    /// without this the revealed grid shows its empty clear surface until a stray relayout redraws it.
+    func requestRevealRedraw() {
+        metalView.needsDisplay = true
+    }
+
     @objc private func step() {
         if coordinator.isCommitBridging { advanceCommitBridge() }
+        if coordinator.isSidebarResizing { advanceSidebarResize() }    // sidebar open/close scales the grid
+        if coordinator.isResizeSettling { advanceResizeSettle() }      // release-time detent reflow ("fly into place")
         // Live-pinch post-release settle. Gated on lattice mode so the driver never drives the reflow fallback;
         // reset the tick dt whenever it isn't running.
         if pinchMode == .lattice, pinchDriver.isSelfAdvancing { advanceLivePinch() } else { pinchAdvancePrevTime = 0 }
@@ -721,17 +792,90 @@ final class MetalGridScrollHost: NSView {
         if t >= 1 { coordinator.endCommitBridge(); metalView.needsDisplay = true }
     }
 
+    /// Advance the sidebar open/close scale (right-anchored, the grid scaling like a left-edge drag). When the scale
+    /// completes, commit the engine inset and settle — instantly, or via the detent fly-into-place if the new width
+    /// reflowed (until sticky columns make a width change reflow-free).
+    private func advanceSidebarResize() {
+        let t = sidebarResizeDuration > 0 ? min(1, (CACurrentMediaTime() - sidebarResizeStart) / sidebarResizeDuration) : 1
+        coordinator.presentationSidebarProgress = CGFloat(t)
+        metalView.needsDisplay = true
+        guard t >= 1 else { return }
+        let (settleScroll, animating) = coordinator.endSidebarResize()   // commits the inset + bottom-anchored scroll
+        stickToBottom = false
+        applyContentSize(coordinator.contentSize())
+        let maxScrollY = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
+        let settledY = min(max(0, settleScroll), maxScrollY)
+        if abs(settledY - scrollView.contentView.bounds.origin.y) > 0.5 {
+            scrollView.contentView.scroll(to: CGPoint(x: 0, y: settledY))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+        if animating { resizeSettleStart = CACurrentMediaTime() }
+        lastViewportScreenFrame = viewportScreenFrame()
+        metalView.needsDisplay = true
+    }
+
+    /// Advance the release-time resize settle: morph the scaled frame into the settled layout. The scroll is
+    /// already at its settled value, so when this completes the canonical render matches exactly (no jump).
+    private func advanceResizeSettle() {
+        let t = resizeSettleDuration > 0 ? min(1, (CACurrentMediaTime() - resizeSettleStart) / resizeSettleDuration) : 1
+        coordinator.resizeSettleProgress = CGFloat(t)
+        metalView.needsDisplay = true
+        if t >= 1 { coordinator.endResizeSettle(); metalView.needsDisplay = true }
+    }
+
     override func layout() {
         super.layout()
         metalView.frame = bounds
         let newFrame = viewportScreenFrame()
         let old = lastViewportScreenFrame
+        // PHASE 1 — pure-horizontal live resize: present the cached stable surface SCALED to the new width about
+        // the stationary edge. NO engine resolve, NO content-size pass, NO scroll rebase this tick — the
+        // `onContentSizeChange` callback is gated off too (see init), and the renderer syncs the frame to the
+        // window border. The single settle happens on `didEndLiveResize`.
+        if inLiveResize, coordinator.presentationResizeActive, liveResizeStartFrame != .zero {
+            // The presentation handles BOTH axes as ONE stable surface: HORIZONTAL scales the snapshot to the new
+            // width (in draw()); VERTICAL slides it — the dragging edge clips while the opposite edge gives up a
+            // fraction (Apple's shared-loss counter-scroll). Present SYNCHRONOUSLY this tick: `needsDisplay` only
+            // schedules an ASYNC draw the live-resize (event-tracking) runloop COALESCES — that was the vertical
+            // flicker (and the ~28%-of-ticks horizontal lag). `draw()` forces an immediate render+present locked to
+            // the window border. The single settle happens on `didEndLiveResize`.
+            // The vertical counter-scroll (shared-loss slide) applies ONLY to a PURE-height drag, where the tiles
+            // keep their size. A corner drag also changes WIDTH ⇒ the tiles SCALE and the resize anchor (centre /
+            // bottom) already handles the vertical position; adding the slide on top double-counts and snaps back on
+            // release (the corner jump). So gate it off whenever the width is changing.
+            let widthChanging = abs(newFrame.width - liveResizeStartFrame.width) > 0.5
+            coordinator.presentationVerticalShift = widthChanging ? 0 : verticalCounterScroll(start: liveResizeStartFrame, current: newFrame)
+            metalView.draw()
+            lastViewportScreenFrame = newFrame
+            return
+        }
         if old != .zero, viewportGeometryChanged(old, newFrame) {
             rebaseForResize(oldFrame: old, newFrame: newFrame)  // window resize / sidebar toggle — NOT zoom
         } else {
             applyContentSize(coordinator.contentSize())         // first layout / move-only (no size change)
         }
         lastViewportScreenFrame = newFrame
+    }
+
+    /// The VERTICAL counter-scroll (viewport pixels, y-down) for a window vertical resize: the dragging edge clips
+    /// the grid, and the OPPOSITE edge gives up a fraction `f` of the height change — Apple's shared-loss slide
+    /// (the grid drifts toward the dragging edge instead of the dragging edge guillotining it). 0 when the height
+    /// did not change (pure-horizontal). `f` ≈ ⅓ (the opposite edge's share; tunable).
+    private func verticalCounterScroll(start: NSRect, current: NSRect) -> CGFloat {
+        let dH = start.height - current.height          // shrink positive (screen y-up height == viewport height)
+        guard abs(dH) > 0.5 else { return 0 }
+        // Which edge moved? Screen coords are y-up: maxY = top, minY = bottom. A bottom-edge drag holds the TOP
+        // (maxY) fixed; a top-edge drag holds the BOTTOM (minY) fixed.
+        let topEdgeDrag = abs(current.maxY - start.maxY) > abs(current.minY - start.minY)
+        let rawShift = MetalGridCoordinator.verticalCounterScrollShift(dH: dH, topEdgeDrag: topEdgeDrag, fraction: 1.0 / 3.0)
+        // Clamp to the content bounds: at the very top/bottom of the library the dragging edge CANNOT pull empty
+        // space into view, so the reveal redirects to the opposite edge — the effective scroll clamps to
+        // [0, maxScroll] at the NEW height. (At the bottom, growing pins the last row and reveals older rows at the
+        // top instead of opening a void below; symmetric at the top.)
+        let startScrollY = coordinator.presentationStartScrollY
+        let maxScroll = max(0, spacer.frame.height - current.height)
+        let clampedScroll = min(max(0, startScrollY - rawShift), maxScroll)
+        return startScrollY - clampedScroll
     }
 
     /// The grid LAYOUT viewport's frame in SCREEN coords (y-up): `maxY` = top edge, `minY` = bottom edge. The
@@ -760,6 +904,15 @@ final class MetalGridScrollHost: NSView {
     private func applyLeadingInsetChange(from oldValue: CGFloat) {
         guard abs(eventLeadingInset - oldValue) > 0.5 else { return }
         let oldFrame = lastViewportScreenFrame
+        // Sidebar open/close = a LEFT-edge resize of the grid: snapshot at the OLD inset (the engine inset is still
+        // `oldValue` here — do NOT commit it first) and SCALE the grid right-anchored to the new inset over the
+        // slide duration (a timed virtual drag), then settle. Instant fallback when the presentation can't run
+        // (mid window live-resize, no window, zoom in flight, first layout).
+        if window != nil, !inLiveResize, oldFrame != .zero, coordinator.beginSidebarResize(fromInset: oldValue, toInset: eventLeadingInset) {
+            sidebarResizeStart = CACurrentMediaTime()
+            metalView.needsDisplay = true
+            return
+        }
         coordinator.sidebarObstructionInset = eventLeadingInset
         guard oldFrame != .zero else { return }
         let newFrame = viewportScreenFrame()
@@ -778,8 +931,14 @@ final class MetalGridScrollHost: NSView {
     private func rebaseForResize(oldFrame: NSRect, newFrame: NSRect) {
         let placingInitial = pendingInitialViewport != .preserve
         let oldScrollY = scrollView.contentView.bounds.origin.y
+        // At/below the newest end — scrolled to (or, after a pinch, past a partial last row at) the content bottom —
+        // bottom-pin to the NEW content bottom. `stickToBottom` is false after a pinch, so without this a viewport
+        // anchor resolved from a point at/in the trailing void lands on a stale item and jumps the grid far into the
+        // past (and can leave the clip in the void → black). Bottom-pin keeps the newest at the bottom: no jump, no black.
+        let oldMaxScroll = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
+        let atOrBelowBottom = stickToBottom || oldScrollY >= oldMaxScroll - 2
         let result = coordinator.rebaseForViewportChange(oldFrame: oldFrame, newFrame: newFrame,
-                                                         oldScrollY: oldScrollY, wasBottomPinned: stickToBottom)
+                                                         oldScrollY: oldScrollY, wasBottomPinned: atOrBelowBottom)
         applyContentSize(coordinator.contentSize())            // new content height (new width); consumes a pending policy
         if placingInitial, pendingInitialViewport == .preserve { return }  // initial viewport just placed → don't rebase over it
         guard !stickToBottom, let r = result else { return }   // sticky → already bottom-pinned by applyContentSize

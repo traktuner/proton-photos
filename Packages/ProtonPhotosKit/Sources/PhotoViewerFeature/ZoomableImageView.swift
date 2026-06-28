@@ -6,11 +6,21 @@ import AppKit
 /// A pinch-OUT while already at fit-scale flies the photo closed (live shrink + fade feedback).
 struct ZoomableImageView: NSViewRepresentable {
     let image: NSImage
-    var onPinchClose: () -> Void = {}
+    /// True while the host's zoom overlay is rendering the live dismiss: hide THIS image so it doesn't double the
+    /// overlay's photo, but keep the scroll view itself hit-testable (alpha 1) so the pinch keeps delivering here.
+    var isDismissing: Bool = false
+    // Interactive pinch-out-to-dismiss: the gesture only REPORTS progress (1 = fullscreen, 0 = collapsed into the
+    // grid cell). The actual shrink-into-the-cell + grid fade is rendered by the shared zoom overlay in the host, so
+    // the photo flies into its EXACT cell (not a local layer shrink toward a corner).
+    var onPinchDismissBegan: () -> Void = {}
+    var onPinchDismissChanged: (CGFloat) -> Void = { _ in }
+    var onPinchDismissEnded: (Bool) -> Void = { _ in }
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = ZoomScrollView()
-        scrollView.onPinchClose = onPinchClose
+        scrollView.onPinchDismissBegan = onPinchDismissBegan
+        scrollView.onPinchDismissChanged = onPinchDismissChanged
+        scrollView.onPinchDismissEnded = onPinchDismissEnded
         scrollView.allowsMagnification = true
         scrollView.minMagnification = 1
         scrollView.maxMagnification = 10
@@ -31,8 +41,13 @@ struct ZoomableImageView: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        (scrollView as? ZoomScrollView)?.onPinchClose = onPinchClose
+        if let z = scrollView as? ZoomScrollView {
+            z.onPinchDismissBegan = onPinchDismissBegan
+            z.onPinchDismissChanged = onPinchDismissChanged
+            z.onPinchDismissEnded = onPinchDismissEnded
+        }
         guard let imageView = context.coordinator.imageView else { return }
+        imageView.alphaValue = isDismissing ? 0 : 1   // hide only the IMAGE; the scroll view stays hit-testable
         if imageView.image !== image {
             imageView.image = image
             scrollView.magnification = 1     // reset zoom when the photo changes
@@ -51,7 +66,9 @@ struct ZoomableImageView: NSViewRepresentable {
 /// `NSScrollView` grow/scroll it when magnified, and turns a pinch-out at fit-scale into a
 /// "fly closed" dismiss.
 private final class ZoomScrollView: NSScrollView {
-    var onPinchClose: () -> Void = {}
+    var onPinchDismissBegan: () -> Void = {}
+    var onPinchDismissChanged: (CGFloat) -> Void = { _ in }
+    var onPinchDismissEnded: (Bool) -> Void = { _ in }
 
     private var dismissing = false
     private var dismissProgress: CGFloat = 0    // 0 = full size, grows as the user pinches out
@@ -70,31 +87,22 @@ private final class ZoomScrollView: NSScrollView {
             super.magnify(with: event)
             return
         }
+        // This view does NOT animate itself — it just REPORTS progress. The host renders the live shrink into the
+        // EXACT grid cell + the grid fade behind, via the shared zoom overlay (the gesture keeps being delivered
+        // here while the host renders the viewer invisible).
         switch event.phase {
         case .began:
             dismissing = true
             dismissProgress = 0
-            wantsLayer = true
+            onPinchDismissBegan()
         case .changed:
             dismissProgress = max(0, dismissProgress - event.magnification)   // outward pinch = negative
-            let scale = max(0.4, 1 - dismissProgress)
-            layer?.transform = CATransform3DMakeScale(scale, scale, 1)
-            alphaValue = max(0.25, scale)
+            onPinchDismissChanged(max(0, min(1, 1 - dismissProgress)))        // 1 = fullscreen, 0 = the grid cell
         case .ended, .cancelled:
-            let shouldClose = dismissProgress > 0.18
+            // A small/quick pinch is enough to fly it home (low threshold).
+            let shouldClose = event.phase == .ended && dismissProgress > 0.07
             dismissing = false
-            if shouldClose {
-                onPinchClose()
-            } else {
-                // Snap back smoothly if the pinch wasn't decisive.
-                NSAnimationContext.runAnimationGroup { ctx in
-                    ctx.duration = 0.22
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    ctx.allowsImplicitAnimation = true
-                    layer?.transform = CATransform3DIdentity
-                    animator().alphaValue = 1
-                }
-            }
+            onPinchDismissEnded(shouldClose)
         default:
             break
         }

@@ -37,22 +37,23 @@ import CoreGraphics
         #expect(engine().levelCount == 6)
     }
 
-    // 2 — SIZE-BASED: a level keeps a CONSTANT tile side at every width; the COLUMN COUNT adapts (more columns
-    // on a wider viewport — never a continuous rescale). At the calibration width it reproduces nominalColumns.
-    @Test func levelSpecsKeepFixedSizeAndAdaptColumns() {
+    // 2 — SIZE-BASED, WIDTH-FILLING: a level FILLS the width at every width (no trailing gutter); the COLUMN
+    // COUNT adapts (more columns on a wider viewport) and the tile breathes only within a small bounded band.
+    // At the calibration width it reproduces nominalColumns.
+    @Test func levelSpecsFillWidthAndAdaptColumns() {
         let e = engine()
         for level in 0 ..< e.levelCount {
+            let nominal = e.metrics(level: level).nominalColumns
             var sides: [CGFloat] = []
-            var cols: [Int] = []
             for w in [CGFloat(700), 1000, 1440, 2560, 3840] {
                 let m = e.resolvedMetrics(level: level, width: w)
-                cols.append(m.columns)
                 sides.append(m.slotSide)
+                #expect(abs((CGFloat(m.columns) * m.pitch - m.gap) - w) < 2.0, "level \(level) must fill width \(w)")
+                #expect(m.columns == nominal, "level \(level) fixed-columns: count holds at \(nominal)")
             }
-            for i in 1 ..< sides.count { #expect(abs(sides[i] - sides[0]) < 0.5, "level \(level) tile side must stay CONSTANT across widths") }
-            #expect(cols.first! < cols.last!, "level \(level) column count must grow with width")
-            for i in 1 ..< cols.count { #expect(cols[i] >= cols[i - 1], "level \(level) columns monotone non-decreasing in width") }
-            // At the calibration width the level reproduces its nominalColumns (density seed preserved).
+            #expect(sides.first! < sides.last!, "level \(level) tile must SCALE with width (fixed-columns, no reflow)")
+            for i in 1 ..< sides.count { #expect(sides[i] >= sides[i - 1] - 0.001, "level \(level) tile monotone non-decreasing in width") }
+            // At any width the level holds its nominalColumns (fixed-columns; equal at the reference width too).
             #expect(e.resolvedMetrics(level: level, width: GridSizePolicy.referenceWidth).columns == e.metrics(level: level).nominalColumns,
                     "level \(level) must reproduce nominalColumns at the reference width")
         }

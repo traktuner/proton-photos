@@ -64,7 +64,10 @@ struct ProductionRouteGuardTests {
         #expect(text.contains("Task.sleep(for: .milliseconds(280))"))
         #expect(text.contains("searchText: committedSearchText"))
         #expect(text.contains(".ignoresSafeArea(.container"))            // detail extends under the floating sidebar
-        #expect(text.contains("geo.safeAreaInsets.leading"))             // obstruction-inset source (== sidebar width)
+        // The obstruction inset is derived from the KNOWN sidebar width gated on columnVisibility — SwiftUI
+        // coordinate spaces / preferences don't bridge across NavigationSplitView's AppKit sidebar, so it can't be
+        // measured. It must NOT wrap the grid in a GeometryReader (the per-tick resize throttle).
+        #expect(text.contains("columnVisibility == .detailOnly ? 0 : sidebarWidth"))  // obstruction-inset source
         #expect(text.contains("gridLeadingEventInset"))                  // inset threaded to the Metal grid host
         #expect(text.contains(".protonPhotosToggleSidebar"))             // ⌥⌘S receiver kept (the native toolbar toggle returns)
         #expect(!text.contains("ZStack(alignment: .topLeading)"))        // the hand-rolled overlay layout is gone

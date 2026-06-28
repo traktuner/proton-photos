@@ -539,11 +539,26 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         didSet { if normalLevelLeadingGap != oldValue { onContentSizeChange?(contentSize()); requestRedraw() } }
     }
     /// THE effective leading inset at a given level: the sidebar obstruction plus, for a normal level with a
-    /// visible sidebar, the small breathing gap (`monthLabels` marks the dense overviews L4–L5 → no gap).
+    /// visible sidebar, the small breathing gap (`monthLabels` marks the dense overviews L4–L5 → no gap), plus the
+    /// standard outer LEFT margin (`gridHorizontalMargin`). The right margin is taken off `layoutWidth`.
     func effectiveLeadingInset(forLevel lvl: Int) -> CGFloat {
         let gap = (sidebarObstructionInset > 0 && !engine.metrics(level: lvl).monthLabels) ? normalLevelLeadingGap : 0
-        return sidebarObstructionInset + gap
+        return sidebarObstructionInset + gap + gridHorizontalMargin(forLevel: lvl)
     }
+    /// Standard OUTER left/right margin (gutter) so the edge columns don't butt against the window edge / sidebar.
+    /// CONSTANT across the normal levels — deliberately NOT the per-level inter-tile gap. A LEVEL-DEPENDENT gutter
+    /// makes `layoutWidth` level-dependent, and the pinch/± commit computes the anchored scroll at the gesture-START
+    /// level's width while the settled grid renders at the TARGET level's width: that width gap accumulates over the
+    /// rows and drifts the anchor by many rows deep in the library (the reported release jump — tiny near the top,
+    /// large far down). A constant gutter keeps `layoutWidth` level-independent so the commit lands exactly. Applied
+    /// to the NORMAL levels only (the dense square overviews L4–L5 stay edge-to-edge). The engine is unchanged: this
+    /// is purely a render inset + width trim, so the live-zoom lattice, transitions, and settled grid stay lock-step.
+    private func gridHorizontalMargin(forLevel lvl: Int) -> CGFloat {
+        engine.metrics(level: lvl).monthLabels ? 0 : Self.standardOuterMargin
+    }
+    /// The constant outer gutter (points) for the normal photo levels — see `gridHorizontalMargin` for why it must
+    /// not vary by level.
+    static let standardOuterMargin: CGFloat = 12
     /// The effective inset at the CURRENT level — THE value every layout/render/input path reads (the dissolve,
     /// which spans two levels, is rendered while `level` is still the source, an accepted ≤gap transient).
     var leadingObstructionInset: CGFloat { effectiveLeadingInset(forLevel: level) }
@@ -551,7 +566,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var fullViewportWidth: CGFloat { metalView?.bounds.width ?? clipView?.bounds.width ?? 0 }
     /// The width the ENGINE lays out in: full render width minus the effective leading inset. Every engine /
     /// anchor / phase / column calculation uses THIS — never the full width.
-    var layoutWidth: CGFloat { max(1, fullViewportWidth - leadingObstructionInset) }
+    var layoutWidth: CGFloat { max(1, fullViewportWidth - leadingObstructionInset - gridHorizontalMargin(forLevel: level)) }
     /// The viewport the engine lays out in: `layoutWidth` × full height.
     var layoutViewportSize: CGSize { CGSize(width: layoutWidth, height: viewportSize.height) }
 
@@ -623,6 +638,444 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return dataSource.flatUIDs[slot.index]
     }
 
+    // MARK: - Live horizontal resize presentation (Phase 1)
+    //
+    // During a live WINDOW resize the grid must behave like a STABLE rendered surface, not a per-frame
+    // re-resolving grid (re-resolving recomputes every tile position each tick → the tiles REFLOW, which reads as
+    // rearranging — exactly what Apple does NOT do). On gesture begin we snapshot the settled render slots ONCE
+    // (generous overscan ABOVE so a narrow / scale-down reveals already-laid-out older rows, never blank), and each
+    // frame we present that snapshot UNIFORMLY SCALED to the current width about the stationary LEFT edge + viewport
+    // BOTTOM — ONE coherent surface, square tiles preserved, no engine resolve / group rebuild / texture churn. On
+    // gesture end the host settles ONCE, bottom-anchored: for a sub-detent resize the round+fill layout at the
+    // release width EQUALS the last scaled frame (same columns; tile side = nominal-fill = start × scale), so
+    // nothing snaps; crossing a column detent costs at most one settle adjustment (Apple does this too).
+
+    private(set) var presentationResizeActive = false
+    /// Leading obstruction inset (sidebar overlap) + layout width captured at gesture start: the scale anchors the
+    /// content's LEFT edge at `inset` and scales by `currentLayoutWidth / startLayoutWidth`.
+    private var presentationStartInset: CGFloat = 0
+    private var presentationStartLayoutWidth: CGFloat = 1
+    /// The settled render slots snapshotted ONCE at gesture start (+ their display mode). Each frame these are
+    /// presented uniformly SCALED — one coherent surface — never re-resolved (re-resolving would reflow).
+    private var presentationSnapshotSlots: [GridRenderSlot] = []
+    private var presentationSnapshotDisplayMode: TileContentDisplayMode = .aspectFitInsideSquare
+    /// The item pinned to the viewport BOTTOM (+ its in-cell Y fraction). Used by the SIDEBAR settle
+    /// (`bottomAnchoredScroll`) so a toggle while scrolled to the newest end keeps the bottom row pinned. -1 ⇒ none.
+    private var presentationBottomAnchorIndex = -1
+    private var presentationBottomAnchorFracY: CGFloat = 1
+    /// The item under the viewport CENTRE at gesture start (+ its in-cell Y fraction): a window resize scales the
+    /// snapshot about the centre so the item you are looking at stays put, and the release scroll re-centres it
+    /// (`centerAnchoredScroll`). -1 ⇒ none. This replaces the old bottom-anchored window-resize model.
+    private var presentationCenterAnchorIndex = -1
+    private var presentationCenterAnchorFracY: CGFloat = 0.5
+    /// True for the duration of a window resize that began at the newest (bottom) end: the scale + settle then
+    /// hold the LAST row at the viewport bottom instead of the centre, so scaling never opens an empty band below.
+    private var presentationResizeBottomPinned = false
+    /// The clip scroll captured at gesture start — the reference the VERTICAL settle counter-scrolls from.
+    private(set) var presentationStartScrollY: CGFloat = 0
+    /// VERTICAL drag offset (viewport pixels, y-down) the host applies to the snapshot each tick: a vertical resize
+    /// keeps the tile SIZE (no scale) and slides the grid so the dragging edge clips while the opposite edge gives
+    /// up a fraction (Apple's shared-loss counter-scroll). 0 for a pure-horizontal drag. Set by the host.
+    var presentationVerticalShift: CGFloat = 0
+
+    /// True only when the presentation can run (no zoom / transition / dissolve / commit / sidebar-anim in flight).
+    var canPresentResize: Bool {
+        zoomTransaction == nil && !gridTransition.isActive && overviewDissolve == nil && !isCommitBridging && !debugSyntheticGrid && !presentationSidebarActive
+    }
+
+    /// Snapshot the settled render slots ONCE (generous overscan so a scale-down reveals real older rows) plus the
+    /// box they were laid out in (layout width, inset) and the start scroll. A presentation/sidebar transition then
+    /// presents these SCALED — never re-resolved.
+    private func captureSnapshot() {
+        guard let clip = clipView, let view = metalView else { return }
+        let viewportSize = view.bounds.size
+        let w = layoutWidth
+        let scrollY = clip.bounds.origin.y
+        let phase = currentPhase()
+        let overscan = max(budget.overscanFraction, 1.5) * viewportSize.height
+        let lvp = CGSize(width: w, height: viewportSize.height)
+        let plan = engine.framePlan(level: level, viewportSize: lvp, scrollOffset: CGPoint(x: 0, y: scrollY), overscan: overscan, columnPhase: phase)
+        presentationSnapshotSlots = renderTranslate(plan.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) })
+        presentationSnapshotDisplayMode = effectiveDisplayMode
+        presentationStartLayoutWidth = w
+        presentationStartInset = leadingObstructionInset
+        presentationStartScrollY = scrollY
+    }
+
+    /// Begin the live horizontal-resize presentation: snapshot the settled slots ONCE and capture the item at the
+    /// viewport BOTTOM so it stays pinned there through the scale. Idempotent within a gesture.
+    func beginPresentationResize() {
+        guard !presentationResizeActive, let clip = clipView, let view = metalView else { return }
+        if presentationSidebarActive { cancelSidebarResize() }   // a window resize supersedes a sidebar scale
+        if resizeSettleActive { endResizeSettle() }              // a fresh drag during a settle supersedes it
+        guard canPresentResize else { return }
+        let viewportSize = view.bounds.size
+        guard viewportSize.width > 1, viewportSize.height > 1 else { return }
+        // At the newest (bottom) end ⇒ hold the LAST row at the viewport bottom (else scaling about the centre opens
+        // an empty band below it); otherwise hold the centre (the item you are looking at stays put). Capture BOTH
+        // anchors so the release can settle whichever the gesture used.
+        presentationResizeBottomPinned = Self.resizeIsBottomPinned(scrollY: clip.bounds.origin.y,
+                                                                   contentHeight: contentSize().height,
+                                                                   viewportHeight: viewportSize.height)
+        captureBottomAnchor()
+        captureCenterAnchor()
+        captureSnapshot()
+        presentationVerticalShift = 0
+        presentationResizeActive = true
+    }
+
+    /// Capture the item at the viewport BOTTOM (+ its in-cell Y fraction) so a width change can keep it pinned at
+    /// the bottom (the scale is bottom-anchored vertically; the settle bottom-anchors to match). -1 ⇒ none.
+    private func captureBottomAnchor() {
+        guard let clip = clipView, let view = metalView else { presentationBottomAnchorIndex = -1; return }
+        let w = layoutWidth
+        let scrollY = clip.bounds.origin.y
+        if let a = engine.anchorItem(nearContentPoint: CGPoint(x: w / 2, y: scrollY + view.bounds.height - 1),
+                                     level: level, width: w, columnPhase: currentPhase()) {
+            presentationBottomAnchorIndex = a.flatIndex
+            presentationBottomAnchorFracY = a.localFraction.y
+        } else {
+            presentationBottomAnchorIndex = -1
+        }
+    }
+
+    /// Capture the item under the viewport CENTRE (+ its in-cell Y fraction) so a window resize keeps it pinned at
+    /// the centre through the scale and re-centres it on release (Apple-style: the thing you look at stays put).
+    private func captureCenterAnchor() {
+        guard let clip = clipView, let view = metalView else { presentationCenterAnchorIndex = -1; return }
+        let w = layoutWidth
+        let scrollY = clip.bounds.origin.y
+        let H = view.bounds.height
+        if let a = engine.anchorItem(nearContentPoint: CGPoint(x: w / 2, y: scrollY + H / 2),
+                                     level: level, width: w, columnPhase: currentPhase()) {
+            presentationCenterAnchorIndex = a.flatIndex
+            presentationCenterAnchorFracY = a.localFraction.y
+        } else {
+            presentationCenterAnchorIndex = -1
+        }
+    }
+
+    /// The bottom-anchored scroll for the captured anchor at the CURRENT layout width (clamped). Falls back to the
+    /// gesture-start scroll when no anchor. Used by the sidebar settle so a toggle while scrolled to the newest end
+    /// keeps the bottom row pinned (no jump) instead of reusing the frozen start scroll.
+    private func bottomAnchoredScroll() -> CGFloat {
+        guard presentationBottomAnchorIndex >= 0, let view = metalView else { return presentationStartScrollY }
+        let H = view.bounds.height
+        let y = engine.anchoredScrollOffsetY(flatIndex: presentationBottomAnchorIndex, relInCellY: presentationBottomAnchorFracY,
+                                             contentFractionY: 1, viewportPointY: H, level: level, width: layoutWidth, columnPhase: currentPhase())
+        return engine.clampScrollOffsetY(y, level: level, width: layoutWidth, viewportHeight: H, columnPhase: currentPhase())
+    }
+
+    /// The settled scroll that re-centres the captured CENTRE anchor at the CURRENT layout width (clamped). Falls
+    /// back to the gesture-start scroll when no anchor. The host applies this ONCE on release of a window resize, so
+    /// the item the user was looking at stays under the viewport centre — there is no per-frame re-anchor (which
+    /// drifted vertically as the tiles scaled with width).
+    func centerAnchoredScroll() -> CGFloat {
+        guard presentationCenterAnchorIndex >= 0, let view = metalView else { return presentationStartScrollY }
+        let H = view.bounds.height
+        let y = engine.anchoredScrollOffsetY(flatIndex: presentationCenterAnchorIndex, relInCellY: presentationCenterAnchorFracY,
+                                             contentFractionY: 0.5, viewportPointY: H / 2, level: level, width: layoutWidth, columnPhase: currentPhase())
+        return engine.clampScrollOffsetY(y, level: level, width: layoutWidth, viewportHeight: H, columnPhase: currentPhase())
+    }
+
+    /// The settle scroll the host applies on release of a WIDTH/corner window resize: bottom-pinned ⇒ keep the LAST
+    /// row at the viewport bottom (no empty band); otherwise re-centre the centre anchor. (A pure-vertical resize
+    /// settles via the host's counter-scroll, not this.)
+    func windowResizeReleaseScrollY() -> CGFloat {
+        presentationResizeBottomPinned ? bottomAnchoredScroll() : centerAnchoredScroll()
+    }
+
+    /// End the presentation; the host syncs the clip to `centerAnchoredScroll()` and redraws the settled grid.
+    func endPresentationResize() {
+        presentationResizeActive = false
+        presentationSnapshotSlots = []
+        presentationVerticalShift = 0
+    }
+
+    // MARK: - Sidebar resize (open/close scales the grid like a left-edge resize — RIGHT-anchored, inset-driven)
+    //
+    // The floating sidebar is FIXED-width, so open/close changes the grid's leading inset by a known amount. Rather
+    // than reflow, this presents the gesture-start snapshot SCALED right-anchored to fill [inset(t), V] as the inset
+    // animates `from` → `to` over the slide duration (a timed "virtual drag", host-driven). The end commits the
+    // engine inset and settles via the SAME detent fly-into-place as a window resize (until sticky columns make a
+    // width change reflow-free, after which the settle is a no-op).
+    private(set) var presentationSidebarActive = false
+    var isSidebarResizing: Bool { presentationSidebarActive }
+    /// from/to are LAYOUT insets (sidebar width + the normal-level gap) — what the scale fills to; `toEventInset`
+    /// is the raw sidebar width committed to `sidebarObstructionInset` (the gap is re-added by the engine).
+    private var presentationSidebarFromInset: CGFloat = 0
+    private var presentationSidebarToInset: CGFloat = 0
+    private var presentationSidebarToEventInset: CGFloat = 0
+    private var presentationSidebarViewportWidth: CGFloat = 1
+    /// 0→1, advanced by the host's display-link tick; eased in `drawSidebarResize`.
+    var presentationSidebarProgress: CGFloat = 0
+
+    /// The LAYOUT inset (points) for a given sidebar obstruction width = the width plus, for a normal level with a
+    /// sidebar, the breathing gap, plus the standard outer LEFT margin — so the scale fills to EXACTLY where the
+    /// engine will lay the grid out (mirrors `effectiveLeadingInset`). Omitting the margin here left a margin-sized
+    /// re-alignment at the end of the slide.
+    private func sidebarLayoutInset(forWidth sidebarInset: CGFloat) -> CGFloat {
+        let gap = (sidebarInset > 0 && !engine.metrics(level: level).monthLabels) ? normalLevelLeadingGap : 0
+        return sidebarInset + gap + gridHorizontalMargin(forLevel: level)
+    }
+
+    /// Arm the sidebar scale: snapshot at the OLD inset (the engine inset must still be `fromInset` here), then
+    /// present it RIGHT-anchored, scaling to [inset(t), V]. `fromInset`/`toInset` are the host's sidebar WIDTHS.
+    /// Returns false (⇒ caller settles instantly) when it can't run.
+    @discardableResult
+    func beginSidebarResize(fromInset: CGFloat, toInset: CGFloat) -> Bool {
+        if presentationSidebarActive { cancelSidebarResize() }   // a new toggle SUPERSEDES the in-flight scale
+        guard canPresentResize, !presentationResizeActive, let view = metalView else { return false }
+        let viewportSize = view.bounds.size
+        guard viewportSize.width > 1, viewportSize.height > 1 else { return false }
+        if resizeSettleActive { endResizeSettle() }
+        captureBottomAnchor()
+        captureSnapshot()
+        presentationSidebarFromInset = sidebarLayoutInset(forWidth: fromInset)   // == presentationStartInset (old layout inset)
+        presentationSidebarToInset = sidebarLayoutInset(forWidth: toInset)
+        presentationSidebarToEventInset = toInset
+        // The right-anchor is the content's RIGHT edge = full width − the right margin (not the window edge), so the
+        // scaled frame's right edge lands exactly where the settled grid's does (no end-of-slide re-alignment).
+        presentationSidebarViewportWidth = viewportSize.width - gridHorizontalMargin(forLevel: level)
+        presentationSidebarProgress = 0
+        presentationSidebarActive = true
+        return true
+    }
+
+    /// Settle the sidebar scale at `toInset`: commit the engine inset and, if the new layout reflowed (a column
+    /// detent crossed), arm the fly-into-place morph from the last (right-anchored) scaled frame to the settled
+    /// layout. Returns true if a settle animation was armed (host drives `resizeSettleProgress`); false ⇒ instant.
+    func endSidebarResize() -> (scroll: CGFloat, animating: Bool) {
+        let V = presentationSidebarViewportWidth
+        let H = metalView?.bounds.height ?? 1
+        let startLayoutW = max(1, V - presentationSidebarFromInset)
+        let toLayoutW = max(1, V - presentationSidebarToInset)
+        let k = toLayoutW / startLayoutW
+        // SOURCE — the last scaled frame (q=1): the snapshot scaled right-anchored to [toInset, V].
+        let source = presentationSnapshotSlots.map { s in
+            GridRenderSlot(index: s.index, column: s.column, row: s.row,
+                           rect: Self.presentationScaledRectRightAnchored(s.rect, scale: k, rightX: V, viewportH: H))
+        }
+        presentationSidebarActive = false
+        sidebarObstructionInset = presentationSidebarToEventInset   // commit the WIDTH (engine re-adds the gap)
+        // The settle scroll BOTTOM-anchors to the captured item at the NEW layout width — matching the scale's
+        // bottom-anchored Y — so a toggle while scrolled to the newest end doesn't jump the bottom row.
+        let scroll = bottomAnchoredScroll()
+        // TARGET — the settled layout (sticky columns ⇒ same count, tile filled) at the new inset + scroll.
+        let phase = currentPhase()
+        let overscan = max(budget.overscanFraction, 1.5) * H
+        let plan = engine.framePlan(level: level, viewportSize: CGSize(width: toLayoutW, height: H), scrollOffset: CGPoint(x: 0, y: scroll), overscan: overscan, columnPhase: phase)
+        let target = renderTranslate(plan.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) })
+        presentationSnapshotSlots = []
+        guard Self.maxIndexedRectDelta(source: source, target: target) > 1.5 else { return (scroll, false) }
+        resizeSettleSource = source
+        resizeSettleTarget = target
+        resizeSettleProgress = 0
+        resizeSettleActive = true
+        return (scroll, true)
+    }
+
+    /// Finalize an in-flight sidebar scale IMMEDIATELY — commit its target inset (engine re-adds the gap), drop the
+    /// snapshot, and commit the inset. Used when a new toggle or a window resize supersedes it, so the engine inset
+    /// can never end out of sync with the sidebar's actual state.
+    func cancelSidebarResize() {
+        guard presentationSidebarActive else { return }
+        presentationSidebarActive = false
+        sidebarObstructionInset = presentationSidebarToEventInset
+        presentationSnapshotSlots = []
+    }
+
+    /// Present the snapshot SCALED right-anchored to fill [inset(t), V] for the current sidebar progress. Coherent
+    /// scale (one surface) — never re-resolved — so the grid scales exactly like a left-edge window drag.
+    private func drawSidebarResize(in view: MTKView, viewportSize: CGSize) {
+        let H = viewportSize.height
+        let V = presentationSidebarViewportWidth
+        let q = Self.easeInOutCubic(min(1, max(0, presentationSidebarProgress)))
+        let inset = presentationSidebarFromInset + (presentationSidebarToInset - presentationSidebarFromInset) * q
+        let startLayoutW = max(1, V - presentationSidebarFromInset)
+        let k = max(1, V - inset) / startLayoutW
+        let scaled = presentationSnapshotSlots.map { s in
+            GridRenderSlot(index: s.index, column: s.column, row: s.row,
+                           rect: Self.presentationScaledRectRightAnchored(s.rect, scale: k, rightX: V, viewportH: H))
+        }
+        let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
+        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
+    }
+
+    /// Present the gesture-start snapshot as ONE coherent surface, UNIFORMLY SCALED to the current width about the
+    /// stationary LEFT edge (x = inset) and the viewport CENTRE. Scaling a single snapshot moves every tile
+    /// together (a smooth zoom), where re-resolving the engine per tick would recompute positions and REFLOW. The
+    /// item under the centre stays pinned (no vertical drift while dragging the side edge); rows scale out
+    /// symmetrically. No engine resolve / group rebuild / texture churn per tick.
+    private func drawPresentationResize(in view: MTKView, viewportSize: CGSize) {
+        let H = viewportSize.height
+        let inset = presentationStartInset
+        // Subtract the RIGHT gutter too (the LEFT gutter is already folded into `inset`): otherwise the snapshot
+        // scales to fill width−inset and the standard outer margin VANISHES during the drag (photos stick to the
+        // right edge), then snaps back when the settled grid (which has the margin) renders on release.
+        let curLayoutW = max(1, viewportSize.width - inset - gridHorizontalMargin(forLevel: level))
+        let k = curLayoutW / max(1, presentationStartLayoutWidth)
+        let dy = presentationVerticalShift   // VERTICAL counter-scroll (pure-vertical only); tiles keep their size
+        let anchorY = presentationResizeBottomPinned ? H : H / 2   // hold the last row at the bottom, else the centre
+        let scaled = presentationSnapshotSlots.map { s in
+            GridRenderSlot(index: s.index, column: s.column, row: s.row,
+                           rect: Self.presentationScaledRect(s.rect, scale: k, insetX: inset, anchorY: anchorY).offsetBy(dx: 0, dy: dy))
+        }
+        let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
+        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
+        // The settle scroll is resolved ONCE on release (`windowResizeReleaseScrollY`), never re-anchored per frame —
+        // that bottom-anchored recompute drifted vertically as the tiles scaled with width.
+    }
+
+    /// Scale a viewport rect (top-down pixel space, y = 0 at top) by `k` about the stationary left edge (x = insetX)
+    /// and a stationary horizontal anchor line (y = anchorY): the content at the anchor stays put, the left content
+    /// edge stays at the inset, and squares stay square (X and Y scale equally). A window resize passes the viewport
+    /// CENTRE (anchorY = H/2). `k = 1` is the identity.
+    nonisolated static func presentationScaledRect(_ r: CGRect, scale k: CGFloat, insetX: CGFloat, anchorY: CGFloat) -> CGRect {
+        CGRect(x: insetX + (r.minX - insetX) * k,
+               y: anchorY + (r.minY - anchorY) * k,
+               width: r.width * k,
+               height: r.height * k)
+    }
+
+    /// Scale a viewport rect about the stationary RIGHT edge (x = rightX) and the viewport bottom — for a sidebar
+    /// open/close (a LEFT-edge resize of the grid): the content's right edge stays put while its left edge moves to
+    /// the new inset and the tiles scale (square). `k = 1` is the identity.
+    nonisolated static func presentationScaledRectRightAnchored(_ r: CGRect, scale k: CGFloat, rightX V: CGFloat, viewportH H: CGFloat) -> CGRect {
+        CGRect(x: V - (V - r.minX) * k,
+               y: H - (H - r.minY) * k,
+               width: r.width * k,
+               height: r.height * k)
+    }
+
+    /// The VERTICAL counter-scroll slide (viewport pixels, y-down) for a height change of `dH` (= startH − curH,
+    /// shrink positive). The DRAGGING edge clips the majority; the OPPOSITE edge gives up fraction `f`. A bottom-
+    /// edge drag slides up by f·dH (older rows leave the top); a top-edge drag slides up by (1−f)·dH (the bottom
+    /// stays put). `f = 0` ⇒ pure edge-anchor (all loss at the dragging edge); `f = 1` ⇒ the opposite edge anchors.
+    nonisolated static func verticalCounterScrollShift(dH: CGFloat, topEdgeDrag: Bool, fraction f: CGFloat) -> CGFloat {
+        topEdgeDrag ? -(1 - f) * dH : -f * dH
+    }
+
+    /// A window resize is BOTTOM-PINNED when the grid is scrolled to within ~a row of the newest (bottom) end. There
+    /// the scale + settle must hold the LAST row at the viewport bottom (anchorY = H, `bottomAnchoredScroll`) rather
+    /// than the centre — otherwise scaling about the centre opens an empty band below the last row. Pure + testable.
+    nonisolated static func resizeIsBottomPinned(scrollY: CGFloat, contentHeight: CGFloat, viewportHeight: CGFloat) -> Bool {
+        let maxScroll = max(0, contentHeight - viewportHeight)
+        return scrollY >= maxScroll - 2
+    }
+
+    // MARK: - Resize settle (release-time animated reflow when a column detent was crossed)
+    //
+    // A live resize SCALES the snapshot at the gesture-start column count. On release the settled round+fill layout
+    // may have a DIFFERENT column count (a detent was crossed) — committing directly would SNAP. Instead this morphs
+    // every visible item's viewport rect from its last SCALED position to its settled position over a short easeOut
+    // (~220 ms), so the reflow is a smooth "fly into place", never an instant jump. For a sub-detent resize source
+    // ≈ target ⇒ NOT armed (the host settles instantly). Mirrors the zoom commit bridge.
+    private(set) var resizeSettleActive = false
+    var isResizeSettling: Bool { resizeSettleActive }
+    private var resizeSettleSource: [GridRenderSlot] = []
+    private var resizeSettleTarget: [GridRenderSlot] = []
+    /// 0→1, advanced by the host's display-link tick; eased in `drawResizeSettle`.
+    var resizeSettleProgress: CGFloat = 0
+
+    /// Arm the release settle: SOURCE = the last scaled presentation frame; TARGET = the settled round+fill layout
+    /// at the release width, bottom-anchored to `targetScrollY` (the scroll the host is about to apply). Returns
+    /// false (⇒ caller settles instantly) when source ≈ target — a sub-detent resize needs no animation.
+    @discardableResult
+    func beginResizeSettle(targetScrollY: CGFloat) -> Bool {
+        guard presentationResizeActive, let view = metalView else { resizeSettleActive = false; return false }
+        let viewportSize = view.bounds.size
+        let H = viewportSize.height
+        let inset = presentationStartInset
+        let curLayoutW = max(1, viewportSize.width - inset - gridHorizontalMargin(forLevel: level))   // right gutter too
+        let k = curLayoutW / max(1, presentationStartLayoutWidth)
+        // SOURCE — exactly the scaled + vertically-slid snapshot the last live frame presented (what the user sees);
+        // same anchor as `drawPresentationResize` so the settle starts from the on-screen frame.
+        let dy = presentationVerticalShift
+        let anchorY = presentationResizeBottomPinned ? H : H / 2
+        let source = presentationSnapshotSlots.map { s in
+            GridRenderSlot(index: s.index, column: s.column, row: s.row,
+                           rect: Self.presentationScaledRect(s.rect, scale: k, insetX: inset, anchorY: anchorY).offsetBy(dx: 0, dy: dy))
+        }
+        // TARGET — the settled round+fill layout at the release width + the scroll the host will apply.
+        let phase = currentPhase()
+        let overscan = max(budget.overscanFraction, 1.5) * H
+        let lvp = CGSize(width: curLayoutW, height: H)
+        let plan = engine.framePlan(level: level, viewportSize: lvp, scrollOffset: CGPoint(x: 0, y: targetScrollY), overscan: overscan, columnPhase: phase)
+        let target = renderTranslate(plan.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) })
+        // FIXED COLUMNS: a width change never changes the column count ⇒ NO reflow ⇒ the fly-into-place morph is not
+        // needed. The only source↔target difference is the snapshot's uniformly-SCALED gaps vs the settled CONSTANT
+        // gaps (≤ a few px); animating THAT over ~220 ms is the "rebuild/scroll-around" glitch on release. Only arm
+        // the morph for a genuine column reflow (which fixed-columns never produces); otherwise the host snaps.
+        let startCols = engine.resolvedMetrics(level: level, width: presentationStartLayoutWidth).columns
+        let delta = Self.maxIndexedRectDelta(source: source, target: target)
+        guard plan.columns != startCols, delta > 1.5 else { resizeSettleActive = false; return false }
+        resizeSettleSource = source
+        resizeSettleTarget = target
+        resizeSettleProgress = 0
+        resizeSettleActive = true
+        return true
+    }
+
+    func endResizeSettle() {
+        resizeSettleActive = false
+        resizeSettleSource = []
+        resizeSettleTarget = []
+    }
+
+    /// Render the settle: each settled (target) slot eased from its SCALED (source) position by `easeOut(progress)`.
+    /// A target item with no source match (newly revealed at an edge) appears at its settled rect. Textures stream
+    /// + decorations draw via the canonical real-slot path.
+    private func drawResizeSettle(in view: MTKView, viewportSize: CGSize, now: CFTimeInterval) {
+        let q = Self.easeOutCubic(min(1, max(0, resizeSettleProgress)))
+        var srcByIndex: [Int: CGRect] = [:]
+        srcByIndex.reserveCapacity(resizeSettleSource.count)
+        for s in resizeSettleSource { srcByIndex[s.index] = s.rect }
+        let slots: [GridRenderSlot] = resizeSettleTarget.map { t in
+            guard let s = srcByIndex[t.index] else { return t }
+            let r = CGRect(x: s.minX + (t.rect.minX - s.minX) * q,
+                           y: s.minY + (t.rect.minY - s.minY) * q,
+                           width: s.width + (t.rect.width - s.width) * q,
+                           height: s.height + (t.rect.height - s.height) * q)
+            return GridRenderSlot(index: t.index, column: t.column, row: t.row, rect: r)
+        }
+        let pureViewport = CGRect(origin: .zero, size: viewportSize)
+        let flatUIDs = dataSource.flatUIDs
+        var visibleUIDs: [PhotoUID] = []
+        var overscanUIDs: [PhotoUID] = []
+        for s in slots where s.index < flatUIDs.count {
+            if s.rect.intersects(pureViewport) { visibleUIDs.append(flatUIDs[s.index]) } else { overscanUIDs.append(flatUIDs[s.index]) }
+        }
+        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
+        _ = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
+        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
+    }
+
+    /// Max per-item rect delta (L1 of origin + size) between two index-keyed slot sets — 0 when every shared item
+    /// sits in the same place (a sub-detent resize), large when a column detent reflowed the grid.
+    nonisolated static func maxIndexedRectDelta(source: [GridRenderSlot], target: [GridRenderSlot]) -> CGFloat {
+        var src: [Int: CGRect] = [:]
+        src.reserveCapacity(source.count)
+        for s in source { src[s.index] = s.rect }
+        var maxD: CGFloat = 0
+        for t in target {
+            guard let r = src[t.index] else { continue }
+            let d = abs(r.minX - t.rect.minX) + abs(r.minY - t.rect.minY) + abs(r.width - t.rect.width) + abs(r.height - t.rect.height)
+            if d > maxD { maxD = d }
+        }
+        return maxD
+    }
+
+    /// easeOutCubic — fast start, gentle landing: the "fly into place" the resize settle wants.
+    nonisolated static func easeOutCubic(_ q: CGFloat) -> CGFloat { let p = 1 - q; return 1 - p * p * p }
+
+    /// easeInOutCubic — slow ends, fast middle: matches a sidebar slide's acceleration.
+    nonisolated static func easeInOutCubic(_ q: CGFloat) -> CGFloat {
+        if q < 0.5 { return 4 * q * q * q }
+        let u = -2 * q + 2
+        return 1 - u * u * u / 2
+    }
+
     // MARK: - MTKViewDelegate
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
@@ -633,7 +1086,25 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         guard let clip = clipView else { return }
         let viewportSize = view.bounds.size
         guard viewportSize.width > 1, viewportSize.height > 1 else { return }
+        // LIVE WINDOW RESIZE: scale the gesture-start snapshot about the viewport centre (fixed columns, no reflow;
+        // the clip is frozen — the host re-centres it ONCE on release). Armed for a horizontal/corner drag.
+        if presentationResizeActive {
+            drawPresentationResize(in: view, viewportSize: viewportSize)
+            return
+        }
+        // SIDEBAR open/close: present the snapshot SCALED right-anchored to the animating inset (a left-edge resize
+        // of the grid) — the same coherent scale as a window drag, host-driven over the slide duration.
+        if presentationSidebarActive {
+            drawSidebarResize(in: view, viewportSize: viewportSize)
+            return
+        }
         let now = CACurrentMediaTime()
+        // RELEASE SETTLE: a detent-crossing resize morphs the scaled frame into the settled layout (the tiles fly
+        // into their new grid positions). Sub-detent resizes never arm this (the host settled instantly).
+        if resizeSettleActive {
+            drawResizeSettle(in: view, viewportSize: viewportSize, now: now)
+            return
+        }
         // OVERVIEW LAYER DISSOLVE (offscreen two-layer mix) — active only during an L3↔L4 / L4↔L5 gesture.
         if let plan = overviewDissolve {
             drawOverviewDissolve(in: view, plan: plan, viewportSize: viewportSize, now: now)

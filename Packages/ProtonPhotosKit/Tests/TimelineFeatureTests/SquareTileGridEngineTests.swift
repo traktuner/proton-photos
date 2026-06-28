@@ -119,9 +119,9 @@ import CoreGraphics
         }
     }
 
-    // 9. SIZE-BASED window resize: a level keeps a CONSTANT slot/photo size at every width; the COLUMN COUNT
-    // adapts (more columns on a wider viewport — no breathing). Leading-aligned, bounded trailing margin, no overlap.
-    @Test func windowResizeKeepsSlotSizeAndAddsColumns() {
+    // 9. SIZE-BASED, WIDTH-FILLING window resize: a level FILLS the width at every width (no gutter); the COLUMN
+    // COUNT adapts (more columns on a wider viewport) and the tile breathes within a bounded band. No overlap.
+    @Test func windowResizeFillsWidthAndAddsColumns() {
         let e = engine()
         var sides: [CGFloat] = []
         var columnsSeen: [Int] = []
@@ -135,12 +135,13 @@ import CoreGraphics
                     #expect(row[i].slotRect.minX - row[i - 1].slotRect.maxX >= plan.gap - eps) // no overlap
                 }
                 #expect(row.last!.slotRect.maxX <= w + 1.0)                                     // never overflows
-                #expect(w - row.last!.slotRect.maxX < plan.pitch)                               // bounded trailing margin
+                #expect(w - row.last!.slotRect.maxX < 2.0)                                      // FILLS the width (no gutter)
             }
         }
-        for i in 1 ..< sides.count { #expect(abs(sides[i] - sides[0]) < eps, "slot size must stay CONSTANT across widths (no breathing)") }
-        #expect(columnsSeen.first! < columnsSeen.last!, "column count must grow with width")
-        for i in 1 ..< columnsSeen.count { #expect(columnsSeen[i] >= columnsSeen[i - 1], "columns monotone non-decreasing in width") }
+        let nominal = e.metrics(level: 2).nominalColumns
+        for c in columnsSeen { #expect(c == nominal, "FIXED-COLUMNS: the count holds at \(nominal) across widths (resize scales, never reflows)") }
+        #expect(sides.first! < sides.last!, "the tile must SCALE with width (fixed-columns, not the old re-column reflow)")
+        for i in 1 ..< sides.count { #expect(sides[i] >= sides[i - 1], "tile size monotone non-decreasing in width") }
     }
 
     // 10. Hit testing uses the SQUARE slot rect — a point in the slot corner that an aspectFit inner rect
@@ -166,10 +167,13 @@ import CoreGraphics
     @Test func zoomUsesMetrics() {
         let e = engine()
         let w = viewport.width
-        func refSide(_ lvl: Int) -> CGFloat { e.metrics(level: lvl).referenceSlotSide }   // SIZE-BASED: FIXED per-level size
-        #expect(abs(e.apparentSlotSide(at: 2, width: w) - refSide(2)) < eps)        // at a detent → that level's fixed side
+        // SEAM: the live apparent side at an integer detent equals the SETTLED (width-filled) side for that
+        // level — so a pinch commit lands with no size pop. (Was: the raw reference side, which only matched at
+        // the reference width.) Between detents it interpolates strictly between the two filled sides.
+        func filledSide(_ lvl: Int) -> CGFloat { e.resolvedMetrics(level: lvl, width: w).slotSide }
+        #expect(abs(e.apparentSlotSide(at: 2, width: w) - filledSide(2)) < eps)     // detent → settled filled side (seam closes)
         let mid = e.apparentSlotSide(at: 2.5, width: w)
-        #expect(mid < refSide(2) && mid > refSide(3))                               // between detents
+        #expect(mid < filledSide(2) && mid > filledSide(3))                         // between detents
         let anchor = GridZoomAnchor(flatIndex: 1000, viewportPoint: CGPoint(x: 700, y: 450),
                                     contentFractionY: 0.5, relInCell: CGPoint(x: 0.5, y: 0.5))
         let inPlan = e.zoomFramePlan(continuousLevel: 2.0, viewportSize: viewport, anchor: anchor, overscan: 0)

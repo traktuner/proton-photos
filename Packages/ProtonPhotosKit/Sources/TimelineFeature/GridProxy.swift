@@ -18,6 +18,13 @@ public final class GridProxy {
     /// Scrolls the grid so the photo is vertically centred (used before a fly-back-to-cell close).
     public var scrollToItem: ((PhotoItem) -> Void)?
 
+    /// Force ONE repaint after a full-screen overlay (the photo viewer) that fully covered the grid is dismissed.
+    /// The on-demand MTKView's layer surface is purged by the window server under full occlusion, and on reveal
+    /// nothing sets `needsDisplay` (every visible tile is still GPU-resident, so the streaming tick is idle) — so the
+    /// revealed grid shows its empty clear surface until a stray relayout finally redraws it (the clear flash + the
+    /// top-to-bottom rebuild). One redraw repaints the whole viewport from resident textures in a single frame.
+    public var redrawOnReveal: (() -> Void)?
+
     /// Scrolls the grid to a flattened timeline index. Used by date navigation overlays; the Metal host resolves
     /// the index through the same production geometry as visible cells, so no SwiftUI layout math is duplicated.
     public var scrollToFlatIndex: ((Int) -> Void)?

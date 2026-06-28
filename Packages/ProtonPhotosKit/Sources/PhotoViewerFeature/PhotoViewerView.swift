@@ -33,6 +33,13 @@ public struct PhotoViewerView: View {
     private let isFavorite: (PhotoUID) -> Bool
     private let onToggleFavorite: (PhotoUID) -> Void
     private let onTrash: (PhotoItem) -> Void
+    private let onPinchDismissBegan: () -> Void
+    private let onPinchDismissChanged: (CGFloat) -> Void
+    private let onPinchDismissEnded: (Bool) -> Void
+    /// True while the interactive pinch-dismiss is in flight: the host's shared zoom overlay is rendering the live
+    /// shrink-into-the-cell, so THIS view hides its own background + image (but stays mounted + hit-testable so the
+    /// pinch keeps delivering to its scroll view, never leaking to the grid behind).
+    private let isDismissing: Bool
 
     @State private var hovering = false
 
@@ -40,24 +47,34 @@ public struct PhotoViewerView: View {
                 isFavorite: @escaping (PhotoUID) -> Bool = { _ in false },
                 onToggleFavorite: @escaping (PhotoUID) -> Void = { _ in },
                 onTrash: @escaping (PhotoItem) -> Void = { _ in },
-                onClose: @escaping () -> Void) {
+                onClose: @escaping () -> Void,
+                onPinchDismissBegan: @escaping () -> Void = {},
+                onPinchDismissChanged: @escaping (CGFloat) -> Void = { _ in },
+                onPinchDismissEnded: @escaping (Bool) -> Void = { _ in },
+                isDismissing: Bool = false) {
         _model = State(initialValue: model)
         self.isFavorite = isFavorite
         self.onToggleFavorite = onToggleFavorite
         self.onTrash = onTrash
         self.onClose = onClose
+        self.onPinchDismissBegan = onPinchDismissBegan
+        self.onPinchDismissChanged = onPinchDismissChanged
+        self.onPinchDismissEnded = onPinchDismissEnded
+        self.isDismissing = isDismissing
     }
 
     public var body: some View {
         ZStack {
-            // Warm Apple-Photos background fills the whole window (behind the now-opaque top bar too).
+            // Warm Apple-Photos background fills the whole window (behind the now-opaque top bar too). Hidden while
+            // an interactive dismiss runs so the grid shows through behind the shrinking photo (the overlay owns it).
             ViewerVisualConstants.backgroundColor.ignoresSafeArea()
+                .opacity(isDismissing ? 0 : 1)
 
             viewerBody
 
-            loadingOverlay
+            loadingOverlay.opacity(isDismissing ? 0 : 1)
 
-            navigationControls
+            navigationControls.opacity(isDismissing ? 0 : 1)
             shortcuts
         }
         .onAppear { model.start() }
@@ -93,7 +110,11 @@ public struct PhotoViewerView: View {
         if let player = model.player {
             PlayerView(player: player)             // single AVPlayer (streaming or downloaded)
         } else if let image = model.image {
-            ZoomableImageView(image: image, onPinchClose: onClose)   // pinch-zoom + pinch-out-to-close
+            ZoomableImageView(image: image,                      // pinch-zoom + interactive pinch-out-to-dismiss
+                              isDismissing: isDismissing,
+                              onPinchDismissBegan: onPinchDismissBegan,
+                              onPinchDismissChanged: onPinchDismissChanged,
+                              onPinchDismissEnded: onPinchDismissEnded)
         }
     }
 
