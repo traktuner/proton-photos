@@ -18,6 +18,8 @@ protocol MetalGridDataSource: AnyObject {
     func image(for uid: PhotoUID) -> CGImage?
     /// Prime the given UIDs into RAM (off-main); cheap + idempotent. Called for visible placeholders.
     func warm(_ uids: [PhotoUID])
+    /// Main-actor notification after an async warm pass may have made new RAM images visible.
+    var onImagesAvailable: (() -> Void)? { get set }
     /// Whether this item is a video (drives the video badge). Default: false.
     func isVideo(_ uid: PhotoUID) -> Bool
 }
@@ -42,6 +44,7 @@ final class RealMetalGridDataSource: MetalGridDataSource {
     let label = "real"
     let sectionCounts: [Int]
     let flatUIDs: [PhotoUID]
+    var onImagesAvailable: (() -> Void)?
     private let feed: ThumbnailFeed
     private let videoUIDs: Set<PhotoUID>
     private var warmInFlight = false
@@ -118,6 +121,7 @@ final class RealMetalGridDataSource: MetalGridDataSource {
             _ = await feed.warmDecoded(batch, limit: batch.count)
             await MainActor.run {
                 self.warmInFlight = false
+                self.onImagesAvailable?()
                 self.pumpWarm()
             }
         }

@@ -94,6 +94,8 @@ final class MetalGridScrollHost: NSView {
     static let normalLevelLeadingGap: CGFloat = 16
 
     private var streamingTick: CADisplayLink?
+    private var displayLinkWakeUntil: CFTimeInterval = 0
+    private let displayLinkIdleGrace: CFTimeInterval = 0.25
     /// The grid is laid out oldest→top-left, newest→bottom-right, so it opens pinned to the BOTTOM
     /// (newest) and re-pins on resize/level until the user scrolls away.
     private var stickToBottom = true
@@ -177,6 +179,7 @@ final class MetalGridScrollHost: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         wantsLayer = true
         layer?.backgroundColor = MetalGridPalette.background.cgColor   // uniform Apple-like dark surface
+        installImageAvailabilityCallback(on: dataSource)
         setUp()
     }
 
@@ -325,7 +328,7 @@ final class MetalGridScrollHost: NSView {
         if animating { resizeSettleStart = CACurrentMediaTime() }
         lastViewportScreenFrame = viewportScreenFrame()
         liveResizeStartFrame = .zero
-        metalView.needsDisplay = true
+        requestFrame()
     }
 
     // MARK: - Live focus-row pinch zoom (engine-owned GridZoomTransaction)
@@ -370,7 +373,7 @@ final class MetalGridScrollHost: NSView {
             pinchCumulativeMagnification += event.magnification
             let pos = CGFloat(pinchBaseLevel) - pinchCumulativeMagnification / magnificationPerLevel
             driveLivePinch(continuousLevel: pos)
-            metalView.needsDisplay = true
+            requestFrame()
         case .ended:
             guard pinchActive else { return }
             if event.magnification != 0 { pinchCumulativeMagnification += event.magnification }
@@ -449,7 +452,7 @@ final class MetalGridScrollHost: NSView {
             pinchSettling = true
             pinchAdvancePrevTime = 0                          // fresh dt for the first settle tick
             lastMagnifyEventTime = CACurrentMediaTime()
-            metalView.needsDisplay = true
+            requestFrame()
         case .reflow:
             if coordinator.liveZoomLevel < 0 {
                 // Rubber-band over-zoom past level 0 → spring the visual level back to 0 over a short ramp,
@@ -458,7 +461,7 @@ final class MetalGridScrollHost: NSView {
                 pinchReflowSettleStart = CACurrentMediaTime()
                 pinchSettling = true
                 lastMagnifyEventTime = CACurrentMediaTime()
-                metalView.needsDisplay = true
+                requestFrame()
             } else {
                 finishLiveZoom(target: cancelled ? pinchBaseLevel : Int(coordinator.liveZoomLevel.rounded()))
             }
@@ -469,7 +472,7 @@ final class MetalGridScrollHost: NSView {
             pinchOverviewSettleStart = CACurrentMediaTime()
             pinchSettling = true
             lastMagnifyEventTime = CACurrentMediaTime()
-            metalView.needsDisplay = true
+            requestFrame()
         case .undecided:
             if !beginShortPinchStep(cancelled: cancelled) {
                 finishLiveZoom(target: pinchBaseLevel)        // no directional input ⇒ commit at start (no change)
@@ -494,7 +497,7 @@ final class MetalGridScrollHost: NSView {
             pinchSettling = true
             pinchAdvancePrevTime = 0
             lastMagnifyEventTime = CACurrentMediaTime()
-            metalView.needsDisplay = true
+            requestFrame()
             return true
         }
 
@@ -510,7 +513,7 @@ final class MetalGridScrollHost: NSView {
             pinchOverviewSettleStart = CACurrentMediaTime()
             pinchSettling = true
             lastMagnifyEventTime = CACurrentMediaTime()
-            metalView.needsDisplay = true
+            requestFrame()
             return true
         }
 
@@ -540,7 +543,7 @@ final class MetalGridScrollHost: NSView {
         pinchAdvancePrevTime = now
         pinchDriver.advance(dt: dt)
         coordinator.setPinchProgress(pinchDriver.segmentQ)
-        metalView.needsDisplay = true
+        requestFrame()
         if pinchDriver.isCommitted { commitLivePinch() }
     }
 
@@ -567,7 +570,7 @@ final class MetalGridScrollHost: NSView {
         pinchAdvancePrevTime = 0
         pinchDriver.reset()
         commitLevelToBinding(previousLevel: previousLevel)    // sync the SwiftUI level binding (+ arm echo guard)
-        metalView.needsDisplay = true
+        requestFrame()
     }
 
     /// Advance the reflow over-zoom spring-back: ramp the live VISUAL level from the released over-zoom value
@@ -578,7 +581,7 @@ final class MetalGridScrollHost: NSView {
         let f = pinchReflowSettleDuration > 0 ? min(1, elapsed / pinchReflowSettleDuration) : 1
         let eased = f * f * (3 - 2 * f)                                   // smoothstep
         coordinator.setLiveVisualLevel(pinchReflowSettleFrom * CGFloat(1 - eased))   // → 0
-        metalView.needsDisplay = true
+        requestFrame()
         if f >= 1 {
             pinchSettling = false
             finishLiveZoom(target: 0)                                    // commit at the largest detent
@@ -603,7 +606,7 @@ final class MetalGridScrollHost: NSView {
         let f = pinchOverviewSettleDuration > 0 ? min(1, elapsed / pinchOverviewSettleDuration) : 1
         pinchOverviewQ = pinchOverviewSettleFrom + (pinchOverviewSettleTo - pinchOverviewSettleFrom) * f
         coordinator.setOverviewDissolveProgress(pinchOverviewQ)
-        metalView.needsDisplay = true
+        requestFrame()
         if f >= 1 { commitOverviewDissolve() }
     }
 
@@ -628,7 +631,7 @@ final class MetalGridScrollHost: NSView {
         pinchMode = .undecided
         pinchOverviewQ = 0
         commitLevelToBinding(previousLevel: previousLevel)    // sync the SwiftUI level binding (+ arm echo guard)
-        metalView.needsDisplay = true
+        requestFrame()
     }
 
     /// Commit the live zoom: rebase scroll from the anchor, then run a short geometry-only BRIDGE that slides
@@ -655,7 +658,7 @@ final class MetalGridScrollHost: NSView {
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
         if !coordinator.isCommitBridging { coordinator.logPostCommitAnchor() }   // instant commit: probe now (bridge logs at end)
-        metalView.needsDisplay = true
+        requestFrame()
         commitLevelToBinding(previousLevel: previousLevel)         // sync the SwiftUI level binding (+ arm echo guard)
     }
 
@@ -737,8 +740,50 @@ final class MetalGridScrollHost: NSView {
         } else {
             scrollLockOrigin = nil
         }
-        metalView.needsDisplay = true
+        requestFrame()
         onViewportChanged?()
+    }
+
+    private func installImageAvailabilityCallback(on source: MetalGridDataSource) {
+        source.onImagesAvailable = { [weak self] in
+            self?.requestFrame()
+        }
+    }
+
+    private func ensureDisplayLink() {
+        guard window != nil, streamingTick == nil else { return }
+        let dl = displayLink(target: self, selector: #selector(step))
+        dl.add(to: .main, forMode: .common)
+        streamingTick = dl
+    }
+
+    private func requestFrame(keepDisplayLinkAlive: Bool = true) {
+        metalView.needsDisplay = true
+        if keepDisplayLinkAlive { wakeDisplayLink() }
+    }
+
+    private func wakeDisplayLink(duration: CFTimeInterval? = nil) {
+        guard window != nil else { return }
+        let grace = duration ?? displayLinkIdleGrace
+        displayLinkWakeUntil = max(displayLinkWakeUntil, CACurrentMediaTime() + grace)
+        ensureDisplayLink()
+        streamingTick?.isPaused = false
+    }
+
+    private func displayLinkHasActiveWork(now: CFTimeInterval) -> Bool {
+        coordinator.isCommitBridging
+            || coordinator.isSidebarResizing
+            || coordinator.isResizeSettling
+            || coordinator.isScrollRebasing
+            || coordinator.hasPendingVisibleThumbnails
+            || (pinchMode == .lattice && pinchDriver.isSelfAdvancing)
+            || (pinchMode == .overviewDissolve && pinchSettling)
+            || (pinchMode == .reflow && pinchSettling)
+            || now < displayLinkWakeUntil
+    }
+
+    private func updateDisplayLinkIdleState(now: CFTimeInterval = CACurrentMediaTime()) {
+        streamingTick?.isPaused = !displayLinkHasActiveWork(now: now)
     }
 
     // The display link only TRIGGERS redraws while thumbnails are streaming in; when the visible set is
@@ -756,16 +801,12 @@ final class MetalGridScrollHost: NSView {
                                                    name: NSWindow.didEndLiveResizeNotification, object: window)
         }
         if window != nil {
-            if streamingTick == nil {
-                let dl = displayLink(target: self, selector: #selector(step))
-                dl.add(to: .main, forMode: .common)
-                streamingTick = dl
-            }
-            streamingTick?.isPaused = false
-            metalView.needsDisplay = true
+            ensureDisplayLink()
+            requestFrame()
         } else {
             streamingTick?.invalidate()
             streamingTick = nil
+            displayLinkWakeUntil = 0
         }
     }
 
@@ -778,8 +819,9 @@ final class MetalGridScrollHost: NSView {
         if pinchMode == .lattice, pinchDriver.isSelfAdvancing { advanceLivePinch() } else { pinchAdvancePrevTime = 0 }
         if pinchMode == .overviewDissolve, pinchSettling { advanceOverviewDissolveSettle() }   // release settle
         if pinchMode == .reflow, pinchSettling { advanceReflowOverZoomSettle() }               // over-zoom spring-back
-        if coordinator.isScrollRebasing { metalView.needsDisplay = true }                       // edge/corner rebase slide
-        if coordinator.hasPendingVisibleThumbnails { metalView.needsDisplay = true }
+        if coordinator.isScrollRebasing { requestFrame() }                       // edge/corner rebase slide
+        if coordinator.hasPendingVisibleThumbnails { requestFrame() }
+        updateDisplayLinkIdleState()
     }
 
     /// Advance the post-release commit bridge (geometry settle). When it completes, end it → normal settled
@@ -787,8 +829,8 @@ final class MetalGridScrollHost: NSView {
     private func advanceCommitBridge() {
         let t = bridgeDuration > 0 ? min(1, (CACurrentMediaTime() - bridgeStart) / bridgeDuration) : 1
         coordinator.commitBridgeProgress = CGFloat(t)
-        metalView.needsDisplay = true
-        if t >= 1 { coordinator.endCommitBridge(); metalView.needsDisplay = true }
+        requestFrame()
+        if t >= 1 { coordinator.endCommitBridge(); requestFrame() }
     }
 
     /// Advance the sidebar open/close scale (right-anchored, the grid scaling like a left-edge drag). When the scale
@@ -797,7 +839,7 @@ final class MetalGridScrollHost: NSView {
     private func advanceSidebarResize() {
         let t = sidebarResizeDuration > 0 ? min(1, (CACurrentMediaTime() - sidebarResizeStart) / sidebarResizeDuration) : 1
         coordinator.presentationSidebarProgress = CGFloat(t)
-        metalView.needsDisplay = true
+        requestFrame()
         guard t >= 1 else { return }
         let (settleScroll, animating) = coordinator.endSidebarResize()   // commits the inset + bottom-anchored scroll
         stickToBottom = false
@@ -810,7 +852,7 @@ final class MetalGridScrollHost: NSView {
         }
         if animating { resizeSettleStart = CACurrentMediaTime() }
         lastViewportScreenFrame = viewportScreenFrame()
-        metalView.needsDisplay = true
+        requestFrame()
     }
 
     /// Advance the release-time resize settle: morph the scaled frame into the settled layout. The scroll is
@@ -818,8 +860,8 @@ final class MetalGridScrollHost: NSView {
     private func advanceResizeSettle() {
         let t = resizeSettleDuration > 0 ? min(1, (CACurrentMediaTime() - resizeSettleStart) / resizeSettleDuration) : 1
         coordinator.resizeSettleProgress = CGFloat(t)
-        metalView.needsDisplay = true
-        if t >= 1 { coordinator.endResizeSettle(); metalView.needsDisplay = true }
+        requestFrame()
+        if t >= 1 { coordinator.endResizeSettle(); requestFrame() }
     }
 
     override func layout() {
@@ -909,7 +951,7 @@ final class MetalGridScrollHost: NSView {
         // (mid window live-resize, no window, zoom in flight, first layout).
         if window != nil, !inLiveResize, oldFrame != .zero, coordinator.beginSidebarResize(fromInset: oldValue, toInset: eventLeadingInset) {
             sidebarResizeStart = CACurrentMediaTime()
-            metalView.needsDisplay = true
+            requestFrame()
             return
         }
         coordinator.sidebarObstructionInset = eventLeadingInset
@@ -948,7 +990,7 @@ final class MetalGridScrollHost: NSView {
             scrollView.contentView.scroll(to: CGPoint(x: 0, y: y))
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
-        metalView.needsDisplay = true                          // first frame after resize uses the rebased scrollY
+        requestFrame()                          // first frame after resize uses the rebased scrollY
     }
 
     /// Set the document spacer to the current content height (width tracks the clip, no h-scroll). This is also
@@ -972,7 +1014,7 @@ final class MetalGridScrollHost: NSView {
         } else if stickToBottom {
             pinToBottom()                    // launch / sticky open: stay at newest (bottom) until the user scrolls
         }
-        metalView.needsDisplay = true
+        requestFrame()
         onViewportChanged?()
     }
 
@@ -1055,13 +1097,13 @@ final class MetalGridScrollHost: NSView {
             scrollView.contentView.scroll(to: CGPoint(x: 0, y: min(max(0, tY), maxY)))
             scrollView.reflectScrolledClipView(scrollView.contentView)
             coordinator.logPostCommitAnchor()
-            metalView.needsDisplay = true
+            requestFrame()
             return
         }
         if stickToBottom {
             coordinator.level = newLevel
             applyContentSize(coordinator.contentSize())   // pins to bottom (newest)
-            metalView.needsDisplay = true
+            requestFrame()
             return
         }
         // Latches the committed column phase so the settled grid keeps the anchor's column (no fly).
@@ -1073,7 +1115,7 @@ final class MetalGridScrollHost: NSView {
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
         coordinator.logPostCommitAnchor()
-        metalView.needsDisplay = true
+        requestFrame()
     }
 
     /// A photo's cell frame in WINDOW content coordinates (top-left origin), or nil if it isn't visible —
@@ -1096,6 +1138,7 @@ final class MetalGridScrollHost: NSView {
     /// placement (canonical bottom-right phase) and consumes it via `applyContentSize` once geometry is valid —
     /// it does NOT scroll immediately, and it never arms sticky bottom-pinning.
     func setDataSource(_ source: MetalGridDataSource, initialViewport: GridInitialViewport = .preserve) {
+        installImageAvailabilityCallback(on: source)
         if initialViewport != .preserve {
             pendingInitialViewport = initialViewport
             coordinator.resetCommittedPhase()             // canonical bottom-right phase, BEFORE the size callback
@@ -1127,7 +1170,7 @@ final class MetalGridScrollHost: NSView {
         let targetY = min(max(0, rect.midY - clipH / 2), maxY)
         scrollView.contentView.scroll(to: CGPoint(x: 0, y: targetY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
-        metalView.needsDisplay = true
+        requestFrame()
     }
 
     /// Scroll a flattened timeline index near the top of the viewport. This is the date-jump primitive for the
@@ -1140,7 +1183,7 @@ final class MetalGridScrollHost: NSView {
         let targetY = min(max(0, rect.minY - 24), maxY)
         scrollView.contentView.scroll(to: CGPoint(x: 0, y: targetY))
         scrollView.reflectScrolledClipView(scrollView.contentView)
-        metalView.needsDisplay = true
+        requestFrame()
         onViewportChanged?()
     }
 }

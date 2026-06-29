@@ -84,6 +84,23 @@ import CoreGraphics
         #expect(!main.contains(".onChange(of: geo.size.width)"))
     }
 
+    // 5c — the host must not run a permanent display link. It wakes for real animation/streaming work and
+    // pauses again once the viewport is idle and the visible thumbnails are resident.
+    @Test func displayLinkIdlesAndWakesForThumbnailArrival() {
+        let host = src("MetalGridScrollHost.swift")
+        #expect(host.contains("private var displayLinkWakeUntil"))
+        #expect(host.contains("private func requestFrame(keepDisplayLinkAlive: Bool = true)"))
+        #expect(host.contains("streamingTick?.isPaused = !displayLinkHasActiveWork(now: now)"))
+        #expect(host.contains("coordinator.hasPendingVisibleThumbnails"))
+        #expect(host.contains("source.onImagesAvailable = { [weak self]"))
+        #expect(!host.contains("streamingTick?.isPaused = false\n            requestFrame()"),
+                "view attach should not leave the display link permanently unpaused")
+
+        let dataSource = src("MetalGridDataSource.swift")
+        #expect(dataSource.contains("var onImagesAvailable: (() -> Void)? { get set }"))
+        #expect(dataSource.contains("self.onImagesAvailable?()"))
+    }
+
     // 6 — no synchronous decode on the resize path: the rebase is pure geometry; texture work stays in the cache.
     @Test func noSynchronousDecodeOnResizePath() {
         let resizeSrc = src("GridViewportResizeRebase.swift")
