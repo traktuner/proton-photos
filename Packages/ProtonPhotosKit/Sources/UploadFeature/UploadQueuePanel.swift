@@ -26,7 +26,7 @@ public struct UploadQueuePanel: View {
             }
         }
         .frame(width: 380, height: coordinator.items.isEmpty ? 220 : 360)
-        .presentationBackground(.regularMaterial)
+        // No .presentationBackground override → the popover keeps its native Liquid Glass chrome.
     }
 
     private var header: some View {

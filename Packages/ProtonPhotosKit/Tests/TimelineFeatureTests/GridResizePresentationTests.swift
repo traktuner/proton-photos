@@ -116,7 +116,7 @@ import CoreGraphics
     // width (so the settled grid lands where the live frame left it) and it does NOT call rebaseForResize.
     @Test func settleSyncsClipWithoutReflowSnap() {
         let host = src("MetalGridScrollHost.swift")
-        guard let dr = host.range(of: "func windowDidEndLiveResize()") else { Issue.record("windowDidEndLiveResize missing"); return }
+        guard let dr = host.range(of: "func windowDidEndLiveResizeImpl()") else { Issue.record("windowDidEndLiveResize missing"); return }
         let db = String(host[dr.lowerBound ..< (host.index(dr.lowerBound, offsetBy: 2000, limitedBy: host.endIndex) ?? host.endIndex)])
         #expect(db.contains("coordinator.endPresentationResize()"))
         #expect(db.contains("coordinator.windowResizeReleaseScrollY()"), "the width settle must use the resize anchor (bottom-pinned ⇒ last row, else centre)")
@@ -243,7 +243,7 @@ import CoreGraphics
     // change settles to the counter-scrolled scroll (start − slide), with NO animation.
     @Test func settleIsAxisAware() {
         let host = src("MetalGridScrollHost.swift")
-        guard let dr = host.range(of: "func windowDidEndLiveResize()") else { Issue.record("windowDidEndLiveResize missing"); return }
+        guard let dr = host.range(of: "func windowDidEndLiveResizeImpl()") else { Issue.record("windowDidEndLiveResize missing"); return }
         let db = String(host[dr.lowerBound ..< (host.index(dr.lowerBound, offsetBy: 1500, limitedBy: host.endIndex) ?? host.endIndex)])
         #expect(db.contains("widthChanged"), "the settle must branch on the resize axis")
         #expect(db.contains("presentationStartScrollY - coordinator.presentationVerticalShift"), "pure vertical settles to the counter-scrolled scroll")

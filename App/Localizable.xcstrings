@@ -446,24 +446,6 @@
         }
       }
     },
-    "export.preparing": {
-      "extractionState": "manual",
-      "comment": "Progress while preparing files for export.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Preparing…"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Wird vorbereitet …"
-          }
-        }
-      }
-    },
     "export.button": {
       "extractionState": "manual",
       "comment": "Confirmation button in the export-folder chooser.",
@@ -1348,7 +1330,7 @@
     },
     "settings.storage_section": {
       "extractionState": "manual",
-      "comment": "Developer-tab section header.",
+      "comment": "Settings section header for Proton storage quota.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1756,6 +1738,186 @@
           "stringUnit": {
             "state": "translated",
             "value": "Offline"
+          }
+        }
+      }
+    },
+    "settings.storage_used": {
+      "extractionState": "manual",
+      "comment": "Label for used/total storage.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Belegt"
+          }
+        }
+      }
+    },
+    "toolbar.favorite_selected": {
+      "extractionState": "manual",
+      "comment": "Toolbar action: favorite all selected photos.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorite Selected"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auswahl favorisieren"
+          }
+        }
+      }
+    },
+    "toolbar.set_album_cover": {
+      "extractionState": "manual",
+      "comment": "Toolbar action: set the selected photo as the album cover.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set as Album Cover"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Als Albumcover festlegen"
+          }
+        }
+      }
+    },
+    "export.confirm_many_title": {
+      "extractionState": "manual",
+      "comment": "Confirm dialog title for downloading many items as a ZIP.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download as ZIP?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Als ZIP herunterladen?"
+          }
+        }
+      }
+    },
+    "export.confirm_many_button": {
+      "extractionState": "manual",
+      "comment": "Confirm button for the ZIP download.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download as ZIP"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Als ZIP herunterladen"
+          }
+        }
+      }
+    },
+    "export.confirm_many_message %lld": {
+      "extractionState": "manual",
+      "comment": "Confirm message. %lld is the item count.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld items will be downloaded as a single ZIP file."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Elemente werden als eine ZIP-Datei geladen."
+          }
+        }
+      }
+    },
+    "export.low_disk_title": {
+      "extractionState": "manual",
+      "comment": "Alert title when an export aborts for low disk.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not Enough Disk Space"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nicht genug Speicherplatz"
+          }
+        }
+      }
+    },
+    "export.low_disk_message": {
+      "extractionState": "manual",
+      "comment": "Alert body when an export aborts for low disk.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The download stopped because there isn’t enough free space. The incomplete ZIP was removed."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Der Download wurde abgebrochen, weil nicht genug freier Speicher vorhanden ist. Die unvollständige ZIP wurde entfernt."
+          }
+        }
+      }
+    },
+    "export.progress_percent %lld": {
+      "extractionState": "manual",
+      "comment": "Hover tooltip on the toolbar download ring. %lld is percent complete.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download %lld%% complete"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download zu %lld%% abgeschlossen"
+          }
+        }
+      }
+    },
+    "export.cancel": {
+      "extractionState": "manual",
+      "comment": "Menu item on the toolbar download ring to cancel the running download.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel Download"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download abbrechen"
           }
         }
       }

@@ -235,6 +235,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         indexByUID = map
         // Rebuild the canonical engine from the new section structure (single source of truth).
         engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts)
+        engine.topInset = topBarInset             // a fresh engine resets topInset → re-apply the toolbar margin
         committedPhase = nil                      // a stale phase could point past the new data → canonical
     }
 
@@ -530,6 +531,13 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// The sidebar obstruction width (points) — the floating sidebar's leading safe-area inset. Set by the host.
     var sidebarObstructionInset: CGFloat = 0 {
         didSet { if sidebarObstructionInset != oldValue { requestRedraw() } }
+    }
+
+    /// The window's translucent toolbar height. Mirrored onto the engine's `topInset` so the first grid row rests
+    /// below the toolbar instead of under it (set by the host, plumbed from `MainView`). Re-applied on every
+    /// engine rebuild (`rebuildIndex`) so a data change never silently drops it.
+    var topBarInset: CGFloat = 0 {
+        didSet { if topBarInset != oldValue { engine.topInset = topBarInset; requestRedraw() } }
     }
     /// Extra leading breathing room for the NORMAL levels (L0–L3) ONLY, so landscape thumbnails don't butt up
     /// against the sidebar. Removed on the dense square overviews (L4–L5, which go edge-to-edge) and when no

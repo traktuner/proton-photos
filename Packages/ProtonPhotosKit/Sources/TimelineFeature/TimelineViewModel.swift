@@ -153,25 +153,33 @@ public final class TimelineViewModel {
         guard newFilter != filter else { return }
         filter = newFilter
         if newFilter == .all {
-            // loadAll serves the cached full library instantly (no "Building…" flash).
-            await loadAll(force: true)
-            return
+            await loadAll(force: true)   // cached full library, instant
+        } else {
+            await loadFiltered(newFilter)
         }
-        // Stale-while-revalidate: keep the current grid on screen while the filtered set loads, then
-        // swap — no loader flash, no blank grid.
+    }
+
+    /// Re-runs the CURRENTLY selected filter — wired to the error-state "Retry" button. It must reload THIS
+    /// filter, NOT fall back to `.all` (the old bug: retry on a failed Recently-Deleted loaded ALL photos while
+    /// the sidebar still pointed at Trash → content/selection mismatch).
+    public func retry() async {
+        if filter == .all { await loadAll(force: true) } else { await loadFiltered(filter) }
+    }
+
+    /// Loads a tag/album/trash filter, showing the `.loading` animation while it fetches (so a route switch never
+    /// flashes a black/stale grid). A newer switch mid-flight wins (the `filter == f` guards).
+    private func loadFiltered(_ f: PhotoFilter) async {
+        state = .loading
         do {
-            let sections = try await (library?.timeline(filter: newFilter) ?? [])
-            // Guard against a stale switch (user clicked another filter meanwhile).
-            guard filter == newFilter else { return }
+            let sections = try await (library?.timeline(filter: f) ?? [])
+            guard filter == f else { return }
             let items = sections.flatMap(\.items)
             allItems = items
             state = items.isEmpty ? .empty : .loaded(sections)
             await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
         } catch is CancellationError {
         } catch {
-            // Surface the error — the user explicitly switched filter, so silently keeping the old
-            // grid (which read as "nothing happens" for Recently Deleted) is worse than showing why.
-            guard filter == newFilter else { return }
+            guard filter == f else { return }
             state = .failed(error.localizedDescription)
         }
     }

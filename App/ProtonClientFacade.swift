@@ -32,10 +32,11 @@ final class ProtonClientFacade {
     }
 
     static func make(bridge: DriveSDKBridge) -> ProtonClientFacade {
-        // Albums: list via the bridge's already-decrypted album list; writes report unsupported.
-        let albumBackend = HTTPAlbumBackend(listProvider: {
-            try await bridge.albums().map(AlbumSummary.init)
-        })
+        // Albums: list + set-cover via the bridge's direct REST; create/add still report unsupported.
+        let albumBackend = HTTPAlbumBackend(
+            listProvider: { try await bridge.albums().map(AlbumSummary.init) },
+            setCoverProvider: { albumID, photoUID in try await bridge.setAlbumCover(albumID: albumID, photoUID: photoUID) }
+        )
         let albumsRepo = AlbumsRepository(backend: albumBackend)
 
         // Uploads: pure manager over the SDK uploader (the bridge) + the album-attaching shim.

@@ -55,6 +55,14 @@ struct MainView: View {
     @State private var selectionMode = false
     @State private var selectedUIDs: Set<PhotoUID> = []
     @State private var isExporting = false
+    /// 0…1 download progress for the top-bar ring (blended across all selected items).
+    @State private var exportFraction: Double = 0
+    /// The running export, so the progress menu can cancel it mid-download (partial ZIP is discarded).
+    @State private var exportTask: Task<Void, Never>?
+    @State private var confirmLargeExport = false
+    @State private var pendingExportItems: [PhotoItem] = []
+    /// Above this many selected items, downloading a ZIP asks for confirmation first.
+    private let largeExportThreshold = 50
     @State private var pendingTrashItems: [PhotoItem] = []
     @State private var closeViewerAfterTrash = false
     @State private var confirmTrash = false
@@ -129,6 +137,7 @@ struct MainView: View {
                 // viewer anyway, and a flip would arm a spurious full-width sidebar scale that plays when you
                 // close the viewer (and would move the cell the zoom transition flies from).
                 .environment(\.gridLeadingEventInset, leadingObstructionInset)
+                .environment(\.gridTopBarInset, topBarInset)   // first grid row rests below the translucent toolbar
                 .onChange(of: searchText) { _, value in scheduleSearchCommit(value) }
             }
             .task { await loadAlbums() }
@@ -215,16 +224,6 @@ struct MainView: View {
             // Shared-element zoom overlay: a single image morphing between the cell and fullscreen.
             if let zoom { zoomOverlay(zoom) }
 
-            if isExporting {
-                VStack(spacing: 10) {
-                    ProgressView().controlSize(.large)
-                    Text("export.preparing")
-                        .font(.callout.weight(.medium))
-                }
-                .padding(22)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-            }
-
             uploadRefreshBanner
 
             if !networkMonitor.isOnline {
@@ -271,6 +270,80 @@ struct MainView: View {
         } message: {
             Text(trashConfirmationMessage)
         }
+        .confirmationDialog("export.confirm_many_title", isPresented: $confirmLargeExport) {
+            Button("export.confirm_many_button") {
+                let items = pendingExportItems
+                pendingExportItems = []
+                startExport(items)
+            }
+            Button("action.cancel", role: .cancel) { pendingExportItems = [] }
+        } message: {
+            Text("export.confirm_many_message \(pendingExportItems.count)")
+        }
+    }
+
+    /// Native upload menu — a system toolbar `Menu` gets the OS Liquid Glass pill for free.
+    private var uploadToolbarMenu: some View {
+        Menu {
+            Button("menu.upload_photos") { performUploadUIAction("uploadPhotos", trigger: .toolbar) }
+                .disabled(!uploadCoordinator.uploadCapabilities.canUpload)
+            Button("menu.upload_folder") { performUploadUIAction("uploadFolder", trigger: .toolbar) }
+                .disabled(!uploadCoordinator.uploadCapabilities.canUpload)
+            Divider()
+            Button("menu.show_uploads") { performUploadUIAction("showQueue", trigger: .toolbar) }
+        } label: {
+            Label("toolbar.upload", systemImage: "tray.and.arrow.up")
+        }
+        .help("toolbar.upload_menu_help")
+        .accessibilityLabel("toolbar.upload")
+    }
+
+    /// The download trigger — or, while a download runs, the native progress indicator (so the icon is REPLACED,
+    /// never duplicated: one download at a time). In Trash the same slot is the Restore action.
+    @ViewBuilder private var downloadActionItem: some View {
+        if isExporting {
+            exportProgressIndicator
+            exportCancelButton
+        } else if selection == .trash {
+            Button { restoreSelected() } label: {
+                if selectedUIDs.isEmpty { Image(systemName: "arrow.uturn.backward") }
+                else { Label("\(selectedUIDs.count)", systemImage: "arrow.uturn.backward") }
+            }
+            .disabled(selectedUIDs.isEmpty)
+            .help("toolbar.restore_from_trash")
+            .accessibilityLabel(selectedUIDs.isEmpty ? "a11y.restore_selected_from_trash" : "a11y.restore_count_from_trash \(selectedUIDs.count)")
+        } else {
+            Button { downloadSelected() } label: {
+                if selectedUIDs.isEmpty { Image(systemName: "square.and.arrow.down") }
+                else { Label("\(selectedUIDs.count)", systemImage: "square.and.arrow.down") }
+            }
+            .disabled(selectedUIDs.isEmpty)
+            .help(selectedUIDs.count > 1 ? "toolbar.download_count_photos_help \(selectedUIDs.count)" : "toolbar.download_original")
+            .accessibilityLabel(selectedUIDs.isEmpty ? "a11y.download_selected_originals" : "a11y.download_count_selected_originals \(selectedUIDs.count)")
+        }
+    }
+
+    /// While a download runs: the SYSTEM's native determinate progress indicator (a custom coloured ring can't
+    /// render inside a system toolbar control — the toolbar standardises item content — so this is the
+    /// Liquid-Glass-native indicator). Paired with `exportCancelButton` so the two sit together and the pill is a
+    /// normal two-item width (a lone tiny indicator made the pill a sliver). Cancel is a real LEFT-click button —
+    /// right-click only opens the OS toolbar's own "Icon & Text / Icon Only" customization menu.
+    private var exportProgressIndicator: some View {
+        let pct = Int((exportFraction * 100).rounded())
+        return ProgressView(value: max(0.001, min(1, exportFraction)))
+            .progressViewStyle(.circular)
+            .controlSize(.regular)
+            .help("export.progress_percent \(pct)")
+            .accessibilityLabel("export.progress_percent \(pct)")
+    }
+
+    private var exportCancelButton: some View {
+        Button { cancelExport() } label: {
+            Label("export.cancel", systemImage: "xmark")
+                .labelStyle(.iconOnly)
+        }
+        .help("export.cancel")
+        .accessibilityLabel("export.cancel")
     }
 
     /// Subtle bottom pill shown only while the device has no network — so cached browsing reads as a deliberate
@@ -284,8 +357,7 @@ struct MainView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(.white.opacity(0.08)))
+        .glassEffect(in: Capsule())   // native Liquid Glass (was .ultraThinMaterial)
     }
 
     @ViewBuilder private var uploadRefreshBanner: some View {
@@ -306,7 +378,7 @@ struct MainView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .background(.regularMaterial, in: Capsule())
+                .glassEffect(in: Capsule())   // native Liquid Glass (was .regularMaterial)
                 .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
                 .padding(.bottom, 20)
             }
@@ -377,7 +449,12 @@ struct MainView: View {
     /// its EXACT grid cell while the grid fades back in behind it. The viewer is kept alive (rendered invisible) so
     /// its in-progress pinch gesture keeps delivering. Falls back to the spring close if the cell scrolled off-screen.
     private func beginInteractiveDismiss() {
-        guard zoom == nil, let vm = viewerModel, let img = vm.image,
+        // A fresh pinch-out may OVERRIDE a stranded interactive dismiss — e.g. the video player loaded mid-pinch and
+        // swapped the content view out from under the previous gesture, leaving the overlay half-collapsed. Only a
+        // NON-interactive open/close spring is left undisturbed; otherwise the pinch always takes over and resolves
+        // the close (the user's "pinch out should overrule whatever is happening" requirement).
+        if let z = zoom, !z.interactive { return }
+        guard let vm = viewerModel, let img = vm.image,
               let cell = gridProxy.windowFrameForItem?(vm.current) else { return }
         zoom = ZoomTransition(item: vm.current, image: img, cellFrame: cell, progress: 1, interactive: true)
     }
@@ -611,6 +688,38 @@ struct MainView: View {
         }
     }
 
+    /// Whether EVERY selected photo is already a favorite — drives the batch heart's filled/empty state and the
+    /// toggle direction, so it's ONE button (mirroring the viewer's single-photo heart), never a separate
+    /// favorite + unfavorite pair.
+    private var selectedAllFavorited: Bool {
+        !selectedUIDs.isEmpty && selectedUIDs.allSatisfy { favorites.contains($0) }
+    }
+
+    /// Batch favorite TOGGLE: if every selected photo is already favorited, un-favorites them all; otherwise
+    /// favorites the ones that aren't yet. Optimistic, reverts per item; keeps the selection so the result shows.
+    private func favoriteSelected() {
+        let target = !selectedAllFavorited
+        let uids = selectedUIDs.filter { favorites.contains($0) != target }
+        guard !uids.isEmpty else { return }
+        if target { favorites.formUnion(uids) } else { favorites.subtract(uids) }   // optimistic
+        Task {
+            for uid in uids {
+                do { try await backend.setFavorite(uid, target) }
+                catch { if target { favorites.remove(uid) } else { favorites.insert(uid) } }   // revert just this one
+            }
+        }
+    }
+
+    /// Sets the single selected photo as the current album's cover (direct REST), then refreshes the album list
+    /// so the sidebar cover updates. Keeps the selection (non-destructive).
+    private func setSelectedAsAlbumCover(albumID: String) {
+        guard selectedUIDs.count == 1, let uid = selectedUIDs.first else { return }
+        Task {
+            try? await facade.albums.setAlbumCover(albumID: albumID, photoUID: uid)
+            await loadAlbums()
+        }
+    }
+
     private func trashPhotos(_ items: [PhotoItem]) {
         let uids = items.map(\.uid)
         timelineModel.remove(Set(uids))          // optimistic removal from the grid
@@ -701,7 +810,7 @@ struct MainView: View {
                 .fixedSize()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-                .background(.regularMaterial, in: Capsule())
+                .glassEffect(in: Capsule())   // native Liquid Glass (was .regularMaterial)
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -713,15 +822,19 @@ struct MainView: View {
                 .help("toolbar.info")
                 .accessibilityLabel("toolbar.info")
 
-                Button {
-                    Task { await performExport([viewerModel.current]) }
-                } label: {
-                    Label("toolbar.download_original", systemImage: "square.and.arrow.down")
-                        .labelStyle(.iconOnly)
+                if isExporting {
+                    exportProgressIndicator   // the download icon is replaced by the native progress while exporting
+                    exportCancelButton
+                } else {
+                    Button {
+                        startExport([viewerModel.current])
+                    } label: {
+                        Label("toolbar.download_original", systemImage: "square.and.arrow.down")
+                            .labelStyle(.iconOnly)
+                    }
+                    .help("toolbar.download_original")
+                    .accessibilityLabel("toolbar.download_original")
                 }
-                .disabled(isExporting)
-                .help("toolbar.download_original")
-                .accessibilityLabel("toolbar.download_original")
 
                 Button { toggleFavorite(viewerModel.current.uid) } label: {
                     Label(favorites.contains(viewerModel.current.uid) ? "toolbar.remove_favorite" : "toolbar.favorite",
@@ -744,30 +857,18 @@ struct MainView: View {
             // No explicit "select mode": click / ⌘-click / ⇧-click / drag-marquee select directly, double
             // click opens. The toolbar is stable — the download (or restore) + trash actions are always
             // present and just enable when something is selected.
+            // Pill 1 — upload + download belong together (`ToolbarSpacer` splits the system glass into a SEPARATE
+            // pill from the selection actions; the toolbar manages its own glass, so this native split is the only
+            // reliable way to get distinct pills).
             ToolbarItemGroup(placement: .primaryAction) {
                 uploadToolbarMenu
-                if selection == .trash {
-                    Button { restoreSelected() } label: {
-                        if selectedUIDs.isEmpty {
-                            Image(systemName: "arrow.uturn.backward")
-                        } else {
-                            Label("\(selectedUIDs.count)", systemImage: "arrow.uturn.backward")
-                        }
-                    }
-                    .disabled(selectedUIDs.isEmpty)
-                    .help("toolbar.restore_from_trash")
-                    .accessibilityLabel(selectedUIDs.isEmpty ? "a11y.restore_selected_from_trash" : "a11y.restore_count_from_trash \(selectedUIDs.count)")
-                } else {
-                    Button { downloadSelected() } label: {
-                        if selectedUIDs.isEmpty {
-                            Image(systemName: "square.and.arrow.down")
-                        } else {
-                            Label("\(selectedUIDs.count)", systemImage: "square.and.arrow.down")
-                        }
-                    }
-                    .disabled(selectedUIDs.isEmpty || isExporting)
-                    .help(selectedUIDs.count > 1 ? "toolbar.download_count_photos_help \(selectedUIDs.count)" : "toolbar.download_original")
-                    .accessibilityLabel(selectedUIDs.isEmpty ? "a11y.download_selected_originals" : "a11y.download_count_selected_originals \(selectedUIDs.count)")
+                downloadActionItem
+            }
+            // Pill 2 — selection actions (trash / favorite / album cover). Omitted entirely in Trash (only Restore
+            // applies there, and it lives in the download slot of pill 1).
+            if selection != .trash {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+                ToolbarItemGroup(placement: .primaryAction) {
                     Button { trashSelected() } label: {
                         Label("toolbar.move_selected_to_trash", systemImage: "trash")
                             .labelStyle(.iconOnly)
@@ -775,7 +876,28 @@ struct MainView: View {
                         .disabled(selectedUIDs.isEmpty)
                         .help("toolbar.move_to_trash")
                         .accessibilityLabel("toolbar.move_selected_to_trash")
+                    Button { favoriteSelected() } label: {
+                        Label(selectedAllFavorited ? "toolbar.remove_favorite" : "toolbar.favorite_selected",
+                              systemImage: selectedAllFavorited ? "heart.fill" : "heart")
+                            .labelStyle(.iconOnly)
+                    }
+                        .disabled(selectedUIDs.isEmpty)
+                        .help(selectedAllFavorited ? "toolbar.remove_favorite" : "toolbar.favorite_selected")
+                        .accessibilityLabel(selectedAllFavorited ? "toolbar.remove_favorite" : "toolbar.favorite_selected")
+                    if case .album(let albumID, _) = selection {
+                        Button { setSelectedAsAlbumCover(albumID: albumID) } label: {
+                            Label("toolbar.set_album_cover", systemImage: "rectangle.badge.checkmark")
+                                .labelStyle(.iconOnly)
+                        }
+                            .disabled(selectedUIDs.count != 1)
+                            .help("toolbar.set_album_cover")
+                            .accessibilityLabel("toolbar.set_album_cover")
+                    }
                 }
+            }
+            // Pill 3 — zoom + aspect view controls.
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+            ToolbarItemGroup(placement: .primaryAction) {
                 ControlGroup {
                     Button { gridProxy.zoomOut?() } label: {
                         Label("toolbar.smaller_thumbnails", systemImage: "minus")
@@ -793,6 +915,9 @@ struct MainView: View {
                         .accessibilityLabel("toolbar.larger_thumbnails")
                 }
                 aspectSquareToggleButton
+            }
+            // Account — its own trailing item.
+            ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button("action.sign_out", role: .destructive) { model.signOut() }
                 } label: {
@@ -818,20 +943,6 @@ struct MainView: View {
         .disabled(level >= 4)   // overview levels are square-only — the toggle is inert there
     }
 
-    private var uploadToolbarMenu: some View {
-        Menu {
-            Button("menu.upload_photos") { performUploadUIAction("uploadPhotos", trigger: .toolbar) }
-                .disabled(!uploadCoordinator.uploadCapabilities.canUpload)
-            Button("menu.upload_folder") { performUploadUIAction("uploadFolder", trigger: .toolbar) }
-                .disabled(!uploadCoordinator.uploadCapabilities.canUpload)
-            Divider()
-            Button("menu.show_uploads") { performUploadUIAction("showQueue", trigger: .toolbar) }
-        } label: {
-            Label("toolbar.upload", systemImage: "tray.and.arrow.up")
-        }
-        .help("toolbar.upload_menu_help")
-        .accessibilityLabel("toolbar.upload")
-    }
 
     private func onTrashViewerItem(_ item: PhotoItem) {
         requestTrash([item], closeViewer: true)
@@ -872,42 +983,142 @@ struct MainView: View {
     private func downloadSelected() {
         let items = timelineModel.allItems.filter { selectedUIDs.contains($0.uid) }
         guard !items.isEmpty, !isExporting else { return }
-        Task { await performExport(items) }
+        if items.count > largeExportThreshold {
+            pendingExportItems = items
+            confirmLargeExport = true     // confirm large multi-downloads before zipping
+        } else {
+            startExport(items)
+        }
     }
+
+    /// Single entry point for launching an export, so the toolbar ring's menu has one task to cancel.
+    private func startExport(_ items: [PhotoItem]) {
+        exportTask?.cancel()
+        exportTask = Task { await performExport(items) }
+    }
+
+    /// Cancels the running download (from the toolbar ring's menu). `performExport` discards any partial ZIP.
+    private func cancelExport() { exportTask?.cancel() }
 
     /// Downloads original(s) only to explicit user-selected destinations. The app does not stage decrypted
     /// originals in its own temp/cache directories.
+    /// MainActor ORCHESTRATION only: panels, progress state, Finder reveal, alerts. The heavy lifting
+    /// (CRC-32, AES-GCM decrypt of cached originals, file writes) runs OFF the main actor in the `nonisolated`
+    /// workers below, so a large export never freezes the UI and Cancel reacts instantly (the user's "im
+    /// Hintergrund, nicht Vordergrund" requirement).
     @MainActor private func performExport(_ items: [PhotoItem]) async {
-        isExporting = true
-        defer { isExporting = false }
+        let backend = self.backend
+        let cache = OfflineLibraryManager.shared.originalsCache
+        // Captures self only to push 0…1 onto the @State ring; the closure itself runs on the main actor.
+        let onProgress: @Sendable (Double) -> Void = { p in Task { @MainActor in self.exportFraction = p } }
+
+        // Resolve the destination FIRST — the progress pill must appear only when the download actually begins,
+        // never while the Save panel is open (otherwise a blank pill sits there until the user picks a location).
+        let single = items.count == 1
+        let dest: URL
+        if single {
+            let item = items[0]
+            let meta = try? await backend.metadata(for: item.uid)
+            let name = meta?.filename ?? Self.defaultName(item, ext: Self.defaultExtension(item, metadata: meta))
+            guard let chosen = chooseSingleDestination(suggestedName: name) else { return }
+            dest = chosen
+        } else {
+            // Multi-select → ONE streaming ZIP, written straight to the user's chosen file (no app-temp staging →
+            // respects the E2EE "originals only at the chosen destination" rule; no size cap → bounded only by
+            // free disk via the live guard in the worker).
+            guard let chosen = chooseZipDestination() else { return }
+            dest = chosen
+        }
+
+        // Download begins now → grow the glass progress pill (animated), and tear it down (animated) when done.
+        exportFraction = 0
+        withAnimation(.smooth(duration: 0.35)) { isExporting = true }
+        defer { withAnimation(.smooth(duration: 0.3)) { isExporting = false }; exportTask = nil }
+
         do {
-            if items.count == 1 {
-                let item = items[0]
-                let meta = try? await backend.metadata(for: item.uid)
-                let name = meta?.filename ?? defaultName(item, ext: defaultExtension(item, metadata: meta))
-                guard let dest = chooseSingleDestination(suggestedName: name) else { return }
-                let data = try await backend.originalData(for: item.uid)
-                try? FileManager.default.removeItem(at: dest)
-                try data.write(to: dest, options: .atomic)
-                NSWorkspace.shared.activateFileViewerSelecting([dest])
+            if single {
+                try await Self.writeSingleExport(item: items[0], dest: dest, backend: backend, cache: cache, onProgress: onProgress)
             } else {
-                guard let folder = chooseExportFolder() else { return }
-                var used = Set<String>()
-                for item in items {
-                    let meta = try? await backend.metadata(for: item.uid)
-                    let base = meta?.filename ?? defaultName(item, ext: defaultExtension(item, metadata: meta))
-                    let name = uniqueName(base, used: &used)
-                    let dest = folder.appendingPathComponent(name)
-                    let data = try await backend.originalData(for: item.uid)
-                    try? FileManager.default.removeItem(at: dest)
-                    try data.write(to: dest, options: .atomic)
-                }
-                NSWorkspace.shared.activateFileViewerSelecting([folder])
+                try await Self.writeZipExport(items: items, dest: dest, backend: backend, cache: cache, onProgress: onProgress)
             }
+            NSWorkspace.shared.activateFileViewerSelecting([dest])
+        } catch is CancellationError {
+            // User cancelled from the ring popover; the worker's `defer` already discarded any partial output.
+        } catch ExportError.lowDisk {
+            let alert = NSAlert()
+            alert.messageText = String(localized: "export.low_disk_title")
+            alert.informativeText = String(localized: "export.low_disk_message")
+            alert.runModal()
         } catch {
             DebugLog.log("export failed: \(error)")
         }
     }
+
+    /// Off-main single-file export: fetch decrypted bytes (cache or download), then write atomically. `nonisolated`
+    /// ⇒ runs on the generic executor, so the decrypt/write never block the main thread.
+    nonisolated private static func writeSingleExport(item: PhotoItem, dest: URL, backend: any PhotosBackend,
+                                                      cache: ThumbnailCache, onProgress: @escaping @Sendable (Double) -> Void) async throws {
+        let data = try await fetchOriginal(item: item, backend: backend, cache: cache, onProgress: onProgress)
+        try Task.checkCancellation()                 // cancelled mid-download → don't write a partial file
+        try? FileManager.default.removeItem(at: dest)
+        try data.write(to: dest, options: .atomic)
+    }
+
+    /// Off-main streaming ZIP export. A `defer` guarantees that ANY non-success exit (cancel, low-disk, or a
+    /// failed download) aborts the writer and deletes the partial `.zip` — there is never a half-written archive
+    /// left behind, and the cancel is honoured between files without touching the main thread.
+    nonisolated private static func writeZipExport(items: [PhotoItem], dest: URL, backend: any PhotosBackend,
+                                                   cache: ThumbnailCache, onProgress: @escaping @Sendable (Double) -> Void) async throws {
+        let total = Double(items.count)
+        let destDir = dest.deletingLastPathComponent()
+        let safetyMargin: Int64 = 256 * 1024 * 1024   // headroom (incl. the central directory)
+        let writer = try ZipStreamWriter(url: dest)
+        var success = false
+        defer { if !success { writer.abort(); try? FileManager.default.removeItem(at: dest) } }
+        var used = Set<String>()
+        for (i, item) in items.enumerated() {
+            try Task.checkCancellation()
+            let meta = try? await backend.metadata(for: item.uid)
+            let base = meta?.filename ?? defaultName(item, ext: defaultExtension(item, metadata: meta))
+            let name = uniqueName(base, used: &used)
+            // Blend each file's own download progress into the overall ring (smooth, not per-item jumps).
+            let data = try await fetchOriginal(item: item, backend: backend, cache: cache,
+                                               onProgress: { p in onProgress((Double(i) + p) / total) })
+            try Task.checkCancellation()
+            if let free = freeBytes(at: destDir), free < Int64(data.count) + safetyMargin { throw ExportError.lowDisk }
+            try writer.addFile(name: name, data: data)
+            onProgress(Double(i + 1) / total)
+        }
+        try writer.finish()
+        success = true
+    }
+
+    /// Decrypted original bytes — REUSES the offline cache (already-viewed/offline originals) so a big export
+    /// doesn't re-download what's already local; otherwise a fresh decrypt+download (reporting progress).
+    /// `nonisolated` + the actor's `nonisolated diskData` ⇒ the AES-GCM decrypt happens off the main thread.
+    nonisolated private static func fetchOriginal(item: PhotoItem, backend: any PhotosBackend, cache: ThumbnailCache,
+                                                  onProgress: @escaping @Sendable (Double) -> Void) async throws -> Data {
+        if let cached = cache.diskData(for: item.uid) {
+            onProgress(1)
+            return cached
+        }
+        return try await backend.originalData(for: item.uid, onProgress: onProgress)
+    }
+
+    private func chooseZipDestination() -> URL? {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "ProtonPhotos Export.zip"
+        panel.allowedContentTypes = [.zip]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
+    }
+
+    nonisolated private static func freeBytes(at dir: URL) -> Int64? {
+        (try? dir.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage
+    }
+
+    private enum ExportError: Error { case lowDisk }
 
     private func chooseSingleDestination(suggestedName: String) -> URL? {
         let panel = NSSavePanel()
@@ -917,22 +1128,13 @@ struct MainView: View {
         return panel.url
     }
 
-    private func chooseExportFolder() -> URL? {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.prompt = String(localized: "export.button")
-        guard panel.runModal() == .OK else { return nil }
-        return panel.url
-    }
 
-    private func defaultName(_ item: PhotoItem, ext: String) -> String {
+    nonisolated private static func defaultName(_ item: PhotoItem, ext: String) -> String {
         let e = ext.isEmpty ? "jpg" : ext
         return "\(item.uid.nodeID.prefix(8)).\(e)"
     }
 
-    private func defaultExtension(_ item: PhotoItem, metadata: PhotoMetadata?) -> String {
+    nonisolated private static func defaultExtension(_ item: PhotoItem, metadata: PhotoMetadata?) -> String {
         let mime = metadata?.mimeType ?? item.mediaType
         if mime.contains("png") { return "png" }
         if mime.contains("heic") || mime.contains("heif") { return "heic" }
@@ -941,7 +1143,7 @@ struct MainView: View {
         return "jpg"
     }
 
-    private func uniqueName(_ name: String, used: inout Set<String>) -> String {
+    nonisolated private static func uniqueName(_ name: String, used: inout Set<String>) -> String {
         guard used.contains(name) else { used.insert(name); return name }
         let url = URL(fileURLWithPath: name)
         let stem = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension

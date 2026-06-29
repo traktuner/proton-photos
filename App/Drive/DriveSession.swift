@@ -204,6 +204,12 @@ extension DriveSession {
         }
     }
 
+    /// Sets an album's cover to an already-uploaded photo. A cleartext LinkID reference (no crypto) — matches the
+    /// Proton web client: PUT the album link with the chosen photo's link id.
+    func setAlbumCover(volumeID: String, albumLinkID: String, coverLinkID: String) async throws {
+        try await send("/drive/photos/volumes/\(volumeID)/albums/\(albumLinkID)", method: "PUT", body: ["CoverLinkID": coverLinkID])
+    }
+
     /// Moves photos to trash (batch). Volume-keyed, on the `v2` path.
     func trash(volumeID: String, linkIDs: [String]) async throws {
         try await send("/drive/v2/volumes/\(volumeID)/trash_multiple", method: "POST", body: ["LinkIDs": linkIDs])
@@ -220,8 +226,9 @@ extension DriveSession {
         var page = 0
         while true {
             let r = try await getJSON("/drive/volumes/\(volumeID)/trash?Page=\(page)&PageSize=\(pageSize)", as: TrashResponse.self)
-            all.append(contentsOf: r.links)
-            if r.links.count < pageSize { break }
+            let links = r.links ?? []
+            all.append(contentsOf: links)
+            if links.count < pageSize { break }
             page += 1
         }
         return all
@@ -236,7 +243,7 @@ extension DriveSession {
             var path = "/drive/photos/volumes/\(volumeID)/albums"
             if let anchor { path += "?AnchorID=\(anchor)" }
             let page = try await getJSON(path, as: AlbumsListResponse.self)
-            all.append(contentsOf: page.albums)
+            all.append(contentsOf: page.albums ?? [])
             anchor = page.more == true ? page.anchorID : nil
         } while anchor != nil
         return all
@@ -258,8 +265,10 @@ extension DriveSession {
 }
 
 struct TrashLink: Decodable {
-    let linkID: String
-    let type: Int
+    // Tolerant: the trash listing sometimes omits fields per item; a single missing required field used to fail
+    // the WHOLE decode (the "Recently Deleted couldn't load" error). Optional + filtered in the bridge instead.
+    let linkID: String?
+    let type: Int?
     let createTime: Double?
     let mimeType: String?
     let photoProperties: PhotoProps?
@@ -275,7 +284,7 @@ struct TrashLink: Decodable {
 }
 
 private struct TrashResponse: Decodable {
-    let links: [TrashLink]
+    let links: [TrashLink]?
     enum CodingKeys: String, CodingKey { case links = "Links" }
 }
 
@@ -289,7 +298,7 @@ struct AlbumListEntry: Decodable {
 }
 
 private struct AlbumsListResponse: Decodable {
-    let albums: [AlbumListEntry]
+    let albums: [AlbumListEntry]?
     let anchorID: String?
     let more: Bool?
     enum CodingKeys: String, CodingKey { case albums = "Albums", anchorID = "AnchorID", more = "More" }
@@ -332,6 +341,10 @@ extension DriveSession {
     private static func decodeAccountData(users: Data, addresses: Data) throws -> AccountData {
         let u = try JSONDecoder().decode(UsersResponse.self, from: users)
         let a = try JSONDecoder().decode(AddressesResponse.self, from: addresses)
+        // Surface the storage quota for Settings (works offline too — both the live and cached paths decode here).
+        if let used = u.user.usedSpace, let max = u.user.maxSpace, max > 0 {
+            Task { @MainActor in AccountInfo.shared.update(usedBytes: used, maxBytes: max) }
+        }
         return AccountData(userKeys: u.user.keys.map(makeKey), addresses: a.addresses.map(makeAddress))
     }
 
@@ -359,7 +372,9 @@ private struct UsersResponse: Decodable {
     enum CodingKeys: String, CodingKey { case user = "User" }
     struct UserBody: Decodable {
         let keys: [CoreKeyDTO]
-        enum CodingKeys: String, CodingKey { case keys = "Keys" }
+        let usedSpace: Int64?
+        let maxSpace: Int64?
+        enum CodingKeys: String, CodingKey { case keys = "Keys", usedSpace = "UsedSpace", maxSpace = "MaxSpace" }
     }
 }
 

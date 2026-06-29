@@ -15,12 +15,16 @@ struct ZoomableImageView: NSViewRepresentable {
     var onPinchDismissBegan: () -> Void = {}
     var onPinchDismissChanged: (CGFloat) -> Void = { _ in }
     var onPinchDismissEnded: (Bool) -> Void = { _ in }
+    /// Force-click (trackpad deep press) over the photo — used to play a Live Photo's motion clip.
+    var onForceClick: () -> Void = {}
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = ZoomScrollView()
         scrollView.onPinchDismissBegan = onPinchDismissBegan
         scrollView.onPinchDismissChanged = onPinchDismissChanged
         scrollView.onPinchDismissEnded = onPinchDismissEnded
+        scrollView.onForceClick = onForceClick
+        scrollView.pressureConfiguration = NSPressureConfiguration(pressureBehavior: .primaryDeepClick)
         scrollView.allowsMagnification = true
         scrollView.minMagnification = 1
         scrollView.maxMagnification = 10
@@ -69,9 +73,22 @@ private final class ZoomScrollView: NSScrollView {
     var onPinchDismissBegan: () -> Void = {}
     var onPinchDismissChanged: (CGFloat) -> Void = { _ in }
     var onPinchDismissEnded: (Bool) -> Void = { _ in }
+    var onForceClick: () -> Void = {}
 
     private var dismissing = false
     private var dismissProgress: CGFloat = 0    // 0 = full size, grows as the user pinches out
+    private var forceClickFired = false         // one trigger per deep-press (reset when pressure relaxes)
+
+    /// Trackpad deep press (the firm click after the soft click): stage ≥ 2 = a force click. Fires once per press.
+    override func pressureChange(with event: NSEvent) {
+        super.pressureChange(with: event)
+        if event.stage >= 2, !forceClickFired {
+            forceClickFired = true
+            onForceClick()
+        } else if event.stage < 2 {
+            forceClickFired = false
+        }
+    }
 
     override func layout() {
         super.layout()

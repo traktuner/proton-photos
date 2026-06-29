@@ -24,7 +24,7 @@ struct InfoPanelView: View {
         }
         .frame(width: ViewerChromeLayout.inspectorWidth)
         .frame(maxHeight: .infinity)
-        .background(.regularMaterial)
+        .glassEffect(in: Rectangle())   // native Liquid Glass inspector (was .regularMaterial)
     }
 
     private var header: some View {

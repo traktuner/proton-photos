@@ -4,17 +4,21 @@ import AlbumsFeature
 
 /// `AlbumBackend` over the app's existing direct-HTTP album reads.
 ///
-/// Listing works (the app already paginates `/drive/photos/volumes/{vol}/albums` and decrypts the
-/// titles). Writes — create, add-photo, set-cover — are **not** implemented: the Proton Swift SDK has
-/// no album API, and the HTTP writes require album-node encryption (generating an album node key,
-/// encrypting the name + hash key, and re-encrypting each photo's content key to the album key) that
-/// this app's `DriveCrypto` (decrypt-only) can't yet do. Those operations report `.unsupported` with
-/// the exact gap rather than faking success or silently dropping to a library-only upload.
+/// Listing + SET-COVER work via direct REST (the set-cover write is just a cleartext `CoverLinkID` PUT, no
+/// crypto). Create + add-photo are still **not** implemented: those HTTP writes require album-node encryption
+/// (generating an album node key, encrypting the name + hash key, and re-encrypting each photo's content key to
+/// the album key) that this app's `DriveCrypto` (decrypt-only) can't yet do — they report `.unsupported` with the
+/// exact gap rather than faking success.
 struct HTTPAlbumBackend: AlbumBackend {
     /// Supplied by the bridge: the already-decrypted album list the sidebar uses.
     let listProvider: @Sendable () async throws -> [AlbumSummary]
+    /// Supplied by the bridge: PUT the album's cover to an already-uploaded photo (cleartext LinkID, no crypto).
+    let setCoverProvider: @Sendable (AlbumID, PhotoUID) async throws -> Void
 
-    var capabilities: AlbumCapabilities { .readOnly }
+    /// List + set-cover via direct REST; create/add still need album-node write crypto (not yet implemented).
+    var capabilities: AlbumCapabilities {
+        AlbumCapabilities(canList: true, canCreate: false, canAddPhotos: false, canSetCover: true)
+    }
 
     func listAlbums() async throws -> [AlbumSummary] {
         try await listProvider()
@@ -35,9 +39,6 @@ struct HTTPAlbumBackend: AlbumBackend {
     }
 
     func setAlbumCover(albumID: AlbumID, photoUID: PhotoUID) async throws {
-        throw AlbumError.unsupported(
-            operation: "Set album cover",
-            gap: "no SDK album-cover API and no encrypted-write HTTP path exists yet"
-        )
+        try await setCoverProvider(albumID, photoUID)
     }
 }

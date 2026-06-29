@@ -37,6 +37,17 @@ public final class PhotoViewerModel {
     public private(set) var originalProgress: Double = 0
     public private(set) var isLoadingOriginal = false
 
+    // MARK: Live Photo motion clip
+    // A SEPARATE, muted player for the paired motion video — preloaded the moment a Live Photo opens so hovering
+    // the LIVE badge (or a force-click) plays it with NO delay, NO controls overlay, and NO black load gap. The
+    // view crossfades this over the still (the "ghost" effect). Distinct from `video` (which is for real videos).
+    public private(set) var motionPlayer: AVPlayer?
+    /// True while the motion clip is playing — the view crossfades the motion layer in/out on this.
+    public private(set) var isMotionPlaying = false
+    private var motionLocalFileURL: URL?              // temp file backing the local-file motion player; deleted on teardown
+    private var motionTask: Task<Void, Never>?
+    private var motionEndObserver: NSObjectProtocol?
+
     /// Whether the info panel is open, and the metadata for the current item (loaded lazily).
     public var showInfo = false
     public private(set) var metadata: PhotoMetadata?
@@ -133,6 +144,82 @@ public final class PhotoViewerModel {
         metadataTask?.cancel()
         placeTask?.cancel()
         video.teardown()
+        teardownMotion()
+    }
+
+    // MARK: - Live Photo motion playback
+
+    /// Live-Photo MOTION playback, re-enabled via a FULLY-DOWNLOADED LOCAL-FILE player (see `prepareMotion`).
+    /// The previous STREAMING player attached a custom `AVAssetResourceLoader` on its own `DispatchQueue` — the
+    /// likely trigger for the process-wide Swift-6.2 executor corruption (#76804) that crashed even Apple's own
+    /// SwiftUI/AppKit frameworks (`_ButtonGesture` action dispatch) after a Live Photo was opened. A local-file
+    /// `AVPlayer` has NO such custom loader/queue. If this STILL corrupts the executor (a crash on a button tap
+    /// after opening a Live Photo), set it back to `false` — AVPlayer is then incompatible until the toolchain
+    /// ships the #76804 fix (Xcode 26.2 line).
+    static let livePhotoMotionPlaybackEnabled = true
+
+    /// Preloads the paired motion clip — FULL download + decrypt to a local temp file, then a LOCAL-FILE
+    /// `AVPlayer` (no streaming, no custom resource-loader queue). Hover/force-click are no-ops until
+    /// `motionPlayer` is set (i.e. the clip finished downloading). No-op for non-Live items.
+    private func prepareMotion(for item: PhotoItem) {
+        teardownMotion()
+        guard Self.livePhotoMotionPlaybackEnabled,
+              item.isLivePhoto, let motionUID = item.relatedVideoUID else { return }
+        // Inherits the model's `@MainActor` context, so the `@Observable` writes after the nonisolated download
+        // land back on main (same pattern as `loadTask`).
+        motionTask = Task {
+            guard let data = try? await media.originalData(for: motionUID),
+                  !Task.isCancelled, self.current == item else { return }
+            // Play a LOCAL FILE — NOT the custom `protonvideo://` streaming asset. Write the decrypted bytes to a
+            // unique temp file (cleaned up in `teardownMotion`).
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("proton-motion-\(motionUID.nodeID).mov")
+            guard (try? data.write(to: url, options: .atomic)) != nil, !Task.isCancelled, self.current == item else { return }
+            let player = AVPlayer(url: url)
+            player.isMuted = true                                   // silent ghost preview (matches Apple's hover)
+            player.actionAtItemEnd = .pause
+            player.automaticallyWaitsToMinimizeStalling = false
+            self.motionLocalFileURL = url
+            self.motionPlayer = player
+            // Preroll only once the item is ready (preroll throws otherwise); a local file is ready near-instantly.
+            if let pi = player.currentItem {
+                var tries = 0
+                while pi.status == .unknown, !Task.isCancelled, tries < 50 {
+                    try? await Task.sleep(for: .milliseconds(20)); tries += 1
+                }
+                if pi.status == .readyToPlay, !Task.isCancelled { player.preroll(atRate: 1) { _ in } }
+            }
+        }
+    }
+
+    /// Plays the motion clip ONCE from the start (hover the LIVE badge or force-click). Idempotent while playing.
+    public func playMotion() {
+        guard let player = motionPlayer, !isMotionPlaying else { return }
+        isMotionPlaying = true
+        player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+        player.play()
+        let ref = WeakViewerRef(self)
+        motionEndObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
+        ) { _ in Task { @MainActor in ref.model?.stopMotion() } }
+    }
+
+    /// Stops the motion clip and crossfades back to the still (hover-out, or auto at end-of-clip).
+    public func stopMotion() {
+        guard isMotionPlaying else { return }
+        isMotionPlaying = false
+        motionPlayer?.pause()
+        motionPlayer?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+        if let obs = motionEndObserver { NotificationCenter.default.removeObserver(obs); motionEndObserver = nil }
+    }
+
+    private func teardownMotion() {
+        motionTask?.cancel(); motionTask = nil
+        if let obs = motionEndObserver { NotificationCenter.default.removeObserver(obs); motionEndObserver = nil }
+        motionPlayer?.pause()
+        isMotionPlaying = false
+        motionPlayer = nil
+        if let url = motionLocalFileURL { try? FileManager.default.removeItem(at: url); motionLocalFileURL = nil }
     }
 
     public func next() {
@@ -162,6 +249,7 @@ public final class PhotoViewerModel {
         isLoadingOriginal = false
         if showInfo { loadMetadata() }   // keep the open panel in sync when navigating
         resolvePlaceName(for: item)      // top-bar POI headline (debounced; skips photos flicked past)
+        prepareMotion(for: item)         // preload the Live Photo motion clip so hover/force-click is instant
 
         // Instant: if we already have the sharp original cached, show it — no spinner, no network.
         if let cached = Self.fullImageCache.object(forKey: Self.cacheKey(item.uid)) {

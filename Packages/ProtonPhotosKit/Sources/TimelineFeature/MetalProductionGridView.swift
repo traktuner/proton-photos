@@ -18,12 +18,26 @@ public extension EnvironmentValues {
     }
 }
 
+/// The window's translucent toolbar height. The grid bakes it into the engine's top layout margin so the first
+/// row rests below the toolbar instead of being tucked under it. Set by the shell; 0 by default.
+public struct GridTopBarInsetKey: EnvironmentKey {
+    public static let defaultValue: CGFloat = 0
+}
+
+public extension EnvironmentValues {
+    var gridTopBarInset: CGFloat {
+        get { self[GridTopBarInsetKey.self] }
+        set { self[GridTopBarInsetKey.self] = newValue }
+    }
+}
+
 /// The production wrapper around `MetalGridScrollHost` — the Metal-backed library grid (the only timeline
 /// grid). The canonical `SquareTileGridEngine` owns all geometry; this adds real-data binding, selection,
 /// double-click viewer handoff, zoom-level changes, month labels, badges, and `GridProxy` wiring
 /// (windowFrame / scrollToItem / scrollToLatest / zoom).
 struct MetalProductionGridView: NSViewRepresentable {
     @Environment(\.gridLeadingEventInset) private var leadingEventInset
+    @Environment(\.gridTopBarInset) private var topBarInset
     let sections: [TimelineSection]
     let allItems: [PhotoItem]
     let feed: ThumbnailFeed
@@ -54,6 +68,7 @@ struct MetalProductionGridView: NSViewRepresentable {
         }
         host.coordinator.decorationsEnabled = true
         host.eventLeadingInset = leadingEventInset
+        host.topBarInset = topBarInset
         coord.host = host
         coord.allItems = allItems
         coord.onOpen = onOpen
@@ -117,6 +132,7 @@ struct MetalProductionGridView: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         guard let host = nsView as? MetalGridScrollHost else { return }
         host.eventLeadingInset = leadingEventInset
+        host.topBarInset = topBarInset
         let coord = context.coordinator
         coord.allItems = allItems
         coord.onOpen = onOpen

@@ -228,6 +228,14 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     private let sectionFlatStart: [Int]
     public let totalItems: Int
 
+    /// A top layout margin (points) added ABOVE the first section so the first row rests below the window's
+    /// translucent toolbar instead of being tucked under it. Baked into the layout ORIGIN (every section / slot /
+    /// header Y shifts down by it) AND into `contentHeight`, so the scroll coordinate stays natural — the host's
+    /// existing `max(0, …)` pin/clamp math is untouched; the first row simply lands at viewport-y `topInset` when
+    /// scrolled to the top. Default 0 (engine geometry tests + standalone callers are unaffected); the production
+    /// `MetalGridCoordinator` sets it to the toolbar height (plumbed from `MainView` → host).
+    public var topInset: CGFloat = 0
+
     public init(sectionCounts: [Int], levels: [GridLevelMetrics] = SquareTileGridEngine.defaultLevels) {
         self.sectionCounts = sectionCounts
         self.levels = levels.isEmpty ? SquareTileGridEngine.defaultLevels : levels
@@ -487,7 +495,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         var rowsArr = [Int](repeating: 0, count: sectionCounts.count)
         var emptyArr = [Int](repeating: 0, count: sectionCounts.count)
         var heightArr = [CGFloat](repeating: 0, count: sectionCounts.count)
-        var y: CGFloat = 0
+        var y: CGFloat = topInset                              // top margin so row 0 clears the translucent toolbar
         for (s, count) in sectionCounts.enumerated() {
             headerTop[s] = y
             contentTop[s] = y + headerHeight

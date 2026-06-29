@@ -6,6 +6,10 @@ import DesignSystem
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var level: Int
+    /// Leading overlap of the floating sidebar (0 when collapsed). The grid lays its tiles out past this inset
+    /// itself, but the SwiftUI placeholder/empty/error states are plain centered views — without this they'd
+    /// center over the FULL detail width (which runs under the sidebar) and read as shifted too far left.
+    @Environment(\.gridLeadingEventInset) private var leadingInset: CGFloat
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
     private let proxy: GridProxy?
     private let routeScrollGeneration: Int
@@ -49,14 +53,19 @@ public struct TimelineView: View {
         Group {
             switch model.state {
             case .loading:
-                // No heavy "Preparing Library" card: a faint shimmer skeleton (never a black screen) sits
-                // behind the translucent loading veil applied below, so the surface stays visible through it.
-                loadingGridSkeleton
+                // Route switches (RAW / album / trash …) show the same animated Proton mark as the app's launch
+                // veil — never a black surface, never a stale grid. The leading inset keeps the 64pt mark
+                // centered in the VISIBLE area when the floating sidebar is open.
+                LoadingMark()
+                    .frame(width: 64, height: 64)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.leading, leadingInset)
             case .empty:
                 emptyState
+                    .padding(.leading, leadingInset)
             case let .failed(message):
                 errorState(message)
+                    .padding(.leading, leadingInset)
             case .loaded:
                 let visibleContent = model.visibleContent(
                     searchText: searchText,
@@ -69,6 +78,7 @@ public struct TimelineView: View {
                 // `TileContentFitter`, inside the renderer).
                 if visibleContent.isEmptySearchResult {
                     searchEmptyState
+                        .padding(.leading, leadingInset)
                 } else {
                     ZStack(alignment: .trailing) {
                         MetalProductionGridView(
@@ -106,36 +116,6 @@ public struct TimelineView: View {
         Color(nsColor: MetalGridPalette.background)
     }
 
-    private var loadingGridSkeleton: some View {
-        GeometryReader { geometry in
-            let columns = max(4, Int(geometry.size.width / 190))
-            let spacing: CGFloat = 8
-            let tileWidth = max(80, (geometry.size.width - CGFloat(columns + 1) * spacing) / CGFloat(columns))
-            let tileHeight = max(72, tileWidth * 0.78)
-            let rowCount = max(4, Int(geometry.size.height / (tileHeight + spacing)) + 1)
-            VStack(spacing: spacing) {
-                ForEach(0..<rowCount, id: \.self) { row in
-                    HStack(spacing: spacing) {
-                        ForEach(0..<columns, id: \.self) { column in
-                            RoundedRectangle(cornerRadius: 7)
-                                .fill(placeholderColor(row: row, column: column))
-                                .frame(width: tileWidth, height: tileHeight)
-                        }
-                    }
-                }
-            }
-            .padding(spacing)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .opacity(0.82)
-            .allowsHitTesting(false)
-        }
-    }
-
-    private func placeholderColor(row: Int, column: Int) -> Color {
-        let phase = Double((row * 7 + column * 3) % 9) / 100
-        return Color.white.opacity(0.045 + phase)
-    }
-
     private var emptyState: some View {
         ContentUnavailableView {
             Label(L10n.string("empty.no_photos_title"), systemImage: "photo.on.rectangle.angled")
@@ -153,7 +133,7 @@ public struct TimelineView: View {
             Text(message)
                 .textSelection(.enabled)
         } actions: {
-            Button(L10n.string("action.retry")) { Task { await model.load() } }
+            Button(L10n.string("action.retry")) { Task { await model.retry() } }
                 .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -197,7 +177,7 @@ private struct TimelineDateScrubber: View {
                         .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+                        .glassEffect(in: Capsule(style: .continuous))   // native Liquid Glass (was .ultraThinMaterial)
                         .position(x: geometry.size.width - 66,
                                   y: markerY(index: index, height: geometry.size.height))
                 }

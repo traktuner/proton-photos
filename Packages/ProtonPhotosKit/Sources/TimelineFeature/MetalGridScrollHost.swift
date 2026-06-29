@@ -2,6 +2,31 @@ import AppKit
 import MetalKit
 import PhotosCore
 
+/// Runs a `@MainActor` body from a `nonisolated` Cocoa / `CADisplayLink` callback WITHOUT performing any Swift
+/// `swift_task_isCurrentExecutor` check — the caller MUST already be on the main thread (asserted in debug).
+///
+/// Why this exists: a `@MainActor @objc` selector callback gets a compiler-inserted executor-equality assertion
+/// at entry, and on the Swift 6.0 runtime that assertion SIGSEGVs (swiftlang/swift #76804) once an `AVPlayer`'s
+/// CoreMedia threads leave a corrupt current-executor record on the main thread — it dereferences a mis-signed
+/// executor identity ("pointer authentication failure"). Neither the `SWIFT_IS_CURRENT_EXECUTOR_LEGACY_MODE`
+/// env var nor `MainActor.assumeIsolated` reliably avoids it: both still route through that same faulting
+/// `swift_task_isCurrentExecutor` (and `assumeIsolated` reaches the very same garbage-dereferencing branch when
+/// a stale current-executor record exists — exactly the CoreMedia case). So the callbacks are marked
+/// `nonisolated` (dropping the compiler's entry assertion) and reach their main-confined work through this hop,
+/// which makes ZERO runtime isolation checks — it is `assumeIsolated` minus its guard, using the same unsafe
+/// `@MainActor`→non-isolated function cast the standard library performs internally after that guard passes.
+/// Correct because every call site is a `.main`-runloop `CADisplayLink` tick or a main-thread AppKit
+/// notification; the `assert` is a debug tripwire in case that ever stops being true.
+@inline(__always)
+private func assumeMainActorUnchecked(_ body: @MainActor () -> Void) {
+    assert(Thread.isMainThread, "assumeMainActorUnchecked must be called on the main thread")
+    typealias Isolated = @MainActor () -> Void
+    typealias Plain = () -> Void
+    withoutActuallyEscaping(body) { (fn: @escaping Isolated) in
+        unsafeBitCast(fn, to: Plain.self)()
+    }
+}
+
 /// A layout-INVARIANT scroll position: the UID of the photo at the top of the viewport plus how far its top sat
 /// below the viewport top. Restoring re-resolves that photo's CURRENT position (whatever the zoom level, width,
 /// or column phase now is) and re-pins it at the same sub-offset — so a remembered route reopens exactly where
@@ -74,6 +99,20 @@ final class MetalGridScrollHost: NSView {
     /// inset. 0 when the sidebar is hidden ⇒ plain full-width grid (identity).
     var eventLeadingInset: CGFloat = 0 {
         didSet { applyLeadingInsetChange(from: oldValue) }
+    }
+
+    /// The window's translucent toolbar height, plumbed from `MainView`. Mirrored to the coordinator/engine so the
+    /// first row rests below the toolbar (the engine's `contentHeight` grows by it). Re-lays content unless a
+    /// resize/sidebar/zoom presentation is mid-flight (those re-apply content size on their own settle). Set once
+    /// at open and effectively constant thereafter, so a plain relayout is enough — no anchor gymnastics.
+    var topBarInset: CGFloat = 0 {
+        didSet {
+            guard abs(topBarInset - oldValue) > 0.5 else { return }
+            coordinator.topBarInset = topBarInset
+            guard !coordinator.presentationResizeActive, !coordinator.isSidebarResizing,
+                  !coordinator.isZoomingLive, !coordinator.isCommitBridging, !coordinator.isResizeSettling else { return }
+            applyContentSize(coordinator.contentSize())
+        }
     }
     /// Extra leading breathing room between the sidebar and the grid for the NORMAL levels (L0–L3) only; the
     /// dense square overviews (L4–L5) go edge-to-edge. The coordinator applies it only when a sidebar is present.
@@ -259,14 +298,16 @@ final class MetalGridScrollHost: NSView {
         )
     }
 
-    @objc private func userWillScroll() { stickToBottom = false }
+    @objc nonisolated private func userWillScroll() { assumeMainActorUnchecked { self.stickToBottom = false } }
 
     /// A manual WINDOW resize detaches the bottom-pin — EXACTLY like a scroll. Without this, resizing a
     /// freshly-opened grid (still `stickToBottom`) only ever bottom-pins and never runs the viewport-anchor
     /// camera rebase (the user's bug: fresh-open resize was wrong; one tiny scroll "fixed" it because that
     /// cleared `stickToBottom`). Fires only for USER-initiated live resizes (not the initial-open layout), so
     /// "open at newest" is preserved. Observer is (re)wired in `viewDidMoveToWindow`.
-    @objc private func windowWillLiveResize() {
+    @objc nonisolated private func windowWillLiveResize() { assumeMainActorUnchecked { self.windowWillLiveResizeImpl() } }
+
+    @MainActor private func windowWillLiveResizeImpl() {
         stickToBottom = false
         // Live resize presentation: snapshot the stable grid surface ONCE so the per-tick `layout()` presents it
         // uniformly scaled/slid (no rubber-band, no per-frame engine resolve). The axis is resolved per tick in
@@ -286,7 +327,9 @@ final class MetalGridScrollHost: NSView {
     /// final size, rebase the scroll once (item-identity, so the same region stays put), redraw normally. If the
     /// gesture had already fallen back (vertical/corner), the presentation is inactive and the normal `layout()`
     /// path already settled it, so this is a no-op beyond clearing the sync-present flag.
-    @objc private func windowDidEndLiveResize() {
+    @objc nonisolated private func windowDidEndLiveResize() { assumeMainActorUnchecked { self.windowDidEndLiveResizeImpl() } }
+
+    @MainActor private func windowDidEndLiveResizeImpl() {
         guard coordinator.presentationResizeActive else { liveResizeStartFrame = .zero; return }
         // SETTLE = NO snap. The settle scroll depends on the axis: a WIDTH/corner change scales the tiles (fixed
         // columns, no reflow), so the grid settles to the resize anchor — at the newest end the LAST row stays at the
@@ -710,7 +753,9 @@ final class MetalGridScrollHost: NSView {
             || CACurrentMediaTime() - lastMagnifyEventTime < 0.6
     }
 
-    @objc private func scrolled() {
+    @objc nonisolated private func scrolled() { assumeMainActorUnchecked { self.scrolledImpl() } }
+
+    @MainActor private func scrolledImpl() {
         // SCROLL LOCK backstop: if anything scrolled the grid during a zoom (a leaked scrollWheel / inertia),
         // snap it straight back to the frozen origin so the grid can't drift. Once the zoom is fully done,
         // release the lock and scroll normally.
@@ -755,7 +800,12 @@ final class MetalGridScrollHost: NSView {
         }
     }
 
-    @objc private func step() {
+    // `nonisolated` + `assumeMainActorUnchecked`: the CADisplayLink fires this on the `.main` runloop, but the
+    // compiler's `@MainActor`-entry executor assertion SIGSEGVs under #76804 once the Live-Photo motion AVPlayer's
+    // CoreMedia threads are live. See `assumeMainActorUnchecked` for the full rationale.
+    @objc nonisolated private func step() { assumeMainActorUnchecked { self.stepImpl() } }
+
+    @MainActor private func stepImpl() {
         if coordinator.isCommitBridging { advanceCommitBridge() }
         if coordinator.isSidebarResizing { advanceSidebarResize() }    // sidebar open/close scales the grid
         if coordinator.isResizeSettling { advanceResizeSettle() }      // reserved for future release-time column-count changes

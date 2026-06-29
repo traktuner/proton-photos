@@ -34,7 +34,7 @@ public enum PhotoTag: Int, Sendable, CaseIterable, Codable {
         case .screenshots: "camera.viewfinder"
         case .videos: "video"
         case .livePhotos: "livephoto"
-        case .motionPhotos: "circle.motionlines"
+        case .motionPhotos: "livephoto.play"   // was "circle.motionlines" — not a real SF Symbol, so it rendered blank
         case .selfies: "person.crop.square"
         case .portraits: "person.fill"
         case .bursts: "square.stack.3d.down.right"

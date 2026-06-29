@@ -1,6 +1,20 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
+// Swift-6.2 runtime defect swiftlang/swift#76804: the compiler-inserted DYNAMIC actor-isolation assertion
+// (`swift_task_isCurrentExecutor` → `SerialExecutorRef::isMainExecutor`) SIGSEGVs once a Live-Photo motion
+// `AVPlayer`'s CoreMedia threads corrupt the main-thread executor's PAC state. It fires on EVERY `@MainActor`
+// SwiftUI body / Cocoa-callback update that reads our `@Observable` model, so structural fixes only RELOCATE
+// the crash (GeometryReader child → plain body → …). This frontend flag stops the compiler EMITTING those
+// dynamic checks at all — it removes the faulting CALL (unlike the env-var override, which only changed the
+// call's decision while the computation still segfaulted). Safe here: static Swift-6 isolation already proves
+// these run on the main actor; the dynamic check was pure belt-and-suspenders and is currently a liability.
+// `.unsafeFlags` is fine because this package is consumed as a LOCAL PATH dependency, never version-resolved.
+// REMOVE once the toolchain ships the #76804 fix (Xcode 26.2 line) — re-test the live AVPlayer path first.
+let disableDynamicActorIsolation: [SwiftSetting] = [
+    .unsafeFlags(["-Xfrontend", "-disable-dynamic-actor-isolation"])
+]
+
 // Pure-Swift feature modules. Deliberately has NO dependency on ProtonDriveSDK,
 // so it stays free of the SDK's `unsafeFlags` linker constraints. SDK-coupled glue
 // (HttpClient/AccountClient/Bridge) lives in the app target instead.
@@ -26,31 +40,34 @@ let package = Package(
         // PhotosCore owns the package-wide localization catalog (Resources/Localizable.xcstrings),
         // resolved via `L10n` / `Bundle.module`. Every package module depends on PhotosCore, so this is
         // the single source of truth for package strings.
-        .target(name: "PhotosCore", resources: [.process("Resources")]),
-        .testTarget(name: "PhotosCoreTests", dependencies: ["PhotosCore"]),
-        .target(name: "DesignSystem", dependencies: ["PhotosCore"], resources: [.process("Resources")]),
-        .target(name: "ProtonAuth", dependencies: ["PhotosCore"]),
-        .testTarget(name: "ProtonAuthTests", dependencies: ["ProtonAuth"]),
-        .target(name: "MediaCache", dependencies: ["PhotosCore"]),
+        .target(name: "PhotosCore", resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "PhotosCoreTests", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "DesignSystem", dependencies: ["PhotosCore"], resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "ProtonAuth", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "ProtonAuthTests", dependencies: ["ProtonAuth"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MediaCache", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",
-            dependencies: ["PhotosCore", "DesignSystem", "MediaCache"]
+            dependencies: ["PhotosCore", "DesignSystem", "MediaCache"],
+            swiftSettings: disableDynamicActorIsolation
         ),
         .target(
             name: "PhotoViewerFeature",
-            dependencies: ["PhotosCore", "DesignSystem", "MediaCache"]
+            dependencies: ["PhotosCore", "DesignSystem", "MediaCache"],
+            swiftSettings: disableDynamicActorIsolation
         ),
-        .testTarget(name: "PhotoViewerFeatureTests", dependencies: ["PhotoViewerFeature"]),
+        .testTarget(name: "PhotoViewerFeatureTests", dependencies: ["PhotoViewerFeature"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(
             name: "TimelineFeatureTests",
-            dependencies: ["TimelineFeature", "MediaCache", "PhotosCore"]
+            dependencies: ["TimelineFeature", "MediaCache", "PhotosCore"],
+            swiftSettings: disableDynamicActorIsolation
         ),
         // Albums: management protocols + repository over an injected backend (SDK has no album APIs,
         // so the app's backend routes reads via direct HTTP and reports writes as unsupported).
-        .target(name: "AlbumsFeature", dependencies: ["PhotosCore"]),
-        .testTarget(name: "AlbumsFeatureTests", dependencies: ["AlbumsFeature", "PhotosCore"]),
+        .target(name: "AlbumsFeature", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "AlbumsFeatureTests", dependencies: ["AlbumsFeature", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         // Upload: pure queue + state machine + folder enumeration over an injected upload backend.
-        .target(name: "UploadFeature", dependencies: ["PhotosCore", "DesignSystem"]),
-        .testTarget(name: "UploadFeatureTests", dependencies: ["UploadFeature", "PhotosCore"]),
+        .target(name: "UploadFeature", dependencies: ["PhotosCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "UploadFeatureTests", dependencies: ["UploadFeature", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
     ]
 )

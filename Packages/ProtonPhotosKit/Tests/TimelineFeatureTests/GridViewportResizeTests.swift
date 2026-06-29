@@ -270,7 +270,7 @@ import CoreGraphics
         #expect(host.contains("NSWindow.willStartLiveResizeNotification") && host.contains("windowWillLiveResize"),
                 "host must observe window live-resize to detach the bottom-pin")
         // windowWillLiveResize still clears stickToBottom (now also arms the live-resize presentation).
-        if let r = host.range(of: "func windowWillLiveResize()") {
+        if let r = host.range(of: "func windowWillLiveResizeImpl()") {
             let body = String(host[r.lowerBound ..< (host.index(r.lowerBound, offsetBy: 220, limitedBy: host.endIndex) ?? host.endIndex)])
             #expect(body.contains("stickToBottom = false"), "a live window resize must clear stickToBottom (like a scroll)")
         } else { Issue.record("windowWillLiveResize missing") }

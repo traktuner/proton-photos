@@ -13,7 +13,9 @@ struct SettingsView: View {
             CacheStatusTab()
                 .tabItem { Label("settings.developer_tab", systemImage: "internaldrive") }
         }
-        .frame(width: 520, height: 460)
+        // Tall enough that the (now larger) Library tab fits without overflowing → no scroller appears. A scroller
+        // only shows if a smaller screen genuinely can't fit the window.
+        .frame(width: 520, height: 580)
     }
 }
 
@@ -21,6 +23,7 @@ struct SettingsView: View {
 
 private struct LibrarySettingsTab: View {
     @State private var offline = OfflineLibraryManager.shared
+    @State private var account = AccountInfo.shared
     @AppStorage(AppSettingsKey.offlineOriginalsCapUnlimited) private var capUnlimited = AppSettingsDefault.offlineOriginalsCapUnlimited
     @AppStorage(AppSettingsKey.offlineOriginalsCapGB) private var capGB = AppSettingsDefault.offlineOriginalsCapGB
     @State private var confirmDelete = false
@@ -31,6 +34,24 @@ private struct LibrarySettingsTab: View {
 
     var body: some View {
         Form {
+            // Proton storage quota (from the account data we already fetch; shows last-known value offline).
+            if let used = account.usedSpaceBytes, let max = account.maxSpaceBytes, max > 0 {
+                Section {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text("settings.storage_used").font(.system(size: 12, weight: .medium))
+                            Spacer()
+                            Text("\(byteString(used)) / \(byteString(max))")
+                                .font(.system(size: 11).monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        ProgressView(value: Double(min(used, max)), total: Double(max))
+                    }
+                } header: {
+                    Text("settings.storage_section")
+                }
+            }
+
             // 1) Offline master switch. E2EE is ALWAYS on (not a toggle); this only decides whether full
             //    originals are KEPT locally for instant/offline reopening.
             Section {

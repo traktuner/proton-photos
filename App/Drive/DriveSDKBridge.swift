@@ -225,6 +225,13 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         return result
     }
 
+    /// Sets an album's cover to an already-uploaded photo (direct REST; the SDK has no album API). The photo's
+    /// `nodeID` is its Drive link id.
+    func setAlbumCover(albumID: String, photoUID: PhotoUID) async throws {
+        let root = try await resolvePhotosRoot()
+        try await driveSession.setAlbumCover(volumeID: root.volumeID, albumLinkID: albumID, coverLinkID: photoUID.nodeID)
+    }
+
     func timeline(filter: PhotoFilter) async throws -> [TimelineSection] {
         switch filter {
         case .all:
@@ -239,12 +246,16 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             return Self.group(entries, volumeID: root.volumeID)
         case .trash:
             let root = try await resolvePhotosRoot()
-            let links = try await driveSession.listTrash(volumeID: root.volumeID).filter { $0.type == 2 }
+            let links = try await driveSession.listTrash(volumeID: root.volumeID).filter { $0.type != 1 }   // drop folders; keep files/unknown
             let photos = links
-                .map { PhotoItem(uid: PhotoUID(volumeID: root.volumeID, nodeID: $0.linkID),
-                                 captureTime: Date(timeIntervalSince1970: $0.captureTime),
-                                 mediaType: ($0.mimeType?.hasPrefix("video/") == true) ? "video/quicktime" : "image/jpeg",
-                                 tags: ($0.mimeType?.hasPrefix("video/") == true) ? [.videos] : []) }
+                .compactMap { l -> PhotoItem? in
+                    guard let id = l.linkID else { return nil }
+                    let isVideo = l.mimeType?.hasPrefix("video/") == true
+                    return PhotoItem(uid: PhotoUID(volumeID: root.volumeID, nodeID: id),
+                                     captureTime: Date(timeIntervalSince1970: l.captureTime),
+                                     mediaType: isVideo ? "video/quicktime" : "image/jpeg",
+                                     tags: isVideo ? [.videos] : [])
+                }
                 .sorted { $0.captureTime < $1.captureTime }
             return [TimelineSection(id: "trash", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]
         }
