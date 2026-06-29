@@ -251,10 +251,16 @@ public struct PhotoViewerView: View {
                 if model.current.isLivePhoto, let motion = model.motionPlayer {
                     MotionPlayerLayerView(player: motion)
                         .opacity(model.isMotionPlaying ? 1 : 0)
-                        .animation(.easeInOut(duration: 0.16), value: model.isMotionPlaying)
+                        .animation(.easeInOut(duration: 0.18), value: model.isMotionPlaying)
                         .allowsHitTesting(false)
                 }
             }
+            // "Come alive": a subtle zoom while the motion plays (and back on stop) that, together with the
+            // opacity crossfade above, masks the photo→video→photo seam. On the whole ZStack so the still and
+            // the motion scale as one (the viewer frame is `.clipped()`, so the tiny overflow is cropped, like
+            // Apple). Kept small per the Live Photo feel.
+            .scaleEffect(model.isMotionPlaying ? 1.04 : 1.0)
+            .animation(.easeInOut(duration: 0.3), value: model.isMotionPlaying)
         }
     }
 

@@ -105,7 +105,21 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                 videoNodeIDs = []
                 DebugLog.log("timeline: video tag enrichment skipped — \(error)")
             }
-            let sections = Self.group(items, videoNodeIDs: videoNodeIDs)
+            // Live Photos (server tag 3): the SDK's `enumerateTimeline` drops Tags/RelatedPhotos, so "Alle Fotos"
+            // items would never be marked Live. Enrich here via the REST photos-listing (same pattern as the
+            // video tag-2 enrichment above) so the LIVE badge + motion work everywhere — not just the Live-Photos
+            // filter. Map each live photo's node → its paired video link.
+            let livePhotoVideoIDs: [String: String]
+            do {
+                let lives = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: 3)
+                livePhotoVideoIDs = Dictionary(lives.compactMap { e in e.relatedVideoLinkID.map { (e.linkID, $0) } },
+                                               uniquingKeysWith: { first, _ in first })
+                DebugLog.log("timeline: live-photo tag enrichment found \(livePhotoVideoIDs.count) live photos")
+            } catch {
+                livePhotoVideoIDs = [:]
+                DebugLog.log("timeline: live-photo tag enrichment skipped — \(error)")
+            }
+            let sections = Self.group(items, videoNodeIDs: videoNodeIDs, livePhotoVideoIDs: livePhotoVideoIDs)
             writeTimelineCache(sections)
             return sections
         } catch {
@@ -345,12 +359,22 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
 
     // MARK: - Mapping
 
-    private static func group(_ items: [PhotoTimelineItem], videoNodeIDs: Set<String> = []) -> [TimelineSection] {
+    private static func group(_ items: [PhotoTimelineItem], videoNodeIDs: Set<String> = [],
+                              livePhotoVideoIDs: [String: String] = [:]) -> [TimelineSection] {
         let photos = items
-            .map { PhotoItem(uid: PhotoUID(volumeID: $0.nodeUid.volumeID, nodeID: $0.nodeUid.nodeID),
-                             captureTime: Date(timeIntervalSince1970: $0.captureTime),
-                             mediaType: videoNodeIDs.contains($0.nodeUid.nodeID) ? "video/quicktime" : "image/jpeg",
-                             tags: videoNodeIDs.contains($0.nodeUid.nodeID) ? [.videos] : []) }
+            .map { item -> PhotoItem in
+                let nodeID = item.nodeUid.nodeID
+                let isVideo = videoNodeIDs.contains(nodeID)
+                let relatedVideo = livePhotoVideoIDs[nodeID]   // a live photo's paired video link, if any
+                var tags: Set<PhotoTag> = []
+                if isVideo { tags.insert(.videos) }
+                if relatedVideo != nil { tags.insert(.motionPhotos) }
+                return PhotoItem(uid: PhotoUID(volumeID: item.nodeUid.volumeID, nodeID: nodeID),
+                                 captureTime: Date(timeIntervalSince1970: item.captureTime),
+                                 mediaType: isVideo ? "video/quicktime" : "image/jpeg",
+                                 isLivePhoto: relatedVideo != nil,
+                                 relatedVideoID: relatedVideo,
+                                 tags: tags) }
             // Ascending (oldest first): oldest at the top, newest at the BOTTOM — like Apple Photos.
             // The grid opens scrolled to the bottom so the newest photos are shown first.
             .sorted { $0.captureTime < $1.captureTime }
