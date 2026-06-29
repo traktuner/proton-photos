@@ -94,7 +94,7 @@ struct MetalGridHUD: Equatable, Sendable {
     var dataSource = "—"   // "real" / "synthetic"
 }
 
-/// Tunable budgets for the prototype (kept liberal — Phase 1 proves the architecture, not final tuning).
+/// Tunable streaming/overscan budgets (kept liberal; tune against real-device profiling if needed).
 struct MetalGridBudget: Sendable {
     /// Max texture uploads pushed to the GPU per frame (visible-first). 8–32 per the spec.
     var maxUploadsPerFrame = 24

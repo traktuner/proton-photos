@@ -77,7 +77,11 @@ public struct TimelineView: View {
                 if visibleSections.isEmpty, !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     searchEmptyState
                 } else {
-                    let monthMarkers = MetalGridProductionAdapter.dateMarkers(sections: visibleSections, granularity: .month)
+                    // Only the L4/L5 scrubber consumes markers; the full-library month scan at the common normal
+                    // levels (L0–L3) would be wasted O(library) work, so derive only when it can be shown.
+                    let monthMarkers = level >= 4
+                        ? MetalGridProductionAdapter.dateMarkers(sections: visibleSections, granularity: .month)
+                        : []
                     ZStack(alignment: .trailing) {
                         MetalProductionGridView(
                             sections: visibleSections,

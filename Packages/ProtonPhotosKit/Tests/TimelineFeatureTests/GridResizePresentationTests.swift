@@ -3,7 +3,7 @@ import Foundation
 import CoreGraphics
 @testable import TimelineFeature
 
-// PHASE 1 — live window-resize PRESENTATION LAYER. During a live window edge drag the grid is presented as a
+// Live window-resize PRESENTATION LAYER. During a live window edge drag the grid is presented as a
 // STABLE rendered surface: the settled slots are snapshotted ONCE on begin, then each frame presented UNIFORMLY
 // SCALED to the new width (square tiles preserved) about the stationary LEFT edge + viewport CENTRE — ONE coherent
 // surface, NO per-tick engine resolve (re-resolving recomputes every tile position → a reflow, which is exactly

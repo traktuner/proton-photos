@@ -224,9 +224,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private(set) var selectionMode = false
     private var indexByUID: [PhotoUID: Int] = [:]
 
-    func setSelection(_ uids: Set<PhotoUID>) { selectedUIDs = uids; requestRedraw() }
-    func setFavorites(_ uids: Set<PhotoUID>) { favoriteUIDs = uids; requestRedraw() }
-    func setSelectionMode(_ on: Bool) { selectionMode = on; requestRedraw() }
+    // Equality-guarded so a no-op SwiftUI `updateNSView` pass (frequent) does not force an otherwise-idle GPU
+    // frame: each setter redraws ONLY when its value actually changed.
+    func setSelection(_ uids: Set<PhotoUID>) { guard uids != selectedUIDs else { return }; selectedUIDs = uids; requestRedraw() }
+    func setFavorites(_ uids: Set<PhotoUID>) { guard uids != favoriteUIDs else { return }; favoriteUIDs = uids; requestRedraw() }
+    func setSelectionMode(_ on: Bool) { guard on != selectionMode else { return }; selectionMode = on; requestRedraw() }
     func requestRedraw() { metalView?.needsDisplay = true }
 
     private func rebuildIndex() {
@@ -638,7 +640,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return dataSource.flatUIDs[slot.index]
     }
 
-    // MARK: - Live horizontal resize presentation (Phase 1)
+    // MARK: - Live resize / sidebar presentation
     //
     // During a live WINDOW resize the grid must behave like a STABLE rendered surface, not a per-frame
     // re-resolving grid (re-resolving recomputes every tile position each tick → the tiles REFLOW, which reads as
@@ -1140,7 +1142,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         drawEngineFrame(in: view, clip: clip, viewportSize: viewportSize, now: now)
     }
 
-    // MARK: - Single-lattice transition render (Phase-B spike)
+    // MARK: - Single-lattice transition render
 
     /// Try to start a CLICKV2_420_FULLER_CORNER click transition
     /// for a toolbar/keyboard +/- to `newLevel`, pinning `anchorIndex` at `viewportPoint`. Commits the
@@ -1456,12 +1458,14 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             let frame = tx.frame(continuousLevel: zoomTransactionLevel, viewportSize: layoutViewportSize, overscan: overscan)
             slots = renderTranslate(frame.visibleSlots)               // layout-space frame → render space (chokepoint)
             contentSizeForDiag = CGSize(width: layoutWidth, height: frame.pitch * CGFloat(max(1, slots.count / max(frame.columns, 1))))
-            if now - lastCommitFrameLog > 0.1 {        // ~10 Hz: trace the live focus row + anchor rect
-                lastCommitFrameLog = now
+            #if DEBUG
+            if now - lastCommitFrameLog > 0.1 {        // ~10 Hz: trace the live focus row + anchor rect (DEBUG only;
+                lastCommitFrameLog = now               // the diagnostic builds a payload string, so keep it out of release)
                 let anchorRect = frame.visibleSlots.first { $0.index == tx.anchorGlobalIndex }?.rect ?? .zero
                 GridZoomCommitLog.frame(progress: zoomTransactionLevel, anchorViewportRect: anchorRect,
                                         focusRow: frame.focusRow, focusRowStable: frame.focusRow.contains(tx.anchorGlobalIndex))
             }
+            #endif
         } else {
             // SETTLED: render exactly at the native NSScrollView origin. During trackpad edge rubber-band,
             // AppKit intentionally reports a temporarily out-of-range clip origin; do NOT clamp it here and do

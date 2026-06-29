@@ -68,7 +68,7 @@ enum GridTransitionComponentBuilder {
                       viewportSize: CGSize) -> GridTransitionLattice? {
         guard let aS = source.visibleSlots.first(where: { $0.index == anchorIndex }),
               let aT = target.visibleSlots.first(where: { $0.index == anchorIndex }) else { return nil }
-        // single-section in the visible region (spike scope; matches engine's single-section zoom guard)
+        // single-section in the visible region (matches the engine's single-section zoom guard)
         let sections = Set(source.visibleSlots.map(\.section)).union(target.visibleSlots.map(\.section))
         guard sections.count == 1 else { return nil }
 

@@ -276,10 +276,11 @@ final class MetalGridScrollHost: NSView {
     /// "open at newest" is preserved. Observer is (re)wired in `viewDidMoveToWindow`.
     @objc private func windowWillLiveResize() {
         stickToBottom = false
-        // PHASE 1 — live horizontal resize presentation: snapshot the stable grid surface and arm the sync
-        // present so the Metal frame locks to the window border (no rubber-band). The axis (pure-horizontal vs
-        // vertical/corner) is resolved per tick in `layout()`; a vertical/corner drag drops the presentation and
-        // falls back to the existing rebase path (Phase 2/3 scope).
+        // Live resize presentation: snapshot the stable grid surface ONCE so the per-tick `layout()` presents it
+        // uniformly scaled/slid (no rubber-band, no per-frame engine resolve). The axis is resolved per tick in
+        // `layout()` — a horizontal drag scales the snapshot, a vertical drag slides it (counter-scroll), a corner
+        // composes both. If the presentation can't run (zoom/transition in flight, no window) the path falls back
+        // to `rebaseForResize`.
         liveResizeStartFrame = viewportScreenFrame()
         guard coordinator.canPresentResize else { return }
         coordinator.beginPresentationResize()
@@ -828,10 +829,10 @@ final class MetalGridScrollHost: NSView {
         metalView.frame = bounds
         let newFrame = viewportScreenFrame()
         let old = lastViewportScreenFrame
-        // PHASE 1 — pure-horizontal live resize: present the cached stable surface SCALED to the new width about
-        // the stationary edge. NO engine resolve, NO content-size pass, NO scroll rebase this tick — the
-        // `onContentSizeChange` callback is gated off too (see init), and the renderer syncs the frame to the
-        // window border. The single settle happens on `didEndLiveResize`.
+        // Live resize presentation: present the cached stable surface SCALED/slid to the new geometry about the
+        // stationary edge. NO engine resolve, NO content-size pass, NO scroll rebase this tick — the
+        // `onContentSizeChange` callback is gated off too (see init). The single settle happens on
+        // `didEndLiveResize`.
         if inLiveResize, coordinator.presentationResizeActive, liveResizeStartFrame != .zero {
             // The presentation handles BOTH axes as ONE stable surface: HORIZONTAL scales the snapshot to the new
             // width (in draw()); VERTICAL slides it — the dragging edge clips while the opposite edge gives up a

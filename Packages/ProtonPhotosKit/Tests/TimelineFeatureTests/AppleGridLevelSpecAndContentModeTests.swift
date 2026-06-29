@@ -37,10 +37,10 @@ import CoreGraphics
         #expect(engine().levelCount == 6)
     }
 
-    // 2 — SIZE-BASED, WIDTH-FILLING: a level FILLS the width at every width (no trailing gutter); the COLUMN
-    // COUNT adapts (more columns on a wider viewport) and the tile breathes only within a small bounded band.
+    // 2 — FIXED-COLUMNS, WIDTH-FILLING: a level FILLS the width at every width (no trailing gutter); the COLUMN
+    // COUNT is CONSTANT (held at nominalColumns) and the tile SCALES with width (resize = scale, never reflow).
     // At the calibration width it reproduces nominalColumns.
-    @Test func levelSpecsFillWidthAndAdaptColumns() {
+    @Test func levelSpecsFillWidthFixedColumns() {
         let e = engine()
         for level in 0 ..< e.levelCount {
             let nominal = e.metrics(level: level).nominalColumns

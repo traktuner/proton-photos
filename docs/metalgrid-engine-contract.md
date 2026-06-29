@@ -11,9 +11,9 @@ Product-level Apple Photos parity is defined in
 with observed Apple Photos behavior or the master spec, this contract is stale and must be changed. Architecture
 follows Apple behavior, not the other way around.
 
-> Historical note: behavior was once accepted as of the `grid: 6-level model, aspect/square toggle, uniform
-> background, viewport-resize camera + perf` commit. Later Apple reference analysis may supersede parts of this
-> contract, especially resize and zoom-level semantics.
+> Historical note: the resize and zoom-level semantics in this contract were rewritten to match the
+> fixed-columns-per-level + width-fill product model and the implemented resize-presentation / continuous-pinch
+> systems (see §6, §10, §13). Earlier "adaptive columns" and "focusRowRelayout crossfade" framings are superseded.
 
 ---
 
@@ -27,9 +27,12 @@ overlaid transparent `NSScrollView` document spacer provides physics + pointer e
 |---|---|---|
 | `SquareTileGridEngine` | `SquareTileGridEngine.swift` | Pure value type. **All** outer grid geometry. |
 | `GridZoomTransaction` | `GridZoomTransaction.swift` | Live pinch zoom / cursor-anchor transaction. |
-| `GridViewportResizeRebase` | `GridViewportResizeRebase.swift` | Window/sidebar resize camera rebase (pure). |
+| `GridTransitionController` (+ `GridTransitionPlan`/`Scheduler`/`Component`) | `GridTransition*.swift` | Integrated Phase-B single-lattice click+pinch transition (production default, no flag). |
+| `PinchLiveZoomDriver` | `PinchLiveZoomDriver.swift` | Continuous multi-level live-pinch scrub driver (chains across detents). |
+| `OverviewLayerDissolve` | `OverviewLayerDissolve.swift` | L3↔L4 / L4↔L5 offscreen two-layer cross-dissolve. |
+| `GridViewportResizeRebase` | `GridViewportResizeRebase.swift` | Resize/sidebar scroll rebase (pure) — the **settle/fallback** path under the presentation layer. |
 | `TileContentFitter` | `TileContentFitter.swift` | How media fits **inside** a square slot (content only). |
-| `MetalGridCoordinator` | `MetalGridCoordinator.swift` | Composes engine geometry + textures + fitting; owns camera state (level, committed phase). |
+| `MetalGridCoordinator` | `MetalGridCoordinator.swift` | Composes engine geometry + textures + fitting; owns camera state (level, committed phase) **and the live resize/sidebar presentation layer** (snapshot-scale). |
 | `MetalGridRenderer` | `MetalGridRenderer.swift` | Draws the quads it is handed. No layout math. |
 | `MetalGridScrollHost` | `MetalGridScrollHost.swift` | AppKit host: scroll physics, gesture intake, resize entry, calls the engine helpers. |
 | `MetalGridPalette` | `MetalGridPalette.swift` | The single uniform grid surface colour. |
@@ -102,7 +105,9 @@ Exactly **six** Apple-like levels (`SquareTileGridEngine.appleLevelSpecs`), keye
 | L5 | 30 | 1 | **squareFill only** | year/month | – |
 
 L3 is the default density. L0–L3 are normal photo levels; L4–L5 are dense square overviews. `transitionKindToNext`
-is **stored classification only** — no transition effect is implemented yet.
+classifies each adjacent step (`focusRowRelayout` / `overviewWarp` / `denseOverviewZoom`) and is consumed live by
+the integrated transition system: `focusRowRelayout` steps drive the single-lattice click/pinch transition, the
+overview boundaries drive `OverviewLayerDissolve` (see §13.1).
 
 ---
 
@@ -148,13 +153,28 @@ committed phase, like the pinch.
 ## 10. Resize / sidebar rebase rule
 
 Resize is **not** zoom. A window resize or sidebar toggle keeps the same level / phase / content mode /
-nominalColumns / gap; only `slotSide` (→ pitch, content height) is recomputed from the new **width**. The scroll
-is rebased via `GridViewportResizeRebase` to preserve the content at a **normalized viewport anchor**
-(`anchorFractionY = 0.5`, centre) — a continuous camera rebase, not a rigid one-edge pin. Bottom-pinned grids
-stay bottom-pinned. A **manual window resize detaches the bottom-pin** (`willStartLiveResize` →
-`stickToBottom = false`) so the rebase runs even on a freshly-opened grid. The first frame after the resize
-already uses the rebased scrollY (no late jump). Resize must **never** start a `GridZoomTransaction`/commit
-bridge, reuse raw scrollY after metrics change, or restore a stale scroll origin.
+nominalColumns / gap. Because each level holds its **fixed** columns, a width change **scales the square slot to
+fill the new width** (`slotSide = (width − gap·(cols−1))/cols`) — the column count never changes on resize (only
+on a zoom); a height change clips/reveals rows.
+
+**Primary live path — the presentation layer.** On gesture start the host (`windowWillLiveResize`, or a sidebar
+inset change) calls `MetalGridCoordinator.beginPresentationResize` / `beginSidebarResize`, which snapshots the
+resolved slot rects ONCE. Each tick `drawPresentationResize` / `drawSidebarResize` CPU-scales that snapshot about
+the stationary edge (`presentationScaledRect` / `presentationScaledRectRightAnchored`), plus a vertical
+counter-scroll for a pure-height drag — with **no per-frame engine resolve and no content-size callback** (both
+frozen while `presentationResizeActive` / `isSidebarResizing`). (This is a CPU snapshot-scale of resolved rects,
+NOT an offscreen MTLTexture canvas.) At SETTLE (`windowDidEndLiveResize` / `endPresentationResize`) the engine
+re-resolves once and the scroll lands on `windowResizeReleaseScrollY` — the **resize anchor**: a bottom-pinned
+grid keeps its last row at the viewport bottom, otherwise the centre item is re-centred. A **manual window resize
+detaches the bottom-pin** (`stickToBottom = false`).
+
+**Fallback path.** When the presentation cannot run (a zoom/commit transaction is in flight, a transition is
+active, or there is no window yet), `MetalGridScrollHost.layout()` / `applyLeadingInsetChange` rebase the scroll
+via `GridViewportResizeRebase` (`rebaseForResize`) to a **normalized viewport anchor** (`anchorFractionY = 0.5`),
+preserving a bottom-pinned grid, so the first frame after the resize is already correct.
+
+Resize must **never** start a `GridZoomTransaction` / commit bridge, reuse raw scrollY after `slotSide` changed,
+or restore a stale scroll origin. Guarded by `GridResizePresentationTests` + `GridViewportResizeTests`.
 
 ## 11. Production background / styling rule
 
@@ -195,32 +215,26 @@ ownership and cross NONE of the boundaries above.
 `sourcePlate`/`targetBackdrop` · compute any geometry in the renderer · derive outer rects from media aspect
 ratio · change the engine/fitter/resize ownership boundaries above.
 
-### 13.1 Implemented: normal-level `focusRowRelayout` crossfade (L0↔L1↔L2↔L3)
+### 13.1 Implemented: the integrated normal-level transition (single-lattice click + continuous pinch)
 
-The FIRST effect ships: `GridNormalZoomVisualPlanner` (`GridNormalZoomVisualPlan.swift`) — a **pure**,
-AppKit-free planner that turns a discrete +/- step between adjacent NORMAL levels into an Apple-like crossfade.
+The production normal-level transition (L0↔L1↔L2↔L3) is the **integrated Phase-B single-lattice** effect — the
+production default with **no feature flag** (see `PHASE_B_GRID_EFFECTS_INTEGRATION.md`):
 
-- **Trigger:** the discrete +/- (toolbar/keyboard) path only, in the non-bottom-pinned state, gated by
-  `MetalGridFocusRowTransitionFlag` (default ON; flip via `MetalGrid.focusRowTransition`). The continuous
-  trackpad pinch (already an anchored uniform scale via `GridZoomTransaction`) is untouched. The committed
-  level/scroll/phase are set SYNCHRONOUSLY exactly as before — the crossfade is a transient visual overlay, so
-  the settled end-state is byte-identical to the prior snap.
-- **Model (verified against Apple Photos macOS):** the focus band (the anchor's row, from the live
-  `GridZoomTransaction`) holds identity-stable + anchored under the cursor (it *scales* in place, never flies);
-  zoom-out fades NEW side neighbours IN, zoom-in fades outer neighbours OUT; outside the focus band, regions
-  crossfade by spatial overlap (target-only → fade-in, source-only → fade-out, occupant-change → replacement
-  crossfade). **Every tile's rect is taken VERBATIM from the source plan / target plan / transaction frame —
-  never a fresh `lerp(oldRect, newRect)`.** A UID may appear in two places mid-crossfade (its source rect
-  fading out + its target rect fading in); after the transition each UID appears only where the target says.
-- **Boundaries honoured:** the planner computes no slotSide/gap/pitch/columns/contentSize, does no hit-testing,
-  and never calls `TileContentFitter` — so the aspect/square toggle cannot change a single transition rect,
-  alpha, role, or the focus band. Content fitting + per-tile `alpha` stay in the renderer
-  (`MetalGridCoordinator.renderTransitionTiles`, reusing the existing `MetalGridQuad.alpha`). Diagnostics:
-  `[GridTransition]` (begin/frame/end) with `flyingIdentityDetected` / `maxIdentityMovementPx`.
-- **Guards:** `FocusRowRelayoutTransitionTests` (no-fly, focus-anchor-stable, zoom-in-drops / zoom-out-adds
-  neighbours, target/source fade, replacement crossfade, focus-replacement-suppressed, content-mode geometry
-  invariance, engine-geometry-only, overview-kinds-refused).
+- **Click `+/-`** runs through `GridTransitionController` + the transition scheduler/component layer
+  (`GridTransitionScheduler` / `GridTransitionComponentBuilder` / `GridTransitionPlan`) — a per-region
+  source⇄target dissolve over a single presentation lattice; the committed level/scroll/phase are set
+  synchronously, so the settled end-state is byte-identical to a plain snap.
+- **Continuous trackpad pinch** runs `PinchLiveZoomDriver` — a host-driven progress scrub that chains across
+  multiple normal detents in one gesture and commits the nearest detent on release. The seam closes because each
+  detent's presentation frame is deterministic (prev-q=1 == next-q=0).
+- Eligibility is gated to adjacent normal levels whose `transitionKindToNext == .focusRowRelayout`
+  (the `MetalGridCoordinator` chain-band logic); an ineligible / degenerate step falls back to a clean instant
+  settle.
 
-**Still future / NOT implemented:** the overview transitions `overviewWarp` (L3→L4) and `denseOverviewZoom`
-(L4→L5). The normal planner explicitly REFUSES them (returns an empty, `handled == false` plan) so an overview
-step can never accidentally use the normal crossfade.
+The earlier `GridNormalZoomVisualPlanner` two-grid crossfade and its `MetalGrid.focusRowTransition` /
+`MetalGrid.singleLatticeTransition` feature flags were **removed**; `ProductionRouteGuardTests` forbids them from
+reappearing. `focusRowRelayout` now survives ONLY as the `transitionKindToNext` enum-case **classification**
+consumed by the pinch chain-band logic — the *name* is live, the old crossfade *effect* is gone.
+
+The overview boundaries (L3↔L4 / L4↔L5) run `OverviewLayerDissolve` (an offscreen two-layer cross-dissolve), not
+the normal lattice. Effects honour the §13 boundaries: they compute no engine geometry and consume only plans.

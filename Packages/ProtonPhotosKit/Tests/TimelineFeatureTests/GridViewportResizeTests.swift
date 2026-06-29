@@ -139,9 +139,9 @@ import CoreGraphics
         let r = rebase(e, oldFrame: old, newFrame: new, scrollY: 6000, level: 2, phase: nil)
         #expect(r.anchorGlobalIndex == centerBefore)
         #expect(r.newContentSize.height == e.contentSize(level: 2, width: 1300, columnPhase: nil).height)
-        // The anchor item is preserved vertically (r.anchorGlobalIndex above); the item at the exact viewport
-        // CENTRE may shift by up to one row when the column count changes (the surplus is re-flowed, not pinned
-        // horizontally without a cursor phase). Tolerate that horizontal neighbour; a real vertical jump is ≫ a row.
+        // The anchor item is preserved vertically (r.anchorGlobalIndex above). Fixed-columns keeps the column
+        // count unchanged, but the slot SCALES with width so the rows visible at the exact viewport CENTRE shift
+        // slightly; the centre item may differ by up to one row. Tolerate that; a real vertical jump is ≫ a row.
         let after = anchorAt(e, width: 1300, scrollY: r.newScrollY, vh: 1000, level: 2, phase: nil)!
         let newCols = e.resolvedMetrics(level: 2, width: 1300).columns
         #expect(abs(after - centerBefore) <= newCols, "centre item must stay within one row of the preserved anchor (got \(after) vs \(centerBefore))")
@@ -153,8 +153,8 @@ import CoreGraphics
         let wide = CGRect(x: 0, y: 0, width: 1280, height: 860), narrow = CGRect(x: 300, y: 0, width: 980, height: 860)
         let centerBefore = anchorAt(e, width: 1280, scrollY: 6000, vh: 860, level: 2, phase: nil)!
         let r = rebase(e, oldFrame: wide, newFrame: narrow, scrollY: 6000, level: 2, phase: nil)
-        // The vertical anchor is preserved; at the narrower width the column count changes, so the item at the
-        // exact centre may be a horizontal neighbour within one row (no cursor phase pins the column). Tolerate it.
+        // The vertical anchor is preserved; fixed-columns keeps the column count unchanged, but the slot scales
+        // with the narrower width so the centre item may differ by up to one row. Tolerate it.
         let after = anchorAt(e, width: 980, scrollY: r.newScrollY, vh: 860, level: 2, phase: nil)!
         let newCols = e.resolvedMetrics(level: 2, width: 980).columns
         #expect(abs(after - centerBefore) <= newCols, "centre item must stay within one row after the sidebar width change (\(after) vs \(centerBefore))")
@@ -269,7 +269,7 @@ import CoreGraphics
         let host = src("MetalGridScrollHost.swift")
         #expect(host.contains("NSWindow.willStartLiveResizeNotification") && host.contains("windowWillLiveResize"),
                 "host must observe window live-resize to detach the bottom-pin")
-        // windowWillLiveResize still clears stickToBottom (now also arms the live-resize presentation, Phase 1).
+        // windowWillLiveResize still clears stickToBottom (now also arms the live-resize presentation).
         if let r = host.range(of: "func windowWillLiveResize()") {
             let body = String(host[r.lowerBound ..< (host.index(r.lowerBound, offsetBy: 220, limitedBy: host.endIndex) ?? host.endIndex)])
             #expect(body.contains("stickToBottom = false"), "a live window resize must clear stickToBottom (like a scroll)")

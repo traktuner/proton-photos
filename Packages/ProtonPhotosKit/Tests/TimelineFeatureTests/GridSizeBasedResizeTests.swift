@@ -3,11 +3,11 @@ import Foundation
 import CoreGraphics
 @testable import TimelineFeature
 
-/// THE size-based, WIDTH-FILLING resize contract (Apple parity). A zoom level fixes a reference PHOTO SIZE; the
-/// column count adapts to width (round-to-nearest) and the square slot is then sized to FILL the width exactly —
-/// so the grid NEVER leaves a trailing gutter, and the tile size breathes only within a small BOUNDED band
-/// around the reference (never the old unbounded fixed-columns rescale). Pure-engine behavioral guards for
-/// `GRID_SIZE_BASED_RESIZE_DESIGN.md` and `docs/apple-photos-parity-master-spec.md`.
+/// THE FIXED-COLUMNS, WIDTH-FILLING resize contract (Apple parity). Each zoom level HOLDS its `nominalColumns`;
+/// the square slot is sized to FILL the viewport width exactly — so the grid NEVER leaves a trailing gutter, and a
+/// width change SCALES the tile (same columns, larger/smaller tile), never a column reflow. The column count
+/// changes ONLY on a zoom. Pure-engine behavioral guards for the fixed-columns model in
+/// `docs/apple-photos-parity-master-spec.md` (and §6/§10 of `docs/metalgrid-engine-contract.md`).
 @Suite struct GridSizeBasedResizeTests {
     private let viewportHeight: CGFloat = 900
     private func engine(_ count: Int = 8000) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
@@ -78,7 +78,8 @@ import CoreGraphics
         }
     }
 
-    // A click in the trailing reveal margin (right of the last column) hits NOTHING (no slot there).
+    // A click to the right of the last FILLED column hits NOTHING. Under width-fill the grid fills the viewport,
+    // so a real margin rarely exists (the guard early-returns); this asserts no phantom slot when one does.
     @Test func clickInTrailingMarginHitsNothing() {
         let e = engine(8000)
         let level = 1, w: CGFloat = 1500
@@ -87,12 +88,12 @@ import CoreGraphics
         guard w - contentWidth > 4 else { return }   // only meaningful when a real margin exists
         let marginX = contentWidth + (w - contentWidth) / 2     // middle of the trailing margin
         #expect(e.hitTest(contentPoint: CGPoint(x: marginX, y: 4000), level: level, width: w) == nil,
-                "a point in the trailing reveal margin must not hit a slot")
+                "a point right of the last filled column must not hit a slot")
     }
 
     // REGRESSION GUARD for the rejected screenshots: at the widths where the OLD `floor` + fixed-`side` model
     // left a trailing gutter up to a FULL tile (≈421pt at L0 @ 1700 = ~25% of the window), the grid now FILLS
-    // the width. This test FAILS on the old model and passes on round + fill.
+    // the width. This test FAILS on the old model and passes on the width-fill model.
     @Test func wideWindowHasNoHugeGutter() {
         let e = engine()
         let cases: [(level: Int, width: CGFloat)] = [(0, 1700), (0, 2141), (0, 1440), (1, 1440), (1, 2309), (2, 1644), (3, 1418)]
@@ -104,7 +105,7 @@ import CoreGraphics
     }
 
     // PINCH COMMIT SEAM at NON-REFERENCE widths: at every integer detent the live apparent side equals the
-    // settled (width-filled) side, so a pinch/click commit lands with NO size pop. Guards the round+fill
+    // settled (width-filled) side, so a pinch/click commit lands with NO size pop. Guards the width-fill
     // lock-step between the live lattice and the settled grid at widths other than the 1280 calibration width.
     @Test func pinchCommitSeamHoldsAtNonReferenceWidths() {
         let e = engine()

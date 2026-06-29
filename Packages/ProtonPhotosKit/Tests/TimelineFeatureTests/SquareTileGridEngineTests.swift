@@ -103,9 +103,9 @@ import CoreGraphics
         return max(0, h / 2 - viewport.height / 2)
     }
 
-    // 6/7/8. SIZE-BASED: the grid is LEADING-aligned — a full visible row starts at column 0 (x≈0) and runs to
-    // column count-1; the trailing edge carries a BOUNDED reveal margin (< one pitch), never a missing column.
-    @Test func visibleQueryIsLeadingAlignedWithBoundedTrailingMargin() {
+    // 6/7/8. FIXED-COLUMNS, WIDTH-FILL: the grid is LEADING-aligned — a full visible row starts at column 0 (x≈0)
+    // and runs to column count-1, and the last column's right edge FILLS the viewport width (no gutter).
+    @Test func visibleQueryIsLeadingAlignedAndFillsWidth() {
         for level in 0 ..< engine().levelCount {
             let plan = settledPlan(level: level, scrollY: midScroll(level: level))   // mid-library → full rows
             let rows = fullRows(plan)
@@ -115,13 +115,13 @@ import CoreGraphics
             #expect(row.last!.column == plan.columns - 1)                    // last filled column present
             #expect(abs(row.first!.slotRect.minX) < 1.0)                     // leading-aligned: left edge at x≈0
             #expect(row.last!.slotRect.maxX <= width + 1.0)                  // never overflows the viewport
-            #expect(width - row.last!.slotRect.maxX < plan.pitch)            // trailing reveal margin < one column (no black gap)
+            #expect(width - row.last!.slotRect.maxX < 2.0)                   // FILLS the width (right edge ≈ viewport, no gutter)
         }
     }
 
-    // 9. SIZE-BASED, WIDTH-FILLING window resize: a level FILLS the width at every width (no gutter); the COLUMN
-    // COUNT adapts (more columns on a wider viewport) and the tile breathes within a bounded band. No overlap.
-    @Test func windowResizeFillsWidthAndAddsColumns() {
+    // 9. FIXED-COLUMNS, WIDTH-FILLING window resize: a level FILLS the width at every width (no gutter); the COLUMN
+    // COUNT is CONSTANT (held at nominalColumns) and the tile SCALES with width (resize = scale, never reflow). No overlap.
+    @Test func windowResizeFillsWidthFixedColumnsScalesTile() {
         let e = engine()
         var sides: [CGFloat] = []
         var columnsSeen: [Int] = []
@@ -182,8 +182,9 @@ import CoreGraphics
         for s in outPlan.visibleSlots { #expect(abs(s.slotRect.width - s.slotRect.height) < eps) } // still square
     }
 
-    // 11b. SIZE-BASED zoom-out: at every apparent level the continuous lens is leading-aligned with a BOUNDED
-    // trailing reveal margin (< one pitch) — background, never a black strip or missing column.
+    // 11b. Continuous zoom-out lens: at every apparent (between-detent) level the lens is leading-aligned with a
+    // BOUNDED trailing margin (< one pitch) — the round column count + interpolated side need not fill exactly
+    // mid-zoom (unlike the settled grid, which fills); background, never a black strip or missing column.
     @Test func zoomOutIsLeadingAlignedWithBoundedTrailingMargin() {
         let e = engine()
         let anchor = GridZoomAnchor(flatIndex: 1000, viewportPoint: CGPoint(x: 700, y: 450),

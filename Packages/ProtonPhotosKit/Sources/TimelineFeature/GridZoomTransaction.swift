@@ -98,10 +98,10 @@ public struct GridZoomTransaction: Equatable, Sendable {
         // about the anchor; the column reflow happens only on release (commit at level 0). For x ≥ 0 the
         // in-band / densest behaviour below is unchanged.
         if x < 0 {
-            // Over-zoom past the largest level: geometrically SCALE the level-0 grid about the cursor. SIZE-BASED,
-            // WIDTH-FILLING: the level-0 column count adapts to width (`columnsForFixedSide`) and the base side is
-            // the settled (width-FILLED) L0 side — so at x == 0 the scale factor is exactly 1 and this branch is
-            // continuous with the in-band branch, and the over-zoom anchors on the same grid the settled L0 shows.
+            // Over-zoom past the largest level: geometrically SCALE the level-0 grid about the cursor. FIXED-COLUMNS,
+            // WIDTH-FILLING: L0 HOLDS its `nominalColumns` and the base side is the settled (width-FILLED) L0 side —
+            // so at x == 0 the scale factor is exactly 1 and this branch is continuous with the in-band branch, and
+            // the over-zoom anchors on the same grid the settled L0 shows.
             let columns = levels[0].nominalColumns                       // FIXED-COLUMNS: L0 holds its count
             let baseSide = apparentSlotSide(at: 0, width: width)
             let f = apparentSlotSide(at: x, width: width) / max(baseSide, 0.001)   // > 1 past level 0 (grows)
@@ -116,11 +116,11 @@ public struct GridZoomTransaction: Equatable, Sendable {
         }
         let gap = apparentGap(at: x)
         let target = apparentSlotSide(at: x, width: width)
-        // SIZE-BASED, WIDTH-FILLING: `apparentSlotSide` already returns the per-level FILLED side, and the column
-        // count comes from the SHARED `columnsForFixedSide` rule — the SAME rule the settled grid uses — so the
-        // transaction and the settled plan agree on (size, columns) at every integer detent (the commit seam
-        // closes; no vertical OR size jump). At an integer detent resolve columns from that level's reference
-        // side + gap EXACTLY (matching the settled `resolvedForLevel`); between detents from the apparent side.
+        // FIXED-COLUMNS, WIDTH-FILLING: `apparentSlotSide` already returns the per-level FILLED side. At an integer
+        // detent the column count is that level's `nominalColumns` — the SAME fixed count the settled
+        // `resolvedForLevel` holds — so the transaction and the settled plan agree on (size, columns) at every
+        // detent (the commit seam closes; no vertical OR size jump). BETWEEN detents (the continuous over-zoom)
+        // the count comes from `columnsForFixedSide` on the apparent side; only this off-detent path is adaptive.
         let columns: Int
         let nearestLevel = x.rounded()
         if abs(x - nearestLevel) < 1e-6, nearestLevel >= 0, Int(nearestLevel) < levels.count {

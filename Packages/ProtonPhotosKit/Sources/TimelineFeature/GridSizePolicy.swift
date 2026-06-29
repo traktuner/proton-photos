@@ -1,16 +1,19 @@
 import CoreGraphics
 
-// MARK: - GridSizePolicy — platform-neutral level → fixed photo size
+// MARK: - GridSizePolicy — platform-neutral level → reference photo size (SIZE-BASED SCAFFOLDING, NOT adopted)
 //
-// The size-based grid model: a zoom LEVEL fixes the on-screen PHOTO SIZE (points); the column count adapts to
-// width (`SquareTileGridEngine.columnsForFixedSide`). The photo size is CONSTANT during any live resize within
-// a viewport size class and changes only in DISCRETE steps at class breakpoints — so the grid never "breathes"
-// (no continuous tile rescale tracking the drag). This policy is the single seam that maps a level to its fixed
-// size; it is a pure value type (CoreGraphics only, no AppKit/UIKit) so the geometry engine stays
-// platform-neutral and the same core can drive a future iPad/iPhone layout (which would select `.compact`).
+// NOTE: this maps a level to a per-level REFERENCE photo size for a SIZE-BASED / ADAPTIVE-COLUMNS model that was
+// explored but is NOT the adopted runtime rule. The shipping grid is FIXED-COLUMNS: the settled resolve HOLDS
+// each level's `nominalColumns` and fills the width (`SquareTileGridEngine.resolvedForLevel` passes
+// `fixedColumns: nominalColumns`), so a window resize SCALES the tile and the column count changes only on a
+// zoom. `referenceSlotSide` (which this policy computes) is passed to the resolve as `targetSide` but is
+// OVERRIDDEN by the fixed-columns branch, so this policy does NOT currently drive the settled column count.
+// Retained as calibration + the seam for a possible future responsive size-class pass (the same pure core could
+// later drive an iPad/iPhone layout via `.compact`). Pure value type (CoreGraphics only, no AppKit/UIKit).
 //
-// `nominalColumns` is retained ONLY as the density key that seeds the `.regular` size at the reference width
-// (and as the spec-guard literal); it is never a runtime column source under this model.
+// The round column rule (`columnsForFixedSide`) referenced below is used in production ONLY by the live pinch
+// over-zoom lattice, never by the settled grid. `nominalColumns` seeds the `.regular` size at the reference
+// width and is the spec-guard literal.
 public enum GridSizePolicy {
 
     /// Discrete viewport size classes. Desktop ships `.regular`; iOS can later select `.compact` by idiom.

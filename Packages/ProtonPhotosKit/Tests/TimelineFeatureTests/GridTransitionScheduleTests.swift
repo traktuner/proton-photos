@@ -1,7 +1,7 @@
 // GridTransitionScheduleTests.swift
 //
-// Phase-B spike: structural verification of the single-presentation-lattice transition layer
-// (CLICKV2_420_FULLER_CORNER + PINCH071). Pure unit tests; no GPU, no app build.
+// Phase-B grid transition layer (PRODUCTION DEFAULT, no flag): structural verification of the
+// single-presentation-lattice schedule (CLICKV2_420_FULLER_CORNER + PINCH071). Pure unit tests; no GPU, no app build.
 
 import Testing
 import Foundation
@@ -10,7 +10,7 @@ import CoreGraphics
 
 @Suite struct GridTransitionScheduleTests {
 
-    // V3.6 component areas (band/alloc-area fractions) — temporary spike reference set.
+    // Calibrated component areas (band/alloc-area fractions) — the production reference set.
     private func v36Components() -> [GridTransitionComponent] {
         func c(_ id: Int, _ area: Double, fd: Int) -> GridTransitionComponent {
             .init(id: id, keys: [RelativeSlotKey(dr: fd == 0 ? 0 : (id % 2 == 0 ? -fd : fd), dc: id)],

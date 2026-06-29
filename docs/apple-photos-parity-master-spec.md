@@ -52,32 +52,27 @@ Known reference files used repeatedly:
 
 ## Grid resize truth
 
-Apple Photos is the target, with one explicit product override: ProtonPhotos may use a responsive level policy
-instead of blindly copying Apple's largest-level column cap when that improves wide-display and future iOS/iPad
-behavior.
+Apple Photos is the target. The **accepted resize model is FIXED-COLUMNS-PER-LEVEL + WIDTH-FILL** (decided
+2026-06-28): each zoom level HOLDS a fixed column count (its density: 3/5/7/9/20/30); the square tile is sized to
+FILL the viewport width exactly, so a wider window / hidden sidebar makes the tiles physically LARGER (more
+pixels per photo) at the SAME column count. The column count changes ONLY on a zoom (level change), NEVER on a
+window resize or sidebar toggle.
 
-The grid resize model must never squeeze thumbnails:
-- A zoom level defines an Apple-like density/thumbnail scale policy, not arbitrary per-frame stretching.
-- Wider viewports may show more columns when the responsive policy says so.
-- Narrower viewports may show fewer columns when the responsive policy says so.
-- Sparse levels may cap columns or adapt columns, but they must not continuously breathe during resize.
-- Dense overview levels should prefer fixed slot size/adaptive columns unless a later Apple analysis proves a
-  better rule.
-- Thumbnails must not continuously rescale just because the window/sidebar width changes.
-- A window/sidebar edge clips or reveals available content.
-- A corner resize follows the same no-squeeze rule: available columns/rows adapt, or edge policy clips/reveals,
-  but thumbnails must not be distorted.
+The grid resize model must never squeeze or distort thumbnails:
+- A zoom level defines an Apple-like density / thumbnail-scale policy, not arbitrary per-frame stretching.
+- A window/sidebar width change SCALES the tile to fill the new width at the level's fixed column count — a smooth
+  uniform scale (Apple's "scale the surface like a photo"), not a column reflow and not a squeeze.
+- A vertical resize clips/reveals rows at a constant column count and constant tile size.
+- A corner resize composes the two: scale-to-fill horizontally, clip/reveal vertically; thumbnails are never
+  distorted.
+- The grid FILLS the width (no trailing gutter); slots stay square; media aspect-fits inside the square slot.
 
-Therefore:
-- `L0 = 3 columns everywhere` is not a universal requirement unless the responsive level policy explicitly caps it.
-- `L0 = Apple's largest-photo feel` is the product requirement.
-- On a narrow display L0 may visually look like about three columns.
-- On a wide or 8K display L0 may show more large thumbnails if that produces the better cross-screen product.
-- If a level caps columns, it still must not breathe/squeeze during live resize; use clipping/reveal, anchors,
-  margins, or discrete layout steps instead.
-
-Any previous fixed-column-per-level engine model is an implementation detail, not a product constraint. Any new
-responsive level policy must be explicit, platform-neutral, and test-covered.
+A **responsive level policy** (column caps / per-size-class scaling for very wide or future iOS/iPad displays)
+remains an **explicitly RESERVED future option** — see `GridSizePolicy` — but is **NOT the currently-adopted
+rule**. Today, on every desktop width, a level shows its fixed column count and scales the tile to fill. `L0 =
+Apple's largest-photo feel` is the product requirement; `L0 = 3 columns` holds at every desktop width today. Any
+future responsive policy must be explicit, platform-neutral, test-covered, and must still never breathe/squeeze
+during a live resize (use clip/reveal + discrete steps).
 
 ## Grid zoom truth
 
@@ -116,7 +111,7 @@ Apple Photos window resize behavior is the target.
 
 Required behavior:
 - Pure height resize clips/reveals vertically without reflow jitter.
-- Pure width resize adapts columns discretely while thumbnail size stays stable.
+- Pure width resize scales the tile to fill the new width at a constant column count (columns change only on zoom).
 - Corner resize follows Apple's observed behavior, not ProtonPhotos convenience behavior.
 - No black frames, empty holes, late jumps, or scroll snaps after resize.
 

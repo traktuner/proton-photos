@@ -32,13 +32,14 @@ enum MetalGridProductionAdapter {
         guard !items.isEmpty else { return [] }
         var markers: [TimelineDateMarker] = []
         var lastKey: DateComponents?
+        let formatter = makeFormatter(granularity: granularity, locale: locale)   // built ONCE, reused per boundary
         for (i, item) in items.enumerated() {
             let key = components(for: item.captureTime, granularity: granularity, calendar: calendar)
             if key != lastKey {
                 lastKey = key
                 markers.append(TimelineDateMarker(index: i,
                                                   date: item.captureTime,
-                                                  text: label(for: item.captureTime, granularity: granularity, locale: locale),
+                                                  text: formatter.string(from: item.captureTime),
                                                   granularity: granularity))
             }
         }
@@ -73,7 +74,9 @@ enum MetalGridProductionAdapter {
         }
     }
 
-    private static func label(for date: Date, granularity: TimelineDateMarker.Granularity, locale: Locale) -> String {
+    /// One configured formatter per (granularity, locale), built ONCE per `dateMarkers` call and reused for every
+    /// boundary — DateFormatter construction is expensive, so do not allocate one per marker.
+    private static func makeFormatter(granularity: TimelineDateMarker.Granularity, locale: Locale) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = locale
         switch granularity {
@@ -84,6 +87,6 @@ enum MetalGridProductionAdapter {
         case .year:
             formatter.setLocalizedDateFormatFromTemplate("yyyy")
         }
-        return formatter.string(from: date)
+        return formatter
     }
 }

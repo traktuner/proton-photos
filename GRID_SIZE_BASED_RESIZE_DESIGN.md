@@ -1,6 +1,17 @@
-# Grid Resize/Sidebar Redesign — Apple Parity (adaptive columns, width-FILLING square slots)
+# Grid Resize/Sidebar Redesign — SUPERSEDED (the accepted model is FIXED-COLUMNS + width-fill)
 
-> **2026-06-27 REVISION — WIDTH-FILLING (round + fill) supersedes "no breathing".**
+> **STATUS 2026-06-28: SUPERSEDED. The accepted model is FIXED-COLUMNS-PER-LEVEL + WIDTH-FILL.**
+> Each level HOLDS its `nominalColumns` (3,5,7,9,20,30); the square tile fills the viewport width
+> (`slotSide = (width − gap·(cols−1))/cols`). A window resize / sidebar toggle SCALES the tile and the column
+> count changes ONLY on a zoom — never on resize. This matches the shipping code
+> (`SquareTileGridEngine.resolvedForLevel` passes `fixedColumns: m.nominalColumns`) and the green
+> `GridSizeBasedResizeTests` (columns == nominal across widths). BOTH models described below are REJECTED: the
+> 2026-06-27 "adaptive round+fill / bounded breathing" revision (columns adapt to width) AND the original
+> "constant size + trailing reveal margin / does-not-fill-width" model. The resize PRESENTATION mechanism that
+> actually shipped is the CPU snapshot-scale presentation layer — see `RESIZE_PRESENTATION_LAYER_DESIGN.md` and
+> §10 of `docs/metalgrid-engine-contract.md`.
+
+> **[REJECTED REVISION — kept for history] 2026-06-27 REVISION — WIDTH-FILLING (round + fill) supersedes "no breathing".**
 > The new Apple reference (`apple resize and sidebar animations.mov` + the All-Photos screenshot) proves the
 > grid **always fills the available width — there is no trailing gutter**. The original "constant photo size +
 > leading-aligned + trailing reveal margin (< one pitch)" model is REJECTED: at the largest levels one pitch is
@@ -23,7 +34,7 @@
 > couplings; read §5/§6 for the still-valid couplings, but the "constant size / trailing margin" framing is
 > historical.
 
-**Status:** IMPLEMENTED on `apple-normal-focusrow-transition` (round+fill + perf-storm coalescing, 394 tests green). Original design notes below. The size-based kernel, shared fixed-side column rule, live transaction lock-step, and core regression tests are implemented on this branch. Remaining visual polish items from the design, especially edge-aware presentation alignment and calm column-step tuning, stay governed by this document. Validated against the source by a 6-agent dependency map + 3 adversarial critiques. Corrections from the critiques are folded in below.
+**Status:** SUPERSEDED (see the banner at the top). The adaptive round+fill kernel described in the 2026-06-27 revision was NOT the accepted outcome — the settled engine ships FIXED-COLUMNS (`SquareTileGridEngine.resolvedForLevel` passes `fixedColumns: m.nominalColumns`). The live-transaction lock-step and regression-test discipline below remain useful history; the column-model framing is historical.
 
 **Goal (user-confirmed, frame-by-frame from the Apple/Proton videos):** a photo's on-screen size is **constant during any live resize**. On *any* resize path — horizontal edge, vertical edge, **corner**, or sidebar toggle — photos keep their exact size; the window/sidebar **clips or reveals** content; the **column count** steps **discretely**. No tile breathing/rescaling. The grid is leading(left)-aligned; a trailing reveal margin (< one tile) carries the sub-column remainder. Pinch zoom is the only thing that changes photo size.
 

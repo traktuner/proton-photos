@@ -1,8 +1,16 @@
 # Resize/Sidebar — Apple-Parity Live Presentation Layer (MEASURED SPEC)
 
-**Status:** SPEC, awaiting approval. No implementation yet. Prereq `round+fill` (width-filling square slots) is
-on this branch and is the basis for the scale segments + the resting layout. The ineffective perf patch
-(suppress-flag + reentrancy-guard) is reverted (no dead code).
+**Status:** IMPLEMENTED. The live resize/sidebar presentation layer shipped on this branch
+(`MetalGridCoordinator.captureSnapshot` / `beginPresentationResize` / `drawPresentationResize` /
+`beginSidebarResize` + host `windowWillLiveResize` / `advanceSidebarResize` / `advanceResizeSettle`), guarded by
+`GridResizePresentationTests`. NOTE: it shipped as a per-tick CPU **snapshot-scale of resolved slot rects**, NOT
+the offscreen-MTLTexture canvas this spec's §4 proposed.
+
+> **RECONCILIATION (2026-06-28):** this spec was written assuming the adaptive round+fill column model. The
+> ACCEPTED model is **FIXED-COLUMNS + width-fill**: each level holds its columns and a resize SCALES the tile to
+> fill the width — there is NO column reflow and NO width-threshold column flip during a resize. The "uniform
+> surface scale about the stationary edge" mechanic below is still correct; ignore the "±1 detent at a width
+> threshold" / "round+fill defines the scale-segment boundaries" framing (§1, §2 step 2's H-threshold re-render).
 
 ## 0. Measurement basis
 
@@ -102,7 +110,8 @@ engine resolve, no content-size pass, no per-frame quad rebuild, no SwiftUI rela
 - **ALREADY REVERTED** (done, no dead code) — `suppressContentSizeCallback` (coordinator + host) and the
   `isProgrammaticResizeScroll` reentrancy guard + their perf-guard tests. They were the wrong fix (host-internal,
   imperceptible) and are fully superseded by this presentation layer.
-- **NOTHING ELSE** dirty remains. The dirty diff is now only round+fill + tests + this doc.
+- **NOTE (stale):** this line predated implementation — the presentation layer described here is now implemented
+  and committed, so "the dirty diff is only round+fill + tests + this doc" no longer holds.
 
 ## 6. Exact tests to add (with the implementation)
 

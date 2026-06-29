@@ -76,10 +76,10 @@ import CoreGraphics
         }
     }
 
-    // 5 — SIZE-BASED, WIDTH-FILLING contract: a level FILLS the width across widths (no trailing gutter); the
-    // column count adapts (more columns when wider) and the tile breathes only within a bounded band. The
-    // reference width reproduces the level's nominalColumns.
-    @Test func fillWidthAdaptiveColumnsGuard() {
+    // 5 — FIXED-COLUMNS, WIDTH-FILLING contract: a level FILLS the width across widths (no trailing gutter); the
+    // column count is CONSTANT (held at nominalColumns) and the tile SCALES with width (resize = scale, never
+    // reflow). The reference width reproduces the level's nominalColumns.
+    @Test func fillWidthFixedColumnsGuard() {
         let e = engine()
         for level in 0 ..< e.levelCount {
             let nominal = e.metrics(level: level).nominalColumns

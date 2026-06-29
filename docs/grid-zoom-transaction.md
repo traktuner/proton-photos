@@ -1,9 +1,9 @@
-# GridZoomTransaction — engine-owned live zoom (design, not yet implemented)
+# GridZoomTransaction — engine-owned live zoom
 
-Status: **DESIGN ONLY.** Production today is **detent-only** (Option A): the grid renders settled
-integer-level `GridFramePlan`s, and +/- / trackpad pinch perform discrete, **cursor-anchored** level changes
-(`MetalGridScrollHost.setLevel(_:anchorContentPoint:)` → `SquareTileGridEngine.cursorAnchoredScrollOffsetY`).
-This document defines the next step — smooth live pinch — so it is built correctly, not bolted on.
+Status: **IMPLEMENTED.** `GridZoomTransaction` is the engine-owned live-pinch / cursor-anchor transaction in
+production, and continuous live pinch is the production default (driven via `PinchLiveZoomDriver` /
+`GridTransitionController`; see `PHASE_B_GRID_EFFECTS_INTEGRATION.md`). The transaction model and the
+continuity / anchor rules this document specifies below remain the contract.
 
 ## Why a transaction (and not a per-frame plan)
 
