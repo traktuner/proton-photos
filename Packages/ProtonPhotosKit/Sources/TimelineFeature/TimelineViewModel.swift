@@ -94,6 +94,11 @@ public final class TimelineViewModel {
     @ObservationIgnored private var visibleContentCacheKey: VisibleContentCacheKey?
     @ObservationIgnored private var visibleContentCacheValue: TimelineVisibleContent?
 
+    /// Per-route loaded sections, so REVISITING a filter/album shows its content INSTANTLY (no loading screen)
+    /// while a fresh fetch refreshes behind. Session-scoped; the background refetch on every visit self-heals
+    /// staleness, so no explicit invalidation is needed. (`.all` has its own on-disk cache via the repository.)
+    @ObservationIgnored private var filterCache: [PhotoFilter: [TimelineSection]] = [:]
+
     func visibleContent(searchText: String, favoriteUIDs: Set<PhotoUID>, includeMonthMarkers: Bool) -> TimelineVisibleContent {
         let context = TimelineSearchContext(activeFilter: filter, favoriteUIDs: favoriteUIDs)
         let key = VisibleContentCacheKey(
@@ -169,18 +174,36 @@ public final class TimelineViewModel {
     /// Loads a tag/album/trash filter, showing the `.loading` animation while it fetches (so a route switch never
     /// flashes a black/stale grid). A newer switch mid-flight wins (the `filter == f` guards).
     private func loadFiltered(_ f: PhotoFilter) async {
-        state = .loading
+        // Instant revisit: if this route was loaded earlier this session, show it IMMEDIATELY (no spinner) and
+        // refresh behind. Only the very first visit shows the loading animation.
+        if let cached = filterCache[f] {
+            let items = cached.flatMap(\.items)
+            allItems = items
+            state = items.isEmpty ? .empty : .loaded(cached)
+        } else {
+            state = .loading
+        }
         do {
             let sections = try await (library?.timeline(filter: f) ?? [])
             guard filter == f else { return }
+            filterCache[f] = sections
             let items = sections.flatMap(\.items)
-            allItems = items
-            state = items.isEmpty ? .empty : .loaded(sections)
-            await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
+            // Only swap the grid if the content actually changed — otherwise keep the instant view (and the
+            // user's scroll position) untouched.
+            if items != allItems {
+                allItems = items
+                state = items.isEmpty ? .empty : .loaded(sections)
+                await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
+            } else if case .loaded = state {
+                // identical to what we already showed from cache — nothing to do
+            } else {
+                state = items.isEmpty ? .empty : .loaded(sections)   // first load, content equals stale allItems
+            }
         } catch is CancellationError {
         } catch {
             guard filter == f else { return }
-            state = .failed(error.localizedDescription)
+            // Keep the cached view on a refresh error; surface failure only if we have nothing to show.
+            if case .loaded = state {} else { state = .failed(error.localizedDescription) }
         }
     }
 
@@ -213,6 +236,7 @@ public final class TimelineViewModel {
             for i in sections.indices { sections[i].items.removeAll { uids.contains($0.uid) } }
             sections.removeAll { $0.items.isEmpty }
             state = sections.isEmpty ? .empty : .loaded(sections)
+            if filter != .all { filterCache[filter] = sections }   // keep the route's instant-revisit cache consistent
         }
     }
 
@@ -221,7 +245,13 @@ public final class TimelineViewModel {
 
         // Instant: show the last-known timeline from disk so there's no "Building your library…"
         // spinner on relaunch. The fresh enumeration below then refreshes it in the background.
-        if let cached = await repository.cachedTimeline(), !cached.isEmpty {
+        let cached = await repository.cachedTimeline()
+        // A sidebar switch may have landed WHILE we were fetching. If the active filter is no longer `.all`,
+        // BAIL — never clobber the newly-selected route's content with the whole library. This is the
+        // "I clicked RAW right after launch but stayed in All Photos" bug: the slow `.all` load used to win.
+        // Every `await` below re-checks this so the views stay married to the sidebar selection.
+        guard filter == .all else { return }
+        if let cached, !cached.isEmpty {
             let deduped = Self.deduplicatedSections(cached)
             allItems = deduped.flatMap(\.items)
             state = .loaded(deduped)
@@ -232,6 +262,7 @@ public final class TimelineViewModel {
 
         do {
             let sections = Self.deduplicatedSections(try await repository.loadTimeline())
+            guard filter == .all else { return }   // route switched mid-fetch — keep the new route, not All Photos
             let fresh = sections.flatMap(\.items)
             // Only swap the grid if the library actually changed — otherwise keep the cached view
             // (and the user's scroll position) untouched.
@@ -243,6 +274,7 @@ public final class TimelineViewModel {
         } catch is CancellationError {
             // ignore
         } catch {
+            guard filter == .all else { return }
             // Keep showing the cached timeline on a refresh error; surface failure only if we have
             // nothing to show.
             if case .loaded = state {} else { state = .failed(error.localizedDescription) }
@@ -252,11 +284,21 @@ public final class TimelineViewModel {
     private func refreshCurrent(uploadedUID: PhotoUID?) async -> TimelineRefreshResult {
         let start = ContinuousClock.now
         let before = allItems.count
+        let f = filter   // the route this refresh is for
         do {
             let sections = Self.deduplicatedSections(try await freshSectionsForCurrentFilter())
+            guard filter == f else {   // a sidebar switch landed mid-refresh — don't clobber the new route
+                return TimelineRefreshResult(
+                    uploadedUID: uploadedUID, foundItem: nil,
+                    timelineCountBefore: before, timelineCountAfter: allItems.count,
+                    filterDescription: Self.describe(f), elapsedMs: elapsedMilliseconds(since: start),
+                    errorMessage: "superseded by route switch"
+                )
+            }
             let items = sections.flatMap(\.items)
             allItems = items
             state = items.isEmpty ? .empty : .loaded(sections)
+            if f != .all { filterCache[f] = sections }   // refresh the route's instant-revisit cache
             await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
             let foundItem = uploadedUID.flatMap { uid in items.first { $0.uid == uid } }
             return TimelineRefreshResult(

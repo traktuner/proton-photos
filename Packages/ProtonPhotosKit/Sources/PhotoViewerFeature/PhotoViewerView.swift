@@ -247,7 +247,7 @@ public struct PhotoViewerView: View {
                                   onPinchDismissBegan: onPinchDismissBegan,
                                   onPinchDismissChanged: onPinchDismissChanged,
                                   onPinchDismissEnded: onPinchDismissEnded,
-                                  onForceClick: { model.playMotion() })
+                                  onForceClick: { model.playMotion(audible: true) })
                 if model.current.isLivePhoto, let motion = model.motionPlayer {
                     MotionPlayerLayerView(player: motion)
                         .opacity(model.isMotionPlaying ? 1 : 0)

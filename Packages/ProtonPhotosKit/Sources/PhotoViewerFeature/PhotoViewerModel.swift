@@ -176,7 +176,10 @@ public final class PhotoViewerModel {
                 .appendingPathComponent("proton-motion-\(motionUID.nodeID).mov")
             guard (try? data.write(to: url, options: .atomic)) != nil, !Task.isCancelled, self.current == item else { return }
             let player = AVPlayer(url: url)
-            player.isMuted = true                                   // silent ghost preview (matches Apple's hover)
+            // Muting is driven PER-PLAY in `playMotion(audible:)` (hover = silent ghost, force-click = audible),
+            // not pinned here: `isMuted` persists on the AVPlayer, so a prior audible play must not leak into a
+            // later silent hover. The player is created paused and emits no audio until `play()`, so leaving the
+            // default (unmuted) here is safe — preroll only fills the pipeline, it never advances the clock.
             player.actionAtItemEnd = .pause
             player.automaticallyWaitsToMinimizeStalling = false
             self.motionLocalFileURL = url
@@ -192,10 +195,22 @@ public final class PhotoViewerModel {
         }
     }
 
-    /// Plays the motion clip ONCE from the start (hover the LIVE badge or force-click). Idempotent while playing.
-    public func playMotion() {
+    /// Plays the motion clip ONCE from the start. Idempotent while playing.
+    ///
+    /// `audible` matches Apple Photos on macOS: a casual HOVER of the LIVE badge plays a SILENT ghost preview
+    /// (`audible: false`), while a deliberate FORCE-CLICK brings the clip alive WITH its sound (`audible: true`).
+    /// The mute is set here every call (not once at preroll) because `isMuted`/`volume` persist on the AVPlayer
+    /// instance, so the audible/silent state must never bleed between successive plays.
+    ///
+    /// Non-interruption guarantee: macOS has NO `AVAudioSession`, so a plain `AVPlayer` mixes with all other
+    /// system audio by default and NEVER ducks, pauses, or takes exclusive control. Unmuting therefore cannot
+    /// interrupt anything else playing on the Mac — DO NOT add any session / `audiovisualBackgroundPlaybackPolicy`
+    /// / audio-category configuration here; that is iOS-think and is the one thing that WOULD cause ducking.
+    public func playMotion(audible: Bool = false) {
         guard let player = motionPlayer, !isMotionPlaying else { return }
         isMotionPlaying = true
+        player.isMuted = !audible
+        player.volume = 1                                           // restore after any fade-out in `stopMotion()`
         player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         player.play()
         let ref = WeakViewerRef(self)
