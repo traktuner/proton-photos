@@ -34,9 +34,6 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // quads — it never invents layout, never computes edge-fill, never scales a second surface. THE
     // canonical production path: input → engine → GridFramePlan → renderer draws exactly that plan.
     private(set) var engine = SquareTileGridEngine(sectionCounts: [])
-    /// When true, render the SYNTHETIC square grid: one colored square per visible slot, straight from
-    /// `GridSlot.viewportRect`, no textures/aspect. Lets the geometry be validated without thumbnails.
-    var debugSyntheticGrid = MetalGridDebugGridFlag.isEnabled
 
     // MARK: - Live zoom transaction (engine-owned; focus-row stable)
     //
@@ -566,9 +563,15 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     var leadingObstructionInset: CGFloat { effectiveLeadingInset(forLevel: level) }
     /// The full on-screen viewport WIDTH (render space) — the MTKView's actual width (no inset removed).
     private var fullViewportWidth: CGFloat { metalView?.bounds.width ?? clipView?.bounds.width ?? 0 }
-    /// The width the ENGINE lays out in: full render width minus the effective leading inset. Every engine /
-    /// anchor / phase / column calculation uses THIS — never the full width.
-    var layoutWidth: CGFloat { max(1, fullViewportWidth - leadingObstructionInset - gridHorizontalMargin(forLevel: level)) }
+    /// The width the ENGINE lays out a GIVEN level in: full render width minus that level's leading inset + outer
+    /// margin. Per-level because the overview levels are edge-to-edge (no margin/gap) while the normal levels carry
+    /// the gutter — so a transition that crosses that boundary (L3↔L4) must lay each level out at its OWN width.
+    func layoutWidth(forLevel lvl: Int) -> CGFloat {
+        max(1, fullViewportWidth - effectiveLeadingInset(forLevel: lvl) - gridHorizontalMargin(forLevel: lvl))
+    }
+    /// The width the ENGINE lays out the CURRENT level in. Every engine / anchor / phase / column calculation uses
+    /// THIS — never the full width.
+    var layoutWidth: CGFloat { layoutWidth(forLevel: level) }
     /// The viewport the engine lays out in: `layoutWidth` × full height.
     var layoutViewportSize: CGSize { CGSize(width: layoutWidth, height: viewportSize.height) }
 
@@ -625,21 +628,6 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return CGSize(width: fullViewportWidth, height: height)
     }
 
-    /// Debug hit test: a viewport point → the photo UID under it (or nil for a gap).
-    func hitTest(viewportPoint: CGPoint) -> PhotoUID? {
-        guard let clip = clipView else { return nil }
-        let content = MetalGridGeometry.contentPoint(viewportPoint: viewportPoint, visibleOrigin: clip.bounds.origin)
-        return hitTest(contentPoint: content)
-    }
-
-    /// Debug hit test from a CONTENT-space point (e.g. a mouse location in the document spacer).
-    func hitTest(contentPoint: CGPoint) -> PhotoUID? {
-        let width = layoutWidth
-        guard width > 1, let slot = engine.hitTest(contentPoint: contentPoint, level: level, width: width, columnPhase: currentPhase()),
-              slot.index < dataSource.flatUIDs.count else { return nil }
-        return dataSource.flatUIDs[slot.index]
-    }
-
     // MARK: - Live resize / sidebar presentation
     //
     // During a live WINDOW resize the grid must behave like a STABLE rendered surface, not a per-frame
@@ -682,7 +670,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     /// True only when the presentation can run (no zoom / transition / dissolve / commit / sidebar-anim in flight).
     var canPresentResize: Bool {
-        zoomTransaction == nil && !gridTransition.isActive && overviewDissolve == nil && !isCommitBridging && !debugSyntheticGrid && !presentationSidebarActive
+        zoomTransaction == nil && !gridTransition.isActive && overviewDissolve == nil && !isCommitBridging && !presentationSidebarActive
     }
 
     /// Snapshot the settled render slots ONCE (generous overscan so a scale-down reveals real older rows) plus the
@@ -1287,8 +1275,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let srcScrollY = clipView?.bounds.origin.y ?? 0
         let overscan = budget.overscanFraction * viewportSize.height
         let cursorContent = CGPoint(x: tx.anchorViewportPoint.x, y: tx.anchorViewportPoint.y + srcScrollY)
+        let targetViewportSize = CGSize(width: layoutWidth(forLevel: t), height: layoutViewportSize.height)
         guard let plan = engine.overviewLayerDissolvePlan(
-            from: s, to: t, viewportSize: layoutViewportSize, sourceScrollY: srcScrollY, sourceColumnPhase: currentPhase(),
+            from: s, to: t, viewportSize: layoutViewportSize, targetViewportSize: targetViewportSize,
+            sourceScrollY: srcScrollY, sourceColumnPhase: currentPhase(),
             preferredNormalMode: preferredNormalLevelContentMode,
             anchorContentPoint: cursorContent, anchorViewportPoint: tx.anchorViewportPoint, overscan: overscan)
         else { return false }
@@ -1415,15 +1405,6 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                                viewportSize: layoutViewportSize, scrollY: bridgeScrollY,
                                                overscan: overscan, progress: commitBridgeProgress, columnPhase: currentPhase()))
         let settledContentSize = engine.contentSize(level: bridgeLevel, width: layoutWidth, columnPhase: currentPhase())
-
-        if debugSyntheticGrid {
-            renderSyntheticSlots(in: view, slots: slots, viewportSize: viewportSize)
-            hasPendingVisibleThumbnails = false
-            publishLightDiagnostics(visibleCount: slots.count, realCount: slots.count, cellCount: slots.count,
-                                    visibleRect: CGRect(origin: scrollOffset, size: viewportSize),
-                                    contentSize: settledContentSize, now: now)
-            return
-        }
         let pureViewport = CGRect(origin: .zero, size: viewportSize)
         let flatUIDs = dataSource.flatUIDs
         var visibleUIDs: [PhotoUID] = []
@@ -1487,15 +1468,6 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                         scrollOffset: CGPoint(x: rawOrigin.x, y: renderY), overscan: overscan, columnPhase: phase)
             slots = renderTranslate(plan.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) })
             contentSizeForDiag = plan.contentSize
-        }
-
-        if debugSyntheticGrid {
-            renderSyntheticSlots(in: view, slots: slots, viewportSize: viewportSize)
-            hasPendingVisibleThumbnails = false
-            publishLightDiagnostics(visibleCount: slots.count, realCount: slots.count, cellCount: slots.count,
-                                    visibleRect: CGRect(origin: clip.bounds.origin, size: viewportSize),
-                                    contentSize: contentSizeForDiag, now: now)
-            return
         }
 
         let pureViewport = CGRect(origin: .zero, size: viewportSize)
@@ -1576,21 +1548,6 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         if !checkEmptyQuads.isEmpty, let t = cache.glyphTexture(symbol: "circle", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkEmptyQuads)) }
         if !checkFilledQuads.isEmpty, let t = cache.glyphTexture(symbol: "checkmark.circle.fill", color: .controlAccentColor) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkFilledQuads)) }
         return (groups, realCount)
-    }
-
-    /// Synthetic debug grid: one solid colored square per visible slot (geometry only — no textures, no
-    /// media aspect). Proves the grid (square slots, consistent gaps, both edges filled) without thumbnails.
-    private func renderSyntheticSlots(in view: MTKView, slots: [GridRenderSlot], viewportSize: CGSize) {
-        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
-        var quads: [MetalGridQuad] = []
-        quads.reserveCapacity(slots.count)
-        for cmd in SquareGridDebugMode.commands(forSlots: slots) {
-            let r = cellRadius(cardRadius, cell: cmd.rect)
-            quads.append(MetalGridQuad(rect: cmd.rect, radius: r, color: cmd.color, mode: .solid))
-        }
-        cache.evictToBudget()
-        renderer.render(in: view, viewportSize: viewportSize,
-                        groups: [MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: quads)])
     }
 
     // MARK: - Decorations (selection outline + badges, production only)

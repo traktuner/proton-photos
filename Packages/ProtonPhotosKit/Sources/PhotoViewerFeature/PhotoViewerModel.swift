@@ -50,13 +50,22 @@ public final class PhotoViewerModel {
     private let streamer: VideoStreamProvider?
     private let metadataProvider: PhotoMetadataProvider?
     private let previewCache: ThumbnailCache?
+    /// Encrypted disk cache for full-resolution ORIGINALS (offline library). Read before any download so a cached
+    /// original is shown instantly even after relaunch; written after a successful load when `cacheOriginals` is
+    /// on, then trimmed to `originalsCapBytes` (LRU). `nil` disables it entirely.
+    private let originalsCache: ThumbnailCache?
+    /// Whether to PERSIST newly-downloaded originals (the Offline Photo Library master switch). Reads always try
+    /// the disk cache regardless — purging on disable is what removes them.
+    private let cacheOriginals: Bool
+    private let originalsCapBytes: Int64?
     private var loadTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
     private var placeTask: Task<Void, Never>?
 
     public init(items: [PhotoItem], index: Int, feed: ThumbnailFeed, media: FullMediaProvider,
                 streamer: VideoStreamProvider? = nil, metadataProvider: PhotoMetadataProvider? = nil,
-                previewCache: ThumbnailCache? = nil) {
+                previewCache: ThumbnailCache? = nil, originalsCache: ThumbnailCache? = nil,
+                cacheOriginals: Bool = false, originalsCapBytes: Int64? = nil) {
         self.items = items
         self.index = index
         self.feed = feed
@@ -64,6 +73,9 @@ public final class PhotoViewerModel {
         self.streamer = streamer
         self.metadataProvider = metadataProvider
         self.previewCache = previewCache
+        self.originalsCache = originalsCache
+        self.cacheOriginals = cacheOriginals
+        self.originalsCapBytes = originalsCapBytes
     }
 
     public func toggleInfo() {
@@ -167,6 +179,22 @@ public final class PhotoViewerModel {
             try? await Task.sleep(for: .milliseconds(160))   // debounce: skip work for photos flicked past
             guard !Task.isCancelled, self.current == item else { return }
 
+            // Cached full original on disk (offline library) → show the SHARP image instantly and skip the
+            // preview + download entirely. The disk read + AES-GCM decrypt + decode run OFF the main actor (the
+            // blob can be tens of MB); only the assignment hops back. Instant even after relaunch / offline.
+            if let oc = self.originalsCache {
+                let uid = item.uid
+                let cached = await Task.detached { oc.diskData(for: uid).flatMap { NSImage(data: $0) } }.value
+                if let full = cached {
+                    guard !Task.isCancelled, self.current == item else { return }
+                    self.image = full
+                    self.isSharp = true
+                    oc.touch(uid)   // mark recently-used so the LRU cap keeps it
+                    Self.fullImageCache.setObject(full, forKey: Self.cacheKey(uid))
+                    return
+                }
+            }
+
             if self.image == nil, let thumb = await self.feed.image(for: item.uid), self.current == item {
                 self.image = thumb
             }
@@ -251,6 +279,13 @@ public final class PhotoViewerModel {
                 isSharp = true
                 video.reset()
                 Self.fullImageCache.setObject(full, forKey: Self.cacheKey(item.uid))
+                // Persist the original to the encrypted offline cache (off the main actor), then trim to the LRU
+                // budget. Gated on the Offline Photo Library switch; the read path above always tries the cache.
+                if cacheOriginals, let oc = originalsCache {
+                    let uid = item.uid
+                    let cap = originalsCapBytes
+                    Task.detached { oc.storeToDisk(data, for: uid); if let cap { oc.enforceByteCap(cap) } }
+                }
             } else {
                 video.fail(.streamURLUnavailable, uid: item.uid)
                 logViewer(item, strategy: "streamRequired", kind: .video)

@@ -116,6 +116,7 @@ final class AppModel {
         // Erase the account's encrypted thumbnail/preview blobs + any legacy cache keys and streamed video
         // blocks before dropping the session, so nothing decryptable is left for the signed-out account.
         OfflineLibraryManager.shared.purgeOnSignOut()
+        if case .signedIn(let session) = auth { AccountDataCache.clear(uid: session.uid) }
         store.clear()
         auth = .signedOut(error: nil)
     }

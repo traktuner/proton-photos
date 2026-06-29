@@ -11,7 +11,7 @@ struct SettingsView: View {
             LibrarySettingsTab()
                 .tabItem { Label("settings.library_tab", systemImage: "photo.on.rectangle.angled") }
             CacheStatusTab()
-                .tabItem { Label("settings.developer_tab", systemImage: "ladybug") }
+                .tabItem { Label("settings.developer_tab", systemImage: "internaldrive") }
         }
         .frame(width: 520, height: 460)
     }
@@ -21,16 +21,20 @@ struct SettingsView: View {
 
 private struct LibrarySettingsTab: View {
     @State private var offline = OfflineLibraryManager.shared
-    @AppStorage(AppSettingsKey.offlineOriginalsEnabled) private var keepOriginals = AppSettingsDefault.offlineOriginalsEnabled
+    @AppStorage(AppSettingsKey.offlineOriginalsCapUnlimited) private var capUnlimited = AppSettingsDefault.offlineOriginalsCapUnlimited
+    @AppStorage(AppSettingsKey.offlineOriginalsCapGB) private var capGB = AppSettingsDefault.offlineOriginalsCapGB
     @State private var confirmDelete = false
+    @State private var confirmDisableOffline = false
     @State private var deleting = false
     @State private var cacheSize: Int64 = 0
+    @State private var originalsSize: Int64 = 0
 
     var body: some View {
         Form {
+            // 1) Offline master switch. E2EE is ALWAYS on (not a toggle); this only decides whether full
+            //    originals are KEPT locally for instant/offline reopening.
             Section {
-                Toggle(isOn: Binding(get: { offline.offlineEnabled },
-                                     set: { offline.setOfflineEnabled($0) })) {
+                Toggle(isOn: Binding(get: { offline.offlineEnabled }, set: { setOffline($0) })) {
                     Text("settings.offline_library_toggle")
                 }
                 Text("settings.offline_library_help")
@@ -41,17 +45,36 @@ private struct LibrarySettingsTab: View {
                 Text("settings.library_offline_section")
             }
 
+            // 2) Originals cache budget — Unbounded or a slider-set cap (LRU purge of the oldest). Only meaningful
+            //    while the offline library is on, so the whole section greys out otherwise.
             Section {
-                Toggle(isOn: $keepOriginals) { Text("settings.keep_originals_toggle") }
-                    .disabled(true)
-                Text("settings.originals_offline_help")
+                Picker("settings.cache_limit_section", selection: $capUnlimited) {
+                    Text("settings.cache_limit_bounded").tag(false)
+                    Text("settings.cache_limit_unlimited").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: capUnlimited) { _, _ in applyCap() }
+
+                if !capUnlimited {
+                    HStack {
+                        Slider(value: $capGB, in: 1...50, step: 1) { editing in if !editing { applyCap() } }
+                        Text("\(Int(capGB)) GB")
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 52, alignment: .trailing)
+                    }
+                }
+                Text("settings.cache_limit_help")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } header: {
-                Text("settings.future_section")
+                Text("settings.cache_limit_section")
             }
+            .disabled(!offline.offlineEnabled)
 
+            // 3) Master reset: wipes EVERYTHING on disk (incl. thumbnails) for the current account.
             Section {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -80,11 +103,39 @@ private struct LibrarySettingsTab: View {
         } message: {
             Text("alert.delete_offline_cache_message \(byteString(cacheSize))")
         }
+        .confirmationDialog("settings.disable_offline_title", isPresented: $confirmDisableOffline) {
+            Button("action.cancel", role: .cancel) {}
+            Button("settings.disable_offline_confirm", role: .destructive) {
+                offline.setOfflineEnabled(false)
+                Task { await offline.purgeOriginalsCache(); await refreshSize() }
+            }
+        } message: {
+            Text("settings.disable_offline_message \(byteString(originalsSize))")
+        }
+    }
+
+    /// Turning ON is immediate. Turning OFF must ALWAYS purge the originals (the OFF contract is "nothing kept");
+    /// the `originalsSize` snapshot can lag (another window, or status not yet refreshed), so it only gates whether
+    /// to confirm first — never whether to purge.
+    private func setOffline(_ on: Bool) {
+        if on { offline.setOfflineEnabled(true); return }
+        if originalsSize > 0 {
+            confirmDisableOffline = true   // the confirm action disables + purges
+        } else {
+            offline.setOfflineEnabled(false)
+            Task { await offline.purgeOriginalsCache(); await refreshSize() }   // idempotent on empty
+        }
+    }
+
+    private func applyCap() {
+        offline.setOriginalsCap(unlimited: capUnlimited, gigabytes: capGB)
+        Task { await refreshSize() }
     }
 
     private func refreshSize() async {
         let status = await OfflineLibraryManager.shared.refreshStatus()
         cacheSize = status.totalCacheSizeBytes
+        originalsSize = status.originalsCacheSizeBytes
     }
 
     private func delete() async {
@@ -123,6 +174,7 @@ private struct CacheStatusTab: View {
             Section {
                 row(String(localized: "settings.dev_cache_size_disk"), byteString(status.cacheSizeBytes))
                 row(String(localized: "settings.dev_preview_cache_disk"), byteString(status.previewCacheSizeBytes))
+                row(String(localized: "settings.dev_originals_cache_disk"), byteString(status.originalsCacheSizeBytes))
                 row(String(localized: "settings.dev_last_error"), status.lastError ?? "—")
             } header: { Text("settings.storage_section") }
 

@@ -182,7 +182,7 @@ The production grid is **one uniform Apple-like dark-gray surface** (`MetalGridP
 used for the renderer clear colour, the host layer, and the inter-cell gaps. There are **no per-cell card
 backgrounds** for resident images (a placeholder card is drawn only while an image is genuinely missing), **no
 grid lines**, and **no debug tile colours** in production. `aspectFit` letterbox bands reveal the same surface.
-The synthetic/debug path (`renderSyntheticSlots`) may use colours; production (`renderRealSlots`) must not.
+Production (`renderRealSlots`) must not use debug/tile colours. (The former synthetic/debug render path was removed.)
 
 ---
 

@@ -6,7 +6,6 @@ import TimelineFeature
 @main
 struct ProtonPhotosApp: App {
     @State private var model = AppModel()
-    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         WindowGroup {
@@ -55,11 +54,6 @@ struct ProtonPhotosApp: App {
                 }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
             }
-            // Debug ▸ open the Metal Grid Lab (Metal-backed grid prototype — real library when available).
-            CommandMenu("Debug") {
-                Button("Metal Grid Lab…") { openWindow(id: MetalGridLabWindowID) }
-                    .keyboardShortcut("m", modifiers: [.command, .option, .shift])
-            }
         }
 
         // Native macOS Settings window → "ProtonPhotos ▸ Einstellungen…" (⌘,).
@@ -67,16 +61,8 @@ struct ProtonPhotosApp: App {
             SettingsView()
         }
 
-        // Dev: Metal Grid Lab (Debug ▸ Metal Grid Lab… / ⌥⇧⌘M). Renders the real library when
-        // the main UI has published it, else synthetic streaming tiles.
-        Window("Metal Grid Lab", id: MetalGridLabWindowID) {
-            MetalGridLab()
-        }
-        .defaultSize(width: 1180, height: 820)
     }
 }
-
-let MetalGridLabWindowID = "metal-grid-lab"
 
 /// Makes the window title bar transparent + full-size, so content (the photo grid) extends up under
 /// the translucent Liquid-Glass toolbar — you see photos scroll through behind it, like Apple Photos.

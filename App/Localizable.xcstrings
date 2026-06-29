@@ -1155,13 +1155,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Developer"
+            "value": "Library Info"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Entwickler"
+            "value": "Library-Infos"
           }
         }
       }
@@ -1191,13 +1191,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Preview thumbnails are always loaded locally encrypted so the grid works. This switch is reserved for larger offline derivatives in the future."
+            "value": "Opened photos are stored locally (encrypted) and stay available offline. Offline you only get thumbnails and photos you already opened — no videos."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Vorschaubilder werden immer lokal verschlüsselt geladen, damit das Raster funktioniert. Dieser Schalter ist für zukünftige größere Offline-Derivate reserviert."
+            "value": "Geöffnete Fotos bleiben lokal (verschlüsselt) gespeichert und sind auch offline verfügbar. Offline gibt es nur Thumbnails und bereits geöffnete Fotos – keine Videos."
           }
         }
       }
@@ -1216,60 +1216,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mediathek / Offline"
-          }
-        }
-      }
-    },
-    "settings.keep_originals_toggle": {
-      "extractionState": "manual",
-      "comment": "Toggle label (currently disabled).",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keep originals & videos offline"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Originale & Videos offline behalten"
-          }
-        }
-      }
-    },
-    "settings.originals_offline_help": {
-      "extractionState": "manual",
-      "comment": "Help text under the keep-originals toggle.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Coming soon. For now, originals and videos are streamed or downloaded on demand and not stored permanently."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Demnächst. Aktuell werden Originale und Videos bei Bedarf gestreamt bzw. geladen und nicht dauerhaft gespeichert."
-          }
-        }
-      }
-    },
-    "settings.future_section": {
-      "extractionState": "manual",
-      "comment": "Section header for future features.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Coming Soon"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Zukünftig"
           }
         }
       }
@@ -1317,13 +1263,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The encrypted thumbnail/preview cache is kept when the offline library is turned off and is only removed with this button."
+            "value": "Deletes everything cached on disk — thumbnails, previews, and originals — for the current account, as if you just signed in. Thumbnails re-crawl automatically."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Der verschlüsselte Thumbnail-/Vorschau-Cache bleibt beim Deaktivieren der Offline-Mediathek erhalten und wird nur über diese Schaltfläche gelöscht."
+            "value": "Löscht alles lokal Gecachte — Thumbnails, Vorschauen und Originale — für den aktuellen Account, wie frisch eingeloggt. Thumbnails werden automatisch neu geladen."
           }
         }
       }
@@ -1353,13 +1299,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Thumbnails and previews (%@) will be removed. Metadata and originals are not affected; thumbnails are reloaded as needed."
+            "value": "Everything cached on disk (%@) — thumbnails, previews, and originals — will be removed for this account. Thumbnails re-crawl automatically."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Vorschaubilder und Vorschauen (%@) werden entfernt. Metadaten und Originale sind nicht betroffen; Thumbnails werden bei Bedarf neu geladen."
+            "value": "Alles lokal Gecachte (%@) — Thumbnails, Vorschauen und Originale — wird für diesen Account entfernt. Thumbnails werden automatisch neu geladen."
           }
         }
       }
@@ -1648,6 +1594,168 @@
           "stringUnit": {
             "state": "translated",
             "value": "Letzter Fehler"
+          }
+        }
+      }
+    },
+    "settings.cache_limit_section": {
+      "extractionState": "manual",
+      "comment": "Header for the originals cache-size limit control.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache limit"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache-Limit"
+          }
+        }
+      }
+    },
+    "settings.cache_limit_bounded": {
+      "extractionState": "manual",
+      "comment": "Segmented option: bounded originals cache.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Limited"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Begrenzt"
+          }
+        }
+      }
+    },
+    "settings.cache_limit_unlimited": {
+      "extractionState": "manual",
+      "comment": "Segmented option: unbounded originals cache.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unlimited"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unbegrenzt"
+          }
+        }
+      }
+    },
+    "settings.cache_limit_help": {
+      "extractionState": "manual",
+      "comment": "Explains the originals cache limit + LRU eviction.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Full-resolution originals you open are kept locally. When limited, the least-recently-opened are removed once the cap is reached."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Geöffnete Originale in voller Auflösung werden lokal behalten. Bei „Begrenzt“ werden die am längsten nicht geöffneten entfernt, sobald das Limit erreicht ist."
+          }
+        }
+      }
+    },
+    "settings.disable_offline_title": {
+      "extractionState": "manual",
+      "comment": "Confirm dialog title for turning off the offline library.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn off Offline Library?"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline-Mediathek ausschalten?"
+          }
+        }
+      }
+    },
+    "settings.disable_offline_message %@": {
+      "extractionState": "manual",
+      "comment": "Confirm message. %@ is the size of cached originals to be deleted.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This removes %@ of cached full-resolution originals. Thumbnails and previews are kept."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dadurch werden %@ gecachte Originale in voller Auflösung entfernt. Thumbnails und Vorschauen bleiben erhalten."
+          }
+        }
+      }
+    },
+    "settings.disable_offline_confirm": {
+      "extractionState": "manual",
+      "comment": "Destructive confirm button: turn off offline + purge originals.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn Off & Delete"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ausschalten & löschen"
+          }
+        }
+      }
+    },
+    "settings.dev_originals_cache_disk": {
+      "extractionState": "manual",
+      "comment": "Library-info metric label.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Originals cache (disk)"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Originale-Cache (Disk)"
+          }
+        }
+      }
+    },
+    "status.offline": {
+      "extractionState": "manual",
+      "comment": "Offline indicator pill shown when the device has no network.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
           }
         }
       }

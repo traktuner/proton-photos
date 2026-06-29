@@ -4,11 +4,15 @@ import Foundation
 /// Centralised here (in the SDK-agnostic core) so the App glue and the test target share one
 /// source of truth — UserDefaults key strings drift silently otherwise.
 public enum AppSettingsKey {
-    /// Offline Photo Library master switch for future larger derivatives/originals. Grid thumbnails are
-    /// mandatory infrastructure and crawl independently of this toggle.
+    /// Offline Photo Library master switch. When ON, full-resolution originals viewed in the photo viewer are
+    /// persisted to the encrypted on-disk `originals` cache so reopening them (even after relaunch / offline) is
+    /// instant. Grid thumbnails are mandatory infrastructure and crawl independently of this toggle.
     public static let offlineLibraryEnabled = "ProtonPhotos.offlineLibraryEnabled"
-    /// Future tier (off by default): keep full-resolution originals/videos locally.
-    public static let offlineOriginalsEnabled = "ProtonPhotos.offlineOriginalsEnabled"
+    /// Whether the offline ORIGINALS disk cache is unbounded (no size cap). When false, `offlineOriginalsCapGB`
+    /// bounds it and the least-recently-used originals are purged once the cap is exceeded.
+    public static let offlineOriginalsCapUnlimited = "ProtonPhotos.offlineOriginalsCapUnlimited"
+    /// Size cap (in GIGABYTES) for the offline ORIGINALS disk cache when bounded.
+    public static let offlineOriginalsCapGB = "ProtonPhotos.offlineOriginalsCapGB"
     /// User-resizable left sidebar width (points).
     public static let sidebarWidth = "ProtonPhotos.sidebarWidth"
     /// Whether the left sidebar is visible.
@@ -18,10 +22,13 @@ public enum AppSettingsKey {
 }
 
 public enum AppSettingsDefault {
-    /// Offline Photo Library is **ON by default** for the future larger-derivative tier. Thumbnails are
-    /// always crawled while signed in, regardless of this value.
+    /// Offline Photo Library is **ON by default**: viewed originals are kept locally (encrypted) up to the cap.
+    /// Thumbnails are always crawled while signed in, regardless of this value.
     public static let offlineLibraryEnabled = true
-    public static let offlineOriginalsEnabled = false
+    /// Bounded by default (no surprise unbounded disk growth).
+    public static let offlineOriginalsCapUnlimited = false
+    /// Default originals-cache cap: 5 GB (~1000–1500 originals). Respects "no bloat" while keeping recents instant.
+    public static let offlineOriginalsCapGB = 5.0
 }
 
 /// Optional backend capability: report how many photo rows the local metadata store (the SQLite
@@ -46,6 +53,8 @@ public struct OfflineCacheStatus: Sendable, Equatable {
     public var failedThumbnailCount: Int
     public var cacheSizeBytes: Int64
     public var previewCacheSizeBytes: Int64
+    /// On-disk size of the encrypted full-resolution ORIGINALS cache (0 when the offline library is off / empty).
+    public var originalsCacheSizeBytes: Int64
     public var lastError: String?
 
     public init(
@@ -61,6 +70,7 @@ public struct OfflineCacheStatus: Sendable, Equatable {
         failedThumbnailCount: Int = 0,
         cacheSizeBytes: Int64 = 0,
         previewCacheSizeBytes: Int64 = 0,
+        originalsCacheSizeBytes: Int64 = 0,
         lastError: String? = nil
     ) {
         self.offlineEnabled = offlineEnabled
@@ -75,6 +85,7 @@ public struct OfflineCacheStatus: Sendable, Equatable {
         self.failedThumbnailCount = failedThumbnailCount
         self.cacheSizeBytes = cacheSizeBytes
         self.previewCacheSizeBytes = previewCacheSizeBytes
+        self.originalsCacheSizeBytes = originalsCacheSizeBytes
         self.lastError = lastError
     }
 
@@ -84,5 +95,5 @@ public struct OfflineCacheStatus: Sendable, Equatable {
         return min(1, Double(thumbnailsOnDisk) / Double(totalAssets))
     }
 
-    public var totalCacheSizeBytes: Int64 { cacheSizeBytes + previewCacheSizeBytes }
+    public var totalCacheSizeBytes: Int64 { cacheSizeBytes + previewCacheSizeBytes + originalsCacheSizeBytes }
 }

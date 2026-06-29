@@ -41,20 +41,11 @@ Driven by 6 read-only auditors (2 hot-path, architecture, dead-code, comments/te
 
 ## 3. Suspected / real-but-NOT-fixed (documented, deferred to honor "no behavior change / no regression")
 
-- **`TimelineView.body` full-library derivation on every body eval** (`filteredSections` + `flatMap(\.items)` +
-  markers, recomputed on a level/favorite/selection change — *per-interaction*, NOT per resize frame; the design
-  doc's "per geometry frame" framing was inaccurate). The cheap part (markers) is now gated (#2 above); the residual
-  `flatMap` allocation per interaction remains. **Recommended:** memoize a `(visibleSections, visibleItems, monthMarkers)`
-  triple in `TimelineViewModel` keyed on `(structureToken, committedSearchText, filter, favoriteUIDs)` — mirroring the
-  existing `sectionAspects`/`structureToken` memo. Deferred: it must produce byte-identical output; a memoization-key
-  miss is a correctness risk not worth taking in a no-behavior-change pass.
 - **`streamingTick` CADisplayLink never paused at idle** (`MetalGridScrollHost`): `step()` fires at refresh rate
   whenever the grid is on screen, even fully idle. **Recommended:** pause when no animation/streaming flag is set and
   resume at the `needsDisplay` sites. Deferred: async thumbnail arrival currently relies on the always-on tick noticing
   `hasPendingVisibleThumbnails`; pausing risks a "thumbnail doesn't appear until next interaction" regression unless
   every arrival path is taught to resume the tick — higher risk than the idle-power win justifies here.
-- **Missing executable guard** `timelineBodyDoesNotRecomputeLibraryPerGeometry` (referenced by the design doc, never
-  written). Best added together with the memoization above.
 
 ## 4. Dead-code / redundancy — result: the codebase is unusually clean
 
@@ -62,17 +53,21 @@ Driven by 6 read-only auditors (2 hot-path, architecture, dead-code, comments/te
   `singleLattice` symbols and the `MetalGrid.focusRowTransition` / `MetalGrid.singleLatticeTransition` flags exist
   ONLY as forbidden-token assertions in `ProductionRouteGuardTests` (guarding against re-introduction). `focusRowRelayout`
   is a LIVE transition-kind classification, not a leftover.
-- **`MetalGridLab` / `MetalGridLabBridge`** — NOT orphaned; wired into a real App Debug menu (`ProtonPhotosApp.swift`)
-  and fed by `MainView`. KEEP. (Optional, owner's call: gate behind `#if DEBUG` so it does not ship in release.)
-- **`SquareGridDebugMode` + `MetalGrid.debugGrid`** — live diagnostic (default OFF), the only synthetic-grid
-  validation path. KEEP.
+- **`MetalGridLab` / `MetalGridLabBridge`** — DELETED 2026-06-29 (debug-tooling cleanup): the Debug-menu grid
+  prototype + its App wiring + the orphaned `SyntheticMetalGridDataSource` are gone.
+- **`SquareGridDebugMode` + `MetalGrid.debugGrid`** — DELETED 2026-06-29: the synthetic colored-square render mode,
+  its `debugSyntheticGrid` flag, `renderSyntheticSlots`, and the draw-path gates were removed.
 - **`columnsForFixedSide` round branch** — reachable only from the live pinch over-zoom (`GridZoomTransaction`), NOT
   dead. KEEP (comment corrected to say so).
-- **Minor redundancy (NOT merged):** `MetalGridProductionAdapter.dataToken` vs `TimelineViewModel.structureToken` are
-  near-identical structural fingerprints. Low value, cross-domain; left independent (merging risks coupling two
-  invalidation policies). Flagged only.
+- **`TimelineViewModel.sectionAspects` / `structureToken`** — DELETED 2026-06-29: leftover from the older
+  aspect/justified-layout path. `AspectRegistry` itself remains live in `ThumbnailFeed`; production layout does not
+  consume media aspect.
+- **`TimelineView.body` visible-content derivation** — now memoized in `TimelineViewModel.visibleContent(...)`, keyed
+  on visible-content generation, committed search text, active filter/favorites context, and whether overview month
+  markers are requested. This keeps filtering / `flatMap(\.items)` / marker derivation out of unrelated body
+  reevaluations.
 
-**Code deleted: none. Code merged: none. Code extracted: none.** (See §5.)
+**Code deleted:** Metal Grid Lab, synthetic debug grid, stale aspect-layout memo. **Code extracted:** none. (See §5.)
 
 ## 5. Code NOT extracted (architecture) — deferred with rationale
 
@@ -88,7 +83,7 @@ should be left alone.
 
 ## 6. Residual risks
 
-- The two deferred perf items (§3) and the deferred extraction (§5) are genuine but intentionally not taken under the
+- The deferred idle-tick perf item (§3) and the deferred extraction (§5) are genuine but intentionally not taken under the
   no-regression mandate.
 - The presentation layer's behavioral contract remains source-string-guarded (brittle to a rename, blind to a
   substring-preserving regression).
@@ -96,9 +91,11 @@ should be left alone.
 
 ## 7. Tests run
 
-- `swift test --filter TimelineFeatureTests`: **414 tests / 51 suites — PASS** (baseline, after docs/comments, after perf).
-- `swift test` (full package): **416 tests / 52 suites — PASS**.
-- `swift build -c release`: **Build complete** (only pre-existing `CLGeocoder` deprecation warnings in
-  `PlaceNameResolver.swift`, untouched).
+- `swift test --filter SecureThumbnailCacheTests`: **14 tests / 1 suite — PASS**.
+- `swift test --filter ProductionRouteGuardTests`: **6 tests / 1 suite — PASS**.
+- `swift test` (full package): **422 tests / 53 suites — PASS** (plus the XCTest localization skips expected in plain SwiftPM).
+- `xcodebuild -project ProtonPhotos.xcodeproj -scheme ProtonPhotos -configuration Debug -destination 'platform=macOS'
+  CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation -skipMacroValidation build`: **BUILD SUCCEEDED**
+  (plain `xcodebuild` is blocked by ProtonCore SwiftLint package-plugin validation on this machine).
 - `git diff --check`: clean.
 - Manual visual QA: **NOT performed** (see the session summary's QA checklist — requires running the app).

@@ -49,6 +49,53 @@ struct ProductionRouteGuardTests {
         #expect(!text.contains("ThumbnailFeed(cache: ThumbnailCache()"))
     }
 
+    @Test func appAccountDataCacheIsEncryptedAndCleared() throws {
+        let accountCache = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/AccountDataCache.swift"), encoding: .utf8)
+        #expect(accountCache.contains("AES.GCM.seal"), "account cache must seal raw account JSON before writing")
+        #expect(accountCache.contains("AES.GCM.open"), "account cache must authenticate/decrypt before use")
+        #expect(accountCache.contains("HKDF<SHA256>.deriveKey"), "account cache key must be derived, not raw-used")
+        #expect(accountCache.contains("keyPassword"), "account cache must be bound to the unlocked Proton secret")
+        #expect(accountCache.contains("uid"), "account cache must be account-scoped")
+
+        let driveSession = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSession.swift"), encoding: .utf8)
+        #expect(driveSession.contains("AccountDataCache.save(users: uData, addresses: aData, uid: current.uid, keyPassword: current.keyPassword)"))
+        #expect(driveSession.contains("AccountDataCache.load(uid: current.uid, keyPassword: current.keyPassword)"))
+
+        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSDKBridge.swift"), encoding: .utf8)
+        #expect(bridge.contains("driveSession.cachedAccountData()"),
+                "offline cold start must use only the encrypted account cache fallback")
+
+        let appModel = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/AppModel.swift"), encoding: .utf8)
+        #expect(appModel.contains("AccountDataCache.clear(uid: session.uid)"),
+                "sign-out must clear encrypted account cache blobs")
+    }
+
+    @Test func viewerOriginalsCacheIsReadBeforeNetworkAndPurgedBySettings() throws {
+        let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
+        #expect(mainView.contains("originalsCache: offline.originalsCache"))
+        #expect(mainView.contains("cacheOriginals: offline.offlineEnabled"))
+        #expect(mainView.contains("originalsCapBytes: offline.originalsCapBytes"))
+
+        let viewer = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoViewerFeature/PhotoViewerModel.swift"), encoding: .utf8)
+        #expect(viewer.contains("oc.diskData(for: uid)"), "viewer must check encrypted originals cache before download")
+        #expect(viewer.contains("oc.storeToDisk(data, for: uid)"), "viewer must persist downloaded originals when enabled")
+        #expect(viewer.contains("oc.enforceByteCap(cap)"), "viewer must enforce the originals LRU budget after writes")
+        let originalsRead = viewer.range(of: "if let oc = self.originalsCache")
+        let thumbnailFallback = viewer.range(of: "if self.image == nil, let thumb = await self.feed.image")
+        #expect(originalsRead != nil, "viewer must have an originals-cache read block")
+        #expect(thumbnailFallback != nil, "viewer must still have the thumbnail fallback")
+        if let o = originalsRead, let t = thumbnailFallback {
+            #expect(o.upperBound <= t.lowerBound, "originals cache must be consulted before preview/thumbnail/network work")
+        }
+        let originalsReadBody = try Self.body(of: viewer, from: "if let oc = self.originalsCache", to: "if self.image == nil, let thumb = await self.feed.image")
+        #expect(originalsReadBody.contains("return"), "originals cache hit must skip the network path")
+
+        let offline = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Offline/OfflineLibraryManager.swift"), encoding: .utf8)
+        #expect(offline.contains("originalsCache.clearAndForgetKey()"), "sign-out purge must include originals")
+        #expect(offline.contains("func purgeOriginalsCache() async"), "turning offline off must have an originals-only purge")
+        #expect(offline.contains("await originalsCache.clear()"))
+    }
+
     @Test func mainViewUsesNativeSplitViewChrome() throws {
         let mainView = Self.repoRoot.appendingPathComponent("App/Views/MainView.swift")
         let text = try String(contentsOf: mainView, encoding: .utf8)
@@ -115,10 +162,14 @@ struct ProductionRouteGuardTests {
         #expect(timelineText.contains("routeScrollGeneration: Int = 0"))
         #expect(timelineText.contains("routeScrollGeneration: routeScrollGeneration"))
         #expect(timelineText.contains("routeInitialScrollAnchor: routeInitialScrollAnchor"))   // memory threaded through
-        #expect(timelineText.contains("MetalGridProductionAdapter.dateMarkers(sections: visibleSections, granularity: .month)"))
-        #expect(timelineText.contains("if level >= 4, monthMarkers.count > 1"))
-        #expect(timelineText.contains("TimelineDateScrubber(markers: monthMarkers)"))
+        #expect(timelineText.contains("includeMonthMarkers: level >= 4"))
+        #expect(timelineText.contains("if level >= 4, visibleContent.monthMarkers.count > 1"))
+        #expect(timelineText.contains("TimelineDateScrubber(markers: visibleContent.monthMarkers)"))
         #expect(timelineText.contains("proxy?.scrollToFlatIndex?(marker.index)"))
+
+        let timelineViewModel = Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/TimelineViewModel.swift")
+        let timelineViewModelText = try String(contentsOf: timelineViewModel, encoding: .utf8)
+        #expect(timelineViewModelText.contains("MetalGridProductionAdapter.dateMarkers(sections: visibleSections, granularity: .month)"))
 
         let productionView = Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/MetalProductionGridView.swift")
         let productionText = try String(contentsOf: productionView, encoding: .utf8)

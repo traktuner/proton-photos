@@ -14,7 +14,7 @@ import CoreGraphics
 
     private func plan(_ s: Int, _ t: Int, mode: TileContentDisplayMode = .aspectFitInsideSquare,
                       _ e: SquareTileGridEngine) -> OverviewLayerDissolvePlan? {
-        e.overviewLayerDissolvePlan(from: s, to: t, viewportSize: viewport, sourceScrollY: 4000, sourceColumnPhase: nil,
+        e.overviewLayerDissolvePlan(from: s, to: t, viewportSize: viewport, targetViewportSize: viewport, sourceScrollY: 4000, sourceColumnPhase: nil,
                                     preferredNormalMode: mode, anchorContentPoint: CGPoint(x: 500, y: 4380),
                                     anchorViewportPoint: CGPoint(x: 500, y: 380), overscan: 300)
     }
@@ -156,7 +156,7 @@ import CoreGraphics
 
     private func dissolveAtBottom(_ s: Int, _ t: Int, _ e: SquareTileGridEngine) -> OverviewLayerDissolvePlan? {
         let sourceMaxY = max(0, e.contentSize(level: s, width: viewport.width).height - viewport.height)
-        return e.overviewLayerDissolvePlan(from: s, to: t, viewportSize: viewport,
+        return e.overviewLayerDissolvePlan(from: s, to: t, viewportSize: viewport, targetViewportSize: viewport,
             sourceScrollY: sourceMaxY, sourceColumnPhase: nil, preferredNormalMode: .aspectFitInsideSquare,
             anchorContentPoint: CGPoint(x: viewport.width / 2, y: sourceMaxY + viewport.height / 2),
             anchorViewportPoint: CGPoint(x: viewport.width / 2, y: viewport.height / 2), overscan: 200)
@@ -187,7 +187,7 @@ import CoreGraphics
     @Test func rawTargetScrollIsClampedIntoBounds() {
         let e = engine(6000)
         // anchor + source near the TOP ⇒ raw anchored target scroll ≤ 0 ⇒ clamps to 0.
-        guard let top = e.overviewLayerDissolvePlan(from: 3, to: 4, viewportSize: viewport,
+        guard let top = e.overviewLayerDissolvePlan(from: 3, to: 4, viewportSize: viewport, targetViewportSize: viewport,
             sourceScrollY: 0, sourceColumnPhase: nil, preferredNormalMode: .aspectFitInsideSquare,
             anchorContentPoint: CGPoint(x: viewport.width / 2, y: 10),
             anchorViewportPoint: CGPoint(x: viewport.width / 2, y: 10), overscan: 200) else { Issue.record("nil"); return }
@@ -197,7 +197,7 @@ import CoreGraphics
         let sMax = max(0, e.contentSize(level: 3, width: viewport.width).height - viewport.height)
         for frac in [0.25, 0.5, 0.75] {
             let sY = sMax * CGFloat(frac)
-            guard let p = e.overviewLayerDissolvePlan(from: 3, to: 4, viewportSize: viewport,
+            guard let p = e.overviewLayerDissolvePlan(from: 3, to: 4, viewportSize: viewport, targetViewportSize: viewport,
                 sourceScrollY: sY, sourceColumnPhase: nil, preferredNormalMode: .aspectFitInsideSquare,
                 anchorContentPoint: CGPoint(x: viewport.width / 2, y: sY + viewport.height / 2),
                 anchorViewportPoint: CGPoint(x: viewport.width / 2, y: viewport.height / 2), overscan: 200) else { continue }
@@ -210,7 +210,7 @@ import CoreGraphics
         let e = engine(6000)
         let sMax = max(0, e.contentSize(level: 3, width: viewport.width).height - viewport.height)
         let sY = sMax * 0.5
-        guard let p = e.overviewLayerDissolvePlan(from: 3, to: 4, viewportSize: viewport,
+        guard let p = e.overviewLayerDissolvePlan(from: 3, to: 4, viewportSize: viewport, targetViewportSize: viewport,
             sourceScrollY: sY, sourceColumnPhase: nil, preferredNormalMode: .aspectFitInsideSquare,
             anchorContentPoint: CGPoint(x: viewport.width / 2, y: sY + viewport.height / 2),
             anchorViewportPoint: CGPoint(x: viewport.width / 2, y: viewport.height / 2), overscan: 200)
@@ -238,7 +238,7 @@ import CoreGraphics
         -> (plan: OverviewLayerDissolvePlan, rawClamped: CGFloat, tphase: Int?, tMax: CGFloat)? {
         let anchorVP = CGPoint(x: viewport.width / 2, y: anchorViewportY)
         let anchorContent = CGPoint(x: viewport.width / 2, y: sourceScrollY + anchorViewportY)
-        guard let plan = e.overviewLayerDissolvePlan(from: s, to: t, viewportSize: viewport, sourceScrollY: sourceScrollY,
+        guard let plan = e.overviewLayerDissolvePlan(from: s, to: t, viewportSize: viewport, targetViewportSize: viewport, sourceScrollY: sourceScrollY,
                   sourceColumnPhase: nil, preferredNormalMode: .aspectFitInsideSquare,
                   anchorContentPoint: anchorContent, anchorViewportPoint: anchorVP, overscan: 200),
               let a = e.anchorItem(nearContentPoint: anchorContent, level: s, width: viewport.width, columnPhase: nil)
@@ -293,7 +293,7 @@ import CoreGraphics
         // (b) anchor the LAST item with the cursor near the top ⇒ raw target scroll > targetMaxY ⇒ clamp (L5→L4).
         guard let lastRect = e.slotRect(flatIndex: 5999, level: 5, width: viewport.width) else { Issue.record("no rect"); return }
         let sMaxL5 = max(0, e.contentSize(level: 5, width: viewport.width).height - viewport.height)
-        guard let p = e.overviewLayerDissolvePlan(from: 5, to: 4, viewportSize: viewport, sourceScrollY: sMaxL5 * 0.5,
+        guard let p = e.overviewLayerDissolvePlan(from: 5, to: 4, viewportSize: viewport, targetViewportSize: viewport, sourceScrollY: sMaxL5 * 0.5,
                   sourceColumnPhase: nil, preferredNormalMode: .aspectFitInsideSquare,
                   anchorContentPoint: CGPoint(x: lastRect.midX, y: lastRect.midY),
                   anchorViewportPoint: CGPoint(x: lastRect.midX, y: 30), overscan: 200) else { Issue.record("nil last"); return }

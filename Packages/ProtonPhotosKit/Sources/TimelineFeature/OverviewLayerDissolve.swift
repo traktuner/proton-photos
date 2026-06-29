@@ -104,28 +104,33 @@ public extension SquareTileGridEngine {
     /// `targetMaxY` is 0 when the target content is shorter than the viewport, so a short target settles at 0
     /// (never stretched/faked). Direction is read from the levels (the ladder is monotonic in density, so
     /// `targetLevel > sourceLevel` ⟺ zooming out).
-    func overviewLayerDissolvePlan(from s: Int, to t: Int, viewportSize: CGSize,
+    func overviewLayerDissolvePlan(from s: Int, to t: Int, viewportSize: CGSize, targetViewportSize: CGSize,
                                    sourceScrollY: CGFloat, sourceColumnPhase: Int?,
                                    preferredNormalMode: TileContentDisplayMode,
                                    anchorContentPoint: CGPoint, anchorViewportPoint: CGPoint,
                                    overscan: CGFloat) -> OverviewLayerDissolvePlan? {
         guard isOverviewBoundary(s, t) else { return nil }
         let width = viewportSize.width
+        // The TARGET level lays out at its OWN width — the L3↔L4 boundary crosses the normal/overview gutter divide
+        // (a normal level has the outer margin; an overview is edge-to-edge), so source and target `layoutWidth`
+        // differ. Using the source width for the target mis-sized the target tiles and put the committed scroll at
+        // the wrong row ⇒ the photo under the cursor landed at the wrong grid position on release.
+        let targetWidth = targetViewportSize.width
         guard let a = anchorItem(nearContentPoint: anchorContentPoint, level: s, width: width,
                                  columnPhase: sourceColumnPhase) else { return nil }
         // Display modes: source keeps its own (square forced ONLY where the level is square-only); target square.
         let sourceMode = effectiveContentMode(preferred: preferredNormalMode, level: s)
         let targetMode = effectiveContentMode(preferred: preferredNormalMode, level: t)   // overview ⇒ squareFillCrop
         // Anchor the target so the cursor's item lands in the cursor's column (no horizontal fly on settle).
-        let desiredColumn = cursorColumn(viewportX: anchorViewportPoint.x, level: t, width: width)
-        let targetPhase = columnPhase(forItem: a.flatIndex, targetColumn: desiredColumn, level: t, width: width)
+        let desiredColumn = cursorColumn(viewportX: anchorViewportPoint.x, level: t, width: targetWidth)
+        let targetPhase = columnPhase(forItem: a.flatIndex, targetColumn: desiredColumn, level: t, width: targetWidth)
         let rawTargetScrollY = anchoredScrollOffset(flatIndex: a.flatIndex, localFraction: a.localFraction,
-                                                    viewportPoint: anchorViewportPoint, level: t, width: width,
+                                                    viewportPoint: anchorViewportPoint, level: t, width: targetWidth,
                                                     columnPhase: targetPhase).y
         // Final target scroll = what the settled grid will commit to (clamped; bottom-filled when at the bottom).
         let viewportH = viewportSize.height
         let sourceMaxY = max(0, contentSize(level: s, width: width, columnPhase: sourceColumnPhase).height - viewportH)
-        let targetMaxY = max(0, contentSize(level: t, width: width, columnPhase: targetPhase).height - viewportH)
+        let targetMaxY = max(0, contentSize(level: t, width: targetWidth, columnPhase: targetPhase).height - viewportH)
         let bottomPinEpsilon: CGFloat = 1.0   // ~the settled scroll-clamp tolerance; robust to sub-pixel rounding
         let sourceIsBottomPinned = abs(sourceScrollY - sourceMaxY) <= bottomPinEpsilon
         let isZoomingOut = t > s              // density ladder is monotonic ⇒ t > s ⟺ zooming out toward overview
@@ -135,7 +140,7 @@ public extension SquareTileGridEngine {
             : min(max(0, rawTargetScrollY), targetMaxY)
         let sourcePlan = framePlan(level: s, viewportSize: viewportSize, scrollOffset: CGPoint(x: 0, y: sourceScrollY),
                                    overscan: overscan, columnPhase: sourceColumnPhase)
-        let targetPlan = framePlan(level: t, viewportSize: viewportSize, scrollOffset: CGPoint(x: 0, y: targetScrollY),
+        let targetPlan = framePlan(level: t, viewportSize: targetViewportSize, scrollOffset: CGPoint(x: 0, y: targetScrollY),
                                    overscan: overscan, columnPhase: targetPhase)
         return OverviewLayerDissolvePlan(sourceLevel: s, targetLevel: t, source: sourcePlan, target: targetPlan,
                                          sourceDisplayMode: sourceMode, targetDisplayMode: targetMode,

@@ -20,10 +20,22 @@ final class OfflineLibraryManager {
     let cache = ThumbnailCache(namespace: "thumbnails", derivative: "thumbnail")
     /// Larger display-preview derivatives, persisted when the viewer fetches them. Also encrypted.
     let previewCache = ThumbnailCache(namespace: "previews", derivative: "preview")
+    /// Full-resolution ORIGINALS viewed in the photo viewer, persisted (encrypted) when the offline library is
+    /// ON, bounded by an LRU size cap (see `originalsCapBytes`). Makes reopening a photo instant even after a
+    /// relaunch / while offline — the bug this fixes was that originals lived only in a per-process RAM cache.
+    let originalsCache = ThumbnailCache(namespace: "originals", derivative: "original")
 
-    /// Master switch, persisted. It is reserved for future larger-derivative/original offline caching;
-    /// thumbnails always crawl while signed in.
+    /// Offline Photo Library master switch, persisted. ON ⇒ viewed originals are kept locally (encrypted) up to
+    /// the cap; thumbnails always crawl regardless of this toggle.
     private(set) var offlineEnabled: Bool
+
+    /// Current originals-cache byte budget, or `nil` when the user chose "unbounded".
+    var originalsCapBytes: Int64? {
+        let d = UserDefaults.standard
+        if d.bool(forKey: AppSettingsKey.offlineOriginalsCapUnlimited) { return nil }
+        let gb = d.object(forKey: AppSettingsKey.offlineOriginalsCapGB) as? Double ?? AppSettingsDefault.offlineOriginalsCapGB
+        return Int64(max(0, gb) * 1_073_741_824)   // GiB → bytes
+    }
 
     /// Latest computed status for the Developer/Cache surface (refreshed on demand).
     private(set) var status = OfflineCacheStatus()
@@ -35,7 +47,11 @@ final class OfflineLibraryManager {
 
     private init() {
         let defaults = UserDefaults.standard
-        defaults.register(defaults: [AppSettingsKey.offlineLibraryEnabled: AppSettingsDefault.offlineLibraryEnabled])
+        defaults.register(defaults: [
+            AppSettingsKey.offlineLibraryEnabled: AppSettingsDefault.offlineLibraryEnabled,
+            AppSettingsKey.offlineOriginalsCapUnlimited: AppSettingsDefault.offlineOriginalsCapUnlimited,
+            AppSettingsKey.offlineOriginalsCapGB: AppSettingsDefault.offlineOriginalsCapGB,
+        ])
         offlineEnabled = defaults.bool(forKey: AppSettingsKey.offlineLibraryEnabled)
     }
 
@@ -55,6 +71,8 @@ final class OfflineLibraryManager {
         let key = Self.cacheKey(for: session)
         cache.configure(accountUID: session.uid, key: key)
         previewCache.configure(accountUID: session.uid, key: key)
+        originalsCache.configure(accountUID: session.uid, key: key)
+        if let cap = originalsCapBytes { let oc = originalsCache; Task.detached { oc.enforceByteCap(cap) } }
     }
 
     /// Sign-out purge: erase encrypted thumbnail/preview blobs + their account Keychain keys, and the
@@ -62,16 +80,38 @@ final class OfflineLibraryManager {
     func purgeOnSignOut() {
         cache.clearAndForgetKey()
         previewCache.clearAndForgetKey()
+        originalsCache.clearAndForgetKey()
         VideoByteRangeCache.shared.clearAll()
     }
 
-    /// Flips the Offline Photo Library switch. Persists it ONLY — it deliberately does NOT start/stop the
-    /// thumbnail crawl (thumbnails are decoupled from this toggle per `OfflineLibraryPolicy`). The toggle is
-    /// reserved for future preview/original offline caching.
+    /// Flips the Offline Photo Library switch and persists it. ON ⇒ the viewer persists full originals to the
+    /// encrypted `originals` cache; OFF ⇒ it stops (and the Settings UI calls `purgeOriginalsCache()` to drop the
+    /// ones already kept). The thumbnail crawl is decoupled and always runs (per `OfflineLibraryPolicy`).
     func setOfflineEnabled(_ enabled: Bool) {
         guard enabled != offlineEnabled else { return }
         offlineEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: AppSettingsKey.offlineLibraryEnabled)
+    }
+
+    /// Persists the originals-cache cap and enforces it immediately — lowering it (or switching from unbounded to
+    /// bounded) purges the least-recently-used originals down to the new budget right away.
+    func setOriginalsCap(unlimited: Bool, gigabytes: Double) {
+        let d = UserDefaults.standard
+        d.set(unlimited, forKey: AppSettingsKey.offlineOriginalsCapUnlimited)
+        d.set(gigabytes, forKey: AppSettingsKey.offlineOriginalsCapGB)
+        guard let cap = originalsCapBytes else { return }   // unbounded → nothing to enforce
+        let oc = originalsCache
+        Task {
+            await Task.detached { oc.enforceByteCap(cap) }.value   // file I/O off the main actor
+            await refreshStatus()
+        }
+    }
+
+    /// Clears ONLY the full-resolution originals cache — used when the user turns the Offline Photo Library OFF.
+    /// Thumbnails + previews (mandatory grid + browsing infrastructure) and the account key are kept.
+    func purgeOriginalsCache() async {
+        await originalsCache.clear()
+        await refreshStatus()
     }
 
     private static func cacheKey(for session: ProtonSession) -> SymmetricKey {
@@ -81,11 +121,13 @@ final class OfflineLibraryManager {
         return HKDF<SHA256>.deriveKey(inputKeyMaterial: input, salt: salt, info: info, outputByteCount: 32)
     }
 
-    /// Erases the offline cache on disk (thumbnails + previews). Never called implicitly — only from
-    /// the explicit "Delete Offline Cache…" button.
+    /// MASTER RESET: erases EVERYTHING on disk for the current account — thumbnails, previews, full originals, and
+    /// streamed video blocks — leaving the state as if freshly signed in (the account key is kept, so the grid
+    /// simply re-crawls). Never called implicitly — only from the explicit "Delete Offline Cache…" button.
     func deleteOfflineCache() async {
         await cache.clear()
         await previewCache.clear()
+        await originalsCache.clear()
         VideoByteRangeCache.shared.clearAll()   // also drop streamed video blocks
         await refreshStatus()
     }
@@ -114,6 +156,7 @@ final class OfflineLibraryManager {
         s.failedThumbnailCount = prefetch?.failed ?? 0
         s.cacheSizeBytes = cache.diskSizeBytes()
         s.previewCacheSizeBytes = previewCache.diskSizeBytes()
+        s.originalsCacheSizeBytes = originalsCache.diskSizeBytes()
         s.lastError = prefetch?.lastErrors.last
         status = s
         return s

@@ -248,27 +248,6 @@ import CoreGraphics
         #expect(!plan.visibleHeaders.isEmpty)   // section headers are owned + queryable
     }
 
-    // 13. Synthetic debug mode: exactly one command per visible slot, rects == the slots' viewport rects.
-    @Test func debugModeEmitsOneCommandPerVisibleSlot() {
-        let plan = settledPlan(level: 2, scrollY: 2000)
-        let cmds = SquareGridDebugMode.commands(for: plan)
-        #expect(cmds.count == plan.visibleSlots.count)
-        for (cmd, slot) in zip(cmds, plan.visibleSlots) {
-            #expect(cmd.rect == slot.viewportRect)
-            #expect(cmd.index == slot.index)
-            #expect(abs(cmd.rect.width - cmd.rect.height) < eps)   // square
-        }
-    }
-
-    // 19. The synthetic debug grid covers the left and right viewport edges when slots exist.
-    @Test func debugGridCoversViewportEdges() {
-        let plan = settledPlan(level: 3, scrollY: 3000)
-        let cmds = SquareGridDebugMode.commands(for: plan)
-        let cols = plan.columns
-        #expect(cmds.contains { $0.column == 0 })          // left edge
-        #expect(cmds.contains { $0.column == cols - 1 })   // right edge
-    }
-
     // A wide-video-shaped item occupies the SAME square slot as any other — the engine has no media-type
     // input, so the slot size is identical regardless of payload.
     @Test func videoUsesSameSquareSlot() {

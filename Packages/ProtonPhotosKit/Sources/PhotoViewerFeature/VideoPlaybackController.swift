@@ -82,6 +82,13 @@ public final class VideoPlaybackController {
         didReachPlaying = false
         let player = AVPlayer(playerItem: item)
         player.automaticallyWaitsToMinimizeStalling = true
+        if isStreaming {
+            // Buffer well AHEAD of playback. Each ~4 MB block is a network fetch + decrypt round-trip through the
+            // custom range loader; the default automatic buffer stayed too shallow for higher-bitrate video and
+            // micro-stalled (~2 spinners/sec). A generous forward buffer lets the loader's read-ahead get in front
+            // and stay there. (0 = automatic; we set an explicit window.)
+            item.preferredForwardBufferDuration = 30
+        }
         self.player = player
         transition(initial)
         logPlayer(item: item, player: player)

@@ -49,9 +49,7 @@ final class MetalGridScrollHost: NSView {
     var onHUD: ((MetalGridHUD) -> Void)? {
         didSet { coordinator.onHUD = onHUD }
     }
-    /// Reports the UID (or nil) under the pointer + the content point — for the debug crosshair/log.
-    var onHitTest: ((PhotoUID?, CGPoint) -> Void)?
-    /// Production click routing (content point, click count, modifiers). Lab leaves it nil.
+    /// Production click routing (content point, click count, modifiers).
     var onCellClick: ((CGPoint, Int, GridClickModifiers) -> Void)?
     /// Fired on any viewport change (scroll / resize / level) so overlays (month labels, a11y) reposition.
     var onViewportChanged: (() -> Void)?
@@ -229,12 +227,6 @@ final class MetalGridScrollHost: NSView {
             self.applyContentSize(size)
         }
 
-        spacer.onMouseMoved = { [weak self] point in
-            guard let self else { return }
-            let p = CGPoint(x: point.x - self.coordinator.leadingObstructionInset, y: point.y)   // render → layout space (X)
-            self.onHitTest?(self.coordinator.hitTest(contentPoint: p), p)
-        }
-        spacer.onMouseExited = { [weak self] in self?.onHitTest?(nil, .zero) }
         spacer.onClick = { [weak self] point, clickCount, modifiers in
             guard let self else { return }
             self.onCellClick?(CGPoint(x: point.x - self.coordinator.leadingObstructionInset, y: point.y), clickCount, modifiers)   // render → layout
@@ -761,14 +753,6 @@ final class MetalGridScrollHost: NSView {
             streamingTick?.invalidate()
             streamingTick = nil
         }
-    }
-
-    /// Force ONE on-demand repaint — used when the grid is revealed after a full-screen overlay (the photo viewer)
-    /// that fully covered it closes. The CAMetalLayer surface was purged by the window server under occlusion and
-    /// nothing else sets `needsDisplay` (every visible tile is still GPU-resident, so the streaming tick is idle), so
-    /// without this the revealed grid shows its empty clear surface until a stray relayout redraws it.
-    func requestRevealRedraw() {
-        metalView.needsDisplay = true
     }
 
     @objc private func step() {

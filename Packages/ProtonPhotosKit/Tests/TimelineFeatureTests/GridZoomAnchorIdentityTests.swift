@@ -311,7 +311,7 @@ import CoreGraphics
         // Source guards: the host converts render→layout once; the coordinator's layout width removes the inset.
         #expect(hostSource().contains("CGPoint(x: raw.x - inset, y: raw.y)"),
                 "cursor x must be converted render→layout by subtracting the inset exactly once")
-        #expect(coordinatorSource().contains("fullViewportWidth - leadingObstructionInset"),
+        #expect(coordinatorSource().contains("fullViewportWidth - effectiveLeadingInset(forLevel: lvl)"),
                 "the engine layout width must remove the leading inset")
     }
 

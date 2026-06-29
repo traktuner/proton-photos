@@ -44,6 +44,7 @@ struct MainView: View {
     // Real height of the native window toolbar (its top safe-area inset). The viewer lays its media out
     // below this, so the open/close zoom must fly the photo into the SAME region to avoid a shrink/jump.
     @State private var topBarInset: CGFloat = 0
+    @State private var networkMonitor = NetworkMonitor.shared
     // The grid's leading obstruction inset == the floating sidebar's overlap when it's open, else 0. Derived from
     // the KNOWN sidebar column width — SwiftUI coordinate spaces and preferences do NOT bridge across
     // NavigationSplitView's AppKit-hosted sidebar column, so the detail can't measure the overlap (its leading
@@ -104,7 +105,7 @@ struct MainView: View {
                     // user-resizable — an AppKit quirk we accept; min==ideal==max did not change it.)
                     .navigationSplitViewColumnWidth(sidebarWidth)
             } detail: {
-                TimelineView(model: timelineModel, aspects: aspects, level: $level, proxy: gridProxy,
+                TimelineView(model: timelineModel, level: $level, proxy: gridProxy,
                              routeScrollGeneration: routeScrollGeneration,
                              routeInitialScrollAnchor: routeInitialScrollAnchor,
                              searchText: committedSearchText,
@@ -121,7 +122,9 @@ struct MainView: View {
                 .navigationTitle(viewerModel == nil ? title : "")
                 .searchable(text: $searchText, placement: .toolbar, prompt: Text("search.prompt \(title)"))
                 .toolbar { toolbarContent }
-                .modifier(WindowToolbarChrome(isViewer: viewerModel != nil))
+                // Native Liquid Glass everywhere: no `.toolbarBackground` style is registered, so both the grid
+                // and the viewer use the system glass bar (registering any style here would replace the adaptive
+                // glass with a flat fill AND box the sidebar titlebar — see git history / the removed WindowToolbarChrome).
                 // Always the real inset — do NOT flip to 0 when the viewer opens: the grid is covered by the
                 // viewer anyway, and a flip would arm a spurious full-width sidebar scale that plays when you
                 // close the viewer (and would move the cell the zoom transition flies from).
@@ -131,7 +134,6 @@ struct MainView: View {
             .task { await loadAlbums() }
             .onAppear {
                 attachOfflineManager()
-                publishMetalGridLabData()
                 if librarySettled { model.markLibraryReady() }
             }
             .onChange(of: librarySettled) { _, settled in
@@ -154,7 +156,6 @@ struct MainView: View {
             }
             .onChange(of: timelineModel.allItems.count) { _, count in
                 OfflineLibraryManager.shared.liveAssetCount = count
-                publishMetalGridLabData()
             }
             .onDisappear {
                 searchDebounceTask?.cancel()
@@ -226,7 +227,15 @@ struct MainView: View {
 
             uploadRefreshBanner
 
+            if !networkMonitor.isOnline {
+                offlineIndicator
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .allowsHitTesting(false)
+            }
         }
+        .animation(.easeInOut(duration: 0.25), value: networkMonitor.isOnline)
         .background(
             // Reads the real top safe-area inset (= native toolbar height) so the zoom transition and the
             // viewer agree on exactly where the media sits below the opaque top bar.
@@ -262,6 +271,21 @@ struct MainView: View {
         } message: {
             Text(trashConfirmationMessage)
         }
+    }
+
+    /// Subtle bottom pill shown only while the device has no network — so cached browsing reads as a deliberate
+    /// offline state, and a failed upload/favorite/video has an obvious reason.
+    private var offlineIndicator: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "wifi.slash")
+            Text("status.offline")
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(.white.opacity(0.08)))
     }
 
     @ViewBuilder private var uploadRefreshBanner: some View {
@@ -375,8 +399,6 @@ struct MainView: View {
             } completion: {
                 if shouldClose { viewerModel = nil }
                 zoom = nil
-                // Only a real close reveals the grid (a snap-back keeps the viewer) — repaint it then.
-                if shouldClose { DispatchQueue.main.async { gridProxy.redrawOnReveal?() } }
             }
         }
     }
@@ -389,7 +411,6 @@ struct MainView: View {
         logViewerToolbar(mode: "grid")
         guard let img = vm.image, let cell = gridProxy.windowFrameForItem?(item) else {
             viewerModel = nil
-            DispatchQueue.main.async { gridProxy.redrawOnReveal?() }
             return
         }
         zoom = ZoomTransition(item: item, image: img, cellFrame: cell, progress: 1, interactive: false)
@@ -399,19 +420,19 @@ struct MainView: View {
             } completion: {
                 viewerModel = nil
                 zoom = nil
-                // The overlay is gone and the grid is uncovered — force one repaint (next runloop, after SwiftUI
-                // removes the overlay) so it paints from its resident textures instead of showing the purged clear
-                // surface until a stray relayout streams the tiles back top-to-bottom.
-                DispatchQueue.main.async { gridProxy.redrawOnReveal?() }
             }
         }
     }
 
     private func makeViewer(_ item: PhotoItem, _ items: [PhotoItem]) -> PhotoViewerModel {
         let index = items.firstIndex(of: item) ?? 0
+        let offline = OfflineLibraryManager.shared
         return PhotoViewerModel(items: items, index: index, feed: feed, media: backend,
                                 streamer: backend, metadataProvider: backend,
-                                previewCache: OfflineLibraryManager.shared.previewCache)
+                                previewCache: offline.previewCache,
+                                originalsCache: offline.originalsCache,
+                                cacheOriginals: offline.offlineEnabled,
+                                originalsCapBytes: offline.originalsCapBytes)
     }
 
     /// Registers this window's thumbnail feed with the shared offline-cache manager, so the Settings
@@ -421,14 +442,6 @@ struct MainView: View {
         let manager = OfflineLibraryManager.shared
         manager.attach(feed: feed, stats: backend)
         manager.liveAssetCount = timelineModel.allItems.count
-    }
-
-    /// Hands the live timeline sections + shared thumbnail feed to the (separate-window) Metal Grid Lab
-    /// so it can render the REAL library. Read-only — does not touch the production grid.
-    private func publishMetalGridLabData() {
-        if case .loaded(let sections) = timelineModel.state {
-            MetalGridLabBridge.shared.publish(sections: sections, feed: feed)
-        }
     }
 
     /// Aspect-fit rect of `image` centred in `size` — the photo's fullscreen frame.
@@ -572,9 +585,6 @@ struct MainView: View {
     private func logUploadUI(action: String, trigger: UploadUITrigger) {
         let line = "[UploadUI] action=\(action) trigger=\(trigger.rawValue)"
         DebugLog.log(line)
-        #if DEBUG
-        print(line)
-        #endif
     }
 
     private func logUploadRefresh(upload: UploadCompletedEvent, attempt: Int, result: TimelineRefreshResult) {
@@ -588,9 +598,6 @@ struct MainView: View {
         filter=\(result.filterDescription) elapsedMs=\(Int(result.elapsedMs)) error=\(result.errorMessage ?? "-")
         """
         DebugLog.log(line)
-        #if DEBUG
-        print(line)
-        #endif
     }
 
     // MARK: - Favorites / trash
@@ -623,6 +630,11 @@ struct MainView: View {
         searchDebounceTask?.cancel()
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             committedSearchText = ""
+            // Clearing the search restores the FULL timeline — land at the newest (bottom-right), the grid's home,
+            // not the preserved filtered-view offset (which reads as the oldest, top). Re-arm the one-shot
+            // initial-viewport placement with a nil anchor (⇒ `.newest`); the host applies it when the full data lands.
+            routeInitialScrollAnchor = nil
+            routeScrollGeneration += 1
             searchDebounceTask = nil
             return
         }
@@ -843,9 +855,6 @@ struct MainView: View {
     private func logViewerToolbar(mode: String) {
         let line = "[ViewerToolbar] mode=\(mode) sidebarToggleVisible=\(mode == "grid")"
         DebugLog.log(line)
-        #if DEBUG
-        print(line)
-        #endif
     }
 
     // MARK: - Sidebar overlay
@@ -856,14 +865,6 @@ struct MainView: View {
             columnVisibility = sidebarOpen ? .all : .detailOnly   // drive the native split view
         }
         SidebarPersistence.saveVisible(sidebarOpen)
-        logSidebar(dragging: false)
-    }
-
-    private func logSidebar(dragging: Bool) {
-        #if DEBUG
-        let persisted = SidebarPersistence.resolvedWidth()
-        print("[Sidebar] visible=\(sidebarOpen) width=\(Int(sidebarWidth)) dragging=\(dragging) persistedWidth=\(Int(persisted))")
-        #endif
     }
 
     // MARK: - Download / export
@@ -1003,31 +1004,6 @@ private struct WithinWindowBlur: NSViewRepresentable {
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
         view.material = material
-    }
-}
-
-/// Window-toolbar chrome, the two distinct modes the app has:
-///
-/// • **Viewer** — a deliberately OPAQUE, warm bar that matches the photo-viewer media background, so the
-///   viewer reads as a focused, distraction-free surface (Apple Photos does the same in its single-photo view).
-///
-/// • **Grid** — NOTHING is applied. The system renders its native macOS Liquid Glass toolbar, which samples
-///   and adapts to the photos that scroll underneath it (the window is `fullSizeContentView` with a
-///   transparent titlebar and the grid ignores the top safe area). That gives Apple's content-adaptive glass
-///   refraction + scroll-edge blur for free — no painted strip, no fake `LinearGradient`/`Rectangle` overlay,
-///   and no forced `.toolbarBackground` material (which would also paint an opaque band over the sidebar's
-///   titlebar region and make the sidebar look boxed). Active/inactive vividness is left to the system.
-private struct WindowToolbarChrome: ViewModifier {
-    let isViewer: Bool
-
-    func body(content: Content) -> some View {
-        if isViewer {
-            content
-                .toolbarBackground(ViewerVisualConstants.backgroundColor, for: .windowToolbar)
-                .toolbarBackground(.visible, for: .windowToolbar)
-        } else {
-            content   // native Liquid Glass — see the type doc above
-        }
     }
 }
 

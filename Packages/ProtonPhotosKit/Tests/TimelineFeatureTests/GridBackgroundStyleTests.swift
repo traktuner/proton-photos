@@ -48,15 +48,14 @@ import CoreGraphics
         #expect(MetalGridPalette.backgroundVector.w == 1)
     }
 
-    // 4 — the synthetic/debug path may use colored tiles; production (renderRealSlots) must not.
-    @Test func debugGridModeMayUseSyntheticColorsButProductionDoesNot() {
+    // 4 — the synthetic colored-tile debug grid was removed; production (buildRealGroups) must never draw a
+    // solid colored card, and the debug palette must stay gone entirely.
+    @Test func productionDoesNotUseSyntheticDebugColors() {
         let coord = src("MetalGridCoordinator.swift")
-        // Debug path uses synthetic solid colors.
-        #expect(coord.contains("renderSyntheticSlots") && coord.contains("mode: .solid"))
+        #expect(!coord.contains("SquareGridDebugMode"), "the synthetic debug palette must stay removed")
         // Production path: resident tiles draw an image quad, never a solid colored card.
         guard let range = coord.range(of: "private func buildRealGroups") else { Issue.record("buildRealGroups missing"); return }
         let body = String(coord[range.lowerBound ..< (coord.index(range.lowerBound, offsetBy: 2800, limitedBy: coord.endIndex) ?? coord.endIndex)])
         #expect(!body.contains("mode: .solid"), "production must not draw synthetic solid-colored tiles")
-        #expect(!body.contains("SquareGridDebugMode"), "production must not use the debug synthetic palette")
     }
 }

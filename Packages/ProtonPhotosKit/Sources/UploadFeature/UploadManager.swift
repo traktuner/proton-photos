@@ -105,9 +105,6 @@ public actor UploadManager: UploadManaging {
     @discardableResult
     public func enqueueFolder(_ url: URL, destination: UploadDestination) async -> [UploadQueueItemID] {
         let result = FolderEnumerator.enumerate(url)
-        if !result.skippedUnsupported.isEmpty {
-            log("[UploadQueue] folder=\(url.lastPathComponent) media=\(result.mediaFiles.count) skippedUnsupported=\(result.skippedUnsupported.count)")
-        }
         return await enqueueFiles(result.mediaFiles, destination: destination)
     }
 
@@ -205,7 +202,6 @@ public actor UploadManager: UploadManaging {
                 } catch {
                     // Uploaded successfully but album step failed → PARTIAL success, photo is safe.
                     markPartialFailure(id, message: message(error))
-                    log(uploadLogLine(id))
                     finish(id)
                     return
                 }
@@ -220,7 +216,6 @@ public actor UploadManager: UploadManaging {
                 transition(id, to: .failed(message: message(error)))
             }
         }
-        log(uploadLogLine(id))
         finish(id)
     }
 
@@ -404,42 +399,7 @@ public actor UploadManager: UploadManaging {
         onChange?(snapshot(), computeStats())
     }
 
-    // MARK: - Logging helpers
-
-    private func uploadLogLine(_ id: UploadQueueItemID) -> String {
-        guard let job = jobs[id] else { return "[Upload] id=\(id) (gone)" }
-        let progress: Double = {
-            if case let .uploading(p) = job.item.state { return p }
-            return job.item.state == .completed ? 1 : 0
-        }()
-        return """
-        [Upload] id=\(id) file=\(job.item.displayName) state=\(stateTag(job.item.state)) \
-        progress=\(String(format: "%.2f", progress)) totalBytes=\(job.item.byteCount) \
-        albumID=\(job.resolvedAlbumID ?? "-")
-        """
-    }
-
-    private func stateTag(_ state: UploadItemState) -> String {
-        switch state {
-        case .queued: "queued"
-        case .preparing: "preparing"
-        case .hashing: "hashing"
-        case .uploading: "uploading"
-        case .finalizing: "finalizing"
-        case .completed: "completed"
-        case .failed: "failed"
-        case .cancelled: "cancelled"
-        case .paused: "paused"
-        }
-    }
-
     private func message(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-    }
-
-    private func log(_ line: String) {
-        #if DEBUG
-        print(line)
-        #endif
     }
 }

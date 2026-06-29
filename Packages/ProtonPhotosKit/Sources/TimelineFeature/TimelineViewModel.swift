@@ -45,6 +45,17 @@ public struct TimelineRefreshRetrySchedule: Sendable, Equatable {
     )
 }
 
+struct TimelineVisibleContent {
+    let sections: [TimelineSection]
+    let items: [PhotoItem]
+    let monthMarkers: [TimelineDateMarker]
+    let hasSearchQuery: Bool
+
+    var isEmptySearchResult: Bool {
+        sections.isEmpty && hasSearchQuery
+    }
+}
+
 @MainActor
 @Observable
 public final class TimelineViewModel {
@@ -55,7 +66,9 @@ public final class TimelineViewModel {
         case failed(String)
     }
 
-    public private(set) var state: State = .loading
+    public private(set) var state: State = .loading {
+        didSet { invalidateVisibleContentCache(bumpGeneration: true) }
+    }
     /// Flat, chronological list of every photo — used so the viewer can page through the whole
     /// library, not just the day that was tapped.
     public private(set) var allItems: [PhotoItem] = []
@@ -65,7 +78,9 @@ public final class TimelineViewModel {
     public let feed: ThumbnailFeed
 
     /// The active filter/album. `.all` is the whole library (fast SDK path); others use direct REST.
-    public private(set) var filter: PhotoFilter = .all
+    public private(set) var filter: PhotoFilter = .all {
+        didSet { invalidateVisibleContentCache() }
+    }
 
     public init(repository: PhotosRepository, feed: ThumbnailFeed, library: PhotoLibraryProvider? = nil) {
         self.repository = repository
@@ -73,41 +88,63 @@ public final class TimelineViewModel {
         self.feed = feed
     }
 
-    // MARK: - Memoized section aspect ratios
+    // MARK: - Memoized visible timeline content
 
-    @ObservationIgnored private var aspectsCacheVersion = -1
-    @ObservationIgnored private var aspectsCacheToken = 0
-    @ObservationIgnored private var aspectsCacheValue: [[CGFloat]] = []
+    @ObservationIgnored private var visibleContentGeneration = 0
+    @ObservationIgnored private var visibleContentCacheKey: VisibleContentCacheKey?
+    @ObservationIgnored private var visibleContentCacheValue: TimelineVisibleContent?
 
-    /// Per-section clamped aspect ratios for the justified layout, memoized on (registry version,
-    /// section structure). Recomputing this in `TimelineView.body` on every SwiftUI re-render did one
-    /// dictionary lookup + string-key allocation PER PHOTO; a sidebar-width drag re-evaluates the body
-    /// each tick, so for a large library that 20k-element rebuild ran every frame and starved the main
-    /// thread — the grid jumped and the divider stuttered. A window resize changes no SwiftUI state, so
-    /// it never paid this, which is exactly why it felt smooth. The cache makes the two paths equal.
-    public func sectionAspects(for sections: [TimelineSection], registry: AspectRegistry) -> [[CGFloat]] {
-        let token = Self.structureToken(sections)
-        if aspectsCacheVersion == registry.version, aspectsCacheToken == token {
-            return aspectsCacheValue
+    func visibleContent(searchText: String, favoriteUIDs: Set<PhotoUID>, includeMonthMarkers: Bool) -> TimelineVisibleContent {
+        let context = TimelineSearchContext(activeFilter: filter, favoriteUIDs: favoriteUIDs)
+        let key = VisibleContentCacheKey(
+            generation: visibleContentGeneration,
+            searchText: searchText,
+            context: context,
+            includeMonthMarkers: includeMonthMarkers
+        )
+        if visibleContentCacheKey == key, let visibleContentCacheValue {
+            return visibleContentCacheValue
         }
-        let value = sections.map { section in
-            section.items.map { min(max(registry.aspect(for: $0.uid), 0.45), 3.2) }
+
+        guard case .loaded(let sections) = state else {
+            let value = TimelineVisibleContent(
+                sections: [],
+                items: [],
+                monthMarkers: [],
+                hasSearchQuery: !TimelineSearchQuery(searchText).isEmpty
+            )
+            visibleContentCacheKey = key
+            visibleContentCacheValue = value
+            return value
         }
-        aspectsCacheVersion = registry.version
-        aspectsCacheToken = token
-        aspectsCacheValue = value
+
+        let visibleSections = TimelineSearch.filter(sections, query: searchText, context: context)
+        let visibleItems = visibleSections.flatMap(\.items)
+        let monthMarkers = includeMonthMarkers
+            ? MetalGridProductionAdapter.dateMarkers(sections: visibleSections, granularity: .month)
+            : []
+        let value = TimelineVisibleContent(
+            sections: visibleSections,
+            items: visibleItems,
+            monthMarkers: monthMarkers,
+            hasSearchQuery: !TimelineSearchQuery(searchText).isEmpty
+        )
+        visibleContentCacheKey = key
+        visibleContentCacheValue = value
         return value
     }
 
-    /// Cheap structural fingerprint (O(#sections), not O(#photos)): section count + per-section counts
-    /// + the first/last uid, so a same-count reload with different content still invalidates the cache.
-    private static func structureToken(_ sections: [TimelineSection]) -> Int {
-        var hasher = Hasher()
-        hasher.combine(sections.count)
-        for section in sections { hasher.combine(section.items.count) }
-        if let first = sections.first?.items.first { hasher.combine(first.uid) }
-        if let last = sections.last?.items.last { hasher.combine(last.uid) }
-        return hasher.finalize()
+    private func invalidateVisibleContentCache(bumpGeneration: Bool = false) {
+        if bumpGeneration { visibleContentGeneration &+= 1 }
+        visibleContentCacheKey = nil
+        visibleContentCacheValue = nil
+    }
+
+    private struct VisibleContentCacheKey: Equatable {
+        let generation: Int
+        let searchText: String
+        let context: TimelineSearchContext
+        let includeMonthMarkers: Bool
     }
 
     /// Switches what the grid shows. `.all` reuses the cached/SDK timeline; tag & album views load

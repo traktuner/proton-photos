@@ -309,6 +309,6 @@ import CoreGraphics
         #expect(!coord.contains("monthLabels ? 0 : engine.metrics(level: lvl).gap"),
                 "the gutter must NOT be the per-level gap (that made layoutWidth level-dependent → the pinch/± commit jump)")
         #expect(coord.contains("sidebarObstructionInset + gap + gridHorizontalMargin(forLevel: lvl)"), "the LEFT margin folds into the leading inset")
-        #expect(coord.contains("fullViewportWidth - leadingObstructionInset - gridHorizontalMargin(forLevel: level)"), "the RIGHT margin trims the layout width")
+        #expect(coord.contains("fullViewportWidth - effectiveLeadingInset(forLevel: lvl) - gridHorizontalMargin(forLevel: lvl)"), "the RIGHT margin trims the (per-level) layout width")
     }
 }

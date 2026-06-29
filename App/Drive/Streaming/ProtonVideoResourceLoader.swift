@@ -22,7 +22,10 @@ final class ProtonVideoResourceLoader: NSObject, AVAssetResourceLoaderDelegate, 
     private let lock = NSLock()
     private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
     private var prefetchTasks: [Int: Task<Void, Never>] = [:]
-    private let forwardPrefetchBlockCount = 4
+    /// How many ~4 MB blocks to warm ahead of the bytes AVFoundation just consumed. Deep enough that the
+    /// network-fetch+decrypt read-ahead stays in front of playback (the shallow 4-block window micro-stalled
+    /// higher-bitrate video). Paired with a roomier `decryptedCache` so warmed blocks survive until requested.
+    private let forwardPrefetchBlockCount = 8
     /// Clear offset the forward read-ahead window was last scheduled from. Lets a repeated request for
     /// the same position skip re-scanning the block map; a seek (any other offset) still re-schedules.
     private var lastForwardPrefetchOffset = -1
@@ -34,7 +37,9 @@ final class ProtonVideoResourceLoader: NSObject, AVAssetResourceLoaderDelegate, 
         self.crypto = crypto
         self.cache = cache
         super.init()
-        decryptedCache.countLimit = 12   // ~12 decrypted blocks held for sequential reads
+        // Hold the forward read-ahead window + a few recent blocks so prefetched blocks aren't evicted before
+        // AVFoundation requests them, and short seek-backs stay re-fetch-free. ~4 MB/block ⇒ ~80 MB peak, transient.
+        decryptedCache.countLimit = 20
     }
 
     deinit {

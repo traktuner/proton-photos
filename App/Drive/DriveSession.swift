@@ -314,13 +314,25 @@ extension DriveSession {
     /// We decode minimal DTOs (ProtonCore's own `Codable` is stricter than the live API) and
     /// construct `ProtonCoreDataModel.Key`/`Address` via their public initialisers.
     func fetchAccountData() async throws -> AccountData {
-        async let users: UsersResponse = getJSON("/core/v4/users", as: UsersResponse.self)
-        async let addresses: AddressesResponse = getJSON("/core/v4/addresses", as: AddressesResponse.self)
-        let (u, a) = try await (users, addresses)
-        return AccountData(
-            userKeys: u.user.keys.map(Self.makeKey),
-            addresses: a.addresses.map(Self.makeAddress)
-        )
+        async let usersData = authedData(path: "/core/v4/users", method: "GET")
+        async let addressesData = authedData(path: "/core/v4/addresses", method: "GET")
+        let (uData, aData) = try await (usersData, addressesData)
+        // Persist (encrypted) so a later OFFLINE cold start can rebuild the crypto without the network.
+        AccountDataCache.save(users: uData, addresses: aData, uid: current.uid, keyPassword: current.keyPassword)
+        return try Self.decodeAccountData(users: uData, addresses: aData)
+    }
+
+    /// The encrypted-on-disk account data from a previous online launch, or nil if absent/undecryptable. Lets
+    /// `DriveSDKBridge.init` rebuild the (pure) Drive crypto + SDK account client when the network is unavailable.
+    func cachedAccountData() -> AccountData? {
+        guard let blob = AccountDataCache.load(uid: current.uid, keyPassword: current.keyPassword) else { return nil }
+        return try? Self.decodeAccountData(users: blob.users, addresses: blob.addresses)
+    }
+
+    private static func decodeAccountData(users: Data, addresses: Data) throws -> AccountData {
+        let u = try JSONDecoder().decode(UsersResponse.self, from: users)
+        let a = try JSONDecoder().decode(AddressesResponse.self, from: addresses)
+        return AccountData(userKeys: u.user.keys.map(makeKey), addresses: a.addresses.map(makeAddress))
     }
 
     private static func makeKey(_ d: CoreKeyDTO) -> Key {

@@ -41,6 +41,9 @@ struct SecureThumbnailCacheTests {
 
     private func uniqueNamespace() -> String { "sec-\(UUID().uuidString)" }
     private func uid(_ id: String = "node-1") -> PhotoUID { PhotoUID(volumeID: "vol-1", nodeID: id) }
+    private func fileSize(_ url: URL) -> Int64 {
+        Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+    }
 
     // MARK: - On-disk encryption
 
@@ -167,6 +170,67 @@ struct SecureThumbnailCacheTests {
         relaunched.configure(accountUID: "acct-A")
         #expect(relaunched.has(uid()) == true)
         #expect(relaunched.diskData(for: uid()) == png())
+    }
+
+    @Test func originalsCacheUsesDerivativeSpecificEncryptionContext() {
+        // Originals/previews/thumbnails may share the same account key source, but their AAD must stay
+        // derivative-bound: an original blob is not a valid thumbnail blob and vice versa.
+        let store = MemoryCacheKeyStore()
+        let ns = uniqueNamespace()
+        let original = ThumbnailCache(namespace: ns, derivative: "original", keyStore: store)
+        let thumbnail = ThumbnailCache(namespace: ns, derivative: "thumbnail", keyStore: store)
+        original.configure(accountUID: "acct-A")
+        thumbnail.configure(accountUID: "acct-A")
+
+        original.storeToDisk(png(), for: uid())
+
+        #expect(original.diskData(for: uid()) == png())
+        #expect(thumbnail.diskData(for: uid()) == nil)
+    }
+
+    @Test func originalsLRUCapEvictsOldestBlobFirst() throws {
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), derivative: "original", keyStore: MemoryCacheKeyStore())
+        cache.configure(accountUID: "acct-A")
+        let old = uid("old")
+        let keepA = uid("keep-a")
+        let keepB = uid("keep-b")
+
+        cache.storeToDisk(Data(repeating: 0x11, count: 300), for: old)
+        cache.storeToDisk(Data(repeating: 0x22, count: 300), for: keepA)
+        cache.storeToDisk(Data(repeating: 0x33, count: 300), for: keepB)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)],
+                                              ofItemAtPath: cache.diskURL(for: old).path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 2)],
+                                              ofItemAtPath: cache.diskURL(for: keepA).path)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 3)],
+                                              ofItemAtPath: cache.diskURL(for: keepB).path)
+
+        let cap = fileSize(cache.diskURL(for: keepA)) + fileSize(cache.diskURL(for: keepB)) + 1
+        cache.enforceByteCap(cap)
+
+        #expect(cache.diskData(for: old) == nil)
+        #expect(cache.diskData(for: keepA) != nil)
+        #expect(cache.diskData(for: keepB) != nil)
+    }
+
+    @Test func originalsTouchKeepsRecentlyUsedBlobDuringCapEnforcement() throws {
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), derivative: "original", keyStore: MemoryCacheKeyStore())
+        cache.configure(accountUID: "acct-A")
+        let old = uid("old")
+        let recentlyUsed = uid("recent")
+
+        cache.storeToDisk(Data(repeating: 0x44, count: 300), for: old)
+        cache.storeToDisk(Data(repeating: 0x55, count: 300), for: recentlyUsed)
+        let staleDate = Date(timeIntervalSince1970: 10)
+        try FileManager.default.setAttributes([.modificationDate: staleDate], ofItemAtPath: cache.diskURL(for: old).path)
+        try FileManager.default.setAttributes([.modificationDate: staleDate], ofItemAtPath: cache.diskURL(for: recentlyUsed).path)
+
+        cache.touch(recentlyUsed)
+        let cap = fileSize(cache.diskURL(for: recentlyUsed)) + 1
+        cache.enforceByteCap(cap)
+
+        #expect(cache.diskData(for: old) == nil)
+        #expect(cache.diskData(for: recentlyUsed) != nil)
     }
 
     @Test func unconfiguredInstanceCannotReadConfiguredBlobs() {

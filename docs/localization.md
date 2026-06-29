@@ -64,8 +64,6 @@ label = L10n.string("upload.state_uploading \(percent)") // interpolation → ke
 These are deliberate and shouldn't be "fixed":
 
 - **Brand / proper nouns:** "Proton Photos", "Proton AG", "Proton Drive".
-- **Developer-only surfaces:** the Debug ▸ Metal Grid Lab window and menu item. Localizing them would also
-  mean editing Metal grid code, which is out of scope.
 - **Developer cache diagnostics:** the Settings ▸ Developer tab *is* localized (it's reachable in
   production), but the underlying metric *values* are raw data.
 - **Technical SDK-gap detail:** `AlbumError.unsupported` carries `operation` + `gap` describing exactly

@@ -2,14 +2,10 @@ import SwiftUI
 import AppKit
 import PhotosCore
 import DesignSystem
-import MediaCache
 
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var level: Int
-    /// Retained for source compatibility with the public init; the production grid no longer consults media
-    /// aspect for layout (the engine is square-only; aspect lives only in `TileContentFitter`).
-    private let aspects: AspectRegistry
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
     private let proxy: GridProxy?
     private let routeScrollGeneration: Int
@@ -23,7 +19,6 @@ public struct TimelineView: View {
 
     public init(
         model: TimelineViewModel,
-        aspects: AspectRegistry,
         level: Binding<Int> = .constant(3),
         proxy: GridProxy? = nil,
         routeScrollGeneration: Int = 0,
@@ -37,7 +32,6 @@ public struct TimelineView: View {
         onOpen: @escaping (PhotoItem, [PhotoItem]) -> Void = { _, _ in }
     ) {
         _model = State(initialValue: model)
-        self.aspects = aspects
         _level = level
         self.proxy = proxy
         self.routeScrollGeneration = routeScrollGeneration
@@ -63,29 +57,23 @@ public struct TimelineView: View {
                 emptyState
             case let .failed(message):
                 errorState(message)
-            case let .loaded(sections):
-                let visibleSections = Self.filteredSections(
-                    sections,
-                    query: searchText,
-                    context: TimelineSearchContext(activeFilter: model.filter, favoriteUIDs: favoriteUIDs)
+            case .loaded:
+                let visibleContent = model.visibleContent(
+                    searchText: searchText,
+                    favoriteUIDs: favoriteUIDs,
+                    includeMonthMarkers: level >= 4
                 )
-                let visibleItems = visibleSections.flatMap(\.items)
                 // Production timeline is MetalGrid-ONLY: the canonical `SquareTileGridEngine` owns all
                 // geometry (square slots). No legacy-grid fallback, no aspect-driven justified layout,
                 // no silent feature-flag switch — media aspect never reaches the layout (it lives only in
                 // `TileContentFitter`, inside the renderer).
-                if visibleSections.isEmpty, !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if visibleContent.isEmptySearchResult {
                     searchEmptyState
                 } else {
-                    // Only the L4/L5 scrubber consumes markers; the full-library month scan at the common normal
-                    // levels (L0–L3) would be wasted O(library) work, so derive only when it can be shown.
-                    let monthMarkers = level >= 4
-                        ? MetalGridProductionAdapter.dateMarkers(sections: visibleSections, granularity: .month)
-                        : []
                     ZStack(alignment: .trailing) {
                         MetalProductionGridView(
-                            sections: visibleSections,
-                            allItems: visibleItems,
+                            sections: visibleContent.sections,
+                            allItems: visibleContent.items,
                             feed: model.feed,
                             level: $level,
                             routeScrollGeneration: routeScrollGeneration,
@@ -100,8 +88,8 @@ public struct TimelineView: View {
                         )
                         .ignoresSafeArea(edges: .bottom)
 
-                        if level >= 4, monthMarkers.count > 1 {
-                            TimelineDateScrubber(markers: monthMarkers) { marker in
+                        if level >= 4, visibleContent.monthMarkers.count > 1 {
+                            TimelineDateScrubber(markers: visibleContent.monthMarkers) { marker in
                                 proxy?.scrollToFlatIndex?(marker.index)
                             }
                         }

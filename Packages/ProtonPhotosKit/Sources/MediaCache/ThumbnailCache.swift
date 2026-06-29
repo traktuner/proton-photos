@@ -163,6 +163,41 @@ public actor ThumbnailCache {
         storeToDisk(data, for: uid)
     }
 
+    // MARK: - LRU size cap (used ONLY by the originals cache; thumbnails/previews stay uncapped & hot-path-free)
+
+    /// Marks a blob as recently used (bumps its modification date) so LRU eviction keeps it. Called on a disk
+    /// HIT for the originals cache only — never on the thumbnail/preview scrolling hot path.
+    public nonisolated func touch(_ uid: PhotoUID) {
+        let (_, account) = crypto.snapshot()
+        let url = directory.appendingPathComponent(filename(uid: uid, account: account))
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+    }
+
+    /// Evicts the LEAST-recently-used blobs (oldest modification date first) until the directory is at or under
+    /// `capBytes`. No-op when already within budget or when `capBytes` is negative (treated as "unbounded" guard).
+    public nonisolated func enforceByteCap(_ capBytes: Int64) {
+        guard capBytes >= 0 else { return }
+        let keys: Set<URLResourceKey> = [.fileSizeKey, .contentModificationDateKey]
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]
+        ) else { return }
+        var entries: [(url: URL, size: Int64, modified: Date)] = []
+        var total: Int64 = 0
+        for url in urls {
+            let vals = try? url.resourceValues(forKeys: keys)
+            let size = Int64(vals?.fileSize ?? 0)
+            entries.append((url, size, vals?.contentModificationDate ?? .distantPast))
+            total += size
+        }
+        guard total > capBytes else { return }
+        for entry in entries.sorted(by: { $0.modified < $1.modified }) {   // oldest first
+            if total <= capBytes { break }
+            try? FileManager.default.removeItem(at: entry.url)
+            validated.remove(entry.url.lastPathComponent)
+            total -= entry.size
+        }
+    }
+
     // MARK: - Clearing
 
     /// Erases the on-disk cache (keeps the account key — re-crawl refills). Used by "Delete Offline Cache".

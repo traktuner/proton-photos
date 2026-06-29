@@ -28,9 +28,18 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         self.driveSession = driveSession
 
         DebugLog.log("bridge: fetching account data…")
-        // Build the account client (fetch + decrypt the user's keys) up front.
-        let account = try await driveSession.fetchAccountData()
-        DebugLog.log("bridge: account ok — \(account.addresses.count) addresses, \(account.userKeys.count) user keys")
+        // Build the account client (fetch + decrypt the user's keys) up front. If the network is unavailable
+        // (cold OFFLINE launch), fall back to the encrypted account cache persisted on a previous online launch,
+        // so the library still opens (read-only, on cached data) instead of failing the whole signed-in UI.
+        let account: AccountData
+        do {
+            account = try await driveSession.fetchAccountData()
+            DebugLog.log("bridge: account ok — \(account.addresses.count) addresses, \(account.userKeys.count) user keys")
+        } catch {
+            guard let cached = driveSession.cachedAccountData() else { throw error }
+            account = cached
+            DebugLog.log("bridge: OFFLINE — using cached account data (\(cached.addresses.count) addresses)")
+        }
         let accountClient = try SDKAccountClientBuilder.build(account: account, keyPassword: session.keyPassword)
         DebugLog.log("bridge: account client built (\(accountClient.unlockedByKeyID.count) unlocked keys)")
 
