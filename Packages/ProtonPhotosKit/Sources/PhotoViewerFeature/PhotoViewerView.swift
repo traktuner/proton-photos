@@ -4,13 +4,6 @@ import AVFoundation
 import PhotosCore
 import DesignSystem
 
-private extension Notification.Name {
-    /// Posted (CAPTURE-FREE) by the still image's force-click; observed by `PhotoViewerView` to play the Live
-    /// Photo motion clip. The indirection keeps a `model`-capturing closure out of the image's tracked view value
-    /// — see the Swift-6 `swift_task_isCurrentExecutor` (#76804) crash note in the view.
-    static let livePhotoMotionTrigger = Notification.Name("me.protonphotos.livePhotoMotionTrigger")
-}
-
 /// `AVPlayerView` that turns a pinch-OUT into the SAME "fly closed" dismiss the still image uses — so a PLAYING
 /// video can be pinched/swiped shut too (previously the gesture only existed on the image path, so it did nothing
 /// over a video). It only REPORTS progress; the host's shared zoom overlay renders the shrink into the exact grid
@@ -224,9 +217,6 @@ public struct PhotoViewerView: View {
         } action: { newWidth in
             containerWidth = newWidth
         }
-        .onReceive(NotificationCenter.default.publisher(for: .livePhotoMotionTrigger)) { _ in
-            model.playMotion()
-        }
     }
 
     /// Top-left inset of the displayed (aspect-fit) image within the content area, so the LIVE badge sits on the
@@ -249,18 +239,15 @@ public struct PhotoViewerView: View {
                        onPinchDismissChanged: onPinchDismissChanged,
                        onPinchDismissEnded: onPinchDismissEnded)
         } else if let image = model.image {
-            // Still image (incl. a Live Photo's key frame), with the motion clip crossfaded OVER it. The
-            // force-click handler is a CAPTURE-FREE Notification post (no `model` capture); the model-capturing
-            // badge/hover live in `viewerBody`'s overlay. Keeping `@MainActor` closures off any geometry-measuring
-            // child value is what avoids the Swift-6 `swift_task_isCurrentExecutor` false-positive SIGSEGV (#76804)
-            // on SwiftUI's `syncMainIfReferences` update path — see PhotoViewerModel.
+            // Still image (incl. a Live Photo's key frame), with the motion clip crossfaded OVER it. Hover the
+            // LIVE badge or force-click the photo to play the motion.
             ZStack {
                 ZoomableImageView(image: image,                      // pinch-zoom + interactive pinch-out-to-dismiss
                                   isDismissing: isDismissing,
                                   onPinchDismissBegan: onPinchDismissBegan,
                                   onPinchDismissChanged: onPinchDismissChanged,
                                   onPinchDismissEnded: onPinchDismissEnded,
-                                  onForceClick: { NotificationCenter.default.post(name: .livePhotoMotionTrigger, object: nil) })
+                                  onForceClick: { model.playMotion() })
                 if model.current.isLivePhoto, let motion = model.motionPlayer {
                     MotionPlayerLayerView(player: motion)
                         .opacity(model.isMotionPlaying ? 1 : 0)
