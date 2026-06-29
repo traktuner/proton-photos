@@ -648,9 +648,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // (generous overscan ABOVE so a narrow / scale-down reveals already-laid-out older rows, never blank), and each
     // frame we present that snapshot UNIFORMLY SCALED to the current width about the stationary LEFT edge + viewport
     // BOTTOM — ONE coherent surface, square tiles preserved, no engine resolve / group rebuild / texture churn. On
-    // gesture end the host settles ONCE, bottom-anchored: for a sub-detent resize the round+fill layout at the
-    // release width EQUALS the last scaled frame (same columns; tile side = nominal-fill = start × scale), so
-    // nothing snaps; crossing a column detent costs at most one settle adjustment (Apple does this too).
+    // gesture end the host settles ONCE, bottom-anchored: under the accepted fixed-columns model the release-width
+    // settled layout uses the same column count as the live snapshot, so no column reflow or detent correction is
+    // expected.
 
     private(set) var presentationResizeActive = false
     /// Leading obstruction inset (sidebar overlap) + layout width captured at gesture start: the scale anchors the
@@ -966,13 +966,12 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return scrollY >= maxScroll - 2
     }
 
-    // MARK: - Resize settle (release-time animated reflow when a column detent was crossed)
+    // MARK: - Resize settle (reserved for release-time column-count changes)
     //
-    // A live resize SCALES the snapshot at the gesture-start column count. On release the settled round+fill layout
-    // may have a DIFFERENT column count (a detent was crossed) — committing directly would SNAP. Instead this morphs
-    // every visible item's viewport rect from its last SCALED position to its settled position over a short easeOut
-    // (~220 ms), so the reflow is a smooth "fly into place", never an instant jump. For a sub-detent resize source
-    // ≈ target ⇒ NOT armed (the host settles instantly). Mirrors the zoom commit bridge.
+    // A live resize SCALES the snapshot at the gesture-start column count. With fixed columns, release normally
+    // resolves to the same column count and this morph is not armed. The path is retained defensively for any future
+    // responsive policy that changes columns at release: every visible item's viewport rect eases from the last
+    // scaled position to the settled position instead of snapping.
     private(set) var resizeSettleActive = false
     var isResizeSettling: Bool { resizeSettleActive }
     private var resizeSettleSource: [GridRenderSlot] = []
@@ -980,9 +979,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// 0→1, advanced by the host's display-link tick; eased in `drawResizeSettle`.
     var resizeSettleProgress: CGFloat = 0
 
-    /// Arm the release settle: SOURCE = the last scaled presentation frame; TARGET = the settled round+fill layout
-    /// at the release width, bottom-anchored to `targetScrollY` (the scroll the host is about to apply). Returns
-    /// false (⇒ caller settles instantly) when source ≈ target — a sub-detent resize needs no animation.
+    /// Arm the release settle: SOURCE = the last scaled presentation frame; TARGET = the settled fixed-column
+    /// layout at the release width, bottom-anchored to `targetScrollY` (the scroll the host is about to apply).
+    /// Returns false (⇒ caller settles instantly) unless the release layout genuinely changed column count.
     @discardableResult
     func beginResizeSettle(targetScrollY: CGFloat) -> Bool {
         guard presentationResizeActive, let view = metalView else { resizeSettleActive = false; return false }
@@ -999,7 +998,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             GridRenderSlot(index: s.index, column: s.column, row: s.row,
                            rect: Self.presentationScaledRect(s.rect, scale: k, insetX: inset, anchorY: anchorY).offsetBy(dx: 0, dy: dy))
         }
-        // TARGET — the settled round+fill layout at the release width + the scroll the host will apply.
+        // TARGET — the settled fixed-column layout at the release width + the scroll the host will apply.
         let phase = currentPhase()
         let overscan = max(budget.overscanFraction, 1.5) * H
         let lvp = CGSize(width: curLayoutW, height: H)
@@ -1054,7 +1053,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     }
 
     /// Max per-item rect delta (L1 of origin + size) between two index-keyed slot sets — 0 when every shared item
-    /// sits in the same place (a sub-detent resize), large when a column detent reflowed the grid.
+    /// sits in the same place, large when a future responsive policy reflows the same indexed items.
     nonisolated static func maxIndexedRectDelta(source: [GridRenderSlot], target: [GridRenderSlot]) -> CGFloat {
         var src: [Int: CGRect] = [:]
         src.reserveCapacity(source.count)

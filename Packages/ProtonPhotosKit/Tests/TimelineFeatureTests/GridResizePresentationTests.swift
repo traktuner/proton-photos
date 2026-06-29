@@ -175,10 +175,10 @@ import CoreGraphics
         #expect(body.contains("presentationResizeActive"), "applyContentSize must be gated off while presenting")
     }
 
-    // MARK: - Release settle (detent-crossing reflow → animated "fly into place")
+    // MARK: - Release settle (reserved for future column-count changes)
 
-    // 11 — maxIndexedRectDelta is 0 for identical layouts (sub-detent ⇒ NO settle, instant) and large when a column
-    // detent reflowed the grid (⇒ arm the animation). Index-keyed, so it measures real per-item movement.
+    // 11 — maxIndexedRectDelta is 0 for identical layouts and large when the same indexed items move. Fixed-column
+    // resize normally never arms this path; it remains useful for any future responsive policy that changes columns.
     @Test func indexedRectDeltaDetectsReflow() {
         let a = [GridRenderSlot(index: 0, column: 0, row: 0, rect: CGRect(x: 0, y: 0, width: 100, height: 100)),
                  GridRenderSlot(index: 1, column: 1, row: 0, rect: CGRect(x: 100, y: 0, width: 100, height: 100))]
@@ -194,12 +194,14 @@ import CoreGraphics
         #expect(MetalGridCoordinator.easeOutCubic(0.5) > 0.5, "easeOut leads linear at the midpoint")
     }
 
-    // 13 — release arms the animated settle ONLY when a detent was crossed (source ≠ target), and the host drives it
-    // to completion on the display tick. A sub-detent resize never arms it (settles instantly — no snap either way).
+    // 13 — release arms the animated settle ONLY when a future responsive layout changed columns and source ≠ target.
+    // Fixed-column resize normally settles instantly; the host wiring remains dormant unless that guard is satisfied.
     @Test func releaseArmsAnimatedSettleWiring() {
         let coord = src("MetalGridCoordinator.swift")
-        #expect(coord.contains("func beginResizeSettle(targetScrollY:") && coord.contains("maxIndexedRectDelta(source: source, target: target) > 1.5"),
-                "begin must arm only when source ≠ target (a detent crossing)")
+        #expect(coord.contains("func beginResizeSettle(targetScrollY:")
+                && coord.contains("plan.columns != startCols")
+                && coord.contains("maxIndexedRectDelta(source: source, target: target) > 1.5"),
+                "begin must arm only when the release layout changed columns and source differs from target")
         #expect(coord.contains("if resizeSettleActive {") && coord.contains("drawResizeSettle(in: view"), "draw() must render the settle morph")
         let host = src("MetalGridScrollHost.swift")
         #expect(host.contains("coordinator.beginResizeSettle(targetScrollY: settledY)"), "release arms the settle with the settled scroll")
@@ -237,15 +239,15 @@ import CoreGraphics
         #expect(!host.contains("if !heightChanged"), "the heightChanged fallback (the flicker path) must be gone")
     }
 
-    // 16 — the settle is AXIS-AWARE: a WIDTH change settles CENTRE-anchored (+ the detent fly-into-place); a pure
-    // VERTICAL change settles to the counter-scrolled scroll (start − slide), with NO animation.
+    // 16 — the settle is AXIS-AWARE: a WIDTH change settles through the fixed-column release path; a pure VERTICAL
+    // change settles to the counter-scrolled scroll (start − slide), with NO animation.
     @Test func settleIsAxisAware() {
         let host = src("MetalGridScrollHost.swift")
         guard let dr = host.range(of: "func windowDidEndLiveResize()") else { Issue.record("windowDidEndLiveResize missing"); return }
         let db = String(host[dr.lowerBound ..< (host.index(dr.lowerBound, offsetBy: 1500, limitedBy: host.endIndex) ?? host.endIndex)])
         #expect(db.contains("widthChanged"), "the settle must branch on the resize axis")
         #expect(db.contains("presentationStartScrollY - coordinator.presentationVerticalShift"), "pure vertical settles to the counter-scrolled scroll")
-        #expect(db.contains("widthChanged && coordinator.beginResizeSettle"), "the detent fly-into-place only applies to a width reflow")
+        #expect(db.contains("widthChanged && coordinator.beginResizeSettle"), "the reserved release-settle guard is width-only")
     }
 
     // 17 — at the content edges the vertical slide CLAMPS the effective scroll to [0, maxScroll] (no void pulled
@@ -273,8 +275,8 @@ import CoreGraphics
     }
 
     // 19 — sidebar open/close SCALES the grid (no reflow during the slide): draw() renders drawSidebarResize via the
-    // right-anchored scale; the host arms it on an inset change, drives it on the display tick, then commits + settles
-    // (fly-into-place only if a detent reflowed). It commits the sidebar WIDTH (gap re-added), not the layout inset.
+    // right-anchored scale; the host arms it on an inset change, drives it on the display tick, then commits + settles.
+    // Fixed columns normally do not arm the reserved release morph. It commits the sidebar WIDTH (gap re-added), not the layout inset.
     @Test func sidebarOpenCloseScalesTheGrid() {
         let coord = src("MetalGridCoordinator.swift")
         #expect(coord.contains("func beginSidebarResize(") && coord.contains("presentationScaledRectRightAnchored"),
@@ -282,7 +284,7 @@ import CoreGraphics
         #expect(coord.contains("if presentationSidebarActive {") && coord.contains("drawSidebarResize(in: view"), "draw() renders the sidebar scale")
         #expect(coord.contains("sidebarObstructionInset = presentationSidebarToEventInset"), "commit the sidebar WIDTH (engine re-adds the gap), not the layout inset")
         #expect(coord.contains("func endSidebarResize()") && coord.contains("maxIndexedRectDelta(source: source, target: target) > 1.5"),
-                "end commits + arms the fly-into-place only on a detent reflow")
+                "end commits and keeps the reserved release morph guarded by real source/target movement")
         #expect(coord.contains("bottomAnchoredScroll()"), "the sidebar settle bottom-anchors (no bottom-row jump when scrolled to the newest end)")
         #expect(coord.contains("if presentationSidebarActive { cancelSidebarResize() }"), "a new toggle / window resize supersedes the in-flight sidebar scale")
         let host = src("MetalGridScrollHost.swift")

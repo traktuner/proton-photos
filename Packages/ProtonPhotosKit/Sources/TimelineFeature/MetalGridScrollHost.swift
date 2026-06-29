@@ -774,7 +774,7 @@ final class MetalGridScrollHost: NSView {
     @objc private func step() {
         if coordinator.isCommitBridging { advanceCommitBridge() }
         if coordinator.isSidebarResizing { advanceSidebarResize() }    // sidebar open/close scales the grid
-        if coordinator.isResizeSettling { advanceResizeSettle() }      // release-time detent reflow ("fly into place")
+        if coordinator.isResizeSettling { advanceResizeSettle() }      // reserved for future release-time column-count changes
         // Live-pinch post-release settle. Gated on lattice mode so the driver never drives the reflow fallback;
         // reset the tick dt whenever it isn't running.
         if pinchMode == .lattice, pinchDriver.isSelfAdvancing { advanceLivePinch() } else { pinchAdvancePrevTime = 0 }
