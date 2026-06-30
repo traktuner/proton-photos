@@ -38,14 +38,13 @@ public final class PhotoViewerModel {
     public private(set) var isLoadingOriginal = false
 
     // MARK: Live Photo motion clip
-    // A SEPARATE, muted player for the paired motion video — preloaded the moment a Live Photo opens so hovering
-    // the LIVE badge (or a force-click) plays it with NO delay, NO controls overlay, and NO black load gap. The
-    // view crossfades this over the still (the "ghost" effect). Distinct from `video` (which is for real videos).
+    // Motion playback is intentionally disabled until it can use the same encrypted-at-rest streaming path as
+    // regular videos. The prior local-file workaround wrote the decrypted paired video to /tmp so AVPlayer could
+    // open it, which violates the app-wide E2EE rule. Keep the public state/API so the UI remains stable; without
+    // a `motionPlayer`, hover/force-click are no-ops.
     public private(set) var motionPlayer: AVPlayer?
     /// True while the motion clip is playing — the view crossfades the motion layer in/out on this.
     public private(set) var isMotionPlaying = false
-    private var motionLocalFileURL: URL?              // temp file backing the local-file motion player; deleted on teardown
-    private var motionTask: Task<Void, Never>?
     private var motionEndObserver: NSObjectProtocol?
 
     /// Whether the info panel is open, and the metadata for the current item (loaded lazily).
@@ -149,50 +148,13 @@ public final class PhotoViewerModel {
 
     // MARK: - Live Photo motion playback
 
-    /// Live-Photo MOTION playback, re-enabled via a FULLY-DOWNLOADED LOCAL-FILE player (see `prepareMotion`).
-    /// The previous STREAMING player attached a custom `AVAssetResourceLoader` on its own `DispatchQueue` — the
-    /// likely trigger for the process-wide Swift-6.2 executor corruption (#76804) that crashed even Apple's own
-    /// SwiftUI/AppKit frameworks (`_ButtonGesture` action dispatch) after a Live Photo was opened. A local-file
-    /// `AVPlayer` has NO such custom loader/queue. If this STILL corrupts the executor (a crash on a button tap
-    /// after opening a Live Photo), set it back to `false` — AVPlayer is then incompatible until the toolchain
-    /// ships the #76804 fix (Xcode 26.2 line).
-    static let livePhotoMotionPlaybackEnabled = true
-
-    /// Preloads the paired motion clip — FULL download + decrypt to a local temp file, then a LOCAL-FILE
-    /// `AVPlayer` (no streaming, no custom resource-loader queue). Hover/force-click are no-ops until
-    /// `motionPlayer` is set (i.e. the clip finished downloading). No-op for non-Live items.
+    /// Live Photo motion must never persist decrypted video bytes. The secure future path is to retain a
+    /// streaming resource (`VideoStreamProvider.makeStreamingAsset`) for the paired motion clip, or a memory-only
+    /// AVAsset equivalent if Apple exposes one. Until then, do not synthesize a local file.
     private func prepareMotion(for item: PhotoItem) {
         teardownMotion()
-        guard Self.livePhotoMotionPlaybackEnabled,
-              item.isLivePhoto, let motionUID = item.relatedVideoUID else { return }
-        // Inherits the model's `@MainActor` context, so the `@Observable` writes after the nonisolated download
-        // land back on main (same pattern as `loadTask`).
-        motionTask = Task {
-            guard let data = try? await media.originalData(for: motionUID),
-                  !Task.isCancelled, self.current == item else { return }
-            // Play a LOCAL FILE — NOT the custom `protonvideo://` streaming asset. Write the decrypted bytes to a
-            // unique temp file (cleaned up in `teardownMotion`).
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("proton-motion-\(motionUID.nodeID).mov")
-            guard (try? data.write(to: url, options: .atomic)) != nil, !Task.isCancelled, self.current == item else { return }
-            let player = AVPlayer(url: url)
-            // Muting is driven PER-PLAY in `playMotion(audible:)` (hover = silent ghost, force-click = audible),
-            // not pinned here: `isMuted` persists on the AVPlayer, so a prior audible play must not leak into a
-            // later silent hover. The player is created paused and emits no audio until `play()`, so leaving the
-            // default (unmuted) here is safe — preroll only fills the pipeline, it never advances the clock.
-            player.actionAtItemEnd = .pause
-            player.automaticallyWaitsToMinimizeStalling = false
-            self.motionLocalFileURL = url
-            self.motionPlayer = player
-            // Preroll only once the item is ready (preroll throws otherwise); a local file is ready near-instantly.
-            if let pi = player.currentItem {
-                var tries = 0
-                while pi.status == .unknown, !Task.isCancelled, tries < 50 {
-                    try? await Task.sleep(for: .milliseconds(20)); tries += 1
-                }
-                if pi.status == .readyToPlay, !Task.isCancelled { player.preroll(atRate: 1) { _ in } }
-            }
-        }
+        guard item.isLivePhoto, item.relatedVideoUID != nil else { return }
+        // Deliberately no-op: plaintext local motion-video files are forbidden by the local E2EE contract.
     }
 
     /// Plays the motion clip ONCE from the start. Idempotent while playing.
@@ -229,12 +191,10 @@ public final class PhotoViewerModel {
     }
 
     private func teardownMotion() {
-        motionTask?.cancel(); motionTask = nil
         if let obs = motionEndObserver { NotificationCenter.default.removeObserver(obs); motionEndObserver = nil }
         motionPlayer?.pause()
         isMotionPlaying = false
         motionPlayer = nil
-        if let url = motionLocalFileURL { try? FileManager.default.removeItem(at: url); motionLocalFileURL = nil }
     }
 
     public func next() {

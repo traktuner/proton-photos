@@ -70,6 +70,16 @@ struct ProductionRouteGuardTests {
                 "sign-out must clear encrypted account cache blobs")
     }
 
+    @Test func sdkSecretCacheIsInMemoryOnly() throws {
+        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSDKBridge.swift"), encoding: .utf8)
+        #expect(bridge.contains("\"secrets.sqlite\"") && bridge.contains("\"secrets.sqlite-wal\"") && bridge.contains("\"secrets.sqlite-shm\""),
+                "startup must purge legacy SDK plaintext secret-cache files")
+        let config = try Self.body(of: bridge, from: "let config = ProtonDriveClientConfiguration(", to: "self.photosClient = try await ProtonPhotosClient(")
+        #expect(config.contains("entityCachePath:"), "non-secret entity cache may stay on disk")
+        #expect(!config.contains("secretCachePath:"), "SDK decrypted key material must not be persisted via secretCachePath")
+        #expect(!config.contains("secretCacheEncryptionKey:"), "do not claim encrypted SDK secret persistence until the native core actually honors it")
+    }
+
     @Test func viewerOriginalsCacheIsReadBeforeNetworkAndPurgedBySettings() throws {
         let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
         #expect(mainView.contains("originalsCache: offline.originalsCache"))
@@ -94,6 +104,14 @@ struct ProductionRouteGuardTests {
         #expect(offline.contains("originalsCache.clearAndForgetKey()"), "sign-out purge must include originals")
         #expect(offline.contains("func purgeOriginalsCache() async"), "turning offline off must have an originals-only purge")
         #expect(offline.contains("await originalsCache.clear()"))
+    }
+
+    @Test func viewerNeverPersistsDecryptedMotionVideoTempFiles() throws {
+        let viewer = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoViewerFeature/PhotoViewerModel.swift"), encoding: .utf8)
+        #expect(!viewer.contains("temporaryDirectory"), "Live Photo motion must not write decrypted video bytes to /tmp")
+        #expect(!viewer.contains("proton-motion-"), "Live Photo motion must not synthesize plaintext local movie files")
+        #expect(!viewer.contains("AVPlayer(url:"), "Viewer playback must not rely on decrypted local temp files")
+        #expect(viewer.contains("plaintext local motion-video files are forbidden by the local E2EE contract"))
     }
 
     @Test func mainViewUsesNativeSplitViewChrome() throws {
