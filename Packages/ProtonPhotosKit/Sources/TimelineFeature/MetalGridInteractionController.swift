@@ -38,6 +38,15 @@ final class MetalGridInteractionController {
         logInteraction(event: "singleClick", uid: hit.uid, openViewer: false)
     }
 
+    /// Marquee (drag-rectangle) selection — drag the mouse to draw a selection rectangle instead of ⇧-clicking
+    /// each item. `additive` (⇧ at drag start) adds to the existing selection; otherwise the rectangle replaces it.
+    func handleMarqueeBegan(additive: Bool) { selection.marqueeBegan(additive: additive) }
+    func handleMarqueeChanged(contentRect: CGRect) {
+        guard let coordinator else { return }
+        selection.marqueeChanged(coordinator.uids(intersecting: contentRect))
+    }
+    func handleMarqueeEnded() { /* selection is applied live during the drag — nothing to finalize */ }
+
     private func logInteraction(event: String, uid: PhotoUID?, openViewer: Bool) {
         PhotoDiagnostics.shared.emit("MetalGridInteraction", [
             "event": event,

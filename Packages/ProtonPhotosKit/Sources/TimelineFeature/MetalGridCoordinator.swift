@@ -253,6 +253,14 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return (slot.index, uid)
     }
 
+    /// The UIDs whose cells intersect a CONTENT-space rect — the marquee (drag-rectangle) selection set.
+    func uids(intersecting contentRect: CGRect) -> Set<PhotoUID> {
+        let width = layoutWidth
+        guard width > 1 else { return [] }
+        let slots = engine.slots(intersecting: contentRect, level: level, width: width, columnPhase: currentPhase())
+        return Set(slots.compactMap { uid(atFlatIndex: $0.index) })
+    }
+
     var levelCount: Int { engine.levelCount }
     func clampLevel(_ l: Int) -> Int { engine.clampLevel(l) }
 

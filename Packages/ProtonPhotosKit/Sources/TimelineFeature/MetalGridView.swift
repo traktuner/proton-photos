@@ -24,13 +24,50 @@ final class MetalGridDocumentSpacer: NSView {
     /// fire a wild concurrent scroll. Takes the event so momentum/inertia after a pinch can be caught too.
     var shouldBlockScroll: ((NSEvent) -> Bool)?
 
+    /// Marquee (drag-rectangle) selection. A press that DRAGS past the threshold draws a selection rectangle
+    /// (CONTENT-space rect reported live); a press that never drags falls through to `onClick` on mouse-UP, so
+    /// single / double / ⇧-click selection is preserved unchanged. `onMarqueeBegan` carries the mouse-down
+    /// modifiers (⇧ = add to the existing selection).
+    var onMarqueeBegan: ((GridClickModifiers) -> Void)?
+    var onMarqueeChanged: ((CGRect) -> Void)?
+    var onMarqueeEnded: (() -> Void)?
+
+    private var mouseDownPoint: CGPoint?
+    private var mouseDownClickCount = 0
+    private var mouseDownModifiers: GridClickModifiers = []
+    private var isMarqueeing = false
+    private static let marqueeThreshold: CGFloat = 4   // px of drag before a press becomes a marquee (jitter-tolerant)
+
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
     override func draw(_ dirtyRect: NSRect) { /* transparent — the Metal view behind shows through */ }
 
     override func mouseDown(with event: NSEvent) {
-        onClick?(convert(event.locationInWindow, from: nil), event.clickCount, MetalGridInteractionController.modifiers(from: event))
-        // Do not call super for selection; let scrollWheel/drag still bubble normally for other events.
+        // Defer the click DECISION to mouse-up: a press that turns into a drag becomes a marquee, not a click.
+        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        mouseDownClickCount = event.clickCount
+        mouseDownModifiers = MetalGridInteractionController.modifiers(from: event)
+        isMarqueeing = false
+    }
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = mouseDownPoint else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        if !isMarqueeing {
+            guard hypot(p.x - start.x, p.y - start.y) >= Self.marqueeThreshold else { return }
+            isMarqueeing = true
+            onMarqueeBegan?(mouseDownModifiers)
+        }
+        onMarqueeChanged?(CGRect(x: min(start.x, p.x), y: min(start.y, p.y),
+                                 width: abs(p.x - start.x), height: abs(p.y - start.y)))
+    }
+    override func mouseUp(with event: NSEvent) {
+        if isMarqueeing {
+            onMarqueeEnded?()
+        } else if let start = mouseDownPoint {
+            onClick?(start, mouseDownClickCount, mouseDownModifiers)   // never dragged → it was a click after all
+        }
+        mouseDownPoint = nil
+        isMarqueeing = false
     }
     override func magnify(with event: NSEvent) {
         onMagnify?(event)
@@ -39,6 +76,20 @@ final class MetalGridDocumentSpacer: NSView {
     override func scrollWheel(with event: NSEvent) {
         if shouldBlockScroll?(event) == true { return }   // pinch in flight → swallow the concurrent pan
         super.scrollWheel(with: event)                    // otherwise bubble to the enclosing scroll view
+    }
+}
+
+/// The translucent drag-rectangle drawn over the grid during a marquee selection. A passive overlay: it never
+/// hit-tests (events pass straight through to the spacer that drives the drag) and is hidden when idle.
+final class MetalGridMarqueeView: NSView {
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func draw(_ dirtyRect: NSRect) {
+        let r = bounds.insetBy(dx: 0.5, dy: 0.5)
+        NSColor.controlAccentColor.withAlphaComponent(0.18).setFill()
+        r.fill()
+        NSColor.controlAccentColor.withAlphaComponent(0.9).setStroke()
+        let path = NSBezierPath(rect: r); path.lineWidth = 1; path.stroke()
     }
 }
 

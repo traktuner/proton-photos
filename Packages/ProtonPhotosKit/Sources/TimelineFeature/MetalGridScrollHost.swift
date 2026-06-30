@@ -51,6 +51,14 @@ final class MetalGridScrollHost: NSView {
     }
     /// Production click routing (content point, click count, modifiers).
     var onCellClick: ((CGPoint, Int, GridClickModifiers) -> Void)?
+    /// Marquee (drag-rectangle) selection routing. `onMarqueeChanged` carries the rect in LAYOUT (engine) space
+    /// — the host already removes the leading-obstruction inset, exactly like `onCellClick`.
+    var onMarqueeBegan: ((GridClickModifiers) -> Void)?
+    var onMarqueeChanged: ((CGRect) -> Void)?
+    var onMarqueeEnded: (() -> Void)?
+    /// The translucent selection rectangle drawn over the grid during a marquee drag (a passive overlay on the
+    /// scroll document, so it scrolls with the content it's selecting).
+    private let marqueeView = MetalGridMarqueeView()
     /// Fired on any viewport change (scroll / resize / level) so overlays (month labels, a11y) reposition.
     var onViewportChanged: (() -> Void)?
     /// The level the live pinch settled on — so the SwiftUI `level` binding stays in sync after a commit.
@@ -235,6 +243,8 @@ final class MetalGridScrollHost: NSView {
         spacer.frame = NSRect(x: 0, y: 0, width: bounds.width, height: bounds.height)
         scrollView.documentView = spacer
         addSubview(scrollView, positioned: .above, relativeTo: metalView)
+        marqueeView.isHidden = true
+        spacer.addSubview(marqueeView)   // drawn over the photos (the spacer is the front, transparent document)
 
         coordinator.clipView = scrollView.contentView
         coordinator.metalView = metalView
@@ -247,6 +257,23 @@ final class MetalGridScrollHost: NSView {
         spacer.onClick = { [weak self] point, clickCount, modifiers in
             guard let self else { return }
             self.onCellClick?(CGPoint(x: point.x - self.coordinator.leadingObstructionInset, y: point.y), clickCount, modifiers)   // render → layout
+        }
+        spacer.onMarqueeBegan = { [weak self] mods in
+            guard let self else { return }
+            self.marqueeView.isHidden = false
+            self.onMarqueeBegan?(mods)
+        }
+        spacer.onMarqueeChanged = { [weak self] rawRect in
+            guard let self else { return }
+            self.marqueeView.frame = rawRect                 // RAW spacer coords — where the user dragged on screen
+            self.marqueeView.needsDisplay = true
+            let inset = self.coordinator.leadingObstructionInset
+            self.onMarqueeChanged?(rawRect.offsetBy(dx: -inset, dy: 0))   // render → layout (same shift as onCellClick)
+        }
+        spacer.onMarqueeEnded = { [weak self] in
+            guard let self else { return }
+            self.marqueeView.isHidden = true
+            self.onMarqueeEnded?()
         }
         spacer.onMagnify = { [weak self] event in self?.handleMagnify(event) }
         // Swallow scroll whenever a pinch could leak into one. Wired on BOTH the document spacer and the

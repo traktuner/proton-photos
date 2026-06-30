@@ -104,6 +104,15 @@ struct MetalProductionGridView: NSViewRepresentable {
         host.onCellClick = { [weak coord] point, clickCount, modifiers in
             coord?.interaction?.handleClick(contentPoint: point, clickCount: clickCount, modifiers: modifiers)
         }
+        host.onMarqueeBegan = { [weak coord] mods in
+            coord?.interaction?.handleMarqueeBegan(additive: mods.contains(.shift))
+        }
+        host.onMarqueeChanged = { [weak coord] rect in
+            coord?.interaction?.handleMarqueeChanged(contentRect: rect)
+        }
+        host.onMarqueeEnded = { [weak coord] in
+            coord?.interaction?.handleMarqueeEnded()
+        }
 
         let header = MetalGridHeaderRenderer(coordinator: host.coordinator)
         header.overlay.frame = host.bounds

@@ -622,6 +622,13 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         resolvedForLevel(level, width: width, columnPhase: columnPhase).hitTest(contentPoint)
     }
 
+    /// Every slot whose SQUARE cell INTERSECTS a CONTENT-space rect — drives marquee (drag-rectangle) selection.
+    public func slots(intersecting contentRect: CGRect, level: Int, width: CGFloat, columnPhase: Int? = nil) -> [GridSlot] {
+        resolvedForLevel(level, width: width, columnPhase: columnPhase)
+            .visibleSlots(in: contentRect, viewportOrigin: .zero)
+            .filter { $0.slotRect.intersects(contentRect) }
+    }
+
     /// (section, item, row, column) of a global index at a settled level (row is section-local).
     public func locate(flatIndex: Int, level: Int, width: CGFloat) -> (section: Int, item: Int, row: Int, column: Int)? {
         guard let p = resolvedForLevel(level, width: width).placement(globalIndex: flatIndex) else { return nil }

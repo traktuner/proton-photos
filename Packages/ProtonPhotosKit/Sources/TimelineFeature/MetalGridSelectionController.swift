@@ -52,4 +52,22 @@ final class MetalGridSelectionController {
 
     /// A click on empty space (gap) clears the selection (Apple-Photos behavior).
     func clickBackground() { clear() }
+
+    // MARK: Marquee (drag-rectangle) selection — replaces ⇧-click for multi-select.
+
+    /// The selection that existed when the drag began — the base a ⇧-drag ADDS to. A plain drag starts from empty.
+    private var marqueeBase: Set<PhotoUID> = []
+
+    /// Begin a marquee drag. `additive` (⇧ held at drag start) keeps the existing selection and adds to it;
+    /// otherwise the drag REPLACES the selection with whatever the rectangle covers.
+    func marqueeBegan(additive: Bool) { marqueeBase = additive ? selected : [] }
+
+    /// Update the marquee selection to the cells currently under the rectangle (`uids`), unioned with the
+    /// drag-start base. Equality-guarded so an unchanged drag step doesn't churn the renderer.
+    func marqueeChanged(_ uids: Set<PhotoUID>) {
+        let new = marqueeBase.union(uids)
+        guard new != selected else { return }
+        selected = new
+        onChange?(selected)
+    }
 }
