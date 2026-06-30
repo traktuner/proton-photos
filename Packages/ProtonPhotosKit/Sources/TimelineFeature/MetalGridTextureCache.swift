@@ -114,7 +114,11 @@ final class MetalGridTextureCache {
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
-        ctx.interpolationQuality = .high
+        // Interpolation quality only matters when actually downsampling (a 1:1 draw ignores it).
+        // `.medium` (bilinear) is materially cheaper on the render thread than `.high` (Lanczos) and
+        // visually indistinguishable for grid thumbnails at these sizes; the full-res viewer decode
+        // is a separate path that keeps high quality.
+        ctx.interpolationQuality = scale < 1 ? .medium : .high
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
 
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(

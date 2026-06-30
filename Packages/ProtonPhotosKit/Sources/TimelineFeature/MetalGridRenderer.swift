@@ -56,6 +56,16 @@ final class MetalGridRenderer {
     private(set) var lastDrawCalls = 0
     private(set) var lastInstanceCount = 0
 
+    /// Triple-buffered vertex pool for the steady `render(...)` path: instead of allocating a fresh
+    /// `MTLBuffer` per group every frame, each frame packs all groups' vertices into one growable,
+    /// reused buffer (per-group byte offsets) drawn from a 3-deep ring. `frameBoundary` bounds the CPU
+    /// to `maxInFlight` frames ahead of the GPU so a pooled buffer is never overwritten while a prior
+    /// frame still reads it. The offscreen dissolve path keeps simple per-group allocation (transient).
+    private static let maxInFlight = 3
+    private let frameBoundary = DispatchSemaphore(value: maxInFlight)
+    private var vertexPool: [MTLBuffer?] = Array(repeating: nil, count: maxInFlight)
+    private var frameCounter = 0
+
     private struct Vertex {
         var position: SIMD2<Float>
         var uv: SIMD2<Float>
@@ -126,8 +136,14 @@ final class MetalGridRenderer {
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             commandBuffer.commit(); return
         }
+        // Claim a pool slot only once we're committed to drawing (the guards above can early-return without
+        // a matching signal). The completion handler releases it when the GPU is done with this frame.
+        frameBoundary.wait()
+        frameCounter &+= 1
+        let slot = frameCounter % Self.maxInFlight
+        commandBuffer.addCompletedHandler { [frameBoundary] _ in frameBoundary.signal() }
         configure(encoder, viewportSize: viewportSize)
-        let (drawCalls, instances) = encode(groups: groups, into: encoder)
+        let (drawCalls, instances) = encode(groups: groups, into: encoder, pooledSlot: slot)
         encoder.endEncoding()
         if view.presentsWithTransaction {
             // LIVE-RESIZE SYNC: when the host has armed `presentsWithTransaction` (during a live window resize),
@@ -158,23 +174,63 @@ final class MetalGridRenderer {
 
     /// Encode all groups (back → front) onto an already-configured encoder. Returns (drawCalls, instances).
     /// Pure w.r.t. the encoder — identical work whether the target is the drawable or an offscreen texture.
+    ///
+    /// `pooledSlot` selects how the vertex storage is sourced: a non-nil slot packs every group's vertices
+    /// into one reused ring buffer (the steady `render(...)` path — no per-frame allocation); `nil` allocates
+    /// a fresh shared buffer per group (the transient offscreen dissolve path, where pooling buys nothing).
     @discardableResult
-    private func encode(groups: [MetalGridRenderGroup], into encoder: MTLRenderCommandEncoder) -> (Int, Int) {
-        var drawCalls = 0
-        var instances = 0
+    private func encode(groups: [MetalGridRenderGroup], into encoder: MTLRenderCommandEncoder, pooledSlot: Int? = nil) -> (Int, Int) {
+        let stride = MemoryLayout<Vertex>.stride
+        // Build each non-empty group's vertices up front, recording its byte offset into the packed buffer.
+        var built: [(verts: [Vertex], source: MetalGridRenderGroup.Source, quadCount: Int, offset: Int)] = []
+        built.reserveCapacity(groups.count)
+        var totalVerts = 0
         for group in groups where !group.quads.isEmpty {
             var verts: [Vertex] = []
             verts.reserveCapacity(group.quads.count * 6)
             for q in group.quads { appendQuad(into: &verts, q) }
-            guard let buffer = device.makeBuffer(bytes: verts, length: MemoryLayout<Vertex>.stride * verts.count, options: .storageModeShared) else { continue }
-            encoder.setVertexBuffer(buffer, offset: 0, index: 0)
-            switch group.source {
+            built.append((verts, group.source, group.quads.count, totalVerts * stride))
+            totalVerts += verts.count
+        }
+        guard totalVerts > 0 else { return (0, 0) }
+
+        // Resolve the vertex buffer + each group's offset into it.
+        let packed: MTLBuffer?
+        if let slot = pooledSlot {
+            packed = pooledBuffer(slot: slot, byteCount: totalVerts * stride)
+            if let buffer = packed {
+                let base = buffer.contents()
+                for g in built {
+                    g.verts.withUnsafeBytes { raw in
+                        if let src = raw.baseAddress { memcpy(base.advanced(by: g.offset), src, raw.count) }
+                    }
+                }
+            }
+        } else {
+            packed = nil   // per-group allocation below
+        }
+
+        var drawCalls = 0
+        var instances = 0
+        for g in built {
+            let buffer: MTLBuffer
+            let offset: Int
+            if let pooled = packed {
+                buffer = pooled
+                offset = g.offset
+            } else {
+                guard let b = device.makeBuffer(bytes: g.verts, length: stride * g.verts.count, options: .storageModeShared) else { continue }
+                buffer = b
+                offset = 0
+            }
+            encoder.setVertexBuffer(buffer, offset: offset, index: 0)
+            switch g.source {
             case .sharedTexture(let texture):
                 encoder.setFragmentTexture(texture, index: 0)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: verts.count)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: g.verts.count)
                 drawCalls += 1
-                instances += group.quads.count
-            case .perQuadTexture(let textures) where textures.count == group.quads.count:
+                instances += g.quadCount
+            case .perQuadTexture(let textures) where textures.count == g.quadCount:
                 for (i, texture) in textures.enumerated() {
                     encoder.setFragmentTexture(texture, index: 0)
                     encoder.drawPrimitives(type: .triangle, vertexStart: i * 6, vertexCount: 6)
@@ -186,6 +242,16 @@ final class MetalGridRenderer {
             }
         }
         return (drawCalls, instances)
+    }
+
+    /// The ring buffer for `slot`, grown (doubling) when the frame needs more than it currently holds.
+    /// Bound by the `frameBoundary` semaphore, so the slot's prior frame has finished reading before reuse.
+    private func pooledBuffer(slot: Int, byteCount: Int) -> MTLBuffer? {
+        if let existing = vertexPool[slot], existing.length >= byteCount { return existing }
+        let capacity = max(byteCount, (vertexPool[slot]?.length ?? 0) * 2)
+        let buffer = device.makeBuffer(length: capacity, options: .storageModeShared)
+        vertexPool[slot] = buffer
+        return buffer
     }
 
     // MARK: - Overview layer dissolve (offscreen, two-layer linear cross-dissolve)
