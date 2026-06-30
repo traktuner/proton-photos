@@ -35,6 +35,10 @@ else
   echo "Signing with: Xcode default (no Apple Development identity found)"
 fi
 
+echo "Preflight: validating grid profile configuration"
+plutil -lint Packages/ProtonPhotosKit/Sources/TimelineFeature/Resources/GridProfiles.plist >/dev/null
+xcrun swift test --package-path Packages/ProtonPhotosKit --filter TimelineGridProfileConfigurationTests
+
 echo "Preflight: building $SCHEME scheme for generic macOS"
 xcodebuild build -project "$PROJECT" -scheme "$SCHEME" \
   -destination 'generic/platform=macOS' -derivedDataPath "$DD" \
