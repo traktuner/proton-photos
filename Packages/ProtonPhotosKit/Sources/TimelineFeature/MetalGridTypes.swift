@@ -77,13 +77,34 @@ struct MetalGridHUD: Equatable, Sendable {
 
 /// Tunable streaming/overscan budgets (kept liberal; tune against real-device profiling if needed).
 struct MetalGridBudget: Sendable {
-    /// Max texture uploads pushed to the GPU per frame (visible-first). Raised 24 → 48 so a freshly decoded
-    /// screenful (cold start / post-pinch) clears in ~half the frames instead of trickling in as bands.
-    var maxUploadsPerFrame = 48
-    /// Max resident textures before LRU eviction kicks in.
-    var maxCachedTextures = 1200
+    /// Max texture uploads pushed to the GPU per frame (visible-first). macOS can afford a larger burst here:
+    /// the decoded CGImages are already in RAM, and this prevents dense-grid direction changes from repainting
+    /// visible thumbnails over many frames.
+    var maxUploadsPerFrame = 96
+    /// Max resident textures before LRU eviction kicks in. This is a macOS adapter budget, not a Core rule;
+    /// future iOS/iPadOS adapters should inject their own lower memory policy.
+    var maxCachedTextures = 4096
     /// Vertical overscan (fraction of viewport height) queried above & below the visible rect.
-    var overscanFraction: CGFloat = 0.6
+    var overscanFraction: CGFloat = 1.2
 
     static let `default` = MetalGridBudget()
+}
+
+struct MetalGridStreamingWindow: Equatable, Sendable {
+    let priority: [PhotoUID]
+    let pinned: Set<PhotoUID>
+}
+
+enum MetalGridStreamingPolicy {
+    /// Visible-first, duplicate-free streaming window. Near-viewport overscan is pinned too: on dense levels,
+    /// a small scroll reversal should reuse resident GPU textures instead of evicting and re-uploading them.
+    static func window(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID]) -> MetalGridStreamingWindow {
+        var seen = Set<PhotoUID>()
+        var priority: [PhotoUID] = []
+        priority.reserveCapacity(visibleUIDs.count + overscanUIDs.count)
+        for uid in visibleUIDs + overscanUIDs where seen.insert(uid).inserted {
+            priority.append(uid)
+        }
+        return MetalGridStreamingWindow(priority: priority, pinned: seen)
+    }
 }

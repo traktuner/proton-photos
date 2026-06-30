@@ -92,6 +92,31 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
     }
 }
 
+@Suite struct MetalGridStreamingPolicyTests {
+    @Test func pinsVisibleAndOverscanForScrollReversalReuse() {
+        let visible = [uid("visible-a"), uid("visible-b")]
+        let overscan = [uid("above-a"), uid("below-a")]
+        let window = MetalGridStreamingPolicy.window(visibleUIDs: visible, overscanUIDs: overscan)
+
+        #expect(window.priority == visible + overscan)
+        #expect(window.pinned == Set(visible + overscan))
+    }
+
+    @Test func deduplicatesWhilePreservingVisibleFirstOrder() {
+        let a = uid("a"), b = uid("b"), c = uid("c")
+        let window = MetalGridStreamingPolicy.window(visibleUIDs: [a, b], overscanUIDs: [b, c, a])
+
+        #expect(window.priority == [a, b, c])
+        #expect(window.pinned == [a, b, c])
+    }
+
+    @Test func macOSDefaultBudgetKeepsDenseScrollNeighborhoodResident() {
+        #expect(MetalGridBudget.default.maxCachedTextures >= 4096)
+        #expect(MetalGridBudget.default.maxUploadsPerFrame >= 96)
+        #expect(MetalGridBudget.default.overscanFraction >= 1.0)
+    }
+}
+
 // MARK: Metal smoke — the renderer's runtime shader actually compiles
 
 @Suite struct MetalGridRendererSmokeTests {
