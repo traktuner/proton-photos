@@ -35,6 +35,9 @@ let package = Package(
         // pure (no SDK/HTTP) and drive injected backend protocols the app implements.
         .library(name: "AlbumsFeature", targets: ["AlbumsFeature"]),
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
+        // Library map: MapKit (native Apple Maps) view over the shared encrypted location index.
+        // Platform UI layer — macOS now; an iOS/iPad UIKit variant reuses the same MediaCache core.
+        .library(name: "MapFeature", targets: ["MapFeature"]),
     ],
     targets: [
         // PhotosCore owns the package-wide localization catalog (Resources/Localizable.xcstrings),
@@ -70,5 +73,7 @@ let package = Package(
         // Upload: pure queue + state machine + folder enumeration over an injected upload backend.
         .target(name: "UploadFeature", dependencies: ["PhotosCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "UploadFeatureTests", dependencies: ["UploadFeature", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        // Map: MapKit view + clustering over PhotoLocationIndex (MediaCache). UI layer (AppKit/MapKit).
+        .target(name: "MapFeature", dependencies: ["PhotosCore", "MediaCache", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
     ]
 )
