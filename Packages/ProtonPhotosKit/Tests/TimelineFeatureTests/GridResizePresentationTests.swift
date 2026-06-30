@@ -377,9 +377,9 @@ private final class PresentationTestDataSource: MetalGridDataSource {
     // (sidebar open = a left-edge resize of the grid: the grid slides in from the right and scales).
     @Test func rightAnchoredScaleHoldsRightEdge() {
         let V: CGFloat = 1000, k: CGFloat = 0.75   // snapshot [0,V] → [250,V]
-        let right = MetalGridCoordinator.presentationScaledRectRightAnchored(CGRect(x: V - 100, y: 0, width: 100, height: 100), scale: k, rightX: V, viewportH: 800)
+        let right = MetalGridCoordinator.presentationScaledRectRightAnchored(CGRect(x: V - 100, y: 0, width: 100, height: 100), scale: k, rightX: V, anchorY: 800)
         #expect(abs(right.maxX - V) < eps, "the content right edge stays at V")
-        let left = MetalGridCoordinator.presentationScaledRectRightAnchored(CGRect(x: 0, y: 0, width: 100, height: 100), scale: k, rightX: V, viewportH: 800)
+        let left = MetalGridCoordinator.presentationScaledRectRightAnchored(CGRect(x: 0, y: 0, width: 100, height: 100), scale: k, rightX: V, anchorY: 800)
         #expect(abs(left.minX - 250) < eps, "the left edge maps to the new inset V·(1−k)")
         #expect(abs(left.width - 100 * k) < eps && abs(left.width - left.height) < eps, "tiles stay square, scaled by k")
     }

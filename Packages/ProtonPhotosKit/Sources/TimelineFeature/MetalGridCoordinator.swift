@@ -919,7 +919,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         presentationSidebarActive = false
         sidebarObstructionInset = presentationSidebarToEventInset   // commit the WIDTH (engine re-adds the gap)
         // Match the presentation's vertical anchor: bottom only at the newest end, centre in the middle of the
-        // timeline. A bottom-only settle made 7-column sidebar close jump to a different position.
+        // timeline.
         let scroll = presentationSidebarBottomPinned ? bottomAnchoredScroll() : centerAnchoredScroll()
         // TARGET — the settled layout (sticky columns ⇒ same count, tile filled) at the new inset + scroll.
         let phase = currentPhase()
@@ -1026,11 +1026,6 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                y: anchorY + (r.minY - anchorY) * k,
                width: r.width * k,
                height: r.height * k)
-    }
-
-    /// Bottom-anchored compatibility wrapper used by older geometry tests.
-    nonisolated static func presentationScaledRectRightAnchored(_ r: CGRect, scale k: CGFloat, rightX V: CGFloat, viewportH H: CGFloat) -> CGRect {
-        presentationScaledRectRightAnchored(r, scale: k, rightX: V, anchorY: H)
     }
 
     /// The VERTICAL counter-scroll slide (viewport pixels, y-down) for a height change of `dH` (= startH − curH,
