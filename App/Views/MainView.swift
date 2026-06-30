@@ -41,6 +41,7 @@ struct MainView: View {
     @State private var searchDebounceTask: Task<Void, Never>?
     // Shared-element zoom transition (photo ↔ its grid cell).
     @State private var gridProxy = GridProxy()
+    @State private var veilTimeout: Task<Void, Never>?
     @State private var zoom: ZoomTransition?
     // Real height of the native window toolbar (its top safe-area inset). The viewer lays its media out
     // below this, so the open/close zoom must fly the photo into the SAME region to avoid a shrink/jump.
@@ -143,11 +144,11 @@ struct MainView: View {
             .task { await loadAlbums() }
             .onAppear {
                 attachOfflineManager()
-                if librarySettled { model.markLibraryReady() }
+                // The grid calls this once the first on-screen frame is fully drawn → lift the veil then.
+                gridProxy.onFirstContentReady = { [weak model] in model?.markLibraryReady() }
+                evaluateVeilLift()
             }
-            .onChange(of: librarySettled) { _, settled in
-                if settled { model.markLibraryReady() }   // lift the launch veil once the grid is ready
-            }
+            .onChange(of: librarySettled) { _, _ in evaluateVeilLift() }
             .onChange(of: selection) { oldValue, newValue in
                 // Switching sidebar route while a photo/video is open: close the viewer INSTANTLY so the new tab's
                 // grid (or Map) just shows. No zoom-back-to-cell — the photo's cell usually isn't in the new
@@ -594,6 +595,20 @@ struct MainView: View {
     private var librarySettled: Bool {
         if case .loading = timelineModel.state { return false }
         return true
+    }
+
+    /// Lift the launch veil only once the VISIBLE thumbnails are actually drawn (the grid fires
+    /// `onFirstContentReady` → `markLibraryReady`), not merely when the library LIST loads — so it never reveals
+    /// blank cells. An empty/failed library has nothing to draw, so it lifts at once. A safety timeout guarantees
+    /// the veil can never stick: a cell that somehow never becomes resident must not pin it forever.
+    private func evaluateVeilLift() {
+        guard librarySettled else { return }
+        if timelineModel.allItems.isEmpty { model.markLibraryReady(); return }
+        guard veilTimeout == nil else { return }
+        veilTimeout = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(3))
+            model.markLibraryReady()
+        }
     }
 
     private var title: String {

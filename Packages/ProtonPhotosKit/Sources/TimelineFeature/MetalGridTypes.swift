@@ -77,8 +77,9 @@ struct MetalGridHUD: Equatable, Sendable {
 
 /// Tunable streaming/overscan budgets (kept liberal; tune against real-device profiling if needed).
 struct MetalGridBudget: Sendable {
-    /// Max texture uploads pushed to the GPU per frame (visible-first). 8–32 per the spec.
-    var maxUploadsPerFrame = 24
+    /// Max texture uploads pushed to the GPU per frame (visible-first). Raised 24 → 48 so a freshly decoded
+    /// screenful (cold start / post-pinch) clears in ~half the frames instead of trickling in as bands.
+    var maxUploadsPerFrame = 48
     /// Max resident textures before LRU eviction kicks in.
     var maxCachedTextures = 1200
     /// Vertical overscan (fraction of viewport height) queried above & below the visible rect.

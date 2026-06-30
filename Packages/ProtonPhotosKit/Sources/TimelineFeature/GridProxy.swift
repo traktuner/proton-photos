@@ -49,4 +49,11 @@ public final class GridProxy {
     /// Query the live content-mode state for rendering the toolbar control (current mode + whether the
     /// toggle is available at the current level). Returns nil before the grid is wired.
     public var contentModeState: (() -> (mode: TileContentDisplayMode, toggleAvailable: Bool))?
+
+    /// Fires ONCE when the first on-screen frame is fully populated — every visible cell's thumbnail is
+    /// uploaded to the GPU (drawn). UNLIKE the closures above (shell → grid commands), this is a grid → shell
+    /// EVENT: the shell assigns it, the grid calls it. The launch veil waits for this so it never lifts onto
+    /// blank cells. The shell must still apply a safety timeout — a cell that never becomes resident must not
+    /// pin the veil forever.
+    public var onFirstContentReady: (() -> Void)?
 }

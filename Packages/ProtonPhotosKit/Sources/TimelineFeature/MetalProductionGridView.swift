@@ -206,6 +206,8 @@ struct MetalProductionGridView: NSViewRepresentable {
         proxy.currentScrollAnchor = { [weak host] in host?.currentScrollAnchor() }   // read-only; shell remembers it per route
         proxy.zoomIn = stepIn
         proxy.zoomOut = stepOut
+        // Grid → shell EVENT: first fully-drawn frame → forward to the shell (it holds the launch veil for this).
+        host.coordinator.onFirstContentReady = { [weak proxy] in proxy?.onFirstContentReady?() }
         // Aspect/square toggle → the coordinator's content-mode preference (content fit only; no geometry change).
         proxy.toggleContentMode = { [weak host] in host?.coordinator.toggleContentMode() }
         proxy.setContentMode = { [weak host] mode in host?.coordinator.setPreferredNormalLevelContentMode(mode) }

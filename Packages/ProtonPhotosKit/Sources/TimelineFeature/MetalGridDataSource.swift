@@ -18,6 +18,9 @@ protocol MetalGridDataSource: AnyObject {
     func image(for uid: PhotoUID) -> CGImage?
     /// Prime the given UIDs into RAM (off-main); cheap + idempotent. Called for visible placeholders.
     func warm(_ uids: [PhotoUID])
+    /// Decode the given UIDs into RAM as a PREFETCH, independent of the per-frame `warm` pump (does not disturb
+    /// `pendingWarm`). Lets a pinch's TARGET level be warmed at segment-build time. Default: no-op.
+    func prefetchWarm(_ uids: [PhotoUID])
     /// Main-actor notification after an async warm pass may have made new RAM images visible.
     var onImagesAvailable: (() -> Void)? { get set }
     /// Whether this item is a video (drives the video badge). Default: false.
@@ -26,6 +29,7 @@ protocol MetalGridDataSource: AnyObject {
 
 extension MetalGridDataSource {
     func isVideo(_ uid: PhotoUID) -> Bool { false }
+    func prefetchWarm(_ uids: [PhotoUID]) {}   // only the real source decodes; test sources opt out
 }
 
 // MARK: - Real data (ThumbnailFeed-backed)
@@ -49,9 +53,11 @@ final class RealMetalGridDataSource: MetalGridDataSource {
     private let videoUIDs: Set<PhotoUID>
     private var warmInFlight = false
     private var pendingWarm: [PhotoUID] = []
-    /// Decode at most this many disk→RAM per in-flight batch so thumbnails STREAM in (≈100 ms/batch)
-    /// instead of the actor blocking on one huge sequential decode of the whole visible+overscan set.
-    private let maxWarmBatch = 48
+    private var prefetchTask: Task<Void, Never>?
+    /// Decode at most this many disk→RAM per in-flight batch. `warmDecoded` now decodes a batch CONCURRENTLY
+    /// across all cores, so this is sized to cover a typical screenful in one or two batches (fewer main-thread
+    /// round-trips, faster cold-start fill) rather than the old serial ≈100 ms/batch cap.
+    private let maxWarmBatch = 96
     /// Coalesces the per-frame visible set so the NETWORK reprioritisation (`.visibleNow`) is enqueued once
     /// per stable viewport (~100 ms), not every scroll frame. Disk→RAM decode below stays immediate.
     private let networkDebouncer = ViewportRequestDebouncer(window: 0.1)
@@ -72,6 +78,20 @@ final class RealMetalGridDataSource: MetalGridDataSource {
     func image(for uid: PhotoUID) -> CGImage? {
         guard let nsImage = feed.memoryImage(for: uid) else { return nil }
         return nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    }
+
+    /// Anticipatory decode of an entire target set into RAM, independent of the per-frame `warm`/`pumpWarm`
+    /// pipeline (whose `pendingWarm = uids` would otherwise clobber it). Used to warm a pinch's TARGET level at
+    /// segment-build time so it is resident by commit instead of popping in black. Idempotent (warmDecoded skips
+    /// already-decoded); cancels any prior in-flight prefetch so rapid level-chaining doesn't pile up callbacks.
+    func prefetchWarm(_ uids: [PhotoUID]) {
+        guard !uids.isEmpty else { return }
+        prefetchTask?.cancel()
+        prefetchTask = Task { [weak self, feed] in
+            _ = await feed.warmDecoded(uids, limit: uids.count)
+            if Task.isCancelled { return }
+            await MainActor.run { self?.onImagesAvailable?() }
+        }
     }
 
     func warm(_ uids: [PhotoUID]) {

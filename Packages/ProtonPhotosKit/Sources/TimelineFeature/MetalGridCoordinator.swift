@@ -16,6 +16,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var dataSource: MetalGridDataSource
     private let budget: MetalGridBudget
 
+    /// Fired ONCE, the first time every visible cell is GPU-resident (the first fully-drawn frame). The shell
+    /// holds the launch veil until this so it never lifts onto blank thumbnails. See `streamTextures`.
+    var onFirstContentReady: (() -> Void)?
+    private var firstContentReported = false
+
     weak var clipView: NSClipView?
     weak var metalView: MTKView?
 
@@ -1240,6 +1245,15 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                         viewportSize: lvp, selection: selectedFlatIndices) else { return false }
         pinchSegmentSource = s
         pinchSegmentTarget = t
+        // Anticipatory prefetch: decode the FULL target-level visible set NOW, at segment build — the decode
+        // pipeline then has the entire gesture as head-start, so the target tiles are RAM-resident by commit
+        // instead of popping in black afterward (the banded fill). Independent of the per-frame warm pump, which
+        // only streams the live crossfade subset (~50-60% of the committed viewport).
+        let targetUIDs = tgtPlan.visibleSlots.compactMap { slot -> PhotoUID? in
+            let i = slot.index
+            return (i >= 0 && i < dataSource.flatUIDs.count) ? dataSource.flatUIDs[i] : nil
+        }
+        dataSource.prefetchWarm(targetUIDs)
         requestRedraw()
         return true
     }
@@ -1630,6 +1644,12 @@ extension MetalGridCoordinator {
         var warm: [PhotoUID] = []
         for uid in priority where !cache.isResident(uid) && !cache.isInFlight(uid) && !dataSource.hasImage(for: uid) { warm.append(uid) }
         if !warm.isEmpty { dataSource.warm(warm) }
+        // First fully-populated on-screen frame (every VISIBLE cell uploaded, just now via `uploadVisible`) →
+        // tell the shell to lift the launch veil. One-shot; `allSatisfy` short-circuits on the first miss.
+        if !firstContentReported, !visibleUIDs.isEmpty, visibleUIDs.allSatisfy({ cache.isResident($0) }) {
+            firstContentReported = true
+            onFirstContentReady?()
+        }
     }
 
     private func publishLightDiagnostics(visibleCount: Int, realCount: Int, cellCount: Int, visibleRect: CGRect, contentSize: CGSize, now: CFTimeInterval) {
