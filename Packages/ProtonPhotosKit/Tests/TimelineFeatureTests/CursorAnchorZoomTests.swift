@@ -11,7 +11,7 @@ import GridCore
 @Suite struct CursorAnchorZoomTests {
     private let width: CGFloat = 1400
     private let eps: CGFloat = 1.0
-    private func engine() -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [3000]) }
+    private func engine() -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [3000]) }
 
     // .../Tests/TimelineFeatureTests/<this>.swift → up 3 → ProtonPhotosKit
     private func source(_ name: String) -> String {

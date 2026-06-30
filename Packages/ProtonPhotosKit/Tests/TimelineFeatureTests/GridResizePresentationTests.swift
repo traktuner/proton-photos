@@ -40,7 +40,11 @@ private final class PresentationTestDataSource: MetalGridDataSource {
     private func makeCoordinator(width: CGFloat = 1200, height: CGFloat = 800, level: Int = 3,
                                  scrollY: CGFloat = 1800, count: Int = 2000) -> (MetalGridCoordinator, MetalGridView, NSClipView)? {
         guard let device = MTLCreateSystemDefaultDevice(),
-              let coordinator = MetalGridCoordinator(device: device, dataSource: PresentationTestDataSource(count: count)) else { return nil }
+              let coordinator = MetalGridCoordinator(
+                device: device,
+                dataSource: PresentationTestDataSource(count: count),
+                gridProfile: TimelineGridProfileConfiguration.production.defaultProfile
+              ) else { return nil }
         let view = MetalGridView(frame: CGRect(x: 0, y: 0, width: width, height: height), device: device)
         let clip = NSClipView(frame: CGRect(x: 0, y: 0, width: width, height: height))
         clip.bounds = CGRect(x: 0, y: scrollY, width: width, height: height)

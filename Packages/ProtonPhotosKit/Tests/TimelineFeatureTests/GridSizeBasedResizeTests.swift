@@ -11,7 +11,7 @@ import GridCore
 /// `docs/apple-photos-parity-master-spec.md` (and §6/§10 of `docs/metalgrid-engine-contract.md`).
 @Suite struct GridSizeBasedResizeTests {
     private let viewportHeight: CGFloat = 900
-    private func engine(_ count: Int = 8000) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
+    private func engine(_ count: Int = 8000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
 
     // FIXED-COLUMNS, WIDTH-FILLING: across a continuous width sweep the column count is CONSTANT (= the level's
     // `nominalColumns`, it never reflows), the slot content width equals the viewport (no gutter), and the tile

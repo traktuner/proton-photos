@@ -3,6 +3,7 @@ import AppKit
 import Metal
 import PhotosCore
 import MediaCache
+import GridCore
 
 /// Leading event-inset (in points) for the grid: while a translucent sidebar overlays the grid's leading
 /// edge, the host declines hit-testing for `x < inset` so those events reach the sidebar. The grid still
@@ -47,6 +48,7 @@ struct MetalProductionGridView: NSViewRepresentable {
     /// previously-visited route), or `nil` to open at the newest end (first visit / launch). Set by the shell
     /// alongside `routeScrollGeneration`; consumed once per generation as the host's initial-viewport policy.
     var routeInitialScrollAnchor: GridScrollAnchor? = nil
+    let gridProfile: GridLevelProfile
     let onOpen: (PhotoItem, [PhotoItem]) -> Void
     var proxy: GridProxy?
     var selectionMode: Bool = false
@@ -60,7 +62,11 @@ struct MetalProductionGridView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let coord = context.coordinator
         guard let device = MTLCreateSystemDefaultDevice(),
-              let host = MetalGridScrollHost(device: device, dataSource: MetalGridProductionAdapter.makeDataSource(sections: sections, feed: feed)) else {
+              let host = MetalGridScrollHost(
+                device: device,
+                dataSource: MetalGridProductionAdapter.makeDataSource(sections: sections, feed: feed),
+                gridProfile: gridProfile
+              ) else {
             // Only reachable if Metal can't initialise on this machine (no GPU / shader build fails); emit a
             // diagnostic and return an empty view rather than crash.
             PhotoDiagnostics.shared.emit("MetalGridFallback", ["reason": "hostInitFailed"])

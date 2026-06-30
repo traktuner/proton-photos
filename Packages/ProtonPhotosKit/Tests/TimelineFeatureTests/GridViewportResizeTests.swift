@@ -10,7 +10,7 @@ import GridCore
 @Suite struct GridViewportResizeTests {
     private let eps: CGFloat = 0.5
     private let f: CGFloat = 0.5
-    private func engine(_ count: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
+    private func engine(_ count: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
 
     private func rebase(_ e: SquareTileGridEngine, oldFrame: CGRect, newFrame: CGRect, scrollY: CGFloat,
                         level: Int, phase: Int?, bottomPinned: Bool = false, anchorFractionY: CGFloat = 0.5) -> GridViewportResizeResult {

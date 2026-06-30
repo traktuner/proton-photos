@@ -10,7 +10,7 @@ import GridCore
 /// not comment matching.
 @Suite struct MetalGridContractGuardTests {
     private let eps: CGFloat = 0.5
-    private func engine(_ count: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
+    private func engine(_ count: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
 
     // MARK: source access (production sources only — never the tests)
     private func packageRoot() -> URL {
@@ -169,7 +169,7 @@ import GridCore
     // 10
     @Test func sixLevelSpecGuard() {
         #expect(SquareTileGridEngine.appleLevelSpecs.count == 6)
-        #expect(SquareTileGridEngine.defaultLevels.count == 6)
+        #expect(SquareTileGridEngine.testRegularLevels.count == 6)
         #expect(engine().levelCount == 6)
         #expect(SquareTileGridEngine.appleLevelSpecs.map(\.nominalColumns) == [3, 5, 7, 9, 20, 30],
                 "accepted six-level nominal columns")
@@ -179,10 +179,12 @@ import GridCore
         let coord = src("MetalGridCoordinator.swift")
         let host = src("MetalGridScrollHost.swift")
 
-        #expect(coord.contains("gridProfile: GridLevelProfile = SquareTileGridEngine.regularTimelineProfile"))
+        #expect(coord.contains("gridProfile: GridLevelProfile)"))
         #expect(coord.contains("engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: gridProfile)"))
         #expect(coord.contains("level = gridProfile.defaultLevel"))
-        #expect(host.contains("gridProfile: GridLevelProfile = SquareTileGridEngine.regularTimelineProfile"))
+        #expect(host.contains("gridProfile: GridLevelProfile)"))
         #expect(host.contains("gridProfile: gridProfile"))
+        #expect(!coord.contains("regularTimelineProfile"))
+        #expect(!host.contains("regularTimelineProfile"))
     }
 }

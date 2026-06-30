@@ -14,7 +14,7 @@ import GridCore
     private let viewport = CGSize(width: 1400, height: 900)
     private let viewportPointY: CGFloat = 450
 
-    private func engine() -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [3000]) }
+    private func engine() -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [3000]) }
 
     private func midScroll(_ e: SquareTileGridEngine, level: Int) -> CGFloat {
         max(0, e.contentSize(level: level, width: width).height / 2 - viewport.height / 2)

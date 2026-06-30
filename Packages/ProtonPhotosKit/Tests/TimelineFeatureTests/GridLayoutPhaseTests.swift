@@ -18,7 +18,7 @@ import GridCore
     private let sourceLevel = 3
 
     private func setup(target: Int) -> (e: SquareTileGridEngine, tx: GridZoomTransaction, desiredCol: Int, phase: Int, scrollY: CGFloat) {
-        let e = SquareTileGridEngine(sectionCounts: [count])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [count])
         let src = e.slotRect(flatIndex: anchor, level: sourceLevel, width: width)!
         let tx = e.beginZoomTransaction(cursorContentPoint: CGPoint(x: src.midX, y: src.midY),
                                         viewportPoint: cursor, level: sourceLevel, width: width)!
@@ -35,7 +35,7 @@ import GridCore
 
     // MARK: 1 — SettledTargetPreservesCursorAnchorColumnTest
     @Test func settledTargetPreservesCursorAnchorColumn() {
-        for target in 0 ..< SquareTileGridEngine.defaultLevels.count {
+        for target in 0 ..< SquareTileGridEngine.testRegularLevels.count {
             let s = setup(target: target)
             let anchorSlot = phasedPlan(s, target: target).visibleSlots.first { $0.index == anchor }
             #expect(anchorSlot?.column == s.desiredCol,
@@ -108,7 +108,7 @@ import GridCore
     // MARK: 6 — PhaseComputedFromAnchorGlobalIndexAndDesiredColumnTest
     @Test func phaseComputedFromAnchorGlobalIndexAndDesiredColumn() {
         let target = 3
-        let e = SquareTileGridEngine(sectionCounts: [count])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [count])
         let cols = e.resolvedMetrics(level: target, width: width).columns
         for desired in [0, 1, cols / 2, cols - 1] {
             let phase = e.columnPhase(forItem: anchor, targetColumn: desired, level: target, width: width)

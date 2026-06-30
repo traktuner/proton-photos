@@ -224,3 +224,17 @@ The regular timeline profile preserves the shipped six-level production ladder e
 default level `3`, normal levels `0...3`, and overview levels `4...5`. The compact profile keeps the same
 transition topology but starts with a one-column large-thumbnail level for narrow scene surfaces. Renderer code
 must remain profile-agnostic and draw the `GridFramePlan` it receives.
+
+#### Phase 3.4 — Config-driven production grid profiles
+
+Production grid profiles are app/adapter configuration, not Core defaults. `TimelineFeature` owns the bundled
+`Resources/GridProfiles.plist` and validates it at load time before constructing `GridLevelProfile` values.
+Invalid profile data must fail validation rather than silently falling back or clamping product behavior.
+
+`MetalGridCoordinator` and `MetalGridScrollHost` must be initialized with an explicit `GridLevelProfile`; they
+must not carry hidden regular/desktop defaults. UI decisions that depend on level semantics, such as month-label
+visibility, must read `GridLevelMetrics`/`GridLevelProfile` properties instead of hard-coded level thresholds.
+
+The bundled plist is a build-time product resource. Do not present editing the signed app bundle as a supported
+customization mechanism; if user-facing profile changes are added later, load them from a validated settings or
+support directory path and keep the same validation gate.

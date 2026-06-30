@@ -20,7 +20,7 @@ import GridCore
 
     // The bridge is the cursor-aligned PHASED settle (sub-cell residual); compute that phase + its rebased scrollY.
     private func setup() -> (e: SquareTileGridEngine, tx: GridZoomTransaction, phase: Int, scrollY: CGFloat) {
-        let e = SquareTileGridEngine(sectionCounts: [count])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [count])
         let src = e.slotRect(flatIndex: anchor, level: sourceLevel, width: width)!
         let tx = e.beginZoomTransaction(cursorContentPoint: CGPoint(x: src.midX, y: src.midY),
                                         viewportPoint: cursor, level: sourceLevel, width: width)!

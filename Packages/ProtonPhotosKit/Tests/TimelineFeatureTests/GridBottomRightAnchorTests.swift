@@ -15,7 +15,7 @@ import GridCore
     @Test func newestIsBottomRightAtEveryLevel() {
         // Counts that are NOT multiples of the column counts, so the partial row is non-trivial.
         for count in [997, 2000, 5003, 12345, 20000] {
-            let e = SquareTileGridEngine(sectionCounts: [count])
+            let e = SquareTileGridEngine.testRegular(sectionCounts: [count])
             for level in 0 ..< e.levelCount {
                 let cols = e.resolvedMetrics(level: level, width: width).columns
                 guard let last = e.locate(flatIndex: count - 1, level: level, width: width) else {
@@ -38,7 +38,7 @@ import GridCore
 
     @Test func noBlackOnTheRightOfTheBottomRowAtEveryLevel() {
         for count in [997, 5003, 20000] {
-            let e = SquareTileGridEngine(sectionCounts: [count])
+            let e = SquareTileGridEngine.testRegular(sectionCounts: [count])
             for level in 0 ..< e.levelCount {
                 let content = e.contentSize(level: level, width: width)
                 // Camera at the very bottom (newest).

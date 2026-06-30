@@ -85,7 +85,7 @@ import GridCore
     // ProductionBeginZoomTransactionIsAvailableTest
     @Test func productionBeginZoomTransactionIsAvailable() {
         // An engine built from production-style single-section counts can capture the live transaction.
-        let e = SquareTileGridEngine(sectionCounts: [16])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [16])
         let tx = e.beginZoomTransaction(cursorContentPoint: CGPoint(x: 200, y: 300),
                                         viewportPoint: CGPoint(x: 200, y: 300), level: 3, width: 1400)
         #expect(tx != nil, "production single-section engine must be able to begin a live zoom transaction")
@@ -94,8 +94,8 @@ import GridCore
     // ProductionGridTransactionNotDisabledByTimelineSectionsTest
     @Test func productionGridTransactionNotDisabledByTimelineSections() {
         // Many date-grouped TimelineSections feed the data source, but it flattens them → the engine the
-        // coordinator builds (`SquareTileGridEngine(sectionCounts: dataSource.sectionCounts)`) is single-
-        // section, so the live transaction is NOT disabled by having multiple timeline sections.
+        // coordinator builds from `dataSource.sectionCounts` + its injected grid profile is single-section,
+        // so the live transaction is NOT disabled by having multiple timeline sections.
         let manySections = (0 ..< 40).map { s in
             TimelineSection(id: "2026-\(s)", date: day(2026, 1, 1), title: "S\(s)",
                             items: (0 ..< 25).map { item("s\(s)-\($0)", day(2026, 1, 1)) })
@@ -104,7 +104,7 @@ import GridCore
         #expect(ds.sectionCounts.count == 1, "40 timeline sections must collapse to ONE layout section")
         #expect(ds.sectionCounts == [40 * 25])
 
-        let engine = SquareTileGridEngine(sectionCounts: ds.sectionCounts)
+        let engine = SquareTileGridEngine.testRegular(sectionCounts: ds.sectionCounts)
         let tx = engine.beginZoomTransaction(cursorContentPoint: CGPoint(x: 200, y: 500),
                                              viewportPoint: CGPoint(x: 200, y: 300), level: 3, width: 1400)
         #expect(tx != nil, "timeline sections must NOT disable the production live transaction")

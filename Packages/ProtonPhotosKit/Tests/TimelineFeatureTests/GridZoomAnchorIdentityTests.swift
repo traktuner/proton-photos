@@ -14,7 +14,7 @@ import GridCore
     private let width: CGFloat = 900
     private let count = 4000
 
-    private func engine() -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
+    private func engine() -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
 
     private func itemUnderCursor(_ e: SquareTileGridEngine, vp: CGPoint, level: Int, phase: Int?, scrollY: CGFloat) -> Int? {
         e.hitTest(contentPoint: CGPoint(x: vp.x, y: vp.y + scrollY), level: level, width: width, columnPhase: phase)?.index

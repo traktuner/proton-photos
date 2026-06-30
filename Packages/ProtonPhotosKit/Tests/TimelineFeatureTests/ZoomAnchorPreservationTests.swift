@@ -14,9 +14,9 @@ import GridCore
     private let viewport = CGSize(width: 1400, height: 900)
     private let viewportPoint = CGPoint(x: 700, y: 450)   // where the finger holds the anchor
 
-    private func singleSection() -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [3000]) }
+    private func singleSection() -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [3000]) }
     private func manySections() -> SquareTileGridEngine {
-        SquareTileGridEngine(sectionCounts: [37, 80, 12, 220, 95, 160, 44, 300, 9, 188])
+        SquareTileGridEngine.testRegular(sectionCounts: [37, 80, 12, 220, 95, 160, 44, 300, 9, 188])
     }
 
     /// Capture a logical anchor at `level`/`scrollY` from a viewport point, exactly like the coordinator.

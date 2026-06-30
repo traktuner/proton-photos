@@ -27,7 +27,7 @@ import GridCore
         return ""
     }
 
-    private func engine(_ count: Int = 1500) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
+    private func engine(_ count: Int = 1500) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
     private let viewport = CGSize(width: 1400, height: 900)
 
     // NoProductionNSCollectionViewFallbackTest — the production timeline instantiates the Metal grid and

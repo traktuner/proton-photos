@@ -17,7 +17,7 @@ import GridCore
     private let anchor = 2137
     private let cursor = CGPoint(x: 690, y: 430)   // mid-viewport cursor (NOT top, NOT centre exactly)
 
-    private func engine() -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
+    private func engine() -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
 
     /// A transaction captured the way the coordinator does: the anchor is the item under the cursor's CONTENT
     /// point at the source level, pinned at the cursor's viewport point.

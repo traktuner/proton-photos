@@ -79,7 +79,8 @@ public struct GridZoomTransaction: Equatable, Sendable {
         self.anchorGlobalIndex = anchorGlobalIndex
         self.anchorViewportPoint = anchorViewportPoint
         self.anchorLocalFraction = anchorLocalFraction
-        self.levels = levels.isEmpty ? SquareTileGridEngine.defaultLevels : levels
+        precondition(!levels.isEmpty, "GridZoomTransaction requires at least one grid level")
+        self.levels = levels
         self.sourceLevel = sourceLevel
     }
 

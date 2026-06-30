@@ -15,7 +15,7 @@ import GridCore
 
     private func plans() -> (GridFramePlan, GridFramePlan) {
         let viewport = CGSize(width: 1400, height: 900)
-        let engine = SquareTileGridEngine(sectionCounts: [4000])
+        let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
         let src = engine.framePlan(level: 0, viewportSize: viewport, scrollOffset: .zero, overscan: 0)
         let tgt = engine.framePlan(level: 1, viewportSize: viewport, scrollOffset: .zero, overscan: 0)
         return (src, tgt)

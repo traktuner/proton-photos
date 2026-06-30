@@ -66,6 +66,7 @@ let package = Package(
         .target(
             name: "TimelineFeature",
             dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "GridCore"],
+            resources: [.process("Resources")],
             swiftSettings: disableDynamicActorIsolation
         ),
         .target(

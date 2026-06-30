@@ -224,8 +224,9 @@ struct ProductionRouteGuardTests {
         #expect(timelineText.contains("routeScrollGeneration: Int = 0"))
         #expect(timelineText.contains("routeScrollGeneration: routeScrollGeneration"))
         #expect(timelineText.contains("routeInitialScrollAnchor: routeInitialScrollAnchor"))   // memory threaded through
-        #expect(timelineText.contains("includeMonthMarkers: level >= 4"))
-        #expect(timelineText.contains("if level >= 4, visibleContent.monthMarkers.count > 1"))
+        #expect(timelineText.contains("let showsMonthLabels = gridProfile.showsMonthLabels(level: level)"))
+        #expect(timelineText.contains("includeMonthMarkers: showsMonthLabels"))
+        #expect(timelineText.contains("if showsMonthLabels, visibleContent.monthMarkers.count > 1"))
         #expect(timelineText.contains("TimelineDateScrubber(markers: visibleContent.monthMarkers)"))
         #expect(timelineText.contains("proxy?.scrollToFlatIndex?(marker.index)"))
 

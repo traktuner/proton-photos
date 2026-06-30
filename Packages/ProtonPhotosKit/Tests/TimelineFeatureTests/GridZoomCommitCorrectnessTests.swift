@@ -17,7 +17,7 @@ import GridCore
     private let sourceLevel = 3
 
     private func setup(target: Int) -> (e: SquareTileGridEngine, tx: GridZoomTransaction, desiredCol: Int, phase: Int, scrollY: CGFloat, pitch: CGFloat) {
-        let e = SquareTileGridEngine(sectionCounts: [count])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [count])
         let src = e.slotRect(flatIndex: anchor, level: sourceLevel, width: width)!
         let tx = e.beginZoomTransaction(cursorContentPoint: CGPoint(x: src.midX, y: src.midY),
                                         viewportPoint: cursor, level: sourceLevel, width: width)!
@@ -59,7 +59,7 @@ import GridCore
 
     // MARK: 3 — SelectedOrHoveredItemIsZoomAnchorTest
     @Test func selectedOrHoveredItemIsZoomAnchor() {
-        let e = SquareTileGridEngine(sectionCounts: [count])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [count])
         let hoveredItem = 2500
         let rect = e.slotRect(flatIndex: hoveredItem, level: sourceLevel, width: width)!
         let hover = CGPoint(x: rect.midX, y: rect.midY)

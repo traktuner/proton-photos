@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import PhotosCore
 import DesignSystem
+import GridCore
 
 public struct TimelineView: View {
     @State private var model: TimelineViewModel
@@ -20,10 +21,12 @@ public struct TimelineView: View {
     private let media: FullMediaProvider?
     private let metadataProvider: PhotoMetadataProvider?
     private let favoriteUIDs: Set<PhotoUID>
+    private let gridProfile: GridLevelProfile
 
     public init(
         model: TimelineViewModel,
-        level: Binding<Int> = .constant(3),
+        level: Binding<Int>? = nil,
+        gridProfile: GridLevelProfile = TimelineGridProfiles.productionDefaultProfile,
         proxy: GridProxy? = nil,
         routeScrollGeneration: Int = 0,
         routeInitialScrollAnchor: GridScrollAnchor? = nil,
@@ -36,7 +39,8 @@ public struct TimelineView: View {
         onOpen: @escaping (PhotoItem, [PhotoItem]) -> Void = { _, _ in }
     ) {
         _model = State(initialValue: model)
-        _level = level
+        _level = level ?? .constant(gridProfile.defaultLevel)
+        self.gridProfile = gridProfile
         self.proxy = proxy
         self.routeScrollGeneration = routeScrollGeneration
         self.routeInitialScrollAnchor = routeInitialScrollAnchor
@@ -67,10 +71,11 @@ public struct TimelineView: View {
                 errorState(message)
                     .padding(.leading, leadingInset)
             case .loaded:
+                let showsMonthLabels = gridProfile.showsMonthLabels(level: level)
                 let visibleContent = model.visibleContent(
                     searchText: searchText,
                     favoriteUIDs: favoriteUIDs,
-                    includeMonthMarkers: level >= 4
+                    includeMonthMarkers: showsMonthLabels
                 )
                 // Production timeline is MetalGrid-ONLY: the canonical `SquareTileGridEngine` owns all
                 // geometry (square slots). No legacy-grid fallback, no aspect-driven justified layout,
@@ -88,6 +93,7 @@ public struct TimelineView: View {
                             level: $level,
                             routeScrollGeneration: routeScrollGeneration,
                             routeInitialScrollAnchor: routeInitialScrollAnchor,
+                            gridProfile: gridProfile,
                             onOpen: onOpen,
                             proxy: proxy,
                             selectionMode: selectionMode,
@@ -98,7 +104,7 @@ public struct TimelineView: View {
                         )
                         .ignoresSafeArea(edges: .bottom)
 
-                        if level >= 4, visibleContent.monthMarkers.count > 1 {
+                        if showsMonthLabels, visibleContent.monthMarkers.count > 1 {
                             TimelineDateScrubber(markers: visibleContent.monthMarkers) { marker in
                                 proxy?.scrollToFlatIndex?(marker.index)
                             }

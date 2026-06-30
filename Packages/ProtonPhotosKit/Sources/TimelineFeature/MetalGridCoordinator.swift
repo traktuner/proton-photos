@@ -26,7 +26,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     weak var clipView: NSClipView?
     weak var metalView: MTKView?
 
-    var level: Int = 3 {                       // medium density; clamped to the engine ladder in didSet
+    var level: Int {                           // clamped to the injected engine ladder in didSet
         didSet {
             level = engine.clampLevel(level)
             if level != oldValue { onContentSizeChange?(contentSize()) }
@@ -40,7 +40,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // metrics + anchor preservation). The coordinator ONLY converts the engine's `GridFramePlan` into Metal
     // quads — it never invents layout, never computes edge-fill, never scales a second surface. THE
     // canonical production path: input → engine → GridFramePlan → renderer draws exactly that plan.
-    private(set) var engine = SquareTileGridEngine(sectionCounts: [])
+    private(set) var engine: SquareTileGridEngine
 
     // MARK: - Live zoom transaction (engine-owned; focus-row stable)
     //
@@ -199,7 +199,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private(set) var hasPendingVisibleThumbnails = false
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
-          gridProfile: GridLevelProfile = SquareTileGridEngine.regularTimelineProfile) {
+          gridProfile: GridLevelProfile) {
         guard let renderer = MetalGridRenderer(device: device),
               let cache = MetalGridTextureCache(device: device, budget: budget) else { return nil }
         self.renderer = renderer
@@ -207,8 +207,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         self.dataSource = dataSource
         self.budget = budget
         self.gridProfile = gridProfile
+        self.level = gridProfile.defaultLevel
+        self.engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: gridProfile)
         super.init()
-        level = gridProfile.defaultLevel
         rebuildIndex()
     }
 

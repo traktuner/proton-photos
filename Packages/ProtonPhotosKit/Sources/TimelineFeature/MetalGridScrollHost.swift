@@ -182,7 +182,7 @@ final class MetalGridScrollHost: NSView {
     private let bridgeDuration: CFTimeInterval = GridZoomCommitBridge.duration
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
-          gridProfile: GridLevelProfile = SquareTileGridEngine.regularTimelineProfile) {
+          gridProfile: GridLevelProfile) {
         guard let coordinator = MetalGridCoordinator(device: device, dataSource: dataSource, budget: budget,
                                                      gridProfile: gridProfile) else { return nil }
         self.coordinator = coordinator

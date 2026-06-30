@@ -104,7 +104,7 @@ import GridCore
         #expect(tv.contains("MetalProductionGridView("), "timeline must build the Metal grid")
         #expect(!tv.contains("PhotoGridView("), "timeline must not build the NSCollectionView grid")
 
-        let e = SquareTileGridEngine(sectionCounts: [5_000])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [5_000])
         let plan = e.framePlan(level: 3, viewportSize: CGSize(width: 1280, height: 800),
                                scrollOffset: CGPoint(x: 0, y: 4000), overscan: 0)
         #expect(!plan.visibleSlots.isEmpty)

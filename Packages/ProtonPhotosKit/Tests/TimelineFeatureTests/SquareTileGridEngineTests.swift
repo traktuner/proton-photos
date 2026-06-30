@@ -13,7 +13,7 @@ import GridCore
     // A single large section so rows pack cleanly (the production layout anchors bottom-right; a single
     // section keeps the math obvious while still exercising the real kernel).
     private func engine(_ count: Int = 2000) -> SquareTileGridEngine {
-        SquareTileGridEngine(sectionCounts: [count])
+        SquareTileGridEngine.testRegular(sectionCounts: [count])
     }
     private let width: CGFloat = 1400
     private let viewport = CGSize(width: 1400, height: 900)
@@ -230,7 +230,7 @@ import GridCore
     // The engine owns section geometry: multi-section content stacks, every slot is square, section/item
     // mapping round-trips, and headers (supplementary query) are available.
     @Test func ownsSectionGeometry() {
-        let e = SquareTileGridEngine(sectionCounts: [37, 80, 12, 150, 9])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [37, 80, 12, 150, 9])
         // globalIndex ⇄ (section,item) round-trips across sections.
         for s in 0 ..< 5 {
             let gi = e.globalIndex(section: s, item: 0)!

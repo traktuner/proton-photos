@@ -8,7 +8,7 @@ import GridCore
 /// and the shared `SquareTileGridEngine.columnsForFixedSide` column rule BEFORE any resolve flips to use them,
 /// so the foundation is proven while the engine still behaves exactly as today (whole suite stays green).
 @Suite struct GridSizePolicyTests {
-    private let levels = SquareTileGridEngine.defaultLevels
+    private let levels = SquareTileGridEngine.testRegularLevels
 
     // The fixed per-level size round-trips: at the reference width it yields EXACTLY the level's nominalColumns
     // (the ε-nudge defeats the FP floor-truncation that would otherwise drop L2→6 / L5→29).

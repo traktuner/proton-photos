@@ -8,7 +8,7 @@ import GridCore
 // the visible query is bounded to the viewport+overscan, the pipeline is built once, diagnostics are throttled,
 // and pure-height resize doesn't recompute width-derived metrics/contentSize.
 @Suite struct GridResizePerfTests {
-    private func engine(_ count: Int = 20000) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
+    private func engine(_ count: Int = 20000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
     private func repoRoot() -> URL { var u = URL(fileURLWithPath: #filePath); for _ in 0 ..< 5 { u.deleteLastPathComponent() }; return u }
     private func src(_ name: String) -> String {
         for target in ["TimelineFeature", "GridCore"] {

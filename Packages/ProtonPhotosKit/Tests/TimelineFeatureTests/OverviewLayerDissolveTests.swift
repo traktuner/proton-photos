@@ -11,7 +11,7 @@ import GridCore
 // step (reports/archive/PHASE_B_OVERVIEW_LAYER_DISSOLVE_REPORT.md).
 @Suite struct OverviewLayerDissolveTests {
     private let viewport = CGSize(width: 1000, height: 760)
-    private func engine(_ n: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [n]) }
+    private func engine(_ n: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [n]) }
 
     private func plan(_ s: Int, _ t: Int, mode: TileContentDisplayMode = .aspectFitInsideSquare,
                       _ e: SquareTileGridEngine) -> OverviewLayerDissolvePlan? {

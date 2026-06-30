@@ -16,7 +16,7 @@ import GridCore
     private func tx(anchorGlobalIndex: Int = 1000, total: Int = 3000) -> GridZoomTransaction {
         GridZoomTransaction(totalItems: total, anchorGlobalIndex: anchorGlobalIndex,
                             anchorViewportPoint: cursor, anchorLocalFraction: CGPoint(x: 0.5, y: 0.5),
-                            levels: SquareTileGridEngine.defaultLevels, sourceLevel: 3)
+                            levels: SquareTileGridEngine.testRegularLevels, sourceLevel: 3)
     }
     private func focusRow(_ t: GridZoomTransaction, _ level: CGFloat) -> [Int] {
         t.frame(continuousLevel: level, viewportSize: viewport, overscan: 0).focusRow
@@ -81,7 +81,7 @@ import GridCore
     // ZoomDirectionUsesCursorItemTest — the transaction anchors on the item UNDER THE CURSOR (engine resolves
     // it), and the host captures it from the cursor (not viewport top).
     @Test func zoomDirectionUsesCursorItem() {
-        let e = SquareTileGridEngine(sectionCounts: [3000])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [3000])
         let width: CGFloat = 1400
         // A content point on a known item at level 3.
         let plan = e.framePlan(level: 3, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: 6000), overscan: 0)
@@ -97,7 +97,7 @@ import GridCore
 
     // GapCursorResolvesNearestFocusRowItemTest — a cursor over a gap still yields a valid adjacent anchor.
     @Test func gapCursorResolvesNearestFocusRowItem() {
-        let e = SquareTileGridEngine(sectionCounts: [3000])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [3000])
         let width: CGFloat = 1400
         let plan = e.framePlan(level: 3, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: 6000), overscan: 0)
         let row = Dictionary(grouping: plan.visibleSlots, by: { $0.row }).first { $0.value.count >= 2 }!.value
@@ -136,7 +136,7 @@ import GridCore
 
     // LargerZoomLevelExistsTest — the largest level (L0) is the lowest density (fewest columns, biggest tiles).
     @Test func largerZoomLevelExists() {
-        let levels = SquareTileGridEngine.defaultLevels
+        let levels = SquareTileGridEngine.testRegularLevels
         #expect(levels.count == 6, "expected exactly six Apple-like levels")
         #expect(levels[0].nominalColumns <= 3, "largest level should be ~3 columns: \(levels[0].nominalColumns)")
         // The largest-level slot side (derived from nominalColumns) exceeds every denser level's at one width.
@@ -149,7 +149,7 @@ import GridCore
     // LevelMetricsMonotonicTest — zooming out (rising level): nominalColumns strictly increases (density up),
     // the derived slot side strictly decreases, gap does not increase.
     @Test func levelMetricsMonotonic() {
-        let levels = SquareTileGridEngine.defaultLevels
+        let levels = SquareTileGridEngine.testRegularLevels
         let w: CGFloat = 1440
         func side(_ i: Int) -> CGFloat { SquareTileGridEngine.nominalSlotSide(columns: levels[i].nominalColumns, gap: levels[i].gap, width: w) }
         for i in 1 ..< levels.count {
@@ -166,13 +166,13 @@ import GridCore
         let width: CGFloat = 1400
         let cursor = CGPoint(x: 700, y: 5000)
         let vp = CGPoint(x: 700, y: 450)
-        let single = SquareTileGridEngine(sectionCounts: [3000])
+        let single = SquareTileGridEngine.testRegular(sectionCounts: [3000])
         #expect(single.beginZoomTransaction(cursorContentPoint: cursor, viewportPoint: vp, level: 3, width: width) != nil,
                 "single-section engine must capture a live transaction")
-        let multi = SquareTileGridEngine(sectionCounts: [500, 700, 1800])
+        let multi = SquareTileGridEngine.testRegular(sectionCounts: [500, 700, 1800])
         #expect(multi.beginZoomTransaction(cursorContentPoint: cursor, viewportPoint: vp, level: 3, width: width) == nil,
                 "multi-section engine must NOT capture a live transaction (live zoom off in production)")
-        let empty = SquareTileGridEngine(sectionCounts: [])
+        let empty = SquareTileGridEngine.testRegular(sectionCounts: [])
         #expect(empty.beginZoomTransaction(cursorContentPoint: cursor, viewportPoint: vp, level: 3, width: width) == nil,
                 "empty library must capture no transaction")
     }

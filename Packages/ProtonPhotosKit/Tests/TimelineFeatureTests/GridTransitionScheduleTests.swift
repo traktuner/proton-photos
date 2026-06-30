@@ -372,7 +372,7 @@ import GridCore
     @Test func builderOnEngineGeometryFocusRowStable() {
         let width: CGFloat = 1400
         let viewport = CGSize(width: 1400, height: 900)
-        let engine = SquareTileGridEngine(sectionCounts: [4000])
+        let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
         // Scroll to top so both levels show the item-0 neighbourhood; anchor on item 0 (top-left,
         // row 0 / col 0 at EVERY level ⇒ guaranteed common, relative key (0,0)).
         let src = engine.framePlan(level: 0, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: 0), overscan: 0)
@@ -413,7 +413,7 @@ import GridCore
     // prove the plan-endpoint half purely (every drawn occupant sits exactly on its source/target frame slot).
     @Test func pinchPlanEndpointsReproduceSourceAndTargetFrames() {
         let viewport = CGSize(width: 1400, height: 900)
-        let engine = SquareTileGridEngine(sectionCounts: [4000])
+        let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
         let src = engine.framePlan(level: 1, viewportSize: viewport, scrollOffset: .zero, overscan: 0)
         let tgt = engine.framePlan(level: 2, viewportSize: viewport, scrollOffset: .zero, overscan: 0)
         #expect(Set(src.visibleSlots.map(\.index)).contains(0) && Set(tgt.visibleSlots.map(\.index)).contains(0))
@@ -446,7 +446,7 @@ import GridCore
     // same rects ⇒ a continuous inter-segment seam (no blank frame, no snap) when the finger crosses a detent.
     @Test func chainingSeamSharedDetentIsContinuous() {
         let viewport = CGSize(width: 1400, height: 900)
-        let engine = SquareTileGridEngine(sectionCounts: [4000])
+        let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
         let f3 = engine.framePlan(level: 3, viewportSize: viewport, scrollOffset: .zero, overscan: 0)
         let f2 = engine.framePlan(level: 2, viewportSize: viewport, scrollOffset: .zero, overscan: 0)   // shared detent
         let f1 = engine.framePlan(level: 1, viewportSize: viewport, scrollOffset: .zero, overscan: 0)
@@ -469,7 +469,7 @@ import GridCore
 
     // ── 8c. Lattice eligibility boundary (the live pinch / click scope) ──
     @Test func latticeEligibilityBoundary() {
-        let e = SquareTileGridEngine(sectionCounts: [100])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [100])
         // Single-lattice scope = adjacent NORMAL-level pairs (lo ∈ {0,1,2}, focusRowRelayout). The normal→
         // overview boundary (L3→L4) is NOT eligible ⇒ the live pinch falls back to the GridZoomTransaction reflow.
         #expect(e.metrics(level: 0).transitionKindToNext == .focusRowRelayout)
@@ -480,7 +480,7 @@ import GridCore
 
     // ── 8d. Chain band = the contiguous focusRowRelayout run (mirrors coordinator.eligiblePinchChainBand) ──
     @Test func chainBandIsContiguousFocusRowRelayoutRun() {
-        let e = SquareTileGridEngine(sectionCounts: [100])
+        let e = SquareTileGridEngine.testRegular(sectionCounts: [100])
         func band(around level: Int) -> (lo: Int, hi: Int) {
             var lo = level, hi = level
             while lo > 0, e.metrics(level: lo - 1).transitionKindToNext == .focusRowRelayout { lo -= 1 }

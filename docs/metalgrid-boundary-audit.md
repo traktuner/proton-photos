@@ -167,10 +167,12 @@ Solutions:
 2. `GridCore` layout profiles must stay viewport-scoped (`regularTimeline`, `compactTimeline`, etc.). Platform
    adapters map scene size, safe areas, traits, and hardware capability to a profile; the renderer just draws
    the resulting `GridFramePlan`.
-3. macOS `TimelineFeature` adapter keeps `MetalProductionGridView`, `MetalGridScrollHost`, header/accessibility,
+3. Production profile values are loaded from the adapter's validated `GridProfiles.plist`, not from renderer
+   defaults. Invalid profile data must fail validation rather than silently falling back to a desktop profile.
+4. macOS `TimelineFeature` adapter keeps `MetalProductionGridView`, `MetalGridScrollHost`, header/accessibility,
    real data source, and AppKit symbol rasterization.
-4. `MetalRenderingCore` target only after `MetalGridRenderer` no longer accepts `MTKView` directly.
-5. iOS/iPadOS adapter: `UIViewRepresentable`/`UIView`, `UIScrollView` or SwiftUI scroll host, platform
+5. `MetalRenderingCore` target only after `MetalGridRenderer` no longer accepts `MTKView` directly.
+6. iOS/iPadOS adapter: `UIViewRepresentable`/`UIView`, `UIScrollView` or SwiftUI scroll host, platform
    safe-area/input policy, platform `MetalGridBudget`, and platform glyph rasterizer.
 
 ## Stop conditions for Phase 3.2

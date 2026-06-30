@@ -11,7 +11,7 @@ import GridCore
     private let width: CGFloat = 1000
     private let viewport = CGSize(width: 1000, height: 760)
     private let eps: CGFloat = 0.5
-    private func engine(_ count: Int = 4000) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
+    private func engine(_ count: Int = 4000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
     private let specs = SquareTileGridEngine.appleLevelSpecs
 
     private func contained(_ inner: CGRect, _ outer: CGRect) -> Bool {
@@ -39,7 +39,7 @@ import GridCore
     // 1
     @Test func sixAppleGridLevelsExist() {
         #expect(specs.count == 6)
-        #expect(SquareTileGridEngine.defaultLevels.count == 6)
+        #expect(SquareTileGridEngine.testRegularLevels.count == 6)
         #expect(specs.map(\.id) == [0, 1, 2, 3, 4, 5])
         #expect(engine().levelCount == 6)
     }
@@ -113,11 +113,11 @@ import GridCore
     }
 
     @Test func regularTimelineProfilePreservesProductionDefaults() {
-        let profile = SquareTileGridEngine.regularTimelineProfile
+        let profile = TimelineGridProfileConfiguration.production.profile(id: "regularTimeline")!
         let e = SquareTileGridEngine(sectionCounts: [4000], profile: profile)
 
         #expect(profile.id == "regularTimeline")
-        #expect(profile.levels == SquareTileGridEngine.defaultLevels)
+        #expect(profile.levels == SquareTileGridEngine.testRegularLevels)
         #expect(profile.defaultLevel == 3)
         #expect(e.defaultLevel == 3)
         #expect(e.levelCount == 6)
@@ -126,7 +126,7 @@ import GridCore
     }
 
     @Test func compactTimelineProfileStartsWithOneColumnAndKeepsTopology() {
-        let profile = SquareTileGridEngine.compactTimelineProfile
+        let profile = TimelineGridProfileConfiguration.production.profile(id: "compactTimeline")!
         let e = SquareTileGridEngine(sectionCounts: [4000], profile: profile)
 
         #expect(profile.id == "compactTimeline")
@@ -145,7 +145,7 @@ import GridCore
     }
 
     @Test func profileNamesAreViewportScopedNotPlatformScoped() {
-        for id in [SquareTileGridEngine.regularTimelineProfile.id, SquareTileGridEngine.compactTimelineProfile.id] {
+        for id in TimelineGridProfileConfiguration.production.profiles.map(\.id) {
             let lower = id.lowercased()
             #expect(!lower.contains("mac"))
             #expect(!lower.contains("ios"))

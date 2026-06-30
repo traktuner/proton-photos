@@ -9,7 +9,7 @@ import GridCore
 @Suite struct GridLiveZoomBoundsTests {
 
     private func transaction(anchorIndex: Int = 500, cursor: CGPoint = CGPoint(x: 700, y: 450)) -> GridZoomTransaction {
-        let engine = SquareTileGridEngine(sectionCounts: [4000])
+        let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
         return GridZoomTransaction(totalItems: 4000, anchorGlobalIndex: anchorIndex, anchorViewportPoint: cursor,
                                    anchorLocalFraction: CGPoint(x: 0.5, y: 0.5), levels: engine.levels, sourceLevel: 0)
     }
@@ -27,7 +27,7 @@ import GridCore
     // 1b. THE rubber band: over-zoom scales the level-0 grid GEOMETRICALLY (fixed columns, larger cells +
     // pitch) — it does NOT reflow to fewer columns. This is what makes the elastic scale actually visible.
     @Test func overZoomScalesLevel0GridWithoutReflow() {
-        let engine = SquareTileGridEngine(sectionCounts: [4000])
+        let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
         let tx = transaction()
         let viewport = CGSize(width: 1400, height: 900)
         let f0 = tx.frame(continuousLevel: 0, viewportSize: viewport, overscan: 0)
@@ -56,7 +56,7 @@ import GridCore
 
     // 3. Releasing after a negative live level commits/clamps to level 0 (never a negative committed level).
     @Test func releaseFromOverZoomCommitsToLevel0() {
-        let engine = SquareTileGridEngine(sectionCounts: [4000])
+        let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
         let deepest = GridLiveZoomBounds.visualLevel(rawLevel: -1000, levelCount: engine.levelCount)
         #expect(Int(deepest.rounded()) == 0)               // the host's rounded commit target is 0
         #expect(engine.clampLevel(Int(deepest.rounded())) == 0)
