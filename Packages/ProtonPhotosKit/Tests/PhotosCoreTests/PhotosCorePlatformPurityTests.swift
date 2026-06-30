@@ -31,7 +31,6 @@ final class PhotosCorePlatformPurityTests: XCTestCase {
 
     /// Recursively collects every `.swift` file under the given directory.
     private func swiftFiles(in directory: URL) throws -> [URL] {
-        let resourceValues = try URLResourceValues(keys: [.isDirectoryKey])
         var results: [URL] = []
         let enumerator = FileManager.default.enumerator(
             at: directory,
@@ -40,14 +39,13 @@ final class PhotosCorePlatformPurityTests: XCTestCase {
         )
         guard let enumerator else { return [] }
         for case let url as URL in enumerator {
-            _ = resourceValues
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue,
                url.pathExtension == "swift" {
                 results.append(url)
             }
         }
-        return results.sorted()
+        return results.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
     }
 
     /// Reads the contents of a file as UTF-8 text.
