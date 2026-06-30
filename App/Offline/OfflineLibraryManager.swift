@@ -98,9 +98,14 @@ final class OfflineLibraryManager {
         prepareDismissed = false
         prepareMonitor = Task { [weak self] in
             while let self, !Task.isCancelled {
-                if let pct = await self.feed?.prefetchStatus().diskThumbnailCoveragePercent {
-                    self.cachePreparePercent = pct
-                    if pct >= 99.5 { break }
+                // Only trust coverage once the crawl is SEEDED (`diskThumbnailTotal > 0`). An empty crawl reports
+                // a false 1.0 "warm"; at launch the monitor runs before the timeline seeds the crawl, so without
+                // this gate it would conclude warm and exit before the first thumbnail ever loads — and the pill
+                // would never appear on a genuine first load (e.g. right after a cache reset).
+                if let status = await self.feed?.prefetchStatus(), status.diskThumbnailTotal > 0 {
+                    let percent = status.diskThumbnailCoverageFraction * 100   // fraction → 0…100 percent
+                    self.cachePreparePercent = percent
+                    if percent >= 99.5 { break }
                     self.prepareActive = true   // un-warm cache → show the pill for this initial load
                 }
                 try? await Task.sleep(for: .seconds(1.5))

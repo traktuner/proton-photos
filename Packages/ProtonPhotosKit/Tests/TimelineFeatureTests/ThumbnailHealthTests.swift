@@ -69,7 +69,7 @@ struct ThumbnailHealthTests {
 
         let status = await prefetcher.status()
         #expect(status.diskFileCount >= 1)
-        #expect(status.diskThumbnailCoveragePercent >= 1)
+        #expect(status.diskThumbnailCoverageFraction >= 1)
     }
 
     @Test func priorityUpgradeTest() async throws {

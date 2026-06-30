@@ -286,7 +286,11 @@ public actor ThumbnailFeed {
     public struct PrefetchStatus: Sendable, Equatable {
         public let enabled: Bool
         public let paused: Bool
-        public let diskThumbnailCoveragePercent: Double
+        /// Disk thumbnail coverage as a 0…1 FRACTION (1.0 = fully warm). Not a 0…100 percent.
+        public let diskThumbnailCoverageFraction: Double
+        /// Number of thumbnails the crawl is tracking. 0 ⇒ the crawl isn't seeded yet, so the fraction (which
+        /// defaults to 1.0 for an empty set) is MEANINGLESS — callers must not read "warm" until this is > 0.
+        public let diskThumbnailTotal: Int
         public let currentQueueLength: Int
         public let downloadsInFlight: Int
         public let decodesInFlight: Int
@@ -319,7 +323,8 @@ public actor ThumbnailFeed {
         return PrefetchStatus(
             enabled: prefetchEnabled,
             paused: prefetchPaused || interactionActive,
-            diskThumbnailCoveragePercent: coverage.percent,
+            diskThumbnailCoverageFraction: coverage.percent,
+            diskThumbnailTotal: coverage.total,
             currentQueueLength: priority.count + max(0, sequential.count - sequentialIndex),
             downloadsInFlight: downloadInFlight,
             decodesInFlight: decodeInFlight,
