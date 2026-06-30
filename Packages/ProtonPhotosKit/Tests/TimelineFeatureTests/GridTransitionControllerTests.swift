@@ -87,6 +87,76 @@ import GridCore
         #expect(!controller.currentDraws().isEmpty)
     }
 
+    @Test func sevenNineClickProducesVisibleMotionAcrossHostTicks() throws {
+        let viewport = CGSize(width: 1400, height: 900)
+        let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
+        let sourceLevel = 3
+        let targetLevel = 2
+        let sourceScroll = CGPoint(x: 0, y: 6000)
+        let viewportPoint = CGPoint(x: viewport.width / 2, y: viewport.height / 2)
+        let anchorContent = CGPoint(x: viewportPoint.x, y: sourceScroll.y + viewportPoint.y)
+        let anchor = try #require(engine.anchorItem(
+            nearContentPoint: anchorContent,
+            level: sourceLevel,
+            width: viewport.width
+        ))
+        let targetColumn = engine.cursorColumn(viewportX: viewportPoint.x, level: targetLevel, width: viewport.width)
+        let targetPhase = engine.columnPhase(
+            forItem: anchor.flatIndex,
+            targetColumn: targetColumn,
+            level: targetLevel,
+            width: viewport.width
+        )
+        let targetScroll = engine.anchoredScrollOffset(
+            flatIndex: anchor.flatIndex,
+            localFraction: anchor.localFraction,
+            viewportPoint: viewportPoint,
+            level: targetLevel,
+            width: viewport.width,
+            columnPhase: targetPhase
+        )
+        let source = engine.framePlan(level: sourceLevel, viewportSize: viewport, scrollOffset: sourceScroll, overscan: viewport.height)
+        let target = engine.framePlan(
+            level: targetLevel,
+            viewportSize: viewport,
+            scrollOffset: CGPoint(x: 0, y: targetScroll.y),
+            overscan: viewport.height,
+            columnPhase: targetPhase
+        )
+
+        let controller = GridTransitionController()
+        #expect(controller.beginClick(
+            source: source,
+            target: target,
+            anchorIndex: anchor.flatIndex,
+            viewportSize: viewport,
+            selection: []
+        ))
+        let initial = controller.currentDraws()
+        #expect(!initial.isEmpty)
+
+        var mid: [GridTransitionDraw] = []
+        var sawPartialHandoff = false
+        for _ in 0 ..< 25 {
+            _ = controller.advanceClick(bySeconds: 1.0 / 60.0)
+            if controller.partialComponentCount() > 0 { sawPartialHandoff = true }
+            let draws = controller.currentDraws()
+            if !draws.isEmpty { mid = draws }
+        }
+        #expect(!mid.isEmpty)
+        let initialRects = Dictionary(uniqueKeysWithValues: initial.map { ($0.index, $0.rect) })
+        let movingRects = mid.filter { draw in
+            guard let start = initialRects[draw.index] else { return false }
+            let delta = abs(start.minX - draw.rect.minX)
+                + abs(start.minY - draw.rect.minY)
+                + abs(start.width - draw.rect.width)
+                + abs(start.height - draw.rect.height)
+            return delta > 1
+        }
+        #expect(!movingRects.isEmpty, "9<->7 click plans must visibly move at least one thumbnail mid-transition")
+        #expect(sawPartialHandoff, "9<->7 click plans must have at least one visible handoff frame during the click")
+    }
+
     @Test func relocatingSelectionDoesNotBlockClickPlan() {
         let (src, tgt) = plans()
         let viewport = CGSize(width: 1400, height: 900)

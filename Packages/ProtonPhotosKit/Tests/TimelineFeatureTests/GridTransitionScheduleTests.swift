@@ -22,6 +22,20 @@ import GridCore
                 c(3, 0.0850, fd: 1), c(4, 0.0667, fd: 1), c(5, 0.0284, fd: 1), c(6, 0.0264, fd: 2)]
     }
 
+    private func overloadedClickComponents(count: Int = 40) -> [GridTransitionComponent] {
+        (0 ..< count).map { id in
+            let distance = 1 + id / 8
+            return GridTransitionComponent(
+                id: id,
+                keys: [RelativeSlotKey(dr: id.isMultiple(of: 2) ? -distance : distance, dc: id % 8)],
+                focusDistance: distance,
+                side: id.isMultiple(of: 2) ? .upper : .lower,
+                visibleAreaFraction: 1.0 / Double(id + 2),
+                window: nil
+            )
+        }
+    }
+
     private func interior60(_ window: ClosedRange<Double>, tuning: GridTransitionTuning, phases: Int = 16) -> Int {
         let curve = tuning.localAlphaCurve
         var mn = Int.max
@@ -134,6 +148,26 @@ import GridCore
         for c in comps { #expect(interior60(windows[c.id]!, tuning: tuning) >= 1) }
         // at most one partial component per frame (50 phases × 60/120 Hz)
         #expect(maxSimultaneousPartial(windows, tuning: tuning, durationSeconds: tuning.clickDurationSeconds) == 1)
+    }
+
+    @Test func overloadedClickWindowsRemainVisibleAtHostSamples() {
+        let comps = overloadedClickComponents()
+        let tuning = GridTransitionTuning.default
+        let windows = GridTransitionScheduler.clickWindows(components: comps, tuning: tuning)
+        let qs = GridTransitionScheduler.clickQSamples(durationSeconds: tuning.clickDurationSeconds,
+                                                       hz: tuning.planRefreshHz,
+                                                       rampFraction: tuning.clickRampFraction)
+        let curve = tuning.localAlphaCurve
+
+        #expect(windows.count == comps.count)
+        for c in comps {
+            let window = windows[c.id]!
+            let interiorSamples = qs.filter { q in
+                let lp = curve.localProgress(w0: window.lowerBound, w1: window.upperBound, q: q)
+                return lp > 1e-9 && lp < 1 - 1e-9
+            }
+            #expect(!interiorSamples.isEmpty, "overloaded click window \(c.id) must have a visible sampled handoff")
+        }
     }
 
     @Test func clickDurationIs420() {
@@ -371,7 +405,6 @@ import GridCore
 
     // ── 7. Builder on real engine geometry: focus row stable, components exist ──
     @Test func builderOnEngineGeometryFocusRowStable() {
-        let width: CGFloat = 1400
         let viewport = CGSize(width: 1400, height: 900)
         let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
         // Scroll to top so both levels show the item-0 neighbourhood; anchor on item 0 (top-left,
