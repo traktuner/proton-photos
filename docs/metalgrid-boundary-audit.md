@@ -202,3 +202,14 @@ The new target has no package dependencies and is covered by the universal Core 
 it as the macOS grid adapter. Transition controllers, Metal renderer input orchestration, selection controller,
 texture residency policy, renderer code, and platform hosts were deliberately left out of this pass because
 their module boundary still needs a separate API/access audit.
+
+## Phase 3.5 result
+
+`GridCore` now owns `GridProfileRebase`: a pure profile-switch camera rebase for dynamic viewport classes.
+It maps the source level to a target level, captures the logical item at a normalized source viewport anchor,
+and resolves the same item/local Y in the target engine before clamping. The default level mapping chooses the
+closest visual slot size while preserving the normal-vs-overview/month-label role when possible.
+
+No macOS production adapter currently switches profiles automatically. `TimelineFeature` still injects the
+validated production profile explicitly; future adapter work must call the Core rebase before swapping engines
+so `regularTimeline`/`compactTimeline` changes do not jump.

@@ -238,3 +238,18 @@ visibility, must read `GridLevelMetrics`/`GridLevelProfile` properties instead o
 The bundled plist is a build-time product resource. Do not present editing the signed app bundle as a supported
 customization mechanism; if user-facing profile changes are added later, load them from a validated settings or
 support directory path and keep the same validation gate.
+
+#### Phase 3.5 — Grid profile camera rebase
+
+`GridCore` owns the pure camera rebase used when a platform adapter switches between viewport-scoped grid
+profiles for the same logical timeline data. A profile switch must not reuse raw scroll offsets. It must capture
+the item at a normalized source viewport anchor, resolve that same item in the target profile, and clamp only
+after computing the target scroll offset.
+
+The rebase API must keep profile choice outside Core: adapters pass a source engine, target engine, viewport
+frames, current level, committed phase policy, bottom-pin state, and a level-mapping policy. The default mapping
+is a visual slot-size match that preserves the normal-vs-overview/month-label role when possible, so dynamic
+viewport changes do not silently cross timeline semantics.
+
+Phase 3.5 does not activate automatic profile switching in the macOS adapter. That wiring belongs to the next
+adapter phase, after the Core rebase behavior is covered by tests.
