@@ -213,6 +213,11 @@ struct MainView: View {
                                 onPinchDismissChanged: updateInteractiveDismiss,
                                 onPinchDismissEnded: { endInteractiveDismiss(shouldClose: $0) },
                                 isDismissing: zoom?.interactive == true)
+                    // Inset by the floating sidebar's width so it stays visible BESIDE the viewer (and the native
+                    // toggle actually shows/hides it) instead of being covered. 0 when collapsed ⇒ full-width viewer.
+                    // Matches the zoom overlay's `contentRect` inset, so the open/close hand-off has no jump.
+                    .padding(.leading, leadingObstructionInset)
+                    .animation(.easeInOut(duration: 0.3), value: leadingObstructionInset)   // slide with the sidebar toggle
                 // NOT `.opacity(0)` while dismissing — an alpha-0 NSView is non-hit-testable, so a fresh pinch would
                 // leak to the grid behind (it would scroll/zoom) and never return to the scroll view (the image
                 // "locks"). The viewer stays hit-testable and hides its OWN background + image while dismissing, so
@@ -396,16 +401,19 @@ struct MainView: View {
 
     @ViewBuilder private func zoomOverlay(_ z: ZoomTransition) -> some View {
         GeometryReader { geo in
-            // Full-window coords (this layer ignores the safe area, matching the window-space cell frames).
-            // At progress 1 the photo is the media region BELOW the opaque top bar, identical to where the
-            // viewer renders it — so handing off to the viewer causes no shrink/jump; at 0 it is the grid cell.
-            let contentRect = CGRect(x: 0, y: topBarInset,
-                                     width: geo.size.width, height: max(0, geo.size.height - topBarInset))
+            // Window coords (this layer ignores the safe area, matching the window-space cell frames). The
+            // media region sits BELOW the opaque top bar AND to the trailing side of the floating sidebar
+            // (the leading-obstruction inset) — identical to where the inset viewer renders it, so handing
+            // off to the viewer causes no shrink/jump; at progress 0 it is the grid cell.
+            let contentRect = CGRect(x: leadingObstructionInset, y: topBarInset,
+                                     width: max(0, geo.size.width - leadingObstructionInset),
+                                     height: max(0, geo.size.height - topBarInset))
             let full = fitRect(z.image, in: contentRect)
             let p = max(0, min(1, z.progress))
             let frame = Self.lerpRect(z.cellFrame, full, p)
             ZStack {
                 ViewerVisualConstants.backgroundColor.opacity(p)   // fades as the photo shrinks ⇒ the grid shows through
+                    .padding(.leading, leadingObstructionInset)    // cover only the detail area, never the floating sidebar
                 Image(nsImage: z.image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
