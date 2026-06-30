@@ -112,7 +112,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             DebugLog.log("timeline: enumerated \(items.count) items ✓")
             let videoNodeIDs: Set<String>
             do {
-                let videos = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: 2)
+                let videos = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: PhotoTag.videos.rawValue)
                 videoNodeIDs = Set(videos.map(\.linkID))
                 DebugLog.log("timeline: video tag enrichment found \(videoNodeIDs.count) videos")
             } catch {
@@ -125,7 +125,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             // filter. Map each live photo's node → its paired video link.
             let livePhotoVideoIDs: [String: String]
             do {
-                let lives = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: 3)
+                let lives = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: PhotoTag.livePhotos.rawValue)
                 livePhotoVideoIDs = Dictionary(lives.compactMap { e in e.relatedVideoLinkID.map { (e.linkID, $0) } },
                                                uniquingKeysWith: { first, _ in first })
                 DebugLog.log("timeline: live-photo tag enrichment found \(livePhotoVideoIDs.count) live photos")
@@ -293,7 +293,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
 
     func favoriteUIDs() async throws -> Set<PhotoUID> {
         let root = try await resolvePhotosRoot()
-        let entries = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: 0)
+        let entries = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: PhotoTag.favorites.rawValue)
         return Set(entries.map { PhotoUID(volumeID: root.volumeID, nodeID: $0.linkID) })
     }
 
@@ -321,7 +321,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                 PhotoItem(
                     uid: PhotoUID(volumeID: volumeID, nodeID: e.linkID),
                     captureTime: Date(timeIntervalSince1970: e.captureTime),
-                    mediaType: e.tags.contains(2) ? "video/quicktime" : "image/jpeg",
+                    mediaType: e.tags.contains(PhotoTag.videos.rawValue) ? "video/quicktime" : "image/jpeg",
                     isLivePhoto: e.isLivePhoto,
                     relatedVideoID: e.relatedVideoLinkID,
                     tags: Self.tags(from: e.tags)
@@ -541,12 +541,7 @@ extension DriveSDKBridge: PhotoUploading {
         // The SDK exposes operation-level pause/resume, but we drive uploads through the `uploadPhoto`
         // convenience (no held operation), so in-flight pause isn't wired: queued items pause at the
         // queue level; cancelled/failed items retry from the start (honestly, not byte-resumed).
-        UploadBackendCapabilities(
-            canUpload: true,
-            supportsCancel: true,
-            supportsPauseResume: false,
-            supportsResumeAcrossRelaunch: false
-        )
+        .sdkUploader
     }
 
     func upload(

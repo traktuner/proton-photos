@@ -1,14 +1,10 @@
 import Foundation
 import PhotosCore
 
-/// App-facing album operations. UI binds to this, never to the SDK/HTTP layer.
-public protocol AlbumManaging: Sendable {
-    var capabilities: AlbumCapabilities { get }
-    func listAlbums() async throws -> [AlbumSummary]
-    func createAlbum(name: String) async throws -> AlbumID
-    func addPhotos(_ photoUIDs: [PhotoUID], to albumID: AlbumID) async throws
-    func setAlbumCover(albumID: AlbumID, photoUID: PhotoUID) async throws
-}
+/// App-facing album operations. UI binds to this, never to the SDK/HTTP layer. Shares its method set
+/// with the `AlbumBackend` data seam via `AlbumOperations`; this facade adds input validation and a
+/// normalised `AlbumError` surface on top of an injected backend.
+public protocol AlbumManaging: AlbumOperations {}
 
 /// Default implementation over an injected `AlbumBackend`. Validates input and normalises errors so
 /// every UI/caller sees the same `AlbumError` surface regardless of which backend is wired.

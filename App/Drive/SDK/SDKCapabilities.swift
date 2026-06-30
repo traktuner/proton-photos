@@ -1,10 +1,14 @@
 import Foundation
+import AlbumsFeature
+import UploadFeature
 
 /// Central, honest record of what the wired Proton SDK / HTTP layer can actually do. Logged once at
-/// sign-in for diagnostics — nothing here currently gates UI (see UploadBackendCapabilities for that).
+/// sign-in for diagnostics — nothing here currently gates UI.
 ///
-/// This documents "does the SDK support X?" for the diagnostic log. When the SDK gains album APIs (or
-/// we implement album-write crypto over HTTP), flip the relevant flag here (purely informational today).
+/// The album + upload sections are NOT hand-rolled here: they reference the same canonical capability
+/// presets the UI gates on (`AlbumCapabilities.httpReadAndCover`, `UploadBackendCapabilities.sdkUploader`),
+/// so the diagnostic can't drift from the real backend. When the SDK gains album APIs (or we implement
+/// album-write crypto), flip the preset and both the gating and the log follow.
 struct SDKCapabilities {
     // ProtonPhotosClient — present and wrapped by `DriveSDKBridge`.
     var photosClientAvailable = true
@@ -14,19 +18,13 @@ struct SDKCapabilities {
     var downloadOperation = true
     var cancelPhotoDownload = true
 
-    // Upload — SDK methods exist; the storage stream is now implemented in `SDKHttpClient`.
-    var uploadPhoto = true
-    var startUpload = true
-    var uploadOperation = true
-    var cancelUpload = true
+    /// Upload capabilities, as the UI sees them (the wired SDK uploader). Single source of truth.
+    var upload = UploadBackendCapabilities.sdkUploader
 
-    // Albums — the Swift SDK exposes no album API. Listing works via direct HTTP; writes
-    // (create/add/cover) need album-node encryption that isn't implemented, so they're unsupported.
+    /// Album capabilities, as the UI sees them. The Swift SDK exposes no album API (`albumsViaSDK`);
+    /// listing + set-cover go via direct HTTP, create/add need unimplemented album-node write crypto.
     var albumsViaSDK = false
-    var albumsViaHTTP = true        // list + album-contents reads
-    var albumCreateSupported = false
-    var albumAddSupported = false
-    var albumSetCoverSupported = false
+    var albums = AlbumCapabilities.httpReadAndCover
 
     static let current = SDKCapabilities()
 
@@ -35,17 +33,16 @@ struct SDKCapabilities {
         let lines = """
         [SDKCapabilities]
         photosClientAvailable=\(photosClientAvailable)
-        uploadPhoto=\(uploadPhoto)
-        startUpload=\(startUpload)
-        uploadOperation=\(uploadOperation)
-        cancelUpload=\(cancelUpload)
+        canUpload=\(upload.canUpload)
+        uploadCancel=\(upload.supportsCancel)
+        uploadPauseResume=\(upload.supportsPauseResume)
         cancelPhotoDownload=\(cancelPhotoDownload)
         downloadOperation=\(downloadOperation)
         albumsViaSDK=\(albumsViaSDK)
-        albumsViaHTTP=\(albumsViaHTTP)
-        albumCreate=\(albumCreateSupported)
-        albumAdd=\(albumAddSupported)
-        albumSetCover=\(albumSetCoverSupported)
+        albumList=\(albums.canList)
+        albumCreate=\(albums.canCreate)
+        albumAdd=\(albums.canAddPhotos)
+        albumSetCover=\(albums.canSetCover)
         """
         DebugLog.log(lines)
     }

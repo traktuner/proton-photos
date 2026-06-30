@@ -51,6 +51,13 @@ public struct AlbumCapabilities: Sendable, Equatable {
     public static let readOnly = AlbumCapabilities(
         canList: true, canCreate: false, canAddPhotos: false, canSetCover: false
     )
+
+    /// The current wired direct-HTTP album backend: listing + set-cover work; create/add need
+    /// album-node write crypto that isn't implemented yet. Single source of truth shared by the
+    /// `HTTPAlbumBackend` and the `[SDKCapabilities]` diagnostic so they can't drift apart.
+    public static let httpReadAndCover = AlbumCapabilities(
+        canList: true, canCreate: false, canAddPhotos: false, canSetCover: true
+    )
 }
 
 // MARK: - Errors

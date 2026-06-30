@@ -16,9 +16,7 @@ struct HTTPAlbumBackend: AlbumBackend {
     let setCoverProvider: @Sendable (AlbumID, PhotoUID) async throws -> Void
 
     /// List + set-cover via direct REST; create/add still need album-node write crypto (not yet implemented).
-    var capabilities: AlbumCapabilities {
-        AlbumCapabilities(canList: true, canCreate: false, canAddPhotos: false, canSetCover: true)
-    }
+    var capabilities: AlbumCapabilities { .httpReadAndCover }
 
     func listAlbums() async throws -> [AlbumSummary] {
         try await listProvider()

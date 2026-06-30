@@ -48,6 +48,13 @@ public struct UploadBackendCapabilities: Sendable, Equatable {
     public static let unavailable = UploadBackendCapabilities(
         canUpload: false, supportsCancel: false, supportsPauseResume: false, supportsResumeAcrossRelaunch: false
     )
+
+    /// The current wired SDK uploader: upload + queue-level cancel work; in-flight pause/resume and
+    /// resume-across-relaunch are not (uploads run through the `uploadPhoto` convenience, no held
+    /// operation). Single source of truth shared by `DriveSDKBridge` and the `[SDKCapabilities]` log.
+    public static let sdkUploader = UploadBackendCapabilities(
+        canUpload: true, supportsCancel: true, supportsPauseResume: false, supportsResumeAcrossRelaunch: false
+    )
 }
 
 // MARK: - Upload backend (SDK seam)
