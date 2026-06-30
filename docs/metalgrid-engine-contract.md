@@ -107,7 +107,8 @@ Exactly **six** Apple-like levels (`SquareTileGridEngine.appleLevelSpecs`), keye
 L3 is the default density. L0–L3 are normal photo levels; L4–L5 are dense square overviews. `transitionKindToNext`
 classifies each adjacent step (`focusRowRelayout` / `overviewWarp` / `denseOverviewZoom`) and is consumed live by
 the integrated transition system: `focusRowRelayout` steps drive the single-lattice click/pinch transition, the
-overview boundaries drive `OverviewLayerDissolve` (see §13.1).
+overview boundaries drive `OverviewLayerDissolve` (see §13.1). Production profiles do not need to duplicate this
+classification in plist data: the loader derives it from adjacent level semantics and rejects explicit mismatches.
 
 ---
 
@@ -227,9 +228,10 @@ production default with **no feature flag** (see `reports/archive/PHASE_B_GRID_E
 - **Continuous trackpad pinch** runs `PinchLiveZoomDriver` — a host-driven progress scrub that chains across
   multiple normal detents in one gesture and commits the nearest detent on release. The seam closes because each
   detent's presentation frame is deterministic (prev-q=1 == next-q=0).
-- Eligibility is gated to adjacent normal levels whose `transitionKindToNext == .focusRowRelayout`
+- Eligibility is gated to adjacent normal levels whose derived/stored `transitionKindToNext == .focusRowRelayout`
   (the `MetalGridCoordinator` chain-band logic); an ineligible / degenerate step falls back to a clean instant
-  settle.
+  settle. The transition kind is semantic metadata of the two levels, not renderer-specific animation policy in the
+  production plist.
 
 The earlier `GridNormalZoomVisualPlanner` two-grid crossfade and its `MetalGrid.focusRowTransition` /
 `MetalGrid.singleLatticeTransition` feature flags were **removed**; `ProductionRouteGuardTests` forbids them from

@@ -112,6 +112,19 @@ import GridCore
         #expect(specs[5].transitionKindToNext == nil, "the densest level has no next")
     }
 
+    @Test func transitionKindsCanBeDerivedFromSemanticRoles() {
+        let e = engine()
+        for level in 0 ... 3 {
+            #expect(e.metrics(level: level).semanticRole == .aspectThumbnail)
+        }
+        for level in [4, 5] {
+            #expect(e.metrics(level: level).semanticRole == .squareOverview)
+        }
+        for level in 0 ..< e.levelCount - 1 {
+            #expect(e.metrics(level: level).transitionKindToNext == e.derivedTransitionKindToNext(level: level))
+        }
+    }
+
     @Test func regularTimelineProfilePreservesProductionDefaults() {
         let profile = TimelineGridProfileConfiguration.production.profile(id: "regularTimeline")!
         let e = SquareTileGridEngine(sectionCounts: [4000], profile: profile)

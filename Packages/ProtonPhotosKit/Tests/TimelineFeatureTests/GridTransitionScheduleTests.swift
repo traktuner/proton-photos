@@ -352,7 +352,8 @@ import GridCore
         #expect(ps[common[0]] == src[common[0]] && pt[common[0]] == tgt[common[0]])   // common: presentation == real
         #expect(ps[entry] != nil && ps[entry] != tgt[entry])         // entry: synthesized source-side endpoint
         #expect(pt[exit] != nil && pt[exit] != src[exit])            // exit: synthesized target-side endpoint
-        // too few common rects ⇒ abort (caller falls back to snap)
+        #expect(GridTransitionPresentationTransform.fit(keys: [common[0], entry, exit], sourceRect: src, targetRect: tgt) != nil)
+        // no common rects ⇒ abort (caller falls back to snap)
         #expect(GridTransitionPresentationTransform.fit(keys: [entry, exit], sourceRect: src, targetRect: tgt) == nil)
     }
 

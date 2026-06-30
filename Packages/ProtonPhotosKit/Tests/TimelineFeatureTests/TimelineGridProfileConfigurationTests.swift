@@ -44,24 +44,50 @@ import GridCore
         }
     }
 
-    @Test func missingIntermediateTransitionIsRejected() throws {
+    @Test func omittedIntermediateTransitionIsDerivedFromLevelSemantics() throws {
         let data = try plistData([
-            "defaultProfileID": "broken",
+            "defaultProfileID": "regular",
             "profiles": [[
-                "id": "broken",
+                "id": "regular",
                 "defaultLevel": 0,
                 "levels": [
-                    level(id: 0, columns: 1, transition: nil),
-                    level(id: 1, columns: 2, transition: nil)
+                    level(id: 0, columns: 3, transition: nil,
+                          supportedContentModes: ["aspectFitInsideSquare", "squareFillCrop"],
+                          defaultContentMode: "aspectFitInsideSquare"),
+                    level(id: 1, columns: 5, transition: nil,
+                          supportedContentModes: ["aspectFitInsideSquare", "squareFillCrop"],
+                          defaultContentMode: "aspectFitInsideSquare")
+                ]
+            ]]
+        ])
+
+        let config = try TimelineGridProfileConfiguration.load(data: data)
+        let profile = try #require(config.profile(id: "regular"))
+        #expect(profile.metrics(level: 0).transitionKindToNext == .focusRowRelayout)
+    }
+
+    @Test func explicitTransitionMustMatchLevelSemantics() throws {
+        let data = try plistData([
+            "defaultProfileID": "regular",
+            "profiles": [[
+                "id": "regular",
+                "defaultLevel": 0,
+                "levels": [
+                    level(id: 0, columns: 3, transition: "denseOverviewZoom",
+                          supportedContentModes: ["aspectFitInsideSquare", "squareFillCrop"],
+                          defaultContentMode: "aspectFitInsideSquare"),
+                    level(id: 1, columns: 5, transition: nil,
+                          supportedContentModes: ["aspectFitInsideSquare", "squareFillCrop"],
+                          defaultContentMode: "aspectFitInsideSquare")
                 ]
             ]]
         ])
 
         do {
             _ = try TimelineGridProfileConfiguration.load(data: data)
-            Issue.record("missing non-final transition must be rejected")
+            Issue.record("semantic transition mismatches must be rejected")
         } catch let error as TimelineGridProfileConfigurationError {
-            #expect(error.description.contains("missing transitionKindToNext"))
+            #expect(error.description.contains("does not match semantic transition focusRowRelayout"))
         }
     }
 
@@ -110,14 +136,18 @@ import GridCore
         ]
     }
 
-    private func level(id: Int, columns: Int, transition: String?) -> [String: Any] {
+    private func level(id: Int,
+                       columns: Int,
+                       transition: String?,
+                       supportedContentModes: [String] = ["squareFillCrop"],
+                       defaultContentMode: String = "squareFillCrop") -> [String: Any] {
         var result: [String: Any] = [
             "id": id,
             "nominalColumns": columns,
             "gap": 0,
             "monthLabels": false,
-            "supportedContentModes": ["squareFillCrop"],
-            "defaultContentMode": "squareFillCrop"
+            "supportedContentModes": supportedContentModes,
+            "defaultContentMode": defaultContentMode
         ]
         if let transition {
             result["transitionKindToNext"] = transition

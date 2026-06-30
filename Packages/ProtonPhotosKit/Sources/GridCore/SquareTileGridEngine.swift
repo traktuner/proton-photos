@@ -46,6 +46,28 @@ public enum GridTransitionKind: String, Equatable, Sendable {
     case denseOverviewZoom
 }
 
+public enum GridLevelSemanticRole: String, Equatable, Sendable {
+    /// Regular photo/video thumbnails. They may be shown aspect-fit or square-cropped inside the square slot.
+    case aspectThumbnail
+    /// Dense overview levels. They are square-fill-only and typically carry date labels.
+    case squareOverview
+}
+
+public extension GridTransitionKind {
+    static func semantic(from lower: GridLevelSemanticRole, to upper: GridLevelSemanticRole) -> GridTransitionKind? {
+        switch (lower, upper) {
+        case (.aspectThumbnail, .aspectThumbnail):
+            return .focusRowRelayout
+        case (.aspectThumbnail, .squareOverview):
+            return .overviewWarp
+        case (.squareOverview, .squareOverview):
+            return .denseOverviewZoom
+        case (.squareOverview, .aspectThumbnail):
+            return nil
+        }
+    }
+}
+
 /// One Apple-like zoom level. FIXED-COLUMNS MODEL: each level HOLDS its `nominalColumns` as the runtime column
 /// count; the square slot is sized to FILL the width, so a wider viewport shows the SAME columns at a LARGER
 /// tile (a uniform width-scale, not a column reflow). `nominalColumns` is the runtime column source AND the
@@ -89,6 +111,10 @@ public struct GridLevelMetrics: Equatable, Sendable {
     /// future responsive size-class pass; `GridSizePolicy` documents the same.
     public var referenceSlotSide: CGFloat {
         GridSizePolicy.slotSide(nominalColumns: nominalColumns, gap: gap, sizeClass: .regular)
+    }
+
+    public var semanticRole: GridLevelSemanticRole {
+        supportedContentModes.contains(.aspectFitInsideSquare) ? .aspectThumbnail : .squareOverview
     }
 
     public init(levelID: Int, nominalColumns: Int, gap: CGFloat, monthLabels: Bool,
@@ -254,6 +280,15 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     public func adjacentTransitionKind(_ a: Int, _ b: Int) -> GridTransitionKind? {
         guard abs(a - b) == 1 else { return nil }
         return metrics(level: min(a, b)).transitionKindToNext
+    }
+
+    public func derivedTransitionKindToNext(level: Int) -> GridTransitionKind? {
+        let lower = clampLevel(level)
+        guard lower < levelCount - 1 else { return nil }
+        return GridTransitionKind.semantic(
+            from: metrics(level: lower).semanticRole,
+            to: metrics(level: lower + 1).semanticRole
+        )
     }
 
     /// Whether the adjacent step `a↔b` crosses an OVERVIEW boundary (`.overviewWarp` = last normal → first

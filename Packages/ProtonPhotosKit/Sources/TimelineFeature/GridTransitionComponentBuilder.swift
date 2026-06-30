@@ -25,11 +25,11 @@ struct GridTransitionLattice: Sendable {
 struct GridTransitionPresentationTransform {
     let sx: Double, sy: Double, tx: Double, ty: Double
 
-    /// Returns nil when too few common rects exist to fit a stable transform ⇒ caller aborts → snap.
-    // minCommon = 2 is the minimum to determine per-axis scale + translation (and cross-check the
-    // scale). Fewer ⇒ abort the transition and fall back to the stable snap rather than guess.
+    /// Returns nil when no common rect exists to fit a stable transform ⇒ caller aborts → snap.
+    // One common rect is enough for the accepted fixed-column grid: source/target rect sizes provide scale,
+    // and their centres provide translation. More common rects make the median robust but are not required.
     static func fit(keys: [RelativeSlotKey], sourceRect: [RelativeSlotKey: CGRect],
-                    targetRect: [RelativeSlotKey: CGRect], minCommon: Int = 2) -> GridTransitionPresentationTransform? {
+                    targetRect: [RelativeSlotKey: CGRect], minCommon: Int = 1) -> GridTransitionPresentationTransform? {
         let common = keys.filter { sourceRect[$0] != nil && targetRect[$0] != nil }
         guard common.count >= minCommon else { return nil }
         func median(_ xs: [Double]) -> Double { let s = xs.sorted(); let n = s.count; return n % 2 == 1 ? s[n / 2] : 0.5 * (s[n / 2 - 1] + s[n / 2]) }

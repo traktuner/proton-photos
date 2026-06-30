@@ -228,3 +228,16 @@ keeps dynamic scene-size changes profile-aware without mixing the profile switch
 Performance impact should be neutral in steady state: profile resolution is a tiny rule scan on layout/update,
 and the O(1)-style rebase runs only when the resolved profile id changes. Narrow macOS windows now use the
 compact ladder; wide windows keep the existing regular ladder.
+
+## Phase 3.7 result
+
+`GridCore` now exposes semantic grid-level roles and a pure derivation rule for adjacent transition kinds. Production
+`GridProfiles.plist` no longer duplicates `transitionKindToNext`; `TimelineFeature` derives it during validated
+profile loading and rejects explicit values that disagree with the adjacent level roles.
+
+The normal-level single-lattice planner now accepts one common presentation rect when fitting the source/target
+transform. Fixed-column geometry supplies the scale from rect sizes and the translation from rect centers, so this
+removes an unnecessary snap fallback on the regular `9 ↔ 7` step without adding per-frame work.
+
+Performance impact is neutral to positive: semantic derivation runs only while loading profiles, and the planner
+change avoids a fallback path but does not increase steady-state rendering cost.

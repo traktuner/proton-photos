@@ -16,9 +16,10 @@ enum TimelineGridProfileConfigurationError: Error, CustomStringConvertible {
     case emptySupportedContentModes(profileID: String, level: Int)
     case invalidContentMode(profileID: String, level: Int, value: String)
     case defaultContentModeNotSupported(profileID: String, level: Int)
-    case missingTransition(profileID: String, level: Int)
     case transitionOnLastLevel(profileID: String, level: Int)
     case invalidTransitionKind(profileID: String, level: Int, value: String)
+    case transitionDoesNotMatchLevelSemantics(profileID: String, level: Int, configured: GridTransitionKind, derived: GridTransitionKind)
+    case cannotDeriveSemanticTransition(profileID: String, level: Int, from: GridLevelSemanticRole, to: GridLevelSemanticRole)
     case emptySelectionProfileID(index: Int)
     case unknownSelectionProfileID(String)
     case invalidSelectionWidth(profileID: String, field: String, value: CGFloat)
@@ -52,12 +53,14 @@ enum TimelineGridProfileConfigurationError: Error, CustomStringConvertible {
             return "grid profile \(profileID) level \(level) has invalid content mode \(value)"
         case let .defaultContentModeNotSupported(profileID, level):
             return "grid profile \(profileID) level \(level) default content mode is not supported"
-        case let .missingTransition(profileID, level):
-            return "grid profile \(profileID) level \(level) is missing transitionKindToNext"
         case let .transitionOnLastLevel(profileID, level):
             return "grid profile \(profileID) last level \(level) must not define transitionKindToNext"
         case let .invalidTransitionKind(profileID, level, value):
             return "grid profile \(profileID) level \(level) has invalid transition kind \(value)"
+        case let .transitionDoesNotMatchLevelSemantics(profileID, level, configured, derived):
+            return "grid profile \(profileID) level \(level) transition \(configured.rawValue) does not match semantic transition \(derived.rawValue)"
+        case let .cannotDeriveSemanticTransition(profileID, level, from, to):
+            return "grid profile \(profileID) level \(level) cannot derive transition from \(from.rawValue) to \(to.rawValue)"
         case let .emptySelectionProfileID(index):
             return "grid profile selection rule at index \(index) has an empty profile id"
         case let .unknownSelectionProfileID(id):
@@ -149,12 +152,23 @@ struct TimelineGridProfileConfiguration: Equatable {
         var levels: [GridLevelMetrics] = []
         levels.reserveCapacity(dto.levels.count)
         for (index, level) in dto.levels.enumerated() {
-            levels.append(try buildLevel(profileID: id, index: index, level: level, levelCount: dto.levels.count))
+            let nextLevel = index + 1 < dto.levels.count ? dto.levels[index + 1] : nil
+            levels.append(try buildLevel(
+                profileID: id,
+                index: index,
+                level: level,
+                nextLevel: nextLevel,
+                levelCount: dto.levels.count
+            ))
         }
         return GridLevelProfile(id: id, levels: levels, defaultLevel: dto.defaultLevel)
     }
 
-    private static func buildLevel(profileID: String, index: Int, level: LevelDTO, levelCount: Int) throws -> GridLevelMetrics {
+    private static func buildLevel(profileID: String,
+                                   index: Int,
+                                   level: LevelDTO,
+                                   nextLevel: LevelDTO?,
+                                   levelCount: Int) throws -> GridLevelMetrics {
         guard level.id == index else {
             throw TimelineGridProfileConfigurationError.invalidLevelID(profileID: profileID, expected: index, actual: level.id)
         }
@@ -168,29 +182,20 @@ struct TimelineGridProfileConfiguration: Equatable {
         guard level.gap >= 0, level.gap.isFinite else {
             throw TimelineGridProfileConfigurationError.invalidGap(profileID: profileID, level: index, value: level.gap)
         }
-        guard !level.supportedContentModes.isEmpty else {
-            throw TimelineGridProfileConfigurationError.emptySupportedContentModes(profileID: profileID, level: index)
+        let supportedModes = try supportedContentModes(profileID: profileID, index: index, level: level)
+        let defaultMode = try defaultContentMode(profileID: profileID, index: index, level: level, supportedModes: supportedModes)
+        let currentRole = semanticRole(supportedModes: supportedModes)
+        let nextRole = try nextLevel.map { next in
+            semanticRole(supportedModes: try supportedContentModes(profileID: profileID, index: index + 1, level: next))
         }
-
-        let supportedModes = try Set(level.supportedContentModes.map { raw -> TileContentDisplayMode in
-            guard let mode = TileContentDisplayMode(rawValue: raw) else {
-                throw TimelineGridProfileConfigurationError.invalidContentMode(profileID: profileID, level: index, value: raw)
-            }
-            return mode
-        })
-
-        guard let defaultMode = TileContentDisplayMode(rawValue: level.defaultContentMode) else {
-            throw TimelineGridProfileConfigurationError.invalidContentMode(
-                profileID: profileID,
-                level: index,
-                value: level.defaultContentMode
-            )
-        }
-        guard supportedModes.contains(defaultMode) else {
-            throw TimelineGridProfileConfigurationError.defaultContentModeNotSupported(profileID: profileID, level: index)
-        }
-
-        let transition = try transitionKind(profileID: profileID, index: index, levelCount: levelCount, raw: level.transitionKindToNext)
+        let transition = try transitionKind(
+            profileID: profileID,
+            index: index,
+            levelCount: levelCount,
+            raw: level.transitionKindToNext,
+            currentRole: currentRole,
+            nextRole: nextRole
+        )
         return GridLevelMetrics(
             levelID: level.id,
             nominalColumns: level.nominalColumns,
@@ -202,18 +207,73 @@ struct TimelineGridProfileConfiguration: Equatable {
         )
     }
 
-    private static func transitionKind(profileID: String, index: Int, levelCount: Int, raw: String?) throws -> GridTransitionKind? {
+    private static func supportedContentModes(profileID: String, index: Int, level: LevelDTO) throws -> Set<TileContentDisplayMode> {
+        guard !level.supportedContentModes.isEmpty else {
+            throw TimelineGridProfileConfigurationError.emptySupportedContentModes(profileID: profileID, level: index)
+        }
+        return try Set(level.supportedContentModes.map { raw -> TileContentDisplayMode in
+            guard let mode = TileContentDisplayMode(rawValue: raw) else {
+                throw TimelineGridProfileConfigurationError.invalidContentMode(profileID: profileID, level: index, value: raw)
+            }
+            return mode
+        })
+    }
+
+    private static func defaultContentMode(profileID: String,
+                                           index: Int,
+                                           level: LevelDTO,
+                                           supportedModes: Set<TileContentDisplayMode>) throws -> TileContentDisplayMode {
+        guard let defaultMode = TileContentDisplayMode(rawValue: level.defaultContentMode) else {
+            throw TimelineGridProfileConfigurationError.invalidContentMode(
+                profileID: profileID,
+                level: index,
+                value: level.defaultContentMode
+            )
+        }
+        guard supportedModes.contains(defaultMode) else {
+            throw TimelineGridProfileConfigurationError.defaultContentModeNotSupported(profileID: profileID, level: index)
+        }
+        return defaultMode
+    }
+
+    private static func semanticRole(supportedModes: Set<TileContentDisplayMode>) -> GridLevelSemanticRole {
+        supportedModes.contains(.aspectFitInsideSquare) ? .aspectThumbnail : .squareOverview
+    }
+
+    private static func transitionKind(profileID: String,
+                                       index: Int,
+                                       levelCount: Int,
+                                       raw: String?,
+                                       currentRole: GridLevelSemanticRole,
+                                       nextRole: GridLevelSemanticRole?) throws -> GridTransitionKind? {
         if index == levelCount - 1 {
             guard raw == nil else {
                 throw TimelineGridProfileConfigurationError.transitionOnLastLevel(profileID: profileID, level: index)
             }
             return nil
         }
+        guard let nextRole,
+              let derived = GridTransitionKind.semantic(from: currentRole, to: nextRole) else {
+            throw TimelineGridProfileConfigurationError.cannotDeriveSemanticTransition(
+                profileID: profileID,
+                level: index,
+                from: currentRole,
+                to: nextRole ?? currentRole
+            )
+        }
         guard let raw else {
-            throw TimelineGridProfileConfigurationError.missingTransition(profileID: profileID, level: index)
+            return derived
         }
         guard let kind = GridTransitionKind(rawValue: raw) else {
             throw TimelineGridProfileConfigurationError.invalidTransitionKind(profileID: profileID, level: index, value: raw)
+        }
+        guard kind == derived else {
+            throw TimelineGridProfileConfigurationError.transitionDoesNotMatchLevelSemantics(
+                profileID: profileID,
+                level: index,
+                configured: kind,
+                derived: derived
+            )
         }
         return kind
     }

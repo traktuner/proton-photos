@@ -37,6 +37,56 @@ import GridCore
         #expect(c.isActive == false)        // settled and ended itself (host clock owns q, no timer)
     }
 
+    @Test func sevenNineViewportCenterClickBuildsPlan() throws {
+        let viewport = CGSize(width: 1400, height: 900)
+        let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
+        let sourceLevel = 3
+        let targetLevel = 2
+        let sourceScroll = CGPoint(x: 0, y: 6000)
+        let viewportPoint = CGPoint(x: viewport.width / 2, y: viewport.height / 2)
+        let anchorContent = CGPoint(x: viewportPoint.x, y: sourceScroll.y + viewportPoint.y)
+        let anchor = try #require(engine.anchorItem(
+            nearContentPoint: anchorContent,
+            level: sourceLevel,
+            width: viewport.width
+        ))
+        let targetColumn = engine.cursorColumn(viewportX: viewportPoint.x, level: targetLevel, width: viewport.width)
+        let targetPhase = engine.columnPhase(
+            forItem: anchor.flatIndex,
+            targetColumn: targetColumn,
+            level: targetLevel,
+            width: viewport.width
+        )
+        let targetScroll = engine.anchoredScrollOffset(
+            flatIndex: anchor.flatIndex,
+            localFraction: anchor.localFraction,
+            viewportPoint: viewportPoint,
+            level: targetLevel,
+            width: viewport.width,
+            columnPhase: targetPhase
+        )
+        let source = engine.framePlan(level: sourceLevel, viewportSize: viewport, scrollOffset: sourceScroll, overscan: 0)
+        let target = engine.framePlan(
+            level: targetLevel,
+            viewportSize: viewport,
+            scrollOffset: CGPoint(x: 0, y: targetScroll.y),
+            overscan: 0,
+            columnPhase: targetPhase
+        )
+
+        let controller = GridTransitionController()
+        #expect(controller.beginClick(
+            source: source,
+            target: target,
+            anchorIndex: anchor.flatIndex,
+            viewportSize: viewport,
+            selection: []
+        ))
+        #expect(controller.lastFallback == .none)
+        #expect(controller.isActive)
+        #expect(!controller.currentDraws().isEmpty)
+    }
+
     @Test func relocatingSelectionDoesNotBlockClickPlan() {
         let (src, tgt) = plans()
         let viewport = CGSize(width: 1400, height: 900)

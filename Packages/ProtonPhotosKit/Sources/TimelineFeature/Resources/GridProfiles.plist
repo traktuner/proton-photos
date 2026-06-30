@@ -38,8 +38,6 @@
 					</array>
 					<key>defaultContentMode</key>
 					<string>aspectFitInsideSquare</string>
-					<key>transitionKindToNext</key>
-					<string>focusRowRelayout</string>
 				</dict>
 				<dict>
 					<key>id</key>
@@ -57,8 +55,6 @@
 					</array>
 					<key>defaultContentMode</key>
 					<string>aspectFitInsideSquare</string>
-					<key>transitionKindToNext</key>
-					<string>focusRowRelayout</string>
 				</dict>
 				<dict>
 					<key>id</key>
@@ -76,8 +72,6 @@
 					</array>
 					<key>defaultContentMode</key>
 					<string>aspectFitInsideSquare</string>
-					<key>transitionKindToNext</key>
-					<string>focusRowRelayout</string>
 				</dict>
 				<dict>
 					<key>id</key>
@@ -95,8 +89,6 @@
 					</array>
 					<key>defaultContentMode</key>
 					<string>aspectFitInsideSquare</string>
-					<key>transitionKindToNext</key>
-					<string>overviewWarp</string>
 				</dict>
 				<dict>
 					<key>id</key>
@@ -113,8 +105,6 @@
 					</array>
 					<key>defaultContentMode</key>
 					<string>squareFillCrop</string>
-					<key>transitionKindToNext</key>
-					<string>denseOverviewZoom</string>
 				</dict>
 				<dict>
 					<key>id</key>
@@ -157,8 +147,6 @@
 					</array>
 					<key>defaultContentMode</key>
 					<string>aspectFitInsideSquare</string>
-					<key>transitionKindToNext</key>
-					<string>focusRowRelayout</string>
 				</dict>
 				<dict>
 					<key>id</key>
@@ -176,8 +164,6 @@
 					</array>
 					<key>defaultContentMode</key>
 					<string>aspectFitInsideSquare</string>
-					<key>transitionKindToNext</key>
-					<string>focusRowRelayout</string>
 				</dict>
 				<dict>
 					<key>id</key>
@@ -195,8 +181,6 @@
 					</array>
 					<key>defaultContentMode</key>
 					<string>aspectFitInsideSquare</string>
-					<key>transitionKindToNext</key>
-					<string>focusRowRelayout</string>
 				</dict>
 				<dict>
 					<key>id</key>
@@ -214,8 +198,6 @@
 					</array>
 					<key>defaultContentMode</key>
 					<string>aspectFitInsideSquare</string>
-					<key>transitionKindToNext</key>
-					<string>overviewWarp</string>
 				</dict>
 				<dict>
 					<key>id</key>
@@ -232,8 +214,6 @@
 					</array>
 					<key>defaultContentMode</key>
 					<string>squareFillCrop</string>
-					<key>transitionKindToNext</key>
-					<string>denseOverviewZoom</string>
 				</dict>
 				<dict>
 					<key>id</key>
