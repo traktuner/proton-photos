@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import AVFoundation
+import ImageIO
 import PhotosCore
 import MediaCache
 
@@ -250,6 +251,30 @@ public final class PhotoViewerModel {
     }()
     private static func cacheKey(_ uid: PhotoUID) -> NSString { "\(uid.volumeID)~\(uid.nodeID)" as NSString }
 
+    /// Fully decodes original image bytes into a ready-to-draw `NSImage`, forcing rasterization NOW
+    /// (`kCGImageSourceShouldCacheImmediately`) so a large photo's heavy decode happens on the calling
+    /// background task — never lazily on the main thread when the view first draws it. Falls back to
+    /// `NSImage(data:)`. Call only from off the main actor.
+    private nonisolated static func decodeFullImage(_ data: Data) -> NSImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return NSImage(data: data) }
+        // Size the (non-downscaling) thumbnail request to the full pixel dimension so we get the original at
+        // full resolution, with the EXIF orientation BAKED IN via `CreateThumbnailWithTransform` — unlike
+        // `CreateImageAtIndex`, which returns the raw stored buffer and leaves a rotated photo flipped.
+        let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let maxDim = max(props?[kCGImagePropertyPixelWidth] as? Int ?? 0,
+                         props?[kCGImagePropertyPixelHeight] as? Int ?? 0)
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxDim > 0 ? maxDim : 100_000,
+        ]
+        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return NSImage(data: data)
+        }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+    }
+
     private func loadCurrent() {
         loadTask?.cancel()
         video.reset()
@@ -281,7 +306,7 @@ public final class PhotoViewerModel {
             // blob can be tens of MB); only the assignment hops back. Instant even after relaunch / offline.
             if let oc = self.originalsCache {
                 let uid = item.uid
-                let cached = await Task.detached { oc.diskData(for: uid).flatMap { NSImage(data: $0) } }.value
+                let cached = await Task.detached { oc.diskData(for: uid).flatMap { Self.decodeFullImage($0) } }.value
                 if let full = cached {
                     guard !Task.isCancelled, self.current == item else { return }
                     self.image = full
@@ -371,7 +396,12 @@ public final class PhotoViewerModel {
             }
             guard !Task.isCancelled, self.current == item else { return }
             isLoadingOriginal = false
-            if expecting != .video, let full = NSImage(data: data) {
+            // Decode the full original OFF the main actor so a large photo never rasterizes on the UI thread.
+            let full = expecting != .video
+                ? await Task.detached(priority: .userInitiated) { Self.decodeFullImage(data) }.value
+                : nil
+            guard !Task.isCancelled, self.current == item else { return }
+            if let full {
                 image = full
                 isSharp = true
                 video.reset()
