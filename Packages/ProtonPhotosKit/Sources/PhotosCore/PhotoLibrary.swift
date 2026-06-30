@@ -50,6 +50,16 @@ public enum PhotoFilter: Equatable, Hashable, Sendable {
     case tag(PhotoTag)
     case album(id: String, title: String)
     case trash
+    /// The whole-library Map view — no timeline load; the detail shows the map instead.
+    case map
+
+    /// Whether selecting this route should load timeline sections into the Metal grid.
+    public var hasTimeline: Bool {
+        switch self {
+        case .map: false
+        default: true
+        }
+    }
 }
 
 /// Read + write of the favorites tag. `favoriteUIDs` reads the server's favorites (so photos

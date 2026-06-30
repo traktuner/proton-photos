@@ -114,6 +114,17 @@ struct ProductionRouteGuardTests {
         #expect(viewer.contains("plaintext local motion-video files are forbidden by the local E2EE contract"))
     }
 
+    @Test func burstProviderMaterializesHiddenSeriesMembers() throws {
+        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSDKBridge.swift"), encoding: .utf8)
+        let body = try Self.body(of: bridge, from: "func burstGroup(containing uid: PhotoUID) async throws -> [PhotoItem] {", to: "    // MARK: - VideoStreamProvider")
+        #expect(body.contains("Self.syntheticBurstMember("),
+                "Proton exposes series as one visible timeline photo plus hidden RelatedPhotos; the viewer must materialize those hidden members")
+        #expect(!body.contains("return memberIDs.compactMap"),
+                "Do not collapse a real Proton series to only members already present in the normal timeline")
+        #expect(bridge.contains("private static func syntheticBurstMember("),
+                "UID-backed synthetic members let thumbnail/preview/original loading use the existing provider path")
+    }
+
     @Test func mainViewUsesNativeSplitViewChrome() throws {
         let mainView = Self.repoRoot.appendingPathComponent("App/Views/MainView.swift")
         let text = try String(contentsOf: mainView, encoding: .utf8)

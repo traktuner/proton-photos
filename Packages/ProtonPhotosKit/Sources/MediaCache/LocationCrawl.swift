@@ -33,7 +33,7 @@ public actor LocationCrawl {
         location: @escaping @Sendable (PhotoUID) async -> (latitude: Double, longitude: Double)?,
         index: PhotoLocationIndex,
         store: PhotoLocationStore,
-        shouldYield: @escaping @Sendable () -> Bool = { false }
+        shouldYield: @escaping @Sendable () async -> Bool = { false }
     ) {
         task?.cancel()
         let throttle = throttle, mergeEvery = mergeEvery, saveEvery = saveEvery
@@ -45,7 +45,7 @@ public actor LocationCrawl {
 
             for uid in pending {
                 if Task.isCancelled { break }
-                while shouldYield() {
+                while await shouldYield() {
                     try? await Task.sleep(for: .milliseconds(500))
                     if Task.isCancelled { return }
                 }

@@ -4,7 +4,7 @@ import PhotosCore
 import ProtonAuth
 import ProtonCoreCryptoPatchedGoImplementation
 
-typealias PhotosBackend = PhotosRepository & ThumbnailProvider & ThumbnailBatchLoader & FullMediaProvider & VideoStreamProvider & PhotoMetadataProvider & PhotoLibraryProvider & FavoritesProvider & TrashProvider & LibraryStatsProvider
+typealias PhotosBackend = PhotosRepository & ThumbnailProvider & ThumbnailBatchLoader & FullMediaProvider & VideoStreamProvider & PhotoMetadataProvider & BurstGroupProvider & PhotoLibraryProvider & FavoritesProvider & TrashProvider & LibraryStatsProvider
 
 /// Root application state + composition. Owns the session lifecycle and builds the SDK-backed
 /// services once the user is signed in.

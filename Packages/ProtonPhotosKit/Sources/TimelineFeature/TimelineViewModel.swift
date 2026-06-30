@@ -358,6 +358,7 @@ public final class TimelineViewModel {
         case .tag(let tag): return "tag:\(tag.title)"
         case .album(let id, let title): return "album:\(title):\(id)"
         case .trash: return "trash"
+        case .map: return "map"
         }
     }
 

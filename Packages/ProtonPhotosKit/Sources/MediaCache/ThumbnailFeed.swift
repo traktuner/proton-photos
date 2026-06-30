@@ -40,6 +40,13 @@ public actor ThumbnailFeed {
     private var prefetchDownloadCompleted = 0
     private var prefetchDecodeStarted = 0
     private var prefetchDecodeCompleted = 0
+    private var lastRepassPercent = -1.0   // disk coverage at the last re-pass; stop re-passing once it stops improving
+    // Adaptive concurrency (AIMD): how many batch downloads run at once self-tunes to just under the server's
+    // (undocumented, dynamic) 429 threshold — additive increase on success, multiplicative decrease on a 429,
+    // bounded [2, concurrency]. No magic number; it discovers the ceiling for this account/endpoint.
+    private var targetConcurrency = 2
+    private var activeDownloaders = 0
+    private var aimdSuccessStreak = 0
 
     // Background-crawl yield (app-level starvation mitigation — see PROTONPHOTOS_… security report). The
     // sequential crawl shares one rate-limit gate + URLSession with visible thumbnail loads, so a heavy
@@ -56,7 +63,7 @@ public actor ThumbnailFeed {
         loader: ThumbnailBatchLoader,
         aspects: AspectRegistry,
         targetPixels: CGFloat = 320,
-        concurrency: Int = 10,
+        concurrency: Int = 10,   // proven sweet spot: higher just trips MORE 429s (server-side limit) → net slower
         batch: Int = 8,
         clock: @escaping @Sendable () -> Date = { Date() }
     ) {
@@ -68,6 +75,7 @@ public actor ThumbnailFeed {
         self.batch = batch
         self.clock = clock
         decoded.countLimit = 1500
+        targetConcurrency = max(2, concurrency / 2)   // AIMD starts at half the cap, then ramps toward it
     }
 
     // MARK: - Reads
@@ -139,6 +147,24 @@ public actor ThumbnailFeed {
             priority.removeFirst(dropCount)
         }
         startWorkers()
+    }
+
+    /// Whether there has been on-screen thumbnail demand within `within` seconds. A LOWER-priority
+    /// background crawl (e.g. the Map GPS crawl) checks this to YIELD the shared rate-limit budget to
+    /// visible work while the user is scrolling — the same mitigation the sequential thumbnail crawl uses —
+    /// so a background crawl can never trip a 429 that stalls on-screen thumbnails.
+    public func hasRecentVisibleDemand(within: TimeInterval = 2.0) -> Bool {
+        guard let last = lastDemandAt else { return false }
+        return clock().timeIntervalSince(last) < within
+    }
+
+    /// Whether the thumbnail crawl still has ANY work — visible requests queued OR the background library
+    /// fill not finished. The Map GPS crawl (P2) yields the WHOLE rate-limit budget while this is true, so
+    /// thumbnails (P1) finish first and the two crawls never flood the backend together (which trips a 429
+    /// that stalls everything on screen). Returns true while `prefetchEnabled` and there is pending work.
+    public func hasPendingThumbnailWork() -> Bool {
+        guard prefetchEnabled else { return false }
+        return !priority.isEmpty || sequentialIndex < sequential.count
     }
 
     /// Force a bounded set of thumbnails into the *decoded* in-memory cache so a synchronous
@@ -338,14 +364,36 @@ public actor ThumbnailFeed {
         while !Task.isCancelled {
             let chunk = takeBatch()
             if chunk.isEmpty {
-                if priority.isEmpty && sequentialIndex >= sequential.count { return }
+                if priority.isEmpty && sequentialIndex >= sequential.count {
+                    // The sequential pass is exhausted. `takeBatch` advances past a failed (429/timeout)
+                    // thumbnail and never re-queues it, so a rate-limit burst leaves permanent gaps —
+                    // "caught up" yet still missing. RE-PASS the library to retry the gaps: `hasUsableDiskData`
+                    // skips the already-cached, so only the missing are refetched. Stop once a full pass no
+                    // longer improves coverage (the rest are genuinely unavailable).
+                    let percent = cache.diskCoverage(for: sequential).percent
+                    if percent < 99.5, percent > lastRepassPercent + 0.01 {
+                        lastRepassPercent = percent
+                        sequentialIndex = 0
+                        try? await Task.sleep(for: .seconds(2))
+                        continue
+                    }
+                    return
+                }
                 try? await Task.sleep(for: .milliseconds(150))
                 continue
             }
+            // AIMD gate: at most `targetConcurrency` workers download at once. Others wait, so the effective
+            // request rate self-tunes to just under the 429 threshold.
+            while activeDownloaders >= targetConcurrency, !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(60))
+            }
+            if Task.isCancelled { return }
+            activeDownloaders += 1
             downloadInFlight += chunk.count
             prefetchDownloadStarted += chunk.count
             PhotoDiagnostics.shared.recordNetworkRequestDuringPinch()
             let completed = await Self.loadWithTimeout(chunk, loader: loader, cache: cache, diskPresence: diskPresence, seconds: 20)
+            activeDownloaders = max(0, activeDownloaders - 1)
             downloadInFlight = max(0, downloadInFlight - chunk.count)
             prefetchCompleted += completed
             prefetchDownloadCompleted += completed
@@ -356,6 +404,14 @@ public actor ThumbnailFeed {
                 // Likely rate-limited: back the sequential crawl off so it stops compounding the 429 and
                 // hurting visible loads. Priority/visible work continues (takeBatch drains it regardless).
                 crawlBackoffUntil = clock().addingTimeInterval(crawlBackoffSeconds)
+                targetConcurrency = max(2, targetConcurrency / 2)   // AIMD: multiplicative decrease on a 429
+                aimdSuccessStreak = 0
+            } else if completed > 0 {
+                aimdSuccessStreak += 1                               // AIMD: additive increase after a success streak
+                if aimdSuccessStreak >= 4 {
+                    aimdSuccessStreak = 0
+                    targetConcurrency = min(concurrency, targetConcurrency + 1)
+                }
             }
             if let checkpointKey, sequentialIndex > 0 {
                 UserDefaults.standard.set(sequentialIndex, forKey: checkpointKey)

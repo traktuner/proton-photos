@@ -27,14 +27,24 @@ public struct PhotoItem: Identifiable, Hashable, Sendable, Codable {
     /// Proton's server-side smart tags when the current backend path exposes them. SDK timeline enumeration
     /// can omit these; callers must treat this as enrichment, not the source of all truth.
     public let tags: Set<PhotoTag>
+    /// Link IDs of every photo in the same burst/series, in presentation order. Empty means either
+    /// "not a burst" or "the backend path has not enriched this item yet"; callers that need the full
+    /// group should ask `BurstGroupProvider` on demand.
+    public let burstMemberIDs: [String]
 
     public var id: PhotoUID { uid }
 
     public var isVideo: Bool { mediaType.hasPrefix("video/") }
+    public var isBurstCandidate: Bool { tags.contains(.bursts) || burstMemberIDs.count > 1 }
 
     /// The paired video's identifier, for Live Photo playback.
     public var relatedVideoUID: PhotoUID? {
         relatedVideoID.map { PhotoUID(volumeID: uid.volumeID, nodeID: $0) }
+    }
+
+    /// Stable UIDs for all known members of this burst/series.
+    public var burstMemberUIDs: [PhotoUID] {
+        burstMemberIDs.map { PhotoUID(volumeID: uid.volumeID, nodeID: $0) }
     }
 
     public init(
@@ -44,7 +54,8 @@ public struct PhotoItem: Identifiable, Hashable, Sendable, Codable {
         isLivePhoto: Bool = false,
         relatedVideoID: String? = nil,
         durationSeconds: Double? = nil,
-        tags: Set<PhotoTag> = []
+        tags: Set<PhotoTag> = [],
+        burstMemberIDs: [String] = []
     ) {
         self.uid = uid
         self.captureTime = captureTime
@@ -53,10 +64,11 @@ public struct PhotoItem: Identifiable, Hashable, Sendable, Codable {
         self.relatedVideoID = relatedVideoID
         self.durationSeconds = durationSeconds
         self.tags = tags
+        self.burstMemberIDs = burstMemberIDs
     }
 
     private enum CodingKeys: String, CodingKey {
-        case uid, captureTime, mediaType, isLivePhoto, relatedVideoID, durationSeconds, tags
+        case uid, captureTime, mediaType, isLivePhoto, relatedVideoID, durationSeconds, tags, burstMemberIDs
     }
 
     public init(from decoder: Decoder) throws {
@@ -68,6 +80,7 @@ public struct PhotoItem: Identifiable, Hashable, Sendable, Codable {
         relatedVideoID = try container.decodeIfPresent(String.self, forKey: .relatedVideoID)
         durationSeconds = try container.decodeIfPresent(Double.self, forKey: .durationSeconds)
         tags = try container.decodeIfPresent(Set<PhotoTag>.self, forKey: .tags) ?? []
+        burstMemberIDs = try container.decodeIfPresent([String].self, forKey: .burstMemberIDs) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -79,6 +92,7 @@ public struct PhotoItem: Identifiable, Hashable, Sendable, Codable {
         try container.encodeIfPresent(relatedVideoID, forKey: .relatedVideoID)
         try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
         try container.encode(tags, forKey: .tags)
+        try container.encode(burstMemberIDs, forKey: .burstMemberIDs)
     }
 }
 
@@ -138,6 +152,12 @@ public extension FullMediaProvider {
     func originalData(for uid: PhotoUID) async throws -> Data {
         try await originalData(for: uid, onProgress: { _ in })
     }
+}
+
+/// Optional metadata provider for Proton burst/series groups. The viewer calls this lazily only when
+/// an item is tagged/enriched as a burst candidate, so the main timeline path stays fast and SDK-agnostic.
+public protocol BurstGroupProvider: Sendable {
+    func burstGroup(containing uid: PhotoUID) async throws -> [PhotoItem]
 }
 
 /// Authentication lifecycle, abstracted away from the concrete fork mechanism.

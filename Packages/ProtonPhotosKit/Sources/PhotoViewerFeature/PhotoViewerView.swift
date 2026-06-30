@@ -191,11 +191,17 @@ public struct PhotoViewerView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
                 .onGeometryChange(for: CGSize.self) { $0.size } action: { contentSize = $0 }
-                // LIVE badge: top-left ON THE IMAGE (offset by the aspect-fit letterbox), not the window edge.
+                // LIVE/Burst badges: top-left ON THE IMAGE (offset by the aspect-fit letterbox), not the window edge.
                 .overlay(alignment: .topLeading) {
-                    if model.player == nil, model.current.isLivePhoto, model.image != nil, !isDismissing {
+                    if model.player == nil, model.image != nil, !isDismissing,
+                       model.current.isLivePhoto || model.isLoadingBurst || model.hasBurstFilmstrip {
                         let inset = livePhotoBadgeImageInset(in: contentSize)
-                        livePhotoBadge.offset(x: inset.width, y: inset.height)
+                        mediaBadges.offset(x: inset.width, y: inset.height)
+                    }
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if model.hasBurstFilmstrip, !isDismissing {
+                        burstFilmstrip
                     }
                 }
             if model.showInfo {
@@ -292,6 +298,86 @@ public struct PhotoViewerView: View {
         .accessibilityLabel(Text(verbatim: "Live Photo"))
     }
 
+    @ViewBuilder private var mediaBadges: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if model.current.isLivePhoto {
+                livePhotoBadge
+            }
+            if model.isLoadingBurst || model.hasBurstFilmstrip {
+                burstBadge
+            }
+        }
+    }
+
+    private var burstBadge: some View {
+        let position = (model.burstIndex ?? 0) + 1
+        let total = max(model.burstItems.count, 1)
+        return HStack(spacing: 6) {
+            Image(systemName: "square.stack.3d.down.right")
+                .font(.system(size: 12, weight: .medium))
+            if model.isLoadingBurst {
+                Text(L10n.string("viewer.burst_loading"))
+                    .font(.system(size: 11, weight: .semibold))
+            } else {
+                Text(L10n.string("viewer.burst_badge \(position) \(total)"))
+                    .font(.system(size: 11, weight: .semibold))
+            }
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .glassEffect(in: Capsule())
+        .padding(.top, model.current.isLivePhoto ? 0 : 14)
+        .padding(.leading, 14)
+        .accessibilityLabel(Text(L10n.string("viewer.burst_filmstrip_label")))
+    }
+
+    private var burstFilmstrip: some View {
+        let width = max(contentSize.width - 40, 320)
+        let itemSide = burstFilmstripItemSide(panelWidth: width, itemCount: model.burstItems.count)
+        let needsScroller = burstFilmstripNeedsScroller(panelWidth: width, itemCount: model.burstItems.count, itemSide: itemSide)
+        let position = (model.burstIndex ?? 0) + 1
+        let total = max(model.burstItems.count, 1)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.string("viewer.burst_badge \(position) \(total)"))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 2)
+            BurstFilmstripView(
+                items: model.burstItems,
+                selectedUID: model.current.uid,
+                feed: model.thumbnailFeed,
+                itemSide: itemSide,
+                showsHorizontalScroller: needsScroller,
+                onSelect: { model.selectBurstIndex($0) }
+            )
+            .frame(height: itemSide + (needsScroller ? 18 : 0))
+            .accessibilityLabel(Text(L10n.string("viewer.burst_filmstrip_label")))
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+        .frame(width: width)
+        .glassEffect(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(.bottom, 16)
+    }
+
+    private func burstFilmstripItemSide(panelWidth: CGFloat, itemCount: Int) -> CGFloat {
+        let count = max(itemCount, 1)
+        let viewportWidth = max(panelWidth - 24, 1)        // outer VStack horizontal padding
+        let sectionInset: CGFloat = 8                      // NSCollectionView left + right inset
+        let totalSpacing = CGFloat(max(count - 1, 0)) * 8
+        let fitted = (viewportWidth - sectionInset - totalSpacing) / CGFloat(count)
+        return min(112, max(58, floor(fitted)))
+    }
+
+    private func burstFilmstripNeedsScroller(panelWidth: CGFloat, itemCount: Int, itemSide: CGFloat) -> Bool {
+        let count = max(itemCount, 1)
+        let viewportWidth = max(panelWidth - 24, 1)
+        let contentWidth = CGFloat(count) * itemSide + CGFloat(max(count - 1, 0)) * 8 + 8
+        return contentWidth > viewportWidth + 0.5
+    }
+
     /// Loading / error affordance for the media (image original or video). The cardinal rule: this is
     /// driven entirely by `videoState`, so the UI is always in exactly one of — preparing, buffering
     /// (with a real reason), playing (no overlay), or failed (readable error + Retry). There is no
@@ -363,16 +449,16 @@ public struct PhotoViewerView: View {
         }
     }
 
-    private func goPrevious() { model.previous() }
-    private func goNext() { model.next() }
+    private func goPrevious() { model.previousInContext() }
+    private func goNext() { model.nextInContext() }
 
     // MARK: Controls + shortcuts
 
     @ViewBuilder private var navigationControls: some View {
         HStack {
-            iconButton("chevron.left", size: 40, enabled: model.canGoPrevious) { goPrevious() }
+            iconButton("chevron.left", size: 40, enabled: model.canNavigatePrevious) { goPrevious() }
             Spacer()
-            iconButton("chevron.right", size: 40, enabled: model.canGoNext) { goNext() }
+            iconButton("chevron.right", size: 40, enabled: model.canNavigateNext) { goNext() }
         }
         .padding(.horizontal, 18)
         .opacity(hovering ? 1 : 0)
@@ -383,7 +469,7 @@ public struct PhotoViewerView: View {
         ZStack {
             Button("", action: goPrevious).keyboardShortcut(.leftArrow, modifiers: [])
             Button("", action: goNext).keyboardShortcut(.rightArrow, modifiers: [])
-            Button("", action: { model.next() }).keyboardShortcut(.space, modifiers: [])
+            Button("", action: goNext).keyboardShortcut(.space, modifiers: [])
             Button("", action: onClose).keyboardShortcut(.cancelAction)
         }
         .opacity(0)

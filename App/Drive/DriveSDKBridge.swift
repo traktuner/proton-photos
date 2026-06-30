@@ -11,7 +11,7 @@ import UploadFeature
 ///
 /// Everything SDK-specific is isolated here so feature modules stay SDK-agnostic and new SDK
 /// capabilities (albums, sharing, upload) can be added without touching the UI layer.
-actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader, FullMediaProvider, VideoStreamProvider, PhotoMetadataProvider, PhotoLibraryProvider, FavoritesProvider, TrashProvider, LibraryStatsProvider {
+actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader, FullMediaProvider, VideoStreamProvider, PhotoMetadataProvider, BurstGroupProvider, PhotoLibraryProvider, FavoritesProvider, TrashProvider, LibraryStatsProvider {
     private let photosClient: ProtonPhotosClient
     private let driveSession: DriveSession
     private let rateLimit = RateLimitGate()
@@ -133,7 +133,21 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                 livePhotoVideoIDs = [:]
                 DebugLog.log("timeline: live-photo tag enrichment skipped — \(error)")
             }
-            let sections = Self.group(items, videoNodeIDs: videoNodeIDs, livePhotoVideoIDs: livePhotoVideoIDs)
+            let burstMemberIDs: [String: [String]]
+            do {
+                let bursts = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: PhotoTag.bursts.rawValue)
+                burstMemberIDs = Self.burstMemberLookup(from: bursts)
+                DebugLog.log("timeline: burst tag enrichment found \(burstMemberIDs.count) burst members")
+            } catch {
+                burstMemberIDs = [:]
+                DebugLog.log("timeline: burst tag enrichment skipped — \(error)")
+            }
+            let sections = Self.group(
+                items,
+                videoNodeIDs: videoNodeIDs,
+                livePhotoVideoIDs: livePhotoVideoIDs,
+                burstMemberIDs: burstMemberIDs
+            )
             writeTimelineCache(sections)
             return sections
         } catch {
@@ -286,6 +300,8 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                 }
                 .sorted { $0.captureTime < $1.captureTime }
             return [TimelineSection(id: "trash", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]
+        case .map:
+            return []   // the Map route renders the map, not a timeline
         }
     }
 
@@ -316,16 +332,10 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
 
     /// Builds timeline sections from direct-listing entries (tag filters + album contents).
     private static func group(_ entries: [PhotosListEntry], volumeID: String) -> [TimelineSection] {
+        let burstMemberIDs = burstMemberLookup(from: entries)
         let photos = entries
             .map { e -> PhotoItem in
-                PhotoItem(
-                    uid: PhotoUID(volumeID: volumeID, nodeID: e.linkID),
-                    captureTime: Date(timeIntervalSince1970: e.captureTime),
-                    mediaType: e.tags.contains(PhotoTag.videos.rawValue) ? "video/quicktime" : "image/jpeg",
-                    isLivePhoto: e.isLivePhoto,
-                    relatedVideoID: e.relatedVideoLinkID,
-                    tags: Self.tags(from: e.tags)
-                )
+                photoItem(from: e, volumeID: volumeID, burstMemberIDs: burstMemberIDs[e.linkID] ?? [])
             }
             .sorted { $0.captureTime < $1.captureTime }
         return [TimelineSection(id: "filtered", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]
@@ -355,6 +365,34 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         )
     }
 
+    // MARK: - BurstGroupProvider
+
+    func burstGroup(containing uid: PhotoUID) async throws -> [PhotoItem] {
+        let root = try await resolvePhotosRoot()
+        let burstEntries = try await driveSession.fetchPhotosList(volumeID: root.volumeID, tag: PhotoTag.bursts.rawValue)
+        let lookup = Self.burstMemberLookup(from: burstEntries)
+        guard let memberIDs = lookup[uid.nodeID], memberIDs.count > 1 else { return [] }
+
+        let entriesByID = Dictionary(burstEntries.map { ($0.linkID, $0) }, uniquingKeysWith: { first, _ in first })
+        let anchorEntry = entriesByID[uid.nodeID] ?? burstEntries.first { entry in
+            memberIDs.contains(entry.linkID)
+        }
+        let anchorTime = anchorEntry.map { Date(timeIntervalSince1970: $0.captureTime) } ?? .distantPast
+
+        return memberIDs.enumerated().map { offset, id in
+            if let entry = entriesByID[id] {
+                return Self.photoItem(from: entry, volumeID: root.volumeID, burstMemberIDs: memberIDs)
+            }
+            return Self.syntheticBurstMember(
+                id: id,
+                volumeID: root.volumeID,
+                memberIDs: memberIDs,
+                anchorTime: anchorTime,
+                offset: offset
+            )
+        }
+    }
+
     // MARK: - VideoStreamProvider
 
     func makeStreamingAsset(for uid: PhotoUID) async throws -> StreamingVideoAsset {
@@ -379,21 +417,25 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     // MARK: - Mapping
 
     private static func group(_ items: [PhotoTimelineItem], videoNodeIDs: Set<String> = [],
-                              livePhotoVideoIDs: [String: String] = [:]) -> [TimelineSection] {
+                              livePhotoVideoIDs: [String: String] = [:],
+                              burstMemberIDs: [String: [String]] = [:]) -> [TimelineSection] {
         let photos = items
             .map { item -> PhotoItem in
                 let nodeID = item.nodeUid.nodeID
                 let isVideo = videoNodeIDs.contains(nodeID)
                 let relatedVideo = livePhotoVideoIDs[nodeID]   // a live photo's paired video link, if any
+                let burstMembers = burstMemberIDs[nodeID] ?? []
                 var tags: Set<PhotoTag> = []
                 if isVideo { tags.insert(.videos) }
                 if relatedVideo != nil { tags.insert(.motionPhotos) }
+                if burstMembers.count > 1 { tags.insert(.bursts) }
                 return PhotoItem(uid: PhotoUID(volumeID: item.nodeUid.volumeID, nodeID: nodeID),
                                  captureTime: Date(timeIntervalSince1970: item.captureTime),
                                  mediaType: isVideo ? "video/quicktime" : "image/jpeg",
                                  isLivePhoto: relatedVideo != nil,
                                  relatedVideoID: relatedVideo,
-                                 tags: tags) }
+                                 tags: tags,
+                                 burstMemberIDs: burstMembers) }
             // Ascending (oldest first): oldest at the top, newest at the BOTTOM — like Apple Photos.
             // The grid opens scrolled to the bottom so the newest photos are shown first.
             .sorted { $0.captureTime < $1.captureTime }
@@ -406,6 +448,50 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
 
     private static func tags(from rawValues: [Int]) -> Set<PhotoTag> {
         Set(rawValues.compactMap(PhotoTag.init(rawValue:)))
+    }
+
+    private static func photoItem(from entry: PhotosListEntry, volumeID: String, burstMemberIDs: [String] = []) -> PhotoItem {
+        let isVideo = entry.tags.contains(PhotoTag.videos.rawValue)
+        var tags = Self.tags(from: entry.tags)
+        if burstMemberIDs.count > 1 { tags.insert(.bursts) }
+        return PhotoItem(
+            uid: PhotoUID(volumeID: volumeID, nodeID: entry.linkID),
+            captureTime: Date(timeIntervalSince1970: entry.captureTime),
+            mediaType: isVideo ? "video/quicktime" : "image/jpeg",
+            isLivePhoto: entry.isLivePhoto,
+            relatedVideoID: entry.isLivePhoto ? entry.relatedVideoLinkID : nil,
+            tags: tags,
+            burstMemberIDs: burstMemberIDs
+        )
+    }
+
+    private static func syntheticBurstMember(
+        id: String,
+        volumeID: String,
+        memberIDs: [String],
+        anchorTime: Date,
+        offset: Int
+    ) -> PhotoItem {
+        PhotoItem(
+            uid: PhotoUID(volumeID: volumeID, nodeID: id),
+            captureTime: anchorTime.addingTimeInterval(Double(offset) * 0.001),
+            mediaType: "image/jpeg",
+            tags: [.bursts],
+            burstMemberIDs: memberIDs
+        )
+    }
+
+    private static func burstMemberLookup(from entries: [PhotosListEntry]) -> [String: [String]] {
+        let candidates = entries
+            .filter { $0.tags.contains(PhotoTag.bursts.rawValue) }
+            .map {
+                BurstGroupCandidate(
+                    id: $0.linkID,
+                    relatedIDs: $0.relatedPhotos.map(\.linkID),
+                    captureTime: Date(timeIntervalSince1970: $0.captureTime)
+                )
+            }
+        return BurstGroupResolver.memberLookup(candidates: candidates)
     }
 }
 
@@ -426,12 +512,16 @@ final class PhotoTimelineStore {
         sqlite3_exec(db, "PRAGMA mmap_size=268435456;", nil, nil, nil)
         let create = """
         CREATE TABLE IF NOT EXISTS photos(
-          node TEXT PRIMARY KEY, vol TEXT, t REAL, mime TEXT, live INTEGER, relvid TEXT, tags TEXT DEFAULT ''
+          node TEXT PRIMARY KEY, vol TEXT, t REAL, mime TEXT, live INTEGER, relvid TEXT,
+          tags TEXT DEFAULT '', burst TEXT DEFAULT ''
         );
         """
         guard sqlite3_exec(db, create, nil, nil, nil) == SQLITE_OK else { return nil }
         if !Self.columnExists(db, table: "photos", column: "tags") {
             sqlite3_exec(db, "ALTER TABLE photos ADD COLUMN tags TEXT DEFAULT '';", nil, nil, nil)
+        }
+        if !Self.columnExists(db, table: "photos", column: "burst") {
+            sqlite3_exec(db, "ALTER TABLE photos ADD COLUMN burst TEXT DEFAULT '';", nil, nil, nil)
         }
         sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_photos_t ON photos(t ASC);", nil, nil, nil)
         sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_photos_vol_node ON photos(vol, node);", nil, nil, nil)
@@ -455,7 +545,7 @@ final class PhotoTimelineStore {
     func load() -> [PhotoItem] {
         let start = Date()
         var stmt: OpaquePointer?
-        let sql = "SELECT node, vol, t, mime, live, relvid, tags FROM photos ORDER BY t ASC;"
+        let sql = "SELECT node, vol, t, mime, live, relvid, tags, burst FROM photos ORDER BY t ASC;"
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
         defer { sqlite3_finalize(stmt) }
         var items: [PhotoItem] = []
@@ -464,13 +554,15 @@ final class PhotoTimelineStore {
             let mime = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "image/jpeg"
             let relvid = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
             let tags = sqlite3_column_text(stmt, 6).map { Self.decodeTags(String(cString: $0)) } ?? []
+            let burst = sqlite3_column_text(stmt, 7).map { Self.decodeStringList(String(cString: $0)) } ?? []
             items.append(PhotoItem(
                 uid: PhotoUID(volumeID: String(cString: volC), nodeID: String(cString: nodeC)),
                 captureTime: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 2)),
                 mediaType: mime,
                 isLivePhoto: sqlite3_column_int(stmt, 4) != 0,
                 relatedVideoID: relvid,
-                tags: tags
+                tags: tags,
+                burstMemberIDs: burst
             ))
         }
         PhotoDiagnostics.shared.recordDBQuery(
@@ -486,7 +578,7 @@ final class PhotoTimelineStore {
         sqlite3_exec(db, "BEGIN;", nil, nil, nil)
         sqlite3_exec(db, "DELETE FROM photos;", nil, nil, nil)
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO photos(node,vol,t,mime,live,relvid,tags) VALUES(?,?,?,?,?,?,?);", -1, &stmt, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO photos(node,vol,t,mime,live,relvid,tags,burst) VALUES(?,?,?,?,?,?,?,?);", -1, &stmt, nil) == SQLITE_OK {
             for item in items {
                 sqlite3_reset(stmt)
                 sqlite3_bind_text(stmt, 1, item.uid.nodeID, -1, transient)
@@ -497,6 +589,7 @@ final class PhotoTimelineStore {
                 if let rel = item.relatedVideoID { sqlite3_bind_text(stmt, 6, rel, -1, transient) }
                 else { sqlite3_bind_null(stmt, 6) }
                 sqlite3_bind_text(stmt, 7, Self.encodeTags(item.tags), -1, transient)
+                sqlite3_bind_text(stmt, 8, Self.encodeStringList(item.burstMemberIDs), -1, transient)
                 sqlite3_step(stmt)
             }
             sqlite3_finalize(stmt)
@@ -515,6 +608,14 @@ final class PhotoTimelineStore {
 
     private static func decodeTags(_ raw: String) -> Set<PhotoTag> {
         Set(raw.split(separator: ",").compactMap { Int($0).flatMap(PhotoTag.init(rawValue:)) })
+    }
+
+    private static func encodeStringList(_ values: [String]) -> String {
+        values.joined(separator: "\n")
+    }
+
+    private static func decodeStringList(_ raw: String) -> [String] {
+        raw.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
     }
 
     private static func columnExists(_ db: OpaquePointer?, table: String, column: String) -> Bool {

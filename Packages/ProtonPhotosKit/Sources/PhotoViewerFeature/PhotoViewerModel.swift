@@ -8,14 +8,14 @@ import MediaCache
 /// Drives the full-screen viewer with progressive quality (thumbnail → preview → original):
 ///  1. show the grid thumbnail instantly (soft — small image scaled up for full-screen),
 ///  2. swap to the larger preview when it arrives (disk-cached for offline),
-    ///  3. crossfade to the full original (sharp) once decrypted into RAM.
+///  3. crossfade to the full original (sharp) once decrypted into RAM.
 ///
 /// Video (Deliverable 5) runs an explicit `VideoViewerState` machine instead of inferring "loading"
 /// from a tangle of optionals: try range-streaming first (which also detects image-vs-video reliably
 /// even though the main timeline reports every item as `image/jpeg`), observe `AVPlayerItem.status`,
-    /// Streaming is the only video path: falling back to a decrypted local temp file is forbidden by the
-    /// app-wide local E2EE rule. One `AVPlayer` is retained for the streaming path, so the view never
-    /// re-creates the player on a redraw.
+/// Streaming is the only video path: falling back to a decrypted local temp file is forbidden by the
+/// app-wide local E2EE rule. One `AVPlayer` is retained for the streaming path, so the view never
+/// re-creates the player on a redraw.
 @MainActor
 @Observable
 public final class PhotoViewerModel {
@@ -62,6 +62,7 @@ public final class PhotoViewerModel {
     private let media: FullMediaProvider
     private let streamer: VideoStreamProvider?
     private let metadataProvider: PhotoMetadataProvider?
+    private let burstProvider: BurstGroupProvider?
     private let previewCache: ThumbnailCache?
     /// Encrypted disk cache for full-resolution ORIGINALS (offline library). Read before any download so a cached
     /// original is shown instantly even after relaunch; written after a successful load when `cacheOriginals` is
@@ -74,9 +75,16 @@ public final class PhotoViewerModel {
     private var loadTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
     private var placeTask: Task<Void, Never>?
+    private var burstTask: Task<Void, Never>?
+
+    public private(set) var burstItems: [PhotoItem] = []
+    public private(set) var burstIndex: Int?
+    public private(set) var isLoadingBurst = false
+    public private(set) var burstLoadFailed = false
 
     public init(items: [PhotoItem], index: Int, feed: ThumbnailFeed, media: FullMediaProvider,
                 streamer: VideoStreamProvider? = nil, metadataProvider: PhotoMetadataProvider? = nil,
+                burstProvider: BurstGroupProvider? = nil,
                 previewCache: ThumbnailCache? = nil, originalsCache: ThumbnailCache? = nil,
                 cacheOriginals: Bool = false, originalsCapBytes: Int64? = nil) {
         self.items = items
@@ -85,6 +93,7 @@ public final class PhotoViewerModel {
         self.media = media
         self.streamer = streamer
         self.metadataProvider = metadataProvider
+        self.burstProvider = burstProvider
         self.previewCache = previewCache
         self.originalsCache = originalsCache
         self.cacheOriginals = cacheOriginals
@@ -104,7 +113,7 @@ public final class PhotoViewerModel {
         metadata = nil
         metadataTask = Task { [metadataProvider] in
             let meta = try? await metadataProvider.metadata(for: item.uid)
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
             self.metadata = meta
         }
     }
@@ -118,24 +127,49 @@ public final class PhotoViewerModel {
         guard let metadataProvider else { return }
         placeTask = Task { [metadataProvider] in
             try? await Task.sleep(for: .milliseconds(200))
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
             let meta: PhotoMetadata?
-            if let loaded = self.metadata, self.current == item {
+            if let loaded = self.metadata, self.isDisplaying(item) {
                 meta = loaded
             } else {
                 meta = try? await metadataProvider.metadata(for: item.uid)
             }
-            guard !Task.isCancelled, self.current == item,
+            guard !Task.isCancelled, self.isDisplaying(item),
                   let meta, meta.hasLocation, let lat = meta.latitude, let lon = meta.longitude else { return }
             let name = await PlaceNameResolver.shared.placeName(latitude: lat, longitude: lon)
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
             self.placeName = name
         }
     }
 
-    public var current: PhotoItem { items[index] }
+    public var baseCurrent: PhotoItem { items[index] }
+    public var current: PhotoItem {
+        if let burstIndex, burstItems.indices.contains(burstIndex) { return burstItems[burstIndex] }
+        return baseCurrent
+    }
     public var canGoNext: Bool { index < items.count - 1 }
     public var canGoPrevious: Bool { index > 0 }
+    public var canNavigateNext: Bool {
+        if hasBurstFilmstrip, let burstIndex, burstIndex < burstItems.count - 1 { return true }
+        return canGoNext
+    }
+    public var canNavigatePrevious: Bool {
+        if hasBurstFilmstrip, let burstIndex, burstIndex > 0 { return true }
+        return canGoPrevious
+    }
+    public var thumbnailFeed: ThumbnailFeed { feed }
+    public var hasBurstFilmstrip: Bool { burstItems.count > 1 }
+    public var exportItemsForDownload: [PhotoItem] {
+        hasBurstFilmstrip ? burstItems : [current]
+    }
+    public var canDownloadCurrentSelection: Bool {
+        !isLoadingBurst && !exportItemsForDownload.isEmpty
+    }
+    public var gridReturnCandidates: [PhotoItem] {
+        current.uid == baseCurrent.uid ? [baseCurrent] : [current, baseCurrent]
+    }
+    private func isDisplaying(_ item: PhotoItem) -> Bool { current.uid == item.uid }
+    private func isBaseCurrent(_ item: PhotoItem) -> Bool { baseCurrent.uid == item.uid }
 
     public func start() { loadCurrent() }
 
@@ -143,6 +177,7 @@ public final class PhotoViewerModel {
     /// stops playback/audio immediately and cancels unnecessary streaming/download work.
     public func stop() {
         loadTask?.cancel()
+        burstTask?.cancel()
         metadataTask?.cancel()
         placeTask?.cancel()
         video.teardown()
@@ -168,10 +203,10 @@ public final class PhotoViewerModel {
         motionTask = Task {
             // 1) Fully download the ENCRYPTED clip into the local encrypted block cache (no plaintext on disk).
             try? await streamer.prefetchEncrypted(for: motionUID)
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
             // 2) Build the streaming player — its resource loader now serves entirely from the local encrypted cache.
             guard let stream = try? await streamer.makeStreamingAsset(for: motionUID),
-                  !Task.isCancelled, self.current == item else { return }
+                  !Task.isCancelled, self.isDisplaying(item) else { return }
             let player = AVPlayer(playerItem: AVPlayerItem(asset: stream.asset))
             player.actionAtItemEnd = .pause
             player.automaticallyWaitsToMinimizeStalling = false
@@ -181,7 +216,7 @@ public final class PhotoViewerModel {
                 while pi.status == .unknown, !Task.isCancelled, tries < 100 {
                     try? await Task.sleep(for: .milliseconds(20)); tries += 1
                 }
-                guard pi.status == .readyToPlay, !Task.isCancelled, self.current == item else { return }
+                guard pi.status == .readyToPlay, !Task.isCancelled, self.isDisplaying(item) else { return }
                 player.preroll(atRate: 1) { _ in }
             }
             // 3) Expose only now — hover/force-click is a no-op until the clip is 100% ready (then plays instantly).
@@ -244,6 +279,31 @@ public final class PhotoViewerModel {
         loadCurrent()
     }
 
+    /// Contextual keyboard/button navigation. A visible burst/series filmstrip is a nested selection, so
+    /// left/right first move through series members; at the series edges they fall through to the adjacent
+    /// library item, matching keyboard accessibility expectations for an active sub-selection.
+    public func nextInContext() {
+        if hasBurstFilmstrip, let burstIndex, burstIndex < burstItems.count - 1 {
+            selectBurstIndex(burstIndex + 1)
+            return
+        }
+        next()
+    }
+
+    public func previousInContext() {
+        if hasBurstFilmstrip, let burstIndex, burstIndex > 0 {
+            selectBurstIndex(burstIndex - 1)
+            return
+        }
+        previous()
+    }
+
+    public func selectBurstIndex(_ newIndex: Int) {
+        guard burstItems.indices.contains(newIndex), burstIndex != newIndex else { return }
+        burstIndex = newIndex
+        loadDisplayedItem(burstItems[newIndex])
+    }
+
     /// In-memory cache of already-loaded full-resolution images (shared across viewer instances) so
     /// reopening / re-navigating to a photo is instant and never re-shows the spinner.
     private static let fullImageCache: NSCache<NSString, NSImage> = {
@@ -276,9 +336,30 @@ public final class PhotoViewerModel {
     }
 
     private func loadCurrent() {
+        burstTask?.cancel()
+        burstItems = []
+        burstIndex = nil
+        isLoadingBurst = false
+        burstLoadFailed = false
+        let item = baseCurrent
+        seedKnownBurstGroup(for: item)
+        loadDisplayedItem(item)
+        loadBurstGroupIfNeeded(for: item)
+    }
+
+    private func seedKnownBurstGroup(for item: PhotoItem) {
+        let memberIDs = item.burstMemberIDs
+        guard memberIDs.count > 1 else { return }
+        let itemByNodeID = Dictionary(uniqueKeysWithValues: items.map { ($0.uid.nodeID, $0) })
+        let known = memberIDs.compactMap { itemByNodeID[$0] }
+        guard known.count > 1 else { return }
+        burstItems = known
+        burstIndex = known.firstIndex(where: { $0.uid == item.uid }) ?? 0
+    }
+
+    private func loadDisplayedItem(_ item: PhotoItem) {
         loadTask?.cancel()
         video.reset()
-        let item = current
         originalProgress = 0
         isLoadingOriginal = false
         if showInfo { loadMetadata() }   // keep the open panel in sync when navigating
@@ -299,7 +380,7 @@ public final class PhotoViewerModel {
 
         loadTask = Task {
             try? await Task.sleep(for: .milliseconds(160))   // debounce: skip work for photos flicked past
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
 
             // Cached full original on disk (offline library) → show the SHARP image instantly and skip the
             // preview + download entirely. The disk read + AES-GCM decrypt + decode run OFF the main actor (the
@@ -308,7 +389,7 @@ public final class PhotoViewerModel {
                 let uid = item.uid
                 let cached = await Task.detached { oc.diskData(for: uid).flatMap { Self.decodeFullImage($0) } }.value
                 if let full = cached {
-                    guard !Task.isCancelled, self.current == item else { return }
+                    guard !Task.isCancelled, self.isDisplaying(item) else { return }
                     self.image = full
                     self.isSharp = true
                     oc.touch(uid)   // mark recently-used so the LRU cap keeps it
@@ -317,17 +398,44 @@ public final class PhotoViewerModel {
                 }
             }
 
-            if self.image == nil, let thumb = await self.feed.image(for: item.uid), self.current == item {
+            if self.image == nil, let thumb = await self.feed.image(for: item.uid), self.isDisplaying(item) {
                 self.image = thumb
             }
             // Larger preview for a crisper interim image (disk-cached for offline browsing).
             if let previewData = await self.loadPreview(item.uid),
-               let preview = NSImage(data: previewData), !Task.isCancelled, self.current == item {
+               let preview = NSImage(data: previewData), !Task.isCancelled, self.isDisplaying(item) {
                 self.image = preview
             }
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
 
             await self.resolveMedia(for: item)
+        }
+    }
+
+    private func loadBurstGroupIfNeeded(for item: PhotoItem) {
+        guard item.isBurstCandidate, let burstProvider else { return }
+        isLoadingBurst = true
+        burstLoadFailed = false
+        burstTask = Task { [burstProvider] in
+            do {
+                let group = try await burstProvider.burstGroup(containing: item.uid)
+                guard !Task.isCancelled, self.isBaseCurrent(item) else { return }
+                self.isLoadingBurst = false
+                guard group.count > 1 else {
+                    if self.hasBurstFilmstrip { return }
+                    self.burstItems = []
+                    self.burstIndex = nil
+                    return
+                }
+                self.burstItems = group
+                self.burstIndex = group.firstIndex(where: { $0.uid == item.uid }) ?? 0
+            } catch {
+                guard !Task.isCancelled, self.isBaseCurrent(item) else { return }
+                self.isLoadingBurst = false
+                self.burstLoadFailed = true
+                self.burstItems = []
+                self.burstIndex = nil
+            }
         }
     }
 
@@ -359,20 +467,20 @@ public final class PhotoViewerModel {
         logViewer(item, strategy: "resolving", kind: nil)
         do {
             let stream = try await streamer.makeStreamingAsset(for: item.uid)
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
             isLoadingOriginal = false
             logViewer(item, strategy: "range", kind: .video)
             video.playStreaming(asset: stream.asset, retaining: stream, uid: item.uid)
         } catch is VideoStreamError {
             // Server MIME says it isn't a video → it's an image. Use the image path.
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
             video.reset()
             logViewer(item, strategy: "image", kind: .image)
             await loadOriginalBytes(for: item, expecting: .image)
         } catch {
             // A real video (or unknown) whose stream setup failed stays failed rather than writing a
             // decrypted full-video temp file.
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
             video.reset()
             if item.isVideo {
                 video.fail(VideoPlaybackError.classify(error), uid: item.uid)
@@ -394,13 +502,13 @@ public final class PhotoViewerModel {
             let data = try await media.originalData(for: item.uid) { p in
                 Task { @MainActor in ref.model?.updateDownloadProgress(p, for: item) }
             }
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
             isLoadingOriginal = false
             // Decode the full original OFF the main actor so a large photo never rasterizes on the UI thread.
             let full = expecting != .video
                 ? await Task.detached(priority: .userInitiated) { Self.decodeFullImage(data) }.value
                 : nil
-            guard !Task.isCancelled, self.current == item else { return }
+            guard !Task.isCancelled, self.isDisplaying(item) else { return }
             if let full {
                 image = full
                 isSharp = true
@@ -432,13 +540,13 @@ public final class PhotoViewerModel {
     /// Re-runs resolution for the current item (the "Retry" button in the failure overlay).
     public func retry() {
         guard current.isVideo || videoState.error != nil else { return }
-        loadCurrent()
+        loadDisplayedItem(current)
     }
 
     /// Pushes real download progress into the state (used by the `@Sendable` progress callback via a
     /// weak box, so the callback never captures the non-Sendable view model directly).
     private func updateDownloadProgress(_ p: Double, for item: PhotoItem) {
-        guard current == item else { return }
+        guard current.uid == item.uid else { return }
         originalProgress = p
         if case .downloading = videoState { video.setDownloading(p) }
     }

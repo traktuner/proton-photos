@@ -752,6 +752,24 @@
         }
       }
     },
+    "toolbar.download_burst_zip": {
+      "extractionState": "manual",
+      "comment": "Viewer download button when the current photo is part of a burst/series; export is a ZIP.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download burst as ZIP"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serie als ZIP laden"
+          }
+        }
+      }
+    },
     "toolbar.favorite": {
       "extractionState": "manual",
       "comment": "Favorite button (not yet a favorite).",
@@ -1846,6 +1864,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld Elemente werden als eine ZIP-Datei geladen."
+          }
+        }
+      }
+    },
+    "export.series_zip_suffix": {
+      "extractionState": "manual",
+      "comment": "Filename suffix for a ZIP that contains all photos in one burst/series.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Series"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serie"
           }
         }
       }

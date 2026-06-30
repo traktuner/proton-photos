@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 import CryptoKit
 import PhotosCore
 import MediaCache
@@ -25,6 +26,15 @@ final class OfflineLibraryManager {
     /// relaunch / while offline — the bug this fixes was that originals lived only in a per-process RAM cache.
     let originalsCache = ThumbnailCache(namespace: "originals", derivative: "original")
 
+    /// Whole-library GPS index for the Map view. GPS is sensitive PII, so it is encrypted at rest
+    /// (`PhotoLocationStore`, same per-account key as the media caches) and decrypted only into the in-memory
+    /// `PhotoLocationIndex`. Filled by a low-priority background crawl behind the thumbnail crawl; purged on
+    /// sign-out. The Map UI binds to `locationIndex`.
+    let locationStore = PhotoLocationStore()
+    let locationIndex = PhotoLocationIndex()
+    private let locationCrawl = LocationCrawl()
+    private var locationCrawlStarted = false
+
     /// Offline Photo Library master switch, persisted. ON ⇒ viewed originals are kept locally (encrypted) up to
     /// the cap; thumbnails always crawl regardless of this toggle.
     private(set) var offlineEnabled: Bool
@@ -39,6 +49,20 @@ final class OfflineLibraryManager {
 
     /// Latest computed status for the Developer/Cache surface (refreshed on demand).
     private(set) var status = OfflineCacheStatus()
+
+    /// Live thumbnail-cache warm progress (0…100) for the toolbar "preparing library" pill. A lightweight
+    /// poll updates it while the background crawl fills; the pill hides once warm.
+    private(set) var cachePreparePercent: Double = 0
+    private var prepareMonitor: Task<Void, Never>?
+    /// Became true once this session saw an un-warm cache (the pill is an INITIAL-LOAD affordance only).
+    private var prepareActive = false
+    /// The pill whooshed away after the first warm-up; it stays hidden for the rest of the session. We can't
+    /// meaningfully predict a mid-session backlog ("1500 new assets just synced"), so re-showing is deferred —
+    /// a fresh launch with an un-warm cache naturally counts as that launch's initial load.
+    private var prepareDismissed = false
+    /// Drives the toolbar "preparing library" pill: shown only during the session's first warm-up, hidden the
+    /// instant it completes (after the native whoosh-out) and not re-shown.
+    var isPreparingLibrary: Bool { prepareActive && !prepareDismissed && liveAssetCount > 0 }
 
     private var feed: ThumbnailFeed?
     private var statsProvider: (any LibraryStatsProvider)?
@@ -61,6 +85,36 @@ final class OfflineLibraryManager {
         self.feed = feed
         self.statsProvider = stats
         Task { await feed.setPrefetchEnabled(OfflineLibraryPolicy.shouldCrawlThumbnails(offlineEnabled: offlineEnabled)) }
+        startPrepareMonitor()
+    }
+
+    /// Polls the thumbnail crawl's coverage so the toolbar "preparing library" pill shows live progress, then
+    /// whooshes the pill away once warm. Cheap: one actor read every 1.5 s. INITIAL-LOAD only — once it completes
+    /// it is not re-shown this session (see `prepareDismissed`); a warm-at-launch cache shows nothing at all.
+    private func startPrepareMonitor() {
+        prepareMonitor?.cancel()
+        cachePreparePercent = 0
+        prepareActive = false
+        prepareDismissed = false
+        prepareMonitor = Task { [weak self] in
+            while let self, !Task.isCancelled {
+                if let pct = await self.feed?.prefetchStatus().diskThumbnailCoveragePercent {
+                    self.cachePreparePercent = pct
+                    if pct >= 99.5 { break }
+                    self.prepareActive = true   // un-warm cache → show the pill for this initial load
+                }
+                try? await Task.sleep(for: .seconds(1.5))
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.cachePreparePercent = 100
+            // Only whoosh out a pill that was actually shown (a cache warm at launch never set prepareActive).
+            // Hold 100 % briefly so completion registers, then animate the whole pill away — and keep it hidden.
+            if self.prepareActive {
+                try? await Task.sleep(for: .seconds(0.4))
+                withAnimation(.smooth(duration: 0.45)) { self.prepareDismissed = true }
+            }
+            self.prepareMonitor = nil
+        }
     }
 
     /// Installs the per-account encryption key for the thumbnail + preview caches (and purges any legacy
@@ -72,6 +126,9 @@ final class OfflineLibraryManager {
         cache.configure(accountUID: session.uid, key: key)
         previewCache.configure(accountUID: session.uid, key: key)
         originalsCache.configure(accountUID: session.uid, key: key)
+        // Same per-account key; decrypt the persisted GPS index into RAM once → instant Map on relaunch.
+        locationStore.configure(accountUID: session.uid, key: key)
+        locationIndex.replaceAll(locationStore.load())
         if let cap = originalsCapBytes { let oc = originalsCache; Task.detached { oc.enforceByteCap(cap) } }
     }
 
@@ -82,6 +139,47 @@ final class OfflineLibraryManager {
         previewCache.clearAndForgetKey()
         originalsCache.clearAndForgetKey()
         VideoByteRangeCache.shared.clearAll()
+        locationStore.clear()
+        locationIndex.replaceAll([])
+        locationCrawlStarted = false
+        prepareMonitor?.cancel()
+        cachePreparePercent = 0
+        prepareActive = false
+        prepareDismissed = false
+    }
+
+    /// Kicks off the background GPS crawl that builds the Map view's location index — once per session.
+    /// Lower priority than the thumbnail crawl: a single throttled worker, resumable (only photos not yet
+    /// indexed are fetched), persisting the encrypted snapshot periodically. Safe to call repeatedly; only
+    /// the first non-empty call starts it.
+    func startLocationCrawl(items: [PhotoItem], metadata: any PhotoMetadataProvider) {
+        guard !locationCrawlStarted, !items.isEmpty else { return }
+        locationCrawlStarted = true
+        let uids = items.reversed().map(\.uid)   // newest first — recent photos are likelier geotagged → pins appear fast
+        let dates = Dictionary(items.map { ($0.uid, $0.captureTime) }, uniquingKeysWith: { first, _ in first })
+        let index = locationIndex
+        let store = locationStore
+        let feed = self.feed
+        Task {
+            // Give the thumbnail crawl a head start, then crawl GPS only while the grid isn't actively
+            // demanding on-screen thumbnails — so the Map crawl shares the rate-limit budget as P2 and
+            // never stalls scrolling (thumbnails are P1).
+            try? await Task.sleep(for: .seconds(8))
+            await locationCrawl.start(
+                uids: uids,
+                captureDates: dates,
+                location: { uid in
+                    guard let m = try? await metadata.metadata(for: uid), m.hasLocation,
+                          let lat = m.latitude, let lon = m.longitude else { return nil }
+                    return (lat, lon)
+                },
+                index: index,
+                store: store,
+                // P2: pause the GPS crawl entirely while the thumbnail crawl (P1) still has ANY work —
+                // visible OR background fill — so they never flood the backend together and stall thumbnails.
+                shouldYield: { await feed?.hasPendingThumbnailWork() ?? true }
+            )
+        }
     }
 
     /// Flips the Offline Photo Library switch and persists it. ON ⇒ the viewer persists full originals to the

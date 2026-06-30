@@ -7,6 +7,7 @@ import MediaCache
 import TimelineFeature
 import PhotoViewerFeature
 import UploadFeature
+import MapFeature
 
 struct MainView: View {
     let model: AppModel
@@ -61,6 +62,7 @@ struct MainView: View {
     @State private var exportTask: Task<Void, Never>?
     @State private var confirmLargeExport = false
     @State private var pendingExportItems: [PhotoItem] = []
+    @State private var pendingExportZipName: String?
     /// Above this many selected items, downloading a ZIP asks for confirmation first.
     private let largeExportThreshold = 50
     @State private var pendingTrashItems: [PhotoItem] = []
@@ -147,11 +149,20 @@ struct MainView: View {
                 if settled { model.markLibraryReady() }   // lift the launch veil once the grid is ready
             }
             .onChange(of: selection) { oldValue, newValue in
+                // Switching sidebar route while a photo/video is open: close the viewer INSTANTLY so the new tab's
+                // grid (or Map) just shows. No zoom-back-to-cell — the photo's cell usually isn't in the new
+                // route, and the expectation is simply "tab switches, photo closes."
+                if viewerModel != nil {
+                    zoom = nil
+                    viewerModel = nil
+                }
                 // Remember where the user was in the route they're leaving (the grid still shows it at this
                 // point, so the proxy reports the OLD route's anchor). Returning to that route re-pins it.
                 if let anchor = gridProxy.currentScrollAnchor?() {
                     routeScrollPositions[oldValue] = anchor
                 }
+                // Non-timeline routes (for example the Map overlay) keep the last grid route underneath.
+                guard newValue.hasTimeline else { return }
                 // The new route opens at its remembered position, or at the newest end on first visit. Both the
                 // target and the generation are set SYNCHRONOUSLY here — BEFORE the async `select(...)` that loads
                 // the route — so the generation is already pending when the new sections (and the new data token)
@@ -163,6 +174,9 @@ struct MainView: View {
             }
             .onChange(of: timelineModel.allItems.count) { _, count in
                 OfflineLibraryManager.shared.liveAssetCount = count
+                // Kick off the low-priority GPS crawl (once) so the Map's location index fills in behind the
+                // thumbnail crawl.
+                OfflineLibraryManager.shared.startLocationCrawl(items: timelineModel.allItems, metadata: backend)
             }
             .onDisappear {
                 searchDebounceTask?.cancel()
@@ -198,6 +212,18 @@ struct MainView: View {
             }
             .sheet(isPresented: $uploadCoordinator.isDestinationSheetPresented) {
                 UploadDestinationSheet(coordinator: uploadCoordinator)
+            }
+
+            // Library Map route: a MapKit map of every geotagged photo, inset beside the floating sidebar like
+            // the viewer. Sits OVER the grid (which still holds the last route underneath) and UNDER the viewer,
+            // so tapping a pin opens the photo viewer on top.
+            if selection == .map {
+                LibraryMapScreen(index: OfflineLibraryManager.shared.locationIndex,
+                                 thumbnail: { feed.memoryImage(for: $0) },
+                                 onSelectPhoto: { openPhotoByUID($0) })
+                    .padding(.leading, leadingObstructionInset)
+                    .animation(.easeInOut(duration: 0.3), value: leadingObstructionInset)
+                    .ignoresSafeArea()
             }
 
             // Hidden while a NON-interactive zoom (open/close spring) animates — the overlay stands in. During an
@@ -276,10 +302,15 @@ struct MainView: View {
         .confirmationDialog("export.confirm_many_title", isPresented: $confirmLargeExport) {
             Button("export.confirm_many_button") {
                 let items = pendingExportItems
+                let zipName = pendingExportZipName
                 pendingExportItems = []
-                startExport(items)
+                pendingExportZipName = nil
+                startExport(items, zipSuggestedName: zipName)
             }
-            Button("action.cancel", role: .cancel) { pendingExportItems = [] }
+            Button("action.cancel", role: .cancel) {
+                pendingExportItems = []
+                pendingExportZipName = nil
+            }
         } message: {
             Text("export.confirm_many_message \(pendingExportItems.count)")
         }
@@ -430,6 +461,13 @@ struct MainView: View {
                width: a.width + (b.width - a.width) * t, height: a.height + (b.height - a.height) * t)
     }
 
+    /// Open the viewer for a photo identified only by uid (a Map pin tap). Looks it up in the currently loaded
+    /// library list and opens directly (no cell-zoom — the grid cell is behind the map / may be off-screen).
+    private func openPhotoByUID(_ uid: PhotoUID) {
+        guard let item = timelineModel.allItems.first(where: { $0.uid == uid }) else { return }
+        openPhoto(item, timelineModel.allItems)
+    }
+
     private func openPhoto(_ item: PhotoItem, _ items: [PhotoItem]) {
         // Need the cell's on-screen frame and a thumbnail to fly; otherwise just open directly.
         guard let cell = gridProxy.windowFrameForItem?(item), let img = feed.memoryImage(for: item.uid) else {
@@ -461,8 +499,8 @@ struct MainView: View {
         // the close (the user's "pinch out should overrule whatever is happening" requirement).
         if let z = zoom, !z.interactive { return }
         guard let vm = viewerModel, let img = vm.image,
-              let cell = gridProxy.windowFrameForItem?(vm.current) else { return }
-        zoom = ZoomTransition(item: vm.current, image: img, cellFrame: cell, progress: 1, interactive: true)
+              let target = viewerReturnTarget(for: vm) else { return }
+        zoom = ZoomTransition(item: target.item, image: img, cellFrame: target.cell, progress: 1, interactive: true)
     }
 
     /// Live pinch progress: 1 = fullscreen, 0 = collapsed into the cell.
@@ -488,15 +526,14 @@ struct MainView: View {
 
     private func closePhoto() {
         guard let vm = viewerModel else { return }
-        let item = vm.current
         // Fly back to the photo's ACTUAL cell. If it scrolled off-screen (user navigated), close
         // instantly rather than centre-scrolling (which made it always shrink into the middle).
         logViewerToolbar(mode: "grid")
-        guard let img = vm.image, let cell = gridProxy.windowFrameForItem?(item) else {
+        guard let img = vm.image, let target = viewerReturnTarget(for: vm) else {
             viewerModel = nil
             return
         }
-        zoom = ZoomTransition(item: item, image: img, cellFrame: cell, progress: 1, interactive: false)
+        zoom = ZoomTransition(item: target.item, image: img, cellFrame: target.cell, progress: 1, interactive: false)
         DispatchQueue.main.async {
             withAnimation(.spring(response: zoomCloseSpring.response, dampingFraction: zoomCloseSpring.damping)) {
                 zoom?.progress = 0
@@ -507,11 +544,19 @@ struct MainView: View {
         }
     }
 
+    private func viewerReturnTarget(for vm: PhotoViewerModel) -> (item: PhotoItem, cell: CGRect)? {
+        for item in vm.gridReturnCandidates {
+            if let cell = gridProxy.windowFrameForItem?(item) { return (item, cell) }
+        }
+        return nil
+    }
+
     private func makeViewer(_ item: PhotoItem, _ items: [PhotoItem]) -> PhotoViewerModel {
         let index = items.firstIndex(of: item) ?? 0
         let offline = OfflineLibraryManager.shared
         return PhotoViewerModel(items: items, index: index, feed: feed, media: backend,
                                 streamer: backend, metadataProvider: backend,
+                                burstProvider: backend,
                                 previewCache: offline.previewCache,
                                 originalsCache: offline.originalsCache,
                                 cacheOriginals: offline.offlineEnabled,
@@ -557,6 +602,7 @@ struct MainView: View {
         case .tag(let t): t.title
         case .album(_, let name): name
         case .trash: String(localized: "sidebar.recently_deleted")
+        case .map: "Map"
         }
     }
 
@@ -791,6 +837,22 @@ struct MainView: View {
             : String(localized: "alert.trash_confirmation_message_other")
     }
 
+    /// Small native progress indicator next to the upload button during the library's FIRST warm-up, while the
+    /// thumbnail cache builds; it whooshes away once warm and is not re-shown this session (see
+    /// `OfflineLibraryManager.isPreparingLibrary`). The exact percent lives on the tooltip / VoiceOver.
+    ///
+    /// Deliberately the SAME control as `exportProgressIndicator` (the download progress) — a determinate
+    /// `.circular` `ProgressView` at `.controlSize(.regular)` — so the two read identically and the pill sizes
+    /// itself the same proven way. No glyph, no label. No manual `.glassEffect`: the toolbar glass is system-owned.
+    private var libraryPreparePill: some View {
+        let pct = Int(OfflineLibraryManager.shared.cachePreparePercent.rounded())
+        return ProgressView(value: max(0.001, min(1, OfflineLibraryManager.shared.cachePreparePercent / 100)))
+            .progressViewStyle(.circular)
+            .controlSize(.regular)
+            .help(Text(verbatim: "Mediathek wird geladen … \(pct)%"))
+            .accessibilityLabel(Text(verbatim: "Mediathek wird geladen, \(pct) Prozent"))
+    }
+
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         if let viewerModel {
             ToolbarItem(placement: .navigation) {
@@ -816,7 +878,9 @@ struct MainView: View {
                 .fixedSize()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-                .glassEffect(in: Capsule())   // native Liquid Glass (was .regularMaterial)
+                // No manual `.glassEffect` here: this is a `.principal` toolbar item and the system toolbar OWNS
+                // the Liquid-Glass background. A manual Capsule glass rendered a DOUBLE pill (inner manual capsule
+                // inside the outer system pill). The system supplies the single glass background.
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -832,14 +896,16 @@ struct MainView: View {
                     exportProgressIndicator   // the download icon is replaced by the native progress while exporting
                     exportCancelButton
                 } else {
+                    let downloadTitle = viewerModel.hasBurstFilmstrip ? "toolbar.download_burst_zip" : "toolbar.download_original"
                     Button {
-                        startExport([viewerModel.current])
+                        downloadViewerSelection(viewerModel)
                     } label: {
-                        Label("toolbar.download_original", systemImage: "square.and.arrow.down")
+                        Label(LocalizedStringKey(downloadTitle), systemImage: "square.and.arrow.down")
                             .labelStyle(.iconOnly)
                     }
-                    .help("toolbar.download_original")
-                    .accessibilityLabel("toolbar.download_original")
+                    .help(LocalizedStringKey(downloadTitle))
+                    .accessibilityLabel(LocalizedStringKey(downloadTitle))
+                    .disabled(!viewerModel.canDownloadCurrentSelection)
                 }
 
                 Button { toggleFavorite(viewerModel.current.uid) } label: {
@@ -863,6 +929,13 @@ struct MainView: View {
             // No explicit "select mode": click / ⌘-click / ⇧-click / drag-marquee select directly, double
             // click opens. The toolbar is stable — the download (or restore) + trash actions are always
             // present and just enable when something is selected.
+            // Library-preparing pill — its OWN glass pill, right before the upload group. A single determinate
+            // progress indicator (the SAME control as the download progress); the system supplies its glass.
+            // The trailing `ToolbarSpacer(.fixed)` splits this off as a SEPARATE pill from the upload group.
+            if OfflineLibraryManager.shared.isPreparingLibrary {
+                ToolbarItem(placement: .primaryAction) { libraryPreparePill }
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
             // Pill 1 — upload + download belong together (`ToolbarSpacer` splits the system glass into a SEPARATE
             // pill from the selection actions; the toolbar manages its own glass, so this native split is the only
             // reliable way to get distinct pills).
@@ -986,21 +1059,101 @@ struct MainView: View {
 
     // MARK: - Download / export
 
+    private struct ExportRequest {
+        let items: [PhotoItem]
+        let zipSuggestedName: String?
+    }
+
     private func downloadSelected() {
         let items = timelineModel.allItems.filter { selectedUIDs.contains($0.uid) }
         guard !items.isEmpty, !isExporting else { return }
-        if items.count > largeExportThreshold {
-            pendingExportItems = items
-            confirmLargeExport = true     // confirm large multi-downloads before zipping
-        } else {
-            startExport(items)
+        Task { @MainActor in
+            let request = await makeExportRequest(for: items, preferredSeriesNameSource: items.count == 1 ? items[0] : nil)
+            startOrConfirmExport(request)
         }
     }
 
+    private func downloadViewerSelection(_ viewerModel: PhotoViewerModel) {
+        let items = viewerModel.exportItemsForDownload
+        guard !items.isEmpty, !isExporting else { return }
+        Task { @MainActor in
+            let request = await makeExportRequest(for: items, preferredSeriesNameSource: viewerModel.baseCurrent)
+            startOrConfirmExport(request)
+        }
+    }
+
+    private func startOrConfirmExport(_ request: ExportRequest) {
+        guard !request.items.isEmpty, !isExporting else { return }
+        if request.items.count > largeExportThreshold {
+            pendingExportItems = request.items
+            pendingExportZipName = request.zipSuggestedName
+            confirmLargeExport = true     // confirm large multi-downloads before zipping
+        } else {
+            startExport(request.items, zipSuggestedName: request.zipSuggestedName)
+        }
+    }
+
+    /// Expands a selected Proton burst/series title photo into all known members before export. This keeps the
+    /// grid toolbar and viewer toolbar on the same E2EE-safe export path; only the item list and suggested ZIP
+    /// filename are prepared here.
+    @MainActor private func makeExportRequest(for sourceItems: [PhotoItem],
+                                              preferredSeriesNameSource: PhotoItem?) async -> ExportRequest {
+        var expanded: [PhotoItem] = []
+        var seen = Set<PhotoUID>()
+        var expandedSingleSeries = false
+
+        func appendUnique(_ item: PhotoItem) {
+            guard seen.insert(item.uid).inserted else { return }
+            expanded.append(item)
+        }
+
+        let memberIDSet = Set((preferredSeriesNameSource?.burstMemberIDs ?? []).map {
+            PhotoUID(volumeID: preferredSeriesNameSource?.uid.volumeID ?? "", nodeID: $0)
+        })
+        let sourceUIDSet = Set(sourceItems.map(\.uid))
+        let alreadyExpandedPreferredSeries = sourceItems.count > 1
+            && preferredSeriesNameSource?.isBurstCandidate == true
+            && !memberIDSet.isEmpty
+            && sourceUIDSet.isSubset(of: memberIDSet)
+
+        if alreadyExpandedPreferredSeries {
+            sourceItems.forEach(appendUnique)
+            expandedSingleSeries = true
+        } else {
+            for item in sourceItems {
+                if item.isBurstCandidate,
+                   let group = try? await backend.burstGroup(containing: item.uid),
+                   group.count > 1 {
+                    group.forEach(appendUnique)
+                    expandedSingleSeries = true
+                } else {
+                    appendUnique(item)
+                }
+            }
+        }
+
+        let zipName: String?
+        if expandedSingleSeries, expanded.count > 1, let source = preferredSeriesNameSource ?? sourceItems.first {
+            zipName = await suggestedSeriesZipName(for: source)
+        } else {
+            zipName = nil
+        }
+        return ExportRequest(items: expanded, zipSuggestedName: zipName)
+    }
+
+    @MainActor private func suggestedSeriesZipName(for item: PhotoItem) async -> String {
+        let meta = try? await backend.metadata(for: item.uid)
+        let fallback = Self.defaultName(item, ext: Self.defaultExtension(item, metadata: meta))
+        let filename = meta?.filename?.isEmpty == false ? meta?.filename : fallback
+        let stem = URL(fileURLWithPath: filename ?? fallback).deletingPathExtension().lastPathComponent
+        let safeStem = stem.isEmpty ? "ProtonPhotos" : stem
+        return "\(safeStem)-\(String(localized: "export.series_zip_suffix")).zip"
+    }
+
     /// Single entry point for launching an export, so the toolbar ring's menu has one task to cancel.
-    private func startExport(_ items: [PhotoItem]) {
+    private func startExport(_ items: [PhotoItem], zipSuggestedName: String? = nil) {
         exportTask?.cancel()
-        exportTask = Task { await performExport(items) }
+        exportTask = Task { await performExport(items, zipSuggestedName: zipSuggestedName) }
     }
 
     /// Cancels the running download (from the toolbar ring's menu). `performExport` discards any partial ZIP.
@@ -1012,7 +1165,7 @@ struct MainView: View {
     /// (CRC-32, AES-GCM decrypt of cached originals, file writes) runs OFF the main actor in the `nonisolated`
     /// workers below, so a large export never freezes the UI and Cancel reacts instantly (the user's "im
     /// Hintergrund, nicht Vordergrund" requirement).
-    @MainActor private func performExport(_ items: [PhotoItem]) async {
+    @MainActor private func performExport(_ items: [PhotoItem], zipSuggestedName: String?) async {
         let backend = self.backend
         let cache = OfflineLibraryManager.shared.originalsCache
         // Captures self only to push 0…1 onto the @State ring; the closure itself runs on the main actor.
@@ -1032,7 +1185,7 @@ struct MainView: View {
             // Multi-select → ONE streaming ZIP, written straight to the user's chosen file (no app-temp staging →
             // respects the E2EE "originals only at the chosen destination" rule; no size cap → bounded only by
             // free disk via the live guard in the worker).
-            guard let chosen = chooseZipDestination() else { return }
+            guard let chosen = chooseZipDestination(suggestedName: zipSuggestedName) else { return }
             dest = chosen
         }
 
@@ -1111,9 +1264,9 @@ struct MainView: View {
         return try await backend.originalData(for: item.uid, onProgress: onProgress)
     }
 
-    private func chooseZipDestination() -> URL? {
+    private func chooseZipDestination(suggestedName: String? = nil) -> URL? {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "ProtonPhotos Export.zip"
+        panel.nameFieldStringValue = suggestedName ?? "ProtonPhotos Export.zip"
         panel.allowedContentTypes = [.zip]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK else { return nil }
@@ -1230,6 +1383,8 @@ private struct SidebarView: View {
                     Label(tag.title, systemImage: tag.systemImage)
                         .tag(PhotoFilter.tag(tag))
                 }
+                Label("Map", systemImage: "map")
+                    .tag(PhotoFilter.map)
             }
             if !albums.isEmpty {
                 Section("sidebar.albums") {

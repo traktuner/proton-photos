@@ -449,6 +449,60 @@
         }
       }
     },
+    "viewer.burst_badge %lld %lld": {
+      "extractionState": "manual",
+      "comment": "Viewer badge showing the selected burst/series photo position.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Burst %1$lld of %2$lld"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serie %1$lld von %2$lld"
+          }
+        }
+      }
+    },
+    "viewer.burst_filmstrip_label": {
+      "extractionState": "manual",
+      "comment": "Accessibility label for the burst/series filmstrip.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Burst photos"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serienfotos"
+          }
+        }
+      }
+    },
+    "viewer.burst_loading": {
+      "extractionState": "manual",
+      "comment": "Viewer badge while burst/series members are loading.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading burst"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Serie wird geladen"
+          }
+        }
+      }
+    },
     "viewer.playback_failed": {
       "extractionState": "manual",
       "comment": "Title on the video failure card.",
