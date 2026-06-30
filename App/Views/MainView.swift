@@ -846,15 +846,15 @@ struct MainView: View {
     /// itself the same proven way. No glyph, no label. No manual `.glassEffect`: the toolbar glass is system-owned.
     private var libraryPreparePill: some View {
         let pct = Int(OfflineLibraryManager.shared.cachePreparePercent.rounded())
-        // Wrapped in a non-interactive Button so it gets the SAME round, padded toolbar pill as the
-        // aspect-toggle button (a bare view gets a tight content-hugging pill instead). `allowsHitTesting(false)`
-        // keeps it non-clickable without the dimming that `.disabled` would apply.
+        // Wrapped in a Button so it gets the SAME round, padded toolbar pill as the aspect-toggle button (a bare
+        // view gets a tight content-hugging pill instead). The action is a deliberate no-op — it's a status
+        // indicator, not a control — but it must stay HIT-TESTABLE, otherwise the hover tooltip (the live percent)
+        // never fires (`.allowsHitTesting(false)` would suppress hover, and `.disabled` would dim the pie).
         return Button(action: {}) {
             ProgressView(value: max(0.001, min(1, OfflineLibraryManager.shared.cachePreparePercent / 100)))
                 .progressViewStyle(.circular)
                 .controlSize(.small)
         }
-        .allowsHitTesting(false)
         .help(Text(verbatim: "Mediathek wird geladen … \(pct)%"))
         .accessibilityLabel(Text(verbatim: "Mediathek wird geladen, \(pct) Prozent"))
     }
