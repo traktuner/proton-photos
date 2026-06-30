@@ -188,3 +188,11 @@ The performance contract from the existing Metal grid is preserved and tightened
 The executable local gate is `scripts/verify-universal-core.sh`. It runs the shared architecture tests and builds every current universal Core target for `generic/platform=iOS` and `generic/platform=macOS`. Because SwiftPM models iPadOS through the iOS platform declaration, this iOS-family build is the package-level iPadOS compatibility check until separate iPad UI targets exist.
 
 Agents MUST run `scripts/verify-universal-core.sh` before committing a change that modifies universal Core boundaries, package target dependencies, Core imports, platform purity rules, or cross-platform cache/feed/location behavior. If the gate cannot run, the final report must name the exact command, failure, and residual risk.
+
+### Phase 3 — MetalGrid boundary split
+
+#### Phase 3.1 — MetalGrid boundary audit
+
+The Phase 3.1 audit is recorded in `docs/metalgrid-boundary-audit.md`. It is audit-only: no production grid behavior changes, no file moves, and no renderer rewrites.
+
+Future MetalGrid extraction work MUST use that audit as input. Pure geometry/zoom/transition/value-policy code may move toward a future `GridCore`; `MTKView`, `NSView`/`UIView`, scroll physics, gesture intake, accessibility hosts, platform glyph rasterization, `MediaCache` feed adapters, and platform texture budgets must remain in platform adapters until explicitly split.
