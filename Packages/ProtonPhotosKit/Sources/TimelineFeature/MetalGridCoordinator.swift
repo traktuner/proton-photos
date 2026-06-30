@@ -16,7 +16,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private let cache: MetalGridTextureCache
     private var dataSource: MetalGridDataSource
     private let budget: MetalGridBudget
-    private let gridProfile: GridLevelProfile
+    private(set) var gridProfile: GridLevelProfile
 
     /// Fired ONCE, the first time every visible cell is GPU-resident (the first fully-drawn frame). The shell
     /// holds the launch veil until this so it never lifts onto blank thumbnails. See `streamTextures`.
@@ -222,6 +222,39 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     var totalItems: Int { dataSource.flatUIDs.count }
     var orderedUIDs: [PhotoUID] { dataSource.flatUIDs }
+    var gridProfileID: String { gridProfile.id }
+
+    @discardableResult
+    func applyGridProfile(_ newProfile: GridLevelProfile,
+                          oldFrame: CGRect,
+                          newFrame: CGRect,
+                          oldScrollY: CGFloat,
+                          wasBottomPinned: Bool,
+                          targetCommittedPhase: Int? = nil,
+                          levelMapping: GridProfileRebaseLevelMapping = .closestVisualMatch) -> GridProfileRebaseResult? {
+        guard newProfile.id != gridProfile.id else { return nil }
+        var targetEngine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: newProfile)
+        targetEngine.topInset = topBarInset
+        let result = engine.rebasedScrollOffsetForProfileChange(GridProfileRebaseInput(
+            targetEngine: targetEngine,
+            oldViewportFrame: oldFrame,
+            newViewportFrame: newFrame,
+            oldScrollY: oldScrollY,
+            sourceLevel: level,
+            sourceCommittedPhase: currentPhase(),
+            targetCommittedPhase: targetCommittedPhase,
+            wasBottomPinned: wasBottomPinned,
+            levelMapping: levelMapping
+        ))
+
+        gridProfile = newProfile
+        engine = targetEngine
+        committedPhase = result.targetCommittedPhase
+        level = result.targetLevel
+        onContentSizeChange?(contentSize())
+        requestRedraw()
+        return result
+    }
 
     // MARK: - Production decorations + selection state (lab leaves `decorationsEnabled` false)
 

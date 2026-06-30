@@ -4,6 +4,15 @@
 <dict>
 	<key>defaultProfileID</key>
 	<string>regularTimeline</string>
+	<key>selectionRules</key>
+	<array>
+		<dict>
+			<key>profileID</key>
+			<string>compactTimeline</string>
+			<key>maxLayoutWidth</key>
+			<real>640</real>
+		</dict>
+	</array>
 	<key>profiles</key>
 	<array>
 		<dict>

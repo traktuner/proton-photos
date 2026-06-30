@@ -18,6 +18,12 @@ import GridCore
         #expect(compact.defaultLevel == 2)
         #expect(compact.levels.map(\.nominalColumns) == [1, 2, 3, 5, 12, 20])
         #expect(SquareTileGridEngine(sectionCounts: [100], profile: compact).resolvedMetrics(level: 0, width: 390).columns == 1)
+
+        #expect(config.selectionRules == [
+            TimelineGridProfileSelectionRule(profileID: "compactTimeline", minLayoutWidth: nil, maxLayoutWidth: 640)
+        ])
+        #expect(config.resolver.profile(for: TimelineGridViewport(layoutWidth: 640)).id == "compactTimeline")
+        #expect(config.resolver.profile(for: TimelineGridViewport(layoutWidth: 641)).id == "regularTimeline")
     }
 
     @Test func invalidDefaultLevelIsRejected() throws {
@@ -59,8 +65,49 @@ import GridCore
         }
     }
 
+    @Test func unknownSelectionProfileIsRejected() throws {
+        let data = try plistData(validConfig(selectionRules: [[
+            "profileID": "missing",
+            "maxLayoutWidth": 640
+        ]]))
+
+        do {
+            _ = try TimelineGridProfileConfiguration.load(data: data)
+            Issue.record("selection rules must reference a configured profile")
+        } catch let error as TimelineGridProfileConfigurationError {
+            #expect(error.description.contains("unknown profile id missing"))
+        }
+    }
+
+    @Test func invalidSelectionRangeIsRejected() throws {
+        let data = try plistData(validConfig(selectionRules: [[
+            "profileID": "regular",
+            "minLayoutWidth": 800,
+            "maxLayoutWidth": 640
+        ]]))
+
+        do {
+            _ = try TimelineGridProfileConfiguration.load(data: data)
+            Issue.record("selection rule min/max ranges must be validated")
+        } catch let error as TimelineGridProfileConfigurationError {
+            #expect(error.description.contains("minLayoutWidth 800.0 above maxLayoutWidth 640.0"))
+        }
+    }
+
     private func plistData(_ object: [String: Any]) throws -> Data {
         try PropertyListSerialization.data(fromPropertyList: object, format: .xml, options: 0)
+    }
+
+    private func validConfig(selectionRules: [[String: Any]]) -> [String: Any] {
+        [
+            "defaultProfileID": "regular",
+            "selectionRules": selectionRules,
+            "profiles": [[
+                "id": "regular",
+                "defaultLevel": 0,
+                "levels": [level(id: 0, columns: 1, transition: nil)]
+            ]]
+        ]
     }
 
     private func level(id: Int, columns: Int, transition: String?) -> [String: Any] {

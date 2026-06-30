@@ -213,3 +213,18 @@ closest visual slot size while preserving the normal-vs-overview/month-label rol
 No macOS production adapter currently switches profiles automatically. `TimelineFeature` still injects the
 validated production profile explicitly; future adapter work must call the Core rebase before swapping engines
 so `regularTimeline`/`compactTimeline` changes do not jump.
+
+## Phase 3.6 result
+
+`TimelineFeature` now owns viewport-resolved production profile selection. `GridProfiles.plist` may define
+validated `selectionRules`; the shipped rule selects `compactTimeline` at layout widths up to `640pt` and falls
+back to the configured default profile (`regularTimeline`) above that.
+
+The production macOS adapter applies profile changes through `MetalGridCoordinator.applyGridProfile`, which uses
+`GridCore.GridProfileRebase` before swapping the engine. The host defers this work while live resize, sidebar
+presentation, pinch zoom, commit bridge, scroll rebase, overview dissolve, or resize-settle work is active. This
+keeps dynamic scene-size changes profile-aware without mixing the profile switch into active animation frames.
+
+Performance impact should be neutral in steady state: profile resolution is a tiny rule scan on layout/update,
+and the O(1)-style rebase runs only when the resolved profile id changes. Narrow macOS windows now use the
+compact ladder; wide windows keep the existing regular ladder.

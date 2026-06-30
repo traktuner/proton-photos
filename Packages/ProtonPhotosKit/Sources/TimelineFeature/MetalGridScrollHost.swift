@@ -73,6 +73,8 @@ final class MetalGridScrollHost: NSView {
     /// changed; consumed/cleared by `reconcileLevelBinding`. nil = no host-led commit awaiting binding sync.
     /// See `LevelBindingReconciler`.
     private var pendingLevelEcho: Int?
+    private var gridProfileResolver: TimelineGridProfileResolver?
+    private var pendingResolvedGridProfile: GridLevelProfile?
 
     /// The leading obstruction inset (points) for the native floating sidebar. ONE value drives three things:
     /// (1) event hit-testing is declined for `x < eventLeadingInset` (those events reach the sidebar); (2) input
@@ -182,11 +184,13 @@ final class MetalGridScrollHost: NSView {
     private let bridgeDuration: CFTimeInterval = GridZoomCommitBridge.duration
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
-          gridProfile: GridLevelProfile) {
+          gridProfile: GridLevelProfile,
+          gridProfileResolver: TimelineGridProfileResolver? = nil) {
         guard let coordinator = MetalGridCoordinator(device: device, dataSource: dataSource, budget: budget,
                                                      gridProfile: gridProfile) else { return nil }
         self.coordinator = coordinator
         self.metalView = MetalGridView(frame: .zero, device: device)
+        self.gridProfileResolver = gridProfileResolver
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         wantsLayer = true
         layer?.backgroundColor = MetalGridPalette.background.cgColor   // uniform Apple-like dark surface
@@ -334,7 +338,7 @@ final class MetalGridScrollHost: NSView {
     /// gesture had already fallen back (vertical/corner), the presentation is inactive and the normal `layout()`
     /// path already settled it, so this is a no-op beyond clearing the sync-present flag.
     @objc private func windowDidEndLiveResize() {
-        guard coordinator.presentationResizeActive else { liveResizeStartFrame = .zero; return }
+        guard coordinator.presentationResizeActive else { applyResolvedGridProfileAfterLiveResizeFallback(); return }
         // SETTLE = NO snap. The settle scroll depends on the axis: a WIDTH/corner change scales the tiles (fixed
         // columns, no reflow), so the grid settles to the resize anchor — at the newest end the LAST row stays at the
         // viewport bottom, otherwise the centre item is re-centred (resolved ONCE here, not drifting per frame). A
@@ -356,9 +360,19 @@ final class MetalGridScrollHost: NSView {
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
         if animating { resizeSettleStart = CACurrentMediaTime() }
-        lastViewportScreenFrame = viewportScreenFrame()
+        let finalFrame = viewportScreenFrame()
+        let profileOldFrame = liveResizeStartFrame == .zero ? lastViewportScreenFrame : liveResizeStartFrame
+        lastViewportScreenFrame = finalFrame
         liveResizeStartFrame = .zero
+        _ = applyResolvedGridProfileIfNeeded(oldFrame: profileOldFrame, newFrame: finalFrame)
         requestFrame()
+    }
+
+    private func applyResolvedGridProfileAfterLiveResizeFallback() {
+        let oldFrame = liveResizeStartFrame == .zero ? lastViewportScreenFrame : liveResizeStartFrame
+        let newFrame = viewportScreenFrame()
+        liveResizeStartFrame = .zero
+        _ = applyResolvedGridProfileIfNeeded(oldFrame: oldFrame, newFrame: newFrame)
     }
 
     // MARK: - Live focus-row pinch zoom (engine-owned GridZoomTransaction)
@@ -806,6 +820,7 @@ final class MetalGridScrollHost: NSView {
             || coordinator.isResizeSettling
             || coordinator.isScrollRebasing
             || coordinator.hasPendingVisibleThumbnails
+            || pendingResolvedGridProfile != nil
             || (pinchMode == .lattice && pinchDriver.isSelfAdvancing)
             || (pinchMode == .overviewDissolve && pinchSettling)
             || (pinchMode == .reflow && pinchSettling)
@@ -814,6 +829,84 @@ final class MetalGridScrollHost: NSView {
 
     private func updateDisplayLinkIdleState(now: CFTimeInterval = CACurrentMediaTime()) {
         streamingTick?.isPaused = !displayLinkHasActiveWork(now: now)
+    }
+
+    func updateGridProfileResolver(_ resolver: TimelineGridProfileResolver?) {
+        gridProfileResolver = resolver
+        if resolver == nil { pendingResolvedGridProfile = nil }
+        _ = applyResolvedGridProfileIfNeeded(oldFrame: lastViewportScreenFrame, newFrame: viewportScreenFrame())
+    }
+
+    private var canApplyResolvedGridProfile: Bool {
+        window != nil
+            && !inLiveResize
+            && !pinchActive
+            && !pinchSettling
+            && !coordinator.presentationResizeActive
+            && !coordinator.isSidebarResizing
+            && !coordinator.isResizeSettling
+            && !coordinator.isZoomingLive
+            && !coordinator.isCommitBridging
+            && !coordinator.isScrollRebasing
+            && !coordinator.gridTransition.isActive
+            && coordinator.overviewDissolve == nil
+    }
+
+    @discardableResult
+    private func applyResolvedGridProfileIfNeeded(oldFrame: NSRect, newFrame: NSRect) -> Bool {
+        guard let resolver = gridProfileResolver else {
+            pendingResolvedGridProfile = nil
+            return false
+        }
+        let frame = newFrame.width > 1 ? newFrame : viewportScreenFrame()
+        guard frame.width > 1 else { return false }
+
+        let layoutWidth = coordinator.layoutWidth > 1 ? coordinator.layoutWidth : frame.width
+        let viewport = TimelineGridViewport(layoutWidth: layoutWidth, layoutHeight: frame.height)
+        let resolved = resolver.profile(for: viewport)
+        guard resolved.id != coordinator.gridProfileID else {
+            pendingResolvedGridProfile = nil
+            return false
+        }
+
+        guard canApplyResolvedGridProfile else {
+            pendingResolvedGridProfile = resolved
+            wakeDisplayLink()
+            return false
+        }
+
+        let previousLevel = coordinator.level
+        let oldScrollY = scrollView.contentView.bounds.origin.y
+        let oldMaxScroll = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
+        let atOrBelowBottom = stickToBottom || oldScrollY >= oldMaxScroll - 2
+        let sourceFrame = oldFrame == .zero ? frame : oldFrame
+        guard let result = coordinator.applyGridProfile(
+            resolved,
+            oldFrame: sourceFrame,
+            newFrame: frame,
+            oldScrollY: oldScrollY,
+            wasBottomPinned: atOrBelowBottom
+        ) else {
+            pendingResolvedGridProfile = nil
+            return false
+        }
+
+        pendingResolvedGridProfile = nil
+        applyContentSize(coordinator.contentSize())
+        if !stickToBottom {
+            let maxY = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
+            let y = min(max(0, result.newScrollY), maxY)
+            scrollLockOrigin = nil
+            if abs(y - oldScrollY) > 0.5 {
+                let rebasedPoint = CGPoint(x: 0, y: y)
+                scrollView.contentView.scroll(to: rebasedPoint)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+        }
+        commitLevelToBinding(previousLevel: previousLevel)
+        requestFrame()
+        onViewportChanged?()
+        return true
     }
 
     // The display link only TRIGGERS redraws while thumbnails are streaming in; when the visible set is
@@ -833,6 +926,7 @@ final class MetalGridScrollHost: NSView {
         if window != nil {
             ensureDisplayLink()
             requestFrame()
+            _ = applyResolvedGridProfileIfNeeded(oldFrame: lastViewportScreenFrame, newFrame: viewportScreenFrame())
         } else {
             streamingTick?.invalidate()
             streamingTick = nil
@@ -851,6 +945,7 @@ final class MetalGridScrollHost: NSView {
         if pinchMode == .reflow, pinchSettling { advanceReflowOverZoomSettle() }               // over-zoom spring-back
         if coordinator.isScrollRebasing { requestFrame() }                       // edge/corner rebase slide
         if coordinator.hasPendingVisibleThumbnails { requestFrame() }
+        _ = applyResolvedGridProfileIfNeeded(oldFrame: lastViewportScreenFrame, newFrame: viewportScreenFrame())
         updateDisplayLinkIdleState()
     }
 
@@ -881,7 +976,10 @@ final class MetalGridScrollHost: NSView {
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
         if animating { resizeSettleStart = CACurrentMediaTime() }
-        lastViewportScreenFrame = viewportScreenFrame()
+        let oldFrame = lastViewportScreenFrame
+        let newFrame = viewportScreenFrame()
+        lastViewportScreenFrame = newFrame
+        _ = applyResolvedGridProfileIfNeeded(oldFrame: oldFrame, newFrame: newFrame)
         requestFrame()
     }
 
@@ -891,7 +989,11 @@ final class MetalGridScrollHost: NSView {
         let t = resizeSettleDuration > 0 ? min(1, (CACurrentMediaTime() - resizeSettleStart) / resizeSettleDuration) : 1
         coordinator.resizeSettleProgress = CGFloat(t)
         requestFrame()
-        if t >= 1 { coordinator.endResizeSettle(); requestFrame() }
+        if t >= 1 {
+            coordinator.endResizeSettle()
+            _ = applyResolvedGridProfileIfNeeded(oldFrame: lastViewportScreenFrame, newFrame: viewportScreenFrame())
+            requestFrame()
+        }
     }
 
     override func layout() {
@@ -917,6 +1019,10 @@ final class MetalGridScrollHost: NSView {
             let widthChanging = abs(newFrame.width - liveResizeStartFrame.width) > 0.5
             coordinator.presentationVerticalShift = widthChanging ? 0 : verticalCounterScroll(start: liveResizeStartFrame, current: newFrame)
             metalView.draw()
+            lastViewportScreenFrame = newFrame
+            return
+        }
+        if applyResolvedGridProfileIfNeeded(oldFrame: old, newFrame: newFrame) {
             lastViewportScreenFrame = newFrame
             return
         }
@@ -993,6 +1099,7 @@ final class MetalGridScrollHost: NSView {
             applyContentSize(coordinator.contentSize())
         }
         lastViewportScreenFrame = newFrame
+        _ = applyResolvedGridProfileIfNeeded(oldFrame: oldFrame, newFrame: newFrame)
     }
 
     /// Viewport resized (window or sidebar). Recompute content size from the new width and rebase the scroll

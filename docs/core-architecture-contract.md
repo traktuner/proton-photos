@@ -239,6 +239,35 @@ The bundled plist is a build-time product resource. Do not present editing the s
 customization mechanism; if user-facing profile changes are added later, load them from a validated settings or
 support directory path and keep the same validation gate.
 
+#### Phase 3.5 — GridCore profile-change rebase
+
+`GridCore` owns `GridProfileRebase`, the pure camera rebase used when a viewport class switches from one
+`GridLevelProfile` ladder to another for the same logical timeline data. It maps the current source level to a
+target level, preserves the logical item at a normalized viewport anchor, and keeps bottom-pinned timelines
+pinned to the target bottom.
+
+This is still Core math only. It must not decide when an app should use `regularTimeline`, `compactTimeline`,
+or any future profile. Platform adapters provide that policy from scene/viewport facts.
+
+#### Phase 3.6 — Viewport-resolved production profile selection
+
+`TimelineFeature` resolves the active production grid profile from validated `GridProfiles.plist` selection
+rules. The current production rule is viewport-based: layout widths up to `640pt` use `compactTimeline`; wider
+layout surfaces fall back to the default `regularTimeline`.
+
+Profile selection rules must name viewport classes, not platforms or device families. A future iPhone, iPad,
+Mac, foldable, Stage Manager, split-view, external-display, or resized-window surface must be expressible by the
+same layout/safe-area/trait facts rather than `if macOS` / `if iPad` branches in Core.
+
+`MetalGridScrollHost` applies profile changes only at stable boundaries. It defers selection changes during
+live window resize, sidebar presentation, pinch zoom, commit bridge, scroll rebase, overview dissolve, and resize
+settle. Once stable, it calls `GridProfileRebase` through `MetalGridCoordinator.applyGridProfile` before swapping
+engines, then syncs the SwiftUI level binding through the same echo guard used by pinch commits.
+
+This pass intentionally leaves the macOS host in `TimelineFeature`; it does not make `MetalGridScrollHost` a
+universal UI host. Future iOS/iPadOS hosts must reuse the same `GridCore` profile/rebase math and implement their
+own UIKit/SwiftUI scroll, gesture, safe-area, accessibility, and texture-budget policy.
+
 #### Phase 3.5 — Grid profile camera rebase
 
 `GridCore` owns the pure camera rebase used when a platform adapter switches between viewport-scoped grid

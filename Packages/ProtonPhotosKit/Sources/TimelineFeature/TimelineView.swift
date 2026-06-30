@@ -22,6 +22,7 @@ public struct TimelineView: View {
     private let metadataProvider: PhotoMetadataProvider?
     private let favoriteUIDs: Set<PhotoUID>
     private let gridProfile: GridLevelProfile
+    private let gridProfileResolver: TimelineGridProfileResolver?
 
     public init(
         model: TimelineViewModel,
@@ -41,6 +42,8 @@ public struct TimelineView: View {
         _model = State(initialValue: model)
         _level = level ?? .constant(gridProfile.defaultLevel)
         self.gridProfile = gridProfile
+        let productionConfig = TimelineGridProfileConfiguration.production
+        self.gridProfileResolver = gridProfile == productionConfig.defaultProfile ? productionConfig.resolver : nil
         self.proxy = proxy
         self.routeScrollGeneration = routeScrollGeneration
         self.routeInitialScrollAnchor = routeInitialScrollAnchor
@@ -94,6 +97,7 @@ public struct TimelineView: View {
                             routeScrollGeneration: routeScrollGeneration,
                             routeInitialScrollAnchor: routeInitialScrollAnchor,
                             gridProfile: gridProfile,
+                            gridProfileResolver: gridProfileResolver,
                             onOpen: onOpen,
                             proxy: proxy,
                             selectionMode: selectionMode,

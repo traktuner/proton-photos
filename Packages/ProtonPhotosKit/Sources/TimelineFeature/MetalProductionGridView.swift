@@ -49,6 +49,7 @@ struct MetalProductionGridView: NSViewRepresentable {
     /// alongside `routeScrollGeneration`; consumed once per generation as the host's initial-viewport policy.
     var routeInitialScrollAnchor: GridScrollAnchor? = nil
     let gridProfile: GridLevelProfile
+    let gridProfileResolver: TimelineGridProfileResolver?
     let onOpen: (PhotoItem, [PhotoItem]) -> Void
     var proxy: GridProxy?
     var selectionMode: Bool = false
@@ -65,7 +66,8 @@ struct MetalProductionGridView: NSViewRepresentable {
               let host = MetalGridScrollHost(
                 device: device,
                 dataSource: MetalGridProductionAdapter.makeDataSource(sections: sections, feed: feed),
-                gridProfile: gridProfile
+                gridProfile: gridProfile,
+                gridProfileResolver: gridProfileResolver
               ) else {
             // Only reachable if Metal can't initialise on this machine (no GPU / shader build fails); emit a
             // diagnostic and return an empty view rather than crash.
@@ -148,6 +150,7 @@ struct MetalProductionGridView: NSViewRepresentable {
         guard let host = nsView as? MetalGridScrollHost else { return }
         host.eventLeadingInset = leadingEventInset
         host.topBarInset = topBarInset
+        host.updateGridProfileResolver(gridProfileResolver)
         let coord = context.coordinator
         coord.allItems = allItems
         coord.onOpen = onOpen

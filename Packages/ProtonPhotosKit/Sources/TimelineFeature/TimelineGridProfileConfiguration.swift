@@ -19,6 +19,10 @@ enum TimelineGridProfileConfigurationError: Error, CustomStringConvertible {
     case missingTransition(profileID: String, level: Int)
     case transitionOnLastLevel(profileID: String, level: Int)
     case invalidTransitionKind(profileID: String, level: Int, value: String)
+    case emptySelectionProfileID(index: Int)
+    case unknownSelectionProfileID(String)
+    case invalidSelectionWidth(profileID: String, field: String, value: CGFloat)
+    case invalidSelectionRange(profileID: String, min: CGFloat, max: CGFloat)
 
     var description: String {
         switch self {
@@ -54,6 +58,14 @@ enum TimelineGridProfileConfigurationError: Error, CustomStringConvertible {
             return "grid profile \(profileID) last level \(level) must not define transitionKindToNext"
         case let .invalidTransitionKind(profileID, level, value):
             return "grid profile \(profileID) level \(level) has invalid transition kind \(value)"
+        case let .emptySelectionProfileID(index):
+            return "grid profile selection rule at index \(index) has an empty profile id"
+        case let .unknownSelectionProfileID(id):
+            return "grid profile selection rule references unknown profile id \(id)"
+        case let .invalidSelectionWidth(profileID, field, value):
+            return "grid profile selection rule for \(profileID) has invalid \(field) \(value)"
+        case let .invalidSelectionRange(profileID, min, max):
+            return "grid profile selection rule for \(profileID) has minLayoutWidth \(min) above maxLayoutWidth \(max)"
         }
     }
 }
@@ -61,6 +73,7 @@ enum TimelineGridProfileConfigurationError: Error, CustomStringConvertible {
 struct TimelineGridProfileConfiguration: Equatable {
     let defaultProfileID: String
     let profiles: [GridLevelProfile]
+    let selectionRules: [TimelineGridProfileSelectionRule]
 
     var defaultProfile: GridLevelProfile {
         guard let profile = profile(id: defaultProfileID) else {
@@ -71,6 +84,10 @@ struct TimelineGridProfileConfiguration: Equatable {
 
     func profile(id: String) -> GridLevelProfile? {
         profiles.first { $0.id == id }
+    }
+
+    var resolver: TimelineGridProfileResolver {
+        TimelineGridProfileResolver(defaultProfileID: defaultProfileID, profiles: profiles, rules: selectionRules)
     }
 
     static let production: TimelineGridProfileConfiguration = {
@@ -107,7 +124,16 @@ struct TimelineGridProfileConfiguration: Equatable {
         guard profiles.contains(where: { $0.id == defaultProfileID }) else {
             throw TimelineGridProfileConfigurationError.missingDefaultProfile(defaultProfileID)
         }
-        return TimelineGridProfileConfiguration(defaultProfileID: defaultProfileID, profiles: profiles)
+
+        let selectionRules = try buildSelectionRules(
+            decoded.selectionRules ?? [],
+            validProfileIDs: Set(profiles.map(\.id))
+        )
+        return TimelineGridProfileConfiguration(
+            defaultProfileID: defaultProfileID,
+            profiles: profiles,
+            selectionRules: selectionRules
+        )
     }
 
     private static func buildProfile(id: String, dto: ProfileDTO) throws -> GridLevelProfile {
@@ -191,6 +217,42 @@ struct TimelineGridProfileConfiguration: Equatable {
         }
         return kind
     }
+
+    private static func buildSelectionRules(_ dtos: [SelectionRuleDTO],
+                                            validProfileIDs: Set<String>) throws -> [TimelineGridProfileSelectionRule] {
+        try dtos.enumerated().map { index, dto in
+            let id = dto.profileID.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !id.isEmpty else {
+                throw TimelineGridProfileConfigurationError.emptySelectionProfileID(index: index)
+            }
+            guard validProfileIDs.contains(id) else {
+                throw TimelineGridProfileConfigurationError.unknownSelectionProfileID(id)
+            }
+            try validateSelectionWidth(dto.minLayoutWidth, profileID: id, field: "minLayoutWidth")
+            try validateSelectionWidth(dto.maxLayoutWidth, profileID: id, field: "maxLayoutWidth")
+            if let min = dto.minLayoutWidth, let max = dto.maxLayoutWidth, min > max {
+                throw TimelineGridProfileConfigurationError.invalidSelectionRange(profileID: id, min: min, max: max)
+            }
+            return TimelineGridProfileSelectionRule(
+                profileID: id,
+                minLayoutWidth: dto.minLayoutWidth,
+                maxLayoutWidth: dto.maxLayoutWidth
+            )
+        }
+    }
+
+    private static func validateSelectionWidth(_ value: CGFloat?,
+                                               profileID: String,
+                                               field: String) throws {
+        guard let value else { return }
+        guard value >= 0, value.isFinite else {
+            throw TimelineGridProfileConfigurationError.invalidSelectionWidth(
+                profileID: profileID,
+                field: field,
+                value: value
+            )
+        }
+    }
 }
 
 public enum TimelineGridProfiles {
@@ -201,7 +263,14 @@ public enum TimelineGridProfiles {
 
 private struct ConfigurationDTO: Decodable {
     let defaultProfileID: String
+    let selectionRules: [SelectionRuleDTO]?
     let profiles: [ProfileDTO]
+}
+
+private struct SelectionRuleDTO: Decodable {
+    let profileID: String
+    let minLayoutWidth: CGFloat?
+    let maxLayoutWidth: CGFloat?
 }
 
 private struct ProfileDTO: Decodable {
