@@ -23,7 +23,7 @@ let package = Package(
     // Source language for every package String Catalog. Required by SwiftPM before a target may carry
     // localized resources; unsupported languages fall back to this (English).
     defaultLocalization: "en",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS("26.0"), .iOS("26.0")],
     products: [
         .library(name: "PhotosCore", targets: ["PhotosCore"]),
         .library(name: "DesignSystem", targets: ["DesignSystem"]),
