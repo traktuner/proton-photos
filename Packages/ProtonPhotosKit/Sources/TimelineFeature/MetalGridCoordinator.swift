@@ -894,16 +894,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Present the snapshot SCALED right-anchored to fill [inset(t), V] for the current sidebar progress. Coherent
     /// scale (one surface) — never re-resolved — so the grid scales exactly like a left-edge window drag.
     private func drawSidebarResize(in view: MTKView, viewportSize: CGSize) {
-        let H = viewportSize.height
-        let V = presentationSidebarViewportWidth
-        let q = Self.easeInOutCubic(min(1, max(0, presentationSidebarProgress)))
-        let inset = presentationSidebarFromInset + (presentationSidebarToInset - presentationSidebarFromInset) * q
-        let startLayoutW = max(1, V - presentationSidebarFromInset)
-        let k = max(1, V - inset) / startLayoutW
-        let scaled = presentationSnapshotSlots.map { s in
-            GridRenderSlot(index: s.index, column: s.column, row: s.row,
-                           rect: Self.presentationScaledRectRightAnchored(s.rect, scale: k, rightX: V, viewportH: H))
-        }
+        let scaled = sidebarPresentationSlots(viewportSize: viewportSize, progress: presentationSidebarProgress)
         let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
         renderer.render(in: view, viewportSize: viewportSize, groups: groups)
     }
@@ -914,6 +905,16 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// item under the centre stays pinned (no vertical drift while dragging the side edge); rows scale out
     /// symmetrically. No engine resolve / group rebuild / texture churn per tick.
     private func drawPresentationResize(in view: MTKView, viewportSize: CGSize) {
+        let scaled = resizePresentationSlots(viewportSize: viewportSize)
+        let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
+        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
+        // The settle scroll is resolved ONCE on release (`windowResizeReleaseScrollY`), never re-anchored per frame —
+        // that bottom-anchored recompute drifted vertically as the tiles scaled with width.
+    }
+
+    /// Pure geometry for the live window-resize presentation. Kept as a named entry point so tests can exercise
+    /// the same rect path the renderer uses: captured slots → one uniform scale/slide → rendered slots.
+    func resizePresentationSlots(viewportSize: CGSize) -> [GridRenderSlot] {
         let H = viewportSize.height
         let inset = presentationStartInset
         // Subtract the RIGHT gutter too (the LEFT gutter is already folded into `inset`): otherwise the snapshot
@@ -927,10 +928,22 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             GridRenderSlot(index: s.index, column: s.column, row: s.row,
                            rect: Self.presentationScaledRect(s.rect, scale: k, insetX: inset, anchorY: anchorY).offsetBy(dx: 0, dy: dy))
         }
-        let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
-        renderer.render(in: view, viewportSize: viewportSize, groups: groups)
-        // The settle scroll is resolved ONCE on release (`windowResizeReleaseScrollY`), never re-anchored per frame —
-        // that bottom-anchored recompute drifted vertically as the tiles scaled with width.
+        return scaled
+    }
+
+    /// Pure geometry for the sidebar open/close presentation. `progress` is the host-driven 0→1 animation value;
+    /// this returns the exact right-anchored slots the renderer draws.
+    func sidebarPresentationSlots(viewportSize: CGSize, progress: CGFloat) -> [GridRenderSlot] {
+        let H = viewportSize.height
+        let V = presentationSidebarViewportWidth
+        let q = Self.easeInOutCubic(min(1, max(0, progress)))
+        let inset = presentationSidebarFromInset + (presentationSidebarToInset - presentationSidebarFromInset) * q
+        let startLayoutW = max(1, V - presentationSidebarFromInset)
+        let k = max(1, V - inset) / startLayoutW
+        return presentationSnapshotSlots.map { s in
+            GridRenderSlot(index: s.index, column: s.column, row: s.row,
+                           rect: Self.presentationScaledRectRightAnchored(s.rect, scale: k, rightX: V, viewportH: H))
+        }
     }
 
     /// Scale a viewport rect (top-down pixel space, y = 0 at top) by `k` about the stationary left edge (x = insetX)
@@ -993,15 +1006,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let H = viewportSize.height
         let inset = presentationStartInset
         let curLayoutW = max(1, viewportSize.width - inset - gridHorizontalMargin(forLevel: level))   // right gutter too
-        let k = curLayoutW / max(1, presentationStartLayoutWidth)
         // SOURCE — exactly the scaled + vertically-slid snapshot the last live frame presented (what the user sees);
         // same anchor as `drawPresentationResize` so the settle starts from the on-screen frame.
-        let dy = presentationVerticalShift
-        let anchorY = presentationResizeBottomPinned ? H : H / 2
-        let source = presentationSnapshotSlots.map { s in
-            GridRenderSlot(index: s.index, column: s.column, row: s.row,
-                           rect: Self.presentationScaledRect(s.rect, scale: k, insetX: inset, anchorY: anchorY).offsetBy(dx: 0, dy: dy))
-        }
+        let source = resizePresentationSlots(viewportSize: viewportSize)
         // TARGET — the settled fixed-column layout at the release width + the scroll the host will apply.
         let phase = currentPhase()
         let overscan = max(budget.overscanFraction, 1.5) * H

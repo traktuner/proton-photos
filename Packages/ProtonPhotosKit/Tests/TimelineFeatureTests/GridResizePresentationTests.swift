@@ -1,7 +1,27 @@
 import Testing
 import Foundation
 import CoreGraphics
+import AppKit
+import MetalKit
+import PhotosCore
 @testable import TimelineFeature
+
+@MainActor
+private final class PresentationTestDataSource: MetalGridDataSource {
+    let label = "presentation-test"
+    let sectionCounts: [Int]
+    let flatUIDs: [PhotoUID]
+    var onImagesAvailable: (() -> Void)?
+
+    init(count: Int) {
+        self.sectionCounts = [count]
+        self.flatUIDs = (0 ..< count).map { PhotoUID(volumeID: "v", nodeID: "\($0)") }
+    }
+
+    func hasImage(for uid: PhotoUID) -> Bool { false }
+    func image(for uid: PhotoUID) -> CGImage? { nil }
+    func warm(_ uids: [PhotoUID]) {}
+}
 
 // Live window-resize PRESENTATION LAYER. During a live window edge drag the grid is presented as a
 // STABLE rendered surface: the settled slots are snapshotted ONCE on begin, then each frame presented UNIFORMLY
@@ -14,6 +34,85 @@ import CoreGraphics
     private func repoRoot() -> URL { var u = URL(fileURLWithPath: #filePath); for _ in 0 ..< 5 { u.deleteLastPathComponent() }; return u }
     private func src(_ name: String) -> String {
         (try? String(contentsOf: repoRoot().appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/\(name)"), encoding: .utf8)) ?? ""
+    }
+    @MainActor
+    private func makeCoordinator(width: CGFloat = 1200, height: CGFloat = 800, level: Int = 3,
+                                 scrollY: CGFloat = 1800, count: Int = 2000) -> (MetalGridCoordinator, MetalGridView, NSClipView)? {
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let coordinator = MetalGridCoordinator(device: device, dataSource: PresentationTestDataSource(count: count)) else { return nil }
+        let view = MetalGridView(frame: CGRect(x: 0, y: 0, width: width, height: height), device: device)
+        let clip = NSClipView(frame: CGRect(x: 0, y: 0, width: width, height: height))
+        clip.bounds = CGRect(x: 0, y: scrollY, width: width, height: height)
+        coordinator.metalView = view
+        coordinator.clipView = clip
+        coordinator.level = level
+        return (coordinator, view, clip)
+    }
+
+    // MARK: - Executable lifecycle coverage (not source-string guards)
+
+    @Test @MainActor func executableWindowResizePresentationScalesSnapshotAndSettlesCleanly() {
+        guard let (coordinator, view, clip) = makeCoordinator() else { return }   // no GPU in CI ⇒ skip
+        _ = clip   // coordinator holds clipView weakly; keep the test clip alive for the lifecycle.
+        coordinator.beginPresentationResize()
+        #expect(coordinator.presentationResizeActive)
+
+        let startSlots = coordinator.resizePresentationSlots(viewportSize: view.bounds.size)
+        #expect(!startSlots.isEmpty)
+        let startByIndex = Dictionary(uniqueKeysWithValues: startSlots.map { ($0.index, $0.rect) })
+
+        view.frame = CGRect(x: 0, y: 0, width: 900, height: 800)
+        let narrowedSlots = coordinator.resizePresentationSlots(viewportSize: view.bounds.size)
+        let narrowedByIndex = Dictionary(uniqueKeysWithValues: narrowedSlots.map { ($0.index, $0.rect) })
+        guard let sampleIndex = startSlots.dropFirst(startSlots.count / 2).first?.index,
+              let source = startByIndex[sampleIndex],
+              let narrowed = narrowedByIndex[sampleIndex] else {
+            Issue.record("no common presentation slot")
+            return
+        }
+        let k: CGFloat = (900 - 24) / (1200 - 24)   // standard 12pt left + right margin at normal levels
+        let expected = MetalGridCoordinator.presentationScaledRect(source, scale: k, insetX: 12, anchorY: 400)
+        #expect(abs(narrowed.minX - expected.minX) < 0.001)
+        #expect(abs(narrowed.minY - expected.minY) < 0.001)
+        #expect(abs(narrowed.width - expected.width) < 0.001)
+        #expect(abs(narrowed.width - narrowed.height) < 0.001)
+
+        #expect(!coordinator.beginResizeSettle(targetScrollY: coordinator.centerAnchoredScroll()),
+                "fixed-column resize should not arm a release reflow morph")
+        coordinator.endPresentationResize()
+        #expect(!coordinator.presentationResizeActive)
+    }
+
+    @Test @MainActor func executableSidebarPresentationScalesRightAnchoredAndCommitsEventInset() {
+        guard let (coordinator, view, clip) = makeCoordinator() else { return }   // no GPU in CI ⇒ skip
+        _ = clip   // coordinator holds clipView weakly; keep the test clip alive for the lifecycle.
+        coordinator.normalLevelLeadingGap = 16
+        #expect(coordinator.beginSidebarResize(fromInset: 0, toInset: 280))
+        #expect(coordinator.isSidebarResizing)
+
+        let startSlots = coordinator.sidebarPresentationSlots(viewportSize: view.bounds.size, progress: 0)
+        let endSlots = coordinator.sidebarPresentationSlots(viewportSize: view.bounds.size, progress: 1)
+        let startByIndex = Dictionary(uniqueKeysWithValues: startSlots.map { ($0.index, $0.rect) })
+        let endByIndex = Dictionary(uniqueKeysWithValues: endSlots.map { ($0.index, $0.rect) })
+        guard let sampleIndex = startSlots.dropFirst(startSlots.count / 2).first?.index,
+              let source = startByIndex[sampleIndex],
+              let end = endByIndex[sampleIndex] else {
+            Issue.record("no common sidebar slot")
+            return
+        }
+        let rightX: CGFloat = 1200 - 12
+        let fromLayoutInset: CGFloat = 12
+        let toLayoutInset: CGFloat = 280 + 16 + 12
+        let k = (rightX - toLayoutInset) / (rightX - fromLayoutInset)
+        let expected = MetalGridCoordinator.presentationScaledRectRightAnchored(source, scale: k, rightX: rightX, viewportH: 800)
+        #expect(abs(end.minX - expected.minX) < 0.001)
+        #expect(abs(end.maxX - expected.maxX) < 0.001)
+        #expect(abs(end.width - end.height) < 0.001)
+
+        let result = coordinator.endSidebarResize()
+        #expect(result.scroll >= 0)
+        #expect(!coordinator.isSidebarResizing)
+        #expect(coordinator.sidebarObstructionInset == 280)
     }
 
     // MARK: - Pure transform math (presentationScaledRect)
@@ -75,12 +174,15 @@ import CoreGraphics
     // groups from THOSE — never `engine.framePlan` for the render.
     @Test func presentationScalesSnapshotNotPerFrameResolve() {
         let coord = src("MetalGridCoordinator.swift")
-        guard let range = coord.range(of: "func drawPresentationResize") else { Issue.record("drawPresentationResize missing"); return }
-        let body = String(coord[range.lowerBound ..< (coord.index(range.lowerBound, offsetBy: 1600, limitedBy: coord.endIndex) ?? coord.endIndex)])
-        #expect(body.contains("presentationSnapshotSlots") && body.contains("presentationScaledRect"),
+        guard let drawRange = coord.range(of: "func drawPresentationResize") else { Issue.record("drawPresentationResize missing"); return }
+        let drawBody = String(coord[drawRange.lowerBound ..< (coord.index(drawRange.lowerBound, offsetBy: 700, limitedBy: coord.endIndex) ?? coord.endIndex)])
+        guard let slotRange = coord.range(of: "func resizePresentationSlots") else { Issue.record("resizePresentationSlots missing"); return }
+        let slotBody = String(coord[slotRange.lowerBound ..< (coord.index(slotRange.lowerBound, offsetBy: 1600, limitedBy: coord.endIndex) ?? coord.endIndex)])
+        #expect(drawBody.contains("resizePresentationSlots(viewportSize: viewportSize)"))
+        #expect(slotBody.contains("presentationSnapshotSlots") && slotBody.contains("presentationScaledRect"),
                 "the render must SCALE the captured snapshot (one coherent surface), not re-resolve per tick")
-        #expect(!body.contains("engine.framePlan"), "drawPresentationResize must NOT re-resolve the layout per tick (that reflows)")
-        #expect(body.contains("buildRealGroups"), "groups are rebuilt from the SCALED snapshot slots")
+        #expect(!drawBody.contains("engine.framePlan") && !slotBody.contains("engine.framePlan"), "drawPresentationResize must NOT re-resolve the layout per tick (that reflows)")
+        #expect(drawBody.contains("buildRealGroups"), "groups are rebuilt from the SCALED snapshot slots")
         #expect(coord.contains("if presentationResizeActive {") && coord.contains("drawPresentationResize(in: view"))
     }
 
@@ -145,7 +247,7 @@ import CoreGraphics
     // (bottom-anchored vs centre-anchored). Begin captures BOTH anchors + the flag.
     @Test func resizeAnchorIsAdaptiveBottomOrCentre() {
         let coord = src("MetalGridCoordinator.swift")
-        guard let dr = coord.range(of: "func drawPresentationResize") else { Issue.record("drawPresentationResize missing"); return }
+        guard let dr = coord.range(of: "func resizePresentationSlots") else { Issue.record("resizePresentationSlots missing"); return }
         let db = String(coord[dr.lowerBound ..< (coord.index(dr.lowerBound, offsetBy: 1600, limitedBy: coord.endIndex) ?? coord.endIndex)])
         #expect(db.contains("presentationResizeBottomPinned ? H : H / 2"), "the scale anchor must be the last row when bottom-pinned, else the centre")
         #expect(coord.contains("func windowResizeReleaseScrollY()") && coord.contains("presentationResizeBottomPinned ? bottomAnchoredScroll() : centerAnchoredScroll()"),
@@ -230,7 +332,7 @@ import CoreGraphics
     // synchronously (the heightChanged fallback to the legacy per-tick rebase — the flicker — is gone).
     @Test func verticalDragSlidesTheSnapshotNoFallback() {
         let coord = src("MetalGridCoordinator.swift")
-        guard let range = coord.range(of: "func drawPresentationResize") else { Issue.record("drawPresentationResize missing"); return }
+        guard let range = coord.range(of: "func resizePresentationSlots") else { Issue.record("resizePresentationSlots missing"); return }
         let body = String(coord[range.lowerBound ..< (coord.index(range.lowerBound, offsetBy: 1400, limitedBy: coord.endIndex) ?? coord.endIndex)])
         #expect(body.contains("presentationVerticalShift") && body.contains("offsetBy(dx: 0, dy: dy)"),
                 "the vertical drag must SLIDE the scaled snapshot (tiles keep size)")
