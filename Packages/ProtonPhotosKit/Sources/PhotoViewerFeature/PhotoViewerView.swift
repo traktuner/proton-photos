@@ -241,7 +241,7 @@ public struct PhotoViewerView: View {
                        onPinchDismissEnded: onPinchDismissEnded)
         } else if let image = model.image {
             // Still image (incl. a Live Photo's key frame), with the motion clip crossfaded OVER it. Hover the
-            // LIVE badge or force-click the photo to play the motion.
+            // LIVE badge to play the motion, or force-click-and-hold the photo (release stops it). Both play with sound.
             ZStack {
                 ZoomableImageView(image: image,                      // pinch-zoom + interactive pinch-out-to-dismiss
                                   itemIdentity: model.current.uid.nodeID,
@@ -251,7 +251,8 @@ public struct PhotoViewerView: View {
                                   onPinchDismissBegan: onPinchDismissBegan,
                                   onPinchDismissChanged: onPinchDismissChanged,
                                   onPinchDismissEnded: onPinchDismissEnded,
-                                  onForceClick: { model.playMotion(audible: true) })
+                                  onForceClick: { model.playMotion() },        // press → play (with sound)
+                                  onForceClickEnded: { model.stopMotion() })   // release → stop, crossfade to still
                 if model.current.isLivePhoto, let motion = model.motionPlayer {
                     MotionPlayerLayerView(player: motion)
                         .opacity(model.isMotionPlaying ? 1 : 0)
@@ -268,9 +269,10 @@ public struct PhotoViewerView: View {
         }
     }
 
-    /// Apple-style LIVE indicator, top-left in full view. Hovering it plays the motion clip (instant — it's
-    /// preloaded); moving off stops it. Native Liquid Glass (a custom view OUTSIDE the toolbar, so `.glassEffect`
-    /// applies). A force-click anywhere on the photo plays it too (see `onForceClick`).
+    /// Apple-style LIVE indicator, top-left in full view. Hovering it plays the motion clip with sound (instant —
+    /// it's preloaded); moving off stops it. Native Liquid Glass (a custom view OUTSIDE the toolbar, so
+    /// `.glassEffect` applies). Force-click-and-hold anywhere on the photo plays it too; releasing stops it
+    /// (see `onForceClick` / `onForceClickEnded`).
     private var livePhotoBadge: some View {
         HStack(spacing: 5) {
             Image(systemName: "livephoto")

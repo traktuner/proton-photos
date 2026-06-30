@@ -28,4 +28,12 @@ public enum VideoStreamError: Error {
 /// so playback never breaks if streaming setup fails.
 public protocol VideoStreamProvider: Sendable {
     func makeStreamingAsset(for uid: PhotoUID) async throws -> StreamingVideoAsset
+    /// Fully downloads + caches the clip's ENCRYPTED blocks locally (never plaintext), so a subsequent
+    /// `makeStreamingAsset` plays instantly from the local encrypted cache. Used for Live Photo motion, which
+    /// must be 100% loaded before hover/click plays it (unlike streamed timeline videos). Default: no-op.
+    func prefetchEncrypted(for uid: PhotoUID) async throws
+}
+
+public extension VideoStreamProvider {
+    func prefetchEncrypted(for uid: PhotoUID) async throws {}   // optional capability
 }

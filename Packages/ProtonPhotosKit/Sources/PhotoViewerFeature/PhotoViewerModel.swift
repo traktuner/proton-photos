@@ -38,13 +38,15 @@ public final class PhotoViewerModel {
     public private(set) var isLoadingOriginal = false
 
     // MARK: Live Photo motion clip
-    // Motion playback is intentionally disabled until it can use the same encrypted-at-rest streaming path as
-    // regular videos. The prior local-file workaround wrote the decrypted paired video to /tmp so AVPlayer could
-    // open it, which violates the app-wide E2EE rule. Keep the public state/API so the UI remains stable; without
-    // a `motionPlayer`, hover/force-click are no-ops.
+    // E2EE-safe: the paired motion clip streams through the SAME encrypted resource-loader path as regular video
+    // (ENCRYPTED blocks cached locally, decrypted ONLY in RAM — never a plaintext file). UNLIKE timeline videos,
+    // the clip is FULLY pre-downloaded (encrypted) before `motionPlayer` is exposed, so hover/force-click plays
+    // instantly. Without a `motionPlayer` (still loading / disabled), hover/force-click are no-ops.
     public private(set) var motionPlayer: AVPlayer?
     /// True while the motion clip is playing — the view crossfades the motion layer in/out on this.
     public private(set) var isMotionPlaying = false
+    private var motionTask: Task<Void, Never>?
+    private var motionAsset: StreamingVideoAsset?   // retains the streaming resource loader (AVFoundation holds it weakly)
     private var motionEndObserver: NSObjectProtocol?
 
     /// Whether the info panel is open, and the metadata for the current item (loaded lazily).
@@ -148,30 +150,60 @@ public final class PhotoViewerModel {
 
     // MARK: - Live Photo motion playback
 
-    /// Live Photo motion must never persist decrypted video bytes. The secure future path is to retain a
-    /// streaming resource (`VideoStreamProvider.makeStreamingAsset`) for the paired motion clip, or a memory-only
-    /// AVAsset equivalent if Apple exposes one. Until then, do not synthesize a local file.
+    /// Kill-switch for Live Photo motion playback. Set `false` to disable instantly (e.g. if it ever reintroduces
+    /// the Swift-6.2 #76804 executor crash on this toolchain); the UI stays stable (hover/force-click no-op).
+    static let livePhotoMotionPlaybackEnabled = true
+
+    /// Preloads the paired motion clip — E2EE-safe. It streams through the SAME encrypted resource-loader path as
+    /// regular video (`makeStreamingAsset` → `protonvideo://`): the ENCRYPTED blocks are cached locally and
+    /// decrypted ONLY in RAM, so plaintext local motion-video files are forbidden by the local E2EE contract and
+    /// never written. UNLIKE timeline videos (which stream as they play), the clip is FULLY pre-downloaded
+    /// (encrypted) before `motionPlayer` is exposed, so a later hover/force-click plays INSTANTLY from the local
+    /// encrypted cache. No-op for non-Live items / when no streamer is injected.
     private func prepareMotion(for item: PhotoItem) {
         teardownMotion()
-        guard item.isLivePhoto, item.relatedVideoUID != nil else { return }
-        // Deliberately no-op: plaintext local motion-video files are forbidden by the local E2EE contract.
+        guard Self.livePhotoMotionPlaybackEnabled, item.isLivePhoto,
+              let motionUID = item.relatedVideoUID, let streamer else { return }
+        motionTask = Task {
+            // 1) Fully download the ENCRYPTED clip into the local encrypted block cache (no plaintext on disk).
+            try? await streamer.prefetchEncrypted(for: motionUID)
+            guard !Task.isCancelled, self.current == item else { return }
+            // 2) Build the streaming player — its resource loader now serves entirely from the local encrypted cache.
+            guard let stream = try? await streamer.makeStreamingAsset(for: motionUID),
+                  !Task.isCancelled, self.current == item else { return }
+            let player = AVPlayer(playerItem: AVPlayerItem(asset: stream.asset))
+            player.actionAtItemEnd = .pause
+            player.automaticallyWaitsToMinimizeStalling = false
+            // Wait until ready, then preroll — the clip is local + encrypted-cached, so this is fast.
+            if let pi = player.currentItem {
+                var tries = 0
+                while pi.status == .unknown, !Task.isCancelled, tries < 100 {
+                    try? await Task.sleep(for: .milliseconds(20)); tries += 1
+                }
+                guard pi.status == .readyToPlay, !Task.isCancelled, self.current == item else { return }
+                player.preroll(atRate: 1) { _ in }
+            }
+            // 3) Expose only now — hover/force-click is a no-op until the clip is 100% ready (then plays instantly).
+            self.motionAsset = stream
+            self.motionPlayer = player
+        }
     }
 
-    /// Plays the motion clip ONCE from the start. Idempotent while playing.
+    /// Plays the motion clip ONCE from the start, WITH sound. Idempotent while playing.
     ///
-    /// `audible` matches Apple Photos on macOS: a casual HOVER of the LIVE badge plays a SILENT ghost preview
-    /// (`audible: false`), while a deliberate FORCE-CLICK brings the clip alive WITH its sound (`audible: true`).
-    /// The mute is set here every call (not once at preroll) because `isMuted`/`volume` persist on the AVPlayer
-    /// instance, so the audible/silent state must never bleed between successive plays.
+    /// Both triggers — a HOVER of the LIVE badge and a FORCE-CLICK on the photo — call this one function, so the
+    /// clip always comes alive with its audio (no silent/audible split). `isMuted`/`volume` are reset here every
+    /// call (not once at preroll) because they persist on the AVPlayer instance, so a prior `stopMotion()` fade
+    /// can never leave the next play muted.
     ///
     /// Non-interruption guarantee: macOS has NO `AVAudioSession`, so a plain `AVPlayer` mixes with all other
     /// system audio by default and NEVER ducks, pauses, or takes exclusive control. Unmuting therefore cannot
     /// interrupt anything else playing on the Mac — DO NOT add any session / `audiovisualBackgroundPlaybackPolicy`
     /// / audio-category configuration here; that is iOS-think and is the one thing that WOULD cause ducking.
-    public func playMotion(audible: Bool = false) {
+    public func playMotion() {
         guard let player = motionPlayer, !isMotionPlaying else { return }
         isMotionPlaying = true
-        player.isMuted = !audible
+        player.isMuted = false
         player.volume = 1                                           // restore after any fade-out in `stopMotion()`
         player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         player.play()
@@ -191,10 +223,12 @@ public final class PhotoViewerModel {
     }
 
     private func teardownMotion() {
+        motionTask?.cancel(); motionTask = nil
         if let obs = motionEndObserver { NotificationCenter.default.removeObserver(obs); motionEndObserver = nil }
         motionPlayer?.pause()
         isMotionPlaying = false
         motionPlayer = nil
+        motionAsset = nil
     }
 
     public func next() {

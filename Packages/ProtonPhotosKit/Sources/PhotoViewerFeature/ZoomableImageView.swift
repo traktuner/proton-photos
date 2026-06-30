@@ -22,8 +22,10 @@ struct ZoomableImageView: NSViewRepresentable {
     var onPinchDismissBegan: () -> Void = {}
     var onPinchDismissChanged: (CGFloat) -> Void = { _ in }
     var onPinchDismissEnded: (Bool) -> Void = { _ in }
-    /// Force-click (trackpad deep press) over the photo — used to play a Live Photo's motion clip.
+    /// Force-click (trackpad deep press) over the photo — starts a Live Photo's motion clip.
     var onForceClick: () -> Void = {}
+    /// The force-click was released (finger lifted) — stops the motion clip, crossfading back to the still.
+    var onForceClickEnded: () -> Void = {}
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = ZoomScrollView()
@@ -31,6 +33,7 @@ struct ZoomableImageView: NSViewRepresentable {
         scrollView.onPinchDismissChanged = onPinchDismissChanged
         scrollView.onPinchDismissEnded = onPinchDismissEnded
         scrollView.onForceClick = onForceClick
+        scrollView.onForceClickEnded = onForceClickEnded
         scrollView.pressureConfiguration = NSPressureConfiguration(pressureBehavior: .primaryDeepClick)
         scrollView.allowsMagnification = true
         scrollView.minMagnification = 1
@@ -58,6 +61,8 @@ struct ZoomableImageView: NSViewRepresentable {
             z.onPinchDismissBegan = onPinchDismissBegan
             z.onPinchDismissChanged = onPinchDismissChanged
             z.onPinchDismissEnded = onPinchDismissEnded
+            z.onForceClick = onForceClick
+            z.onForceClickEnded = onForceClickEnded
         }
         guard let imageView = context.coordinator.imageView else { return }
         imageView.alphaValue = isDismissing ? 0 : 1   // hide only the IMAGE; the scroll view stays hit-testable
@@ -129,19 +134,25 @@ private final class ZoomScrollView: NSScrollView {
     var onPinchDismissChanged: (CGFloat) -> Void = { _ in }
     var onPinchDismissEnded: (Bool) -> Void = { _ in }
     var onForceClick: () -> Void = {}
+    var onForceClickEnded: () -> Void = {}
 
     private var dismissing = false
     private var dismissProgress: CGFloat = 0    // 0 = full size, grows as the user pinches out
-    private var forceClickFired = false         // one trigger per deep-press (reset when pressure relaxes)
+    private var forceClickFired = false         // true between deep-press and release (drives hold-to-play)
 
-    /// Trackpad deep press (the firm click after the soft click): stage ≥ 2 = a force click. Fires once per press.
+    /// Trackpad deep press = hold-to-play: stage ≥ 2 starts the motion; releasing the finger (pressure relaxes
+    /// below stage 2) stops it. The trackpad streams decreasing-stage events as the finger lifts, so this is the
+    /// reliable release signal — no `mouseUp` override needed.
     override func pressureChange(with event: NSEvent) {
         super.pressureChange(with: event)
-        if event.stage >= 2, !forceClickFired {
-            forceClickFired = true
-            onForceClick()
-        } else if event.stage < 2 {
+        if event.stage >= 2 {
+            if !forceClickFired {
+                forceClickFired = true
+                onForceClick()                  // deep press → play
+            }
+        } else if forceClickFired {
             forceClickFired = false
+            onForceClickEnded()                 // released → stop
         }
     }
 

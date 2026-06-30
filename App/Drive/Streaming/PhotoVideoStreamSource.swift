@@ -136,6 +136,18 @@ actor PhotoVideoStreamSource {
         try await session.fetchBlock(url: block.url, token: block.token)
     }
 
+    /// Fully downloads the clip's ENCRYPTED blocks into the shared range cache (no plaintext written anywhere),
+    /// so a later streaming play serves entirely from local encrypted bytes. Used for Live Photo motion, which
+    /// must be 100% loaded before hover/click plays it. Idempotent: skips blocks already cached.
+    func prefetchEncrypted(uid: PhotoUID) async throws {
+        let prepared = try await prepare(uid: uid)
+        for block in prepared.blocks where VideoByteRangeCache.shared.encryptedBlock(uid: prepared.uid, block: block.index) == nil {
+            try Task.checkCancellation()
+            let encrypted = try await encryptedBlockData(block)
+            VideoByteRangeCache.shared.store(uid: prepared.uid, block: block.index, encrypted: encrypted)
+        }
+    }
+
     /// Decrypted file metadata for the info panel: filename (decrypted with the parent node key),
     /// MIME type, size, and the XAttr (dimensions, device, duration, GPS).
     func fileMetadata(linkID: String) async throws -> (filename: String?, mimeType: String?, size: Int?, xattr: ExtendedAttributes?) {

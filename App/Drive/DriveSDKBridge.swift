@@ -357,6 +357,11 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         return StreamingVideoAsset(asset: asset, retaining: loader)
     }
 
+    func prefetchEncrypted(for uid: PhotoUID) async throws {
+        let source = try await fileSource()
+        try await source.prefetchEncrypted(uid: uid)
+    }
+
     // MARK: - Mapping
 
     private static func group(_ items: [PhotoTimelineItem], videoNodeIDs: Set<String> = [],
