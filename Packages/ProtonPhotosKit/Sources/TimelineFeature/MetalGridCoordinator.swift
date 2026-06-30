@@ -859,6 +859,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var presentationSidebarToInset: CGFloat = 0
     private var presentationSidebarToEventInset: CGFloat = 0
     private var presentationSidebarViewportWidth: CGFloat = 1
+    private var presentationSidebarBottomPinned = false
     /// 0→1, advanced by the host's display-link tick; eased in `drawSidebarResize`.
     var presentationSidebarProgress: CGFloat = 0
 
@@ -877,11 +878,17 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     @discardableResult
     func beginSidebarResize(fromInset: CGFloat, toInset: CGFloat) -> Bool {
         if presentationSidebarActive { cancelSidebarResize() }   // a new toggle SUPERSEDES the in-flight scale
-        guard canPresentResize, !presentationResizeActive, let view = metalView else { return false }
+        guard canPresentResize, !presentationResizeActive, let view = metalView, let clip = clipView else { return false }
         let viewportSize = view.bounds.size
         guard viewportSize.width > 1, viewportSize.height > 1 else { return false }
         if resizeSettleActive { endResizeSettle() }
+        presentationSidebarBottomPinned = Self.resizeIsBottomPinned(
+            scrollY: clip.bounds.origin.y,
+            contentHeight: contentSize().height,
+            viewportHeight: viewportSize.height
+        )
         captureBottomAnchor()
+        captureCenterAnchor()
         captureSnapshot()
         presentationSidebarFromInset = sidebarLayoutInset(forWidth: fromInset)   // == presentationStartInset (old layout inset)
         presentationSidebarToInset = sidebarLayoutInset(forWidth: toInset)
@@ -903,16 +910,17 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let startLayoutW = max(1, V - presentationSidebarFromInset)
         let toLayoutW = max(1, V - presentationSidebarToInset)
         let k = toLayoutW / startLayoutW
+        let anchorY = presentationSidebarBottomPinned ? H : H / 2
         // SOURCE — the last scaled frame (q=1): the snapshot scaled right-anchored to [toInset, V].
         let source = presentationSnapshotSlots.map { s in
             GridRenderSlot(index: s.index, column: s.column, row: s.row,
-                           rect: Self.presentationScaledRectRightAnchored(s.rect, scale: k, rightX: V, viewportH: H))
+                           rect: Self.presentationScaledRectRightAnchored(s.rect, scale: k, rightX: V, anchorY: anchorY))
         }
         presentationSidebarActive = false
         sidebarObstructionInset = presentationSidebarToEventInset   // commit the WIDTH (engine re-adds the gap)
-        // The settle scroll BOTTOM-anchors to the captured item at the NEW layout width — matching the scale's
-        // bottom-anchored Y — so a toggle while scrolled to the newest end doesn't jump the bottom row.
-        let scroll = bottomAnchoredScroll()
+        // Match the presentation's vertical anchor: bottom only at the newest end, centre in the middle of the
+        // timeline. A bottom-only settle made 7-column sidebar close jump to a different position.
+        let scroll = presentationSidebarBottomPinned ? bottomAnchoredScroll() : centerAnchoredScroll()
         // TARGET — the settled layout (sticky columns ⇒ same count, tile filled) at the new inset + scroll.
         let phase = currentPhase()
         let overscan = max(budget.overscanFraction, 1.5) * H
@@ -935,6 +943,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         presentationSidebarActive = false
         sidebarObstructionInset = presentationSidebarToEventInset
         presentationSnapshotSlots = []
+        presentationSidebarBottomPinned = false
     }
 
     /// Present the snapshot SCALED right-anchored to fill [inset(t), V] for the current sidebar progress. Coherent
@@ -986,9 +995,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let inset = presentationSidebarFromInset + (presentationSidebarToInset - presentationSidebarFromInset) * q
         let startLayoutW = max(1, V - presentationSidebarFromInset)
         let k = max(1, V - inset) / startLayoutW
+        let anchorY = presentationSidebarBottomPinned ? H : H / 2
         return presentationSnapshotSlots.map { s in
             GridRenderSlot(index: s.index, column: s.column, row: s.row,
-                           rect: Self.presentationScaledRectRightAnchored(s.rect, scale: k, rightX: V, viewportH: H))
+                           rect: Self.presentationScaledRectRightAnchored(s.rect, scale: k, rightX: V, anchorY: anchorY))
         }
     }
 
@@ -1003,14 +1013,19 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                height: r.height * k)
     }
 
-    /// Scale a viewport rect about the stationary RIGHT edge (x = rightX) and the viewport bottom — for a sidebar
+    /// Scale a viewport rect about the stationary RIGHT edge (x = rightX) and a vertical anchor line — for a sidebar
     /// open/close (a LEFT-edge resize of the grid): the content's right edge stays put while its left edge moves to
     /// the new inset and the tiles scale (square). `k = 1` is the identity.
-    nonisolated static func presentationScaledRectRightAnchored(_ r: CGRect, scale k: CGFloat, rightX V: CGFloat, viewportH H: CGFloat) -> CGRect {
+    nonisolated static func presentationScaledRectRightAnchored(_ r: CGRect, scale k: CGFloat, rightX V: CGFloat, anchorY: CGFloat) -> CGRect {
         CGRect(x: V - (V - r.minX) * k,
-               y: H - (H - r.minY) * k,
+               y: anchorY + (r.minY - anchorY) * k,
                width: r.width * k,
                height: r.height * k)
+    }
+
+    /// Bottom-anchored compatibility wrapper used by older geometry tests.
+    nonisolated static func presentationScaledRectRightAnchored(_ r: CGRect, scale k: CGFloat, rightX V: CGFloat, viewportH H: CGFloat) -> CGRect {
+        presentationScaledRectRightAnchored(r, scale: k, rightX: V, anchorY: H)
     }
 
     /// The VERTICAL counter-scroll slide (viewport pixels, y-down) for a height change of `dH` (= startH − curH,

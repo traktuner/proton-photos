@@ -819,6 +819,7 @@ final class MetalGridScrollHost: NSView {
             || coordinator.isSidebarResizing
             || coordinator.isResizeSettling
             || coordinator.isScrollRebasing
+            || coordinator.gridTransition.activeKind == .click
             || coordinator.hasPendingVisibleThumbnails
             || pendingResolvedGridProfile != nil
             || (pinchMode == .lattice && pinchDriver.isSelfAdvancing)
@@ -938,6 +939,7 @@ final class MetalGridScrollHost: NSView {
         if coordinator.isCommitBridging { advanceCommitBridge() }
         if coordinator.isSidebarResizing { advanceSidebarResize() }    // sidebar open/close scales the grid
         if coordinator.isResizeSettling { advanceResizeSettle() }      // drives the release-time column-reflow morph (window resize or sidebar settle); armed only when the column count actually changes (rare under fixed columns)
+        if coordinator.gridTransition.activeKind == .click { requestFrame() }   // toolbar/keyboard +/- click plans need display-link-paced frames
         // Live-pinch post-release settle. Gated on lattice mode so the driver never drives the reflow fallback;
         // reset the tick dt whenever it isn't running.
         if pinchMode == .lattice, pinchDriver.isSelfAdvancing { advanceLivePinch() } else { pinchAdvancePrevTime = 0 }

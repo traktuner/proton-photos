@@ -109,8 +109,9 @@ private final class PresentationTestDataSource: MetalGridDataSource {
         let fromLayoutInset: CGFloat = 12
         let toLayoutInset: CGFloat = 280 + 16 + 12
         let k = (rightX - toLayoutInset) / (rightX - fromLayoutInset)
-        let expected = MetalGridCoordinator.presentationScaledRectRightAnchored(source, scale: k, rightX: rightX, viewportH: 800)
+        let expected = MetalGridCoordinator.presentationScaledRectRightAnchored(source, scale: k, rightX: rightX, anchorY: 400)
         #expect(abs(end.minX - expected.minX) < 0.001)
+        #expect(abs(end.minY - expected.minY) < 0.001)
         #expect(abs(end.maxX - expected.maxX) < 0.001)
         #expect(abs(end.width - end.height) < 0.001)
 
@@ -392,12 +393,24 @@ private final class PresentationTestDataSource: MetalGridDataSource {
         #expect(coord.contains("sidebarObstructionInset = presentationSidebarToEventInset"), "commit the sidebar WIDTH (engine re-adds the gap), not the layout inset")
         #expect(coord.contains("func endSidebarResize()") && coord.contains("maxIndexedRectDelta(source: source, target: target) > 1.5"),
                 "end commits and keeps the reserved release morph guarded by real source/target movement")
-        #expect(coord.contains("bottomAnchoredScroll()"), "the sidebar settle bottom-anchors (no bottom-row jump when scrolled to the newest end)")
+        #expect(coord.contains("presentationSidebarBottomPinned ? bottomAnchoredScroll() : centerAnchoredScroll()"),
+                "the sidebar settle must bottom-anchor only at newest; middle-of-timeline toggles stay centre-anchored")
         #expect(coord.contains("if presentationSidebarActive { cancelSidebarResize() }"), "a new toggle / window resize supersedes the in-flight sidebar scale")
         let host = src("MetalGridScrollHost.swift")
         #expect(host.contains("coordinator.beginSidebarResize(fromInset: oldValue, toInset: eventLeadingInset)"), "an inset change arms the sidebar scale")
         #expect(host.contains("if coordinator.isSidebarResizing { advanceSidebarResize() }") && host.contains("coordinator.presentationSidebarProgress = CGFloat(t)"),
                 "the display tick drives the sidebar scale")
+    }
+
+    // 20 — toolbar/keyboard +/- click transitions must be display-link paced. The transition plan itself is pure
+    // GridCore; the AppKit host must keep requesting frames while a click plan is active, otherwise 7↔9 can build
+    // a valid plan but show no visible animation.
+    @Test func clickTransitionKeepsDisplayLinkActive() {
+        let host = src("MetalGridScrollHost.swift")
+        #expect(host.contains("coordinator.gridTransition.activeKind == .click { requestFrame() }"),
+                "the display tick must request frames for active click transitions")
+        #expect(host.contains("|| coordinator.gridTransition.activeKind == .click"),
+                "active click transitions must keep the display link awake until they settle")
     }
 
     // 22 — STANDARD OUTER MARGIN (= the level's inter-tile gap) so photos don't butt against the window edge: the
