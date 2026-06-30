@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 import PhotosCore
-import MediaCache
+import MediaLocationCore
 
 /// SwiftUI wrapper that keeps the map in sync with the location index as the background crawl fills it in.
 ///

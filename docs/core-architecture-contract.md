@@ -169,3 +169,9 @@ The performance contract from the existing feed remains unchanged: background co
 `MediaCache.ThumbnailFeed` is now the macOS adapter. It keeps the existing macOS `NSImage` API, records aspect ratios, and chooses macOS-specific RAM/CPU budgets before constructing `ThumbnailFeedCore`. Future iOS/iPadOS adapters must use the same core and provide their own conservative platform budgets, so a feed bug is fixed once in `MediaFeedCore` and platform policy remains outside Core.
 
 The performance contract from the existing Metal grid is preserved and tightened: render/upload paths should read `CGImage` directly from the shared decoded core cache where possible. Platform image wrapper creation (`NSImage`, future `UIImage`) must stay in platform adapters and must not be required for Metal upload eligibility checks.
+
+#### Phase 2.4 — MediaLocationCore target
+
+`MediaLocationCore` is the universal location-index boundary. It may depend on `PhotosCore`, `Foundation`, `CryptoKit`, and `Observation`; it must not import platform UI frameworks, MapKit view-hosting code, platform image/view types, or direct hardware-policy sizing.
+
+`MediaLocationCore` owns the encrypted GPS index store, in-memory coordinate index, and low-priority GPS crawl scheduler. Platform map UI belongs outside this target: macOS uses `MapFeature`/MapKit/AppKit today, while future iOS/iPadOS map UI must consume the same `PhotoLocationIndex`, `PhotoLocationStore`, and `LocationCrawl`.

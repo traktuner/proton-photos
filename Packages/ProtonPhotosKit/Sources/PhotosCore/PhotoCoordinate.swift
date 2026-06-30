@@ -4,8 +4,8 @@ import Foundation
 ///
 /// Platform-agnostic (Foundation only) so the same index drives the macOS, iPadOS and iOS map UIs —
 /// see the universal-binary vision: the core is shared, only the map *view* is per-platform. The
-/// coordinates are sensitive PII; they live encrypted at rest (`PhotoLocationStore`) and decrypted only
-/// in RAM (`PhotoLocationIndex`).
+/// coordinates are sensitive PII; MediaLocationCore stores them encrypted at rest (`PhotoLocationStore`)
+/// and decrypted only in RAM (`PhotoLocationIndex`).
 public struct PhotoCoordinate: Sendable, Equatable, Codable, Identifiable {
     public let uid: PhotoUID
     public let latitude: Double

@@ -31,6 +31,7 @@ let package = Package(
         .library(name: "MediaByteCache", targets: ["MediaByteCache"]),
         .library(name: "MediaDecodingCore", targets: ["MediaDecodingCore"]),
         .library(name: "MediaFeedCore", targets: ["MediaFeedCore"]),
+        .library(name: "MediaLocationCore", targets: ["MediaLocationCore"]),
         .library(name: "MediaCache", targets: ["MediaCache"]),
         .library(name: "TimelineFeature", targets: ["TimelineFeature"]),
         .library(name: "PhotoViewerFeature", targets: ["PhotoViewerFeature"]),
@@ -39,7 +40,7 @@ let package = Package(
         .library(name: "AlbumsFeature", targets: ["AlbumsFeature"]),
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
         // Library map: MapKit (native Apple Maps) view over the shared encrypted location index.
-        // Platform UI layer — macOS now; an iOS/iPad UIKit variant reuses the same MediaCache core.
+        // Platform UI layer — macOS now; an iOS/iPad UIKit variant reuses the same MediaLocationCore.
         .library(name: "MapFeature", targets: ["MapFeature"]),
     ],
     targets: [
@@ -57,8 +58,9 @@ let package = Package(
         .testTarget(name: "MediaDecodingCoreTests", dependencies: ["MediaDecodingCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaFeedCore", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "MediaFeedCoreTests", dependencies: ["MediaFeedCore", "PhotosCore", "MediaByteCache", "MediaDecodingCore"], swiftSettings: disableDynamicActorIsolation),
-        .target(name: "MediaCache", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore"], swiftSettings: disableDynamicActorIsolation),
-        .testTarget(name: "MediaCacheTests", dependencies: ["MediaCache", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MediaLocationCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "MediaLocationCoreTests", dependencies: ["MediaLocationCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MediaCache", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",
             dependencies: ["PhotosCore", "DesignSystem", "MediaCache"],
@@ -82,7 +84,7 @@ let package = Package(
         // Upload: pure queue + state machine + folder enumeration over an injected upload backend.
         .target(name: "UploadFeature", dependencies: ["PhotosCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "UploadFeatureTests", dependencies: ["UploadFeature", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
-        // Map: MapKit view + clustering over PhotoLocationIndex (MediaCache). UI layer (AppKit/MapKit).
-        .target(name: "MapFeature", dependencies: ["PhotosCore", "MediaCache", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
+        // Map: MapKit view + clustering over PhotoLocationIndex (MediaLocationCore). UI layer (AppKit/MapKit).
+        .target(name: "MapFeature", dependencies: ["PhotosCore", "MediaLocationCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
     ]
 )

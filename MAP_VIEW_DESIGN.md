@@ -11,7 +11,7 @@
 
 ## Universal-binary architecture (load-bearing)
 Long-term: a universal binary for iPad/iOS without a rewrite (see memory `universal-binary-shared-core-vision`). So:
-- **Shared core (platform-agnostic, Foundation/CryptoKit):** `PhotoCoordinate` (PhotosCore); `PhotoLocationStore` + `PhotoLocationIndex` + `LocationCrawl` (MediaCache). Reused as-is on iOS.
+- **Shared core (platform-agnostic, Foundation/CryptoKit):** `PhotoCoordinate` (PhotosCore); `PhotoLocationStore` + `PhotoLocationIndex` + `LocationCrawl` (MediaLocationCore). Reused as-is on iOS.
 - **Platform UI:** `MapFeature` module — the `MKMapView` wrapper (`NSViewRepresentable` on macOS; `UIViewRepresentable` later) + annotation views are the only platform-specific bits. All native + Liquid Glass.
 
 ## Data source
@@ -26,9 +26,9 @@ GPS = decrypted XAttr `Location` (Latitude/Longitude), already surfaced by `Phot
 | Module | Type | Role |
 |---|---|---|
 | PhotosCore | `PhotoCoordinate` | shared model (uid, lat, lon, date) |
-| MediaCache | `PhotoLocationStore` | AES-GCM encrypted persistence of the index blob |
-| MediaCache | `PhotoLocationIndex` | `@Observable` in-memory index + bbox query; the map binds its `revision` |
-| MediaCache | `LocationCrawl` | low-priority background GPS crawl (yields to thumbnails) |
+| MediaLocationCore | `PhotoLocationStore` | AES-GCM encrypted persistence of the index blob |
+| MediaLocationCore | `PhotoLocationIndex` | `@Observable` in-memory index + bbox query; the map binds its `revision` |
+| MediaLocationCore | `LocationCrawl` | low-priority background GPS crawl (yields to thumbnails) |
 | MapFeature (new) | `LibraryMapView`, annotation/cluster views, `MapViewModel` | the MapKit UI + clustering |
 | App/Drive | crawl wiring | feeds the real metadata provider + uid list; sign-out purge |
 | App | `PhotoFilter.map` + sidebar + detail switch | the route |

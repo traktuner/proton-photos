@@ -1,8 +1,8 @@
 import Testing
 import Foundation
 import CryptoKit
-@testable import MediaCache
 import PhotosCore
+@testable import MediaLocationCore
 
 private func uid(_ n: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: n) }
 private func coord(_ n: String, _ lat: Double, _ lon: Double) -> PhotoCoordinate {
@@ -91,5 +91,102 @@ private func tempDir() -> URL {
         let box = GeoBoundingBox(minLatitude: 47, maxLatitude: 48, minLongitude: 12, maxLongitude: 14)
         let hits = index.coordinates(in: box)
         #expect(hits.map(\.uid) == [uid("inside")])
+    }
+}
+
+@Suite("MediaLocationCore platform purity")
+struct MediaLocationCorePlatformPurityTests {
+    private var packageRoot: URL {
+        var url = URL(fileURLWithPath: #filePath)
+        for _ in 0 ..< 3 { url.deleteLastPathComponent() }
+        return url
+    }
+
+    private var sources: URL {
+        packageRoot.appendingPathComponent("Sources/MediaLocationCore")
+    }
+
+    private static let forbiddenFrameworkImports: [String] = [
+        "AppKit",
+        "UIKit",
+        "SwiftUI",
+        "AVKit",
+        "MetalKit",
+    ]
+
+    private static let forbiddenTokens: [String] = [
+        "NSImage",
+        "UIImage",
+        "NSView",
+        "UIView",
+        "NSWorkspace",
+        "NSOpenPanel",
+        "UIApplication",
+        "NSApplication",
+        "ProcessInfo.processInfo.physicalMemory",
+        "ProcessInfo.processInfo.activeProcessorCount",
+    ]
+
+    private static let allowedFrameworkImports: Set<String> = [
+        "CryptoKit",
+        "Foundation",
+        "Observation",
+        "PhotosCore",
+    ]
+
+    @Test func hasNoPlatformFrameworkImports() throws {
+        let files = try swiftFiles(in: sources)
+        #expect(!files.isEmpty)
+
+        var violations: [String] = []
+        var seen: Set<String> = []
+        for file in files {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            for line in source.split(whereSeparator: { $0.isNewline }) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix("import ") else { continue }
+                let remainder = trimmed.dropFirst("import ".count)
+                let moduleName = remainder.split(separator: " ").first.map(String.init) ?? String(remainder)
+                seen.insert(moduleName)
+                if Self.forbiddenFrameworkImports.contains(moduleName) {
+                    violations.append("\(file.lastPathComponent): \(trimmed)")
+                }
+            }
+        }
+
+        #expect(violations.isEmpty, "MediaLocationCore must not import platform UI frameworks:\n\(violations.joined(separator: "\n"))")
+        #expect(seen.subtracting(Self.allowedFrameworkImports).isEmpty, "Unexpected MediaLocationCore imports: \(seen.subtracting(Self.allowedFrameworkImports).sorted())")
+    }
+
+    @Test func hasNoPlatformImageOrHardwarePolicyTokens() throws {
+        let files = try swiftFiles(in: sources)
+        #expect(!files.isEmpty)
+
+        var violations: [String] = []
+        for file in files {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            for token in Self.forbiddenTokens where source.contains(token) {
+                violations.append("\(file.lastPathComponent): \(token)")
+            }
+        }
+
+        #expect(violations.isEmpty, "MediaLocationCore must not reference platform UI types or hardware policy:\n\(violations.joined(separator: "\n"))")
+    }
+
+    private func swiftFiles(in directory: URL) throws -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+        var results: [URL] = []
+        for case let url as URL in enumerator {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue,
+                  url.pathExtension == "swift" else { continue }
+            results.append(url)
+        }
+        return results.sorted { $0.path < $1.path }
     }
 }

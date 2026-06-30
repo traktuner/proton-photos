@@ -2,7 +2,7 @@ import SwiftUI
 import MapKit
 import AppKit
 import PhotosCore
-import MediaCache
+import MediaLocationCore
 
 /// The library map: a native MapKit map (Apple tiles, no API key) with clustered photo badges over the
 /// shared, encrypted `PhotoLocationIndex`.
