@@ -3,7 +3,7 @@ import CryptoKit
 import Security
 
 /// Persists the per-account cache MainKey (the AES-256 key that encrypts the thumbnail/preview cache).
-/// Abstracted so production uses the macOS Keychain and tests can inject an in-memory double — the cache
+/// Abstracted so production uses the Apple platform Keychain and tests can inject an in-memory double — the cache
 /// never depends on the Keychain being reachable in a unit test.
 public protocol CacheKeyStore: Sendable {
     /// The key for `account`, minting + persisting a fresh random 256-bit key on first use. Returns `nil`
@@ -20,7 +20,8 @@ public protocol CacheKeyStore: Sendable {
 
 /// Keychain-backed cache key store.
 ///
-/// • One generic-password item per account, `service = me.protonphotos.mac.cachekey`, `account = <uid>`.
+/// • One generic-password item per account. The default service keeps the original macOS cache-key namespace for
+///   migration-free compatibility; callers may inject a different service for a future account-wide namespace.
 /// • `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` — readable only while the device is unlocked, and
 ///   NEVER migrated to another device or included in an unencrypted backup.
 /// • `kSecAttrSynchronizable` is deliberately NOT set — the key must not sync to iCloud Keychain.

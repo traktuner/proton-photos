@@ -1,6 +1,5 @@
 import Foundation
 import AppKit
-import ImageIO
 import PhotosCore
 /// Loads thumbnails for the whole library with a single, bounded worker pool:
 ///  • on-screen cells call `requestPriority` + poll `cachedImage`, so what you're looking at is
@@ -80,7 +79,7 @@ public actor ThumbnailFeed {
     /// RAM budget for the DECODED thumbnail cache, scaled to the device's physical memory so a big machine keeps
     /// (nearly) the whole library decoded in RAM — no re-decode on scroll-back or pinch — while a small device
     /// (iOS) stays bounded. NSCache ALSO evicts under system memory pressure, so this is a ceiling, not a
-    /// reservation. Platform-agnostic (Foundation only) for the universal-binary core.
+    /// reservation. The budget formula itself is Foundation-only; the current feed remains the macOS adapter layer.
     static func decodedRAMBudgetBytes() -> Int {
         let physical = Double(ProcessInfo.processInfo.physicalMemory)        // bytes
         let floor = 256.0 * 1024 * 1024                                      // ≥ 256 MB even on tiny devices
@@ -90,10 +89,7 @@ public actor ThumbnailFeed {
 
     /// Approximate decoded byte cost (pixels × 4 RGBA) for cost-based NSCache eviction.
     static func decodedCost(_ image: NSImage) -> Int {
-        if let rep = image.representations.first, rep.pixelsWide > 0, rep.pixelsHigh > 0 {
-            return rep.pixelsWide * rep.pixelsHigh * 4
-        }
-        return max(1, Int(image.size.width * image.size.height * 4))
+        MacThumbnailImageDecoder.decodedCost(image)
     }
 
     // MARK: - Reads
@@ -227,10 +223,10 @@ public actor ThumbnailFeed {
                 func addNext() {
                     guard let uid = it.next() else { return }
                     group.addTask {
-                        guard let data = cache.diskData(for: uid) else { return DecodedTile(uid: uid, image: nil, diskHadData: false, durationMs: 0) }
+                        guard let data = cache.diskData(for: uid) else { return DecodedTile(uid: uid, decoded: nil, diskHadData: false, durationMs: 0) }
                         let start = Date()
-                        let img = Self.downsample(data, max: maxPixels)
-                        return DecodedTile(uid: uid, image: img, diskHadData: true, durationMs: Date().timeIntervalSince(start) * 1000)
+                        let decoded = MacThumbnailImageDecoder.decode(data, maxPixelSize: maxPixels)
+                        return DecodedTile(uid: uid, decoded: decoded, diskHadData: true, durationMs: Date().timeIntervalSince(start) * 1000)
                     }
                 }
                 for _ in 0..<lanes { addNext() }   // keep at most `lanes` decodes in flight (no core over-subscription)
@@ -246,9 +242,9 @@ public actor ThumbnailFeed {
                     PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
                     prefetchDecodeStarted += 1
                     PhotoDiagnostics.shared.recordDecodeStarted(queueDepth: 0)
-                    if let img = tile.image {
-                        decoded.setObject(img, forKey: Self.key(tile.uid), cost: Self.decodedCost(img))
-                        aspects.record(tile.uid, aspect: img.size.width / max(img.size.height, 1))
+                    if let tileImage = tile.decoded {
+                        decoded.setObject(tileImage.image, forKey: Self.key(tile.uid), cost: tileImage.costBytes)
+                        aspects.record(tile.uid, aspect: tileImage.aspectRatio)
                         prefetchDecodeCompleted += 1
                         PhotoDiagnostics.shared.recordDecodeCompleted(durationMs: tile.durationMs, queueDepth: 0)
                         decodedFromDisk += 1
@@ -556,13 +552,13 @@ public actor ThumbnailFeed {
         decodeInFlight += 1
         PhotoDiagnostics.shared.recordDecodeStarted(queueDepth: decodeInFlight)
         let start = Date()
-        let image = Self.downsample(data, max: targetPixels)
+        let image = MacThumbnailImageDecoder.decode(data, maxPixelSize: targetPixels)
         let durationMs = Date().timeIntervalSince(start) * 1000
         decodeInFlight = max(0, decodeInFlight - 1)
         if let image {
             prefetchDecodeCompleted += 1
             PhotoDiagnostics.shared.recordDecodeCompleted(durationMs: durationMs, queueDepth: decodeInFlight)
-            return image
+            return image.image
         }
         PhotoDiagnostics.shared.increment("thumb.diskDecodeFailed")
         PhotoDiagnostics.shared.recordDecodeFailed(queueDepth: decodeInFlight)
@@ -602,20 +598,6 @@ public actor ThumbnailFeed {
         ], throttleSeconds: 1.0)
     }
 
-    private static func downsample(_ data: Data, max: CGFloat) -> NSImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return NSImage(data: data) }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceThumbnailMaxPixelSize: max,
-        ]
-        guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            return NSImage(data: data)
-        }
-        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-    }
-
     private static func key(_ uid: PhotoUID) -> NSString {
         "\(uid.volumeID)~\(uid.nodeID)" as NSString
     }
@@ -634,7 +616,7 @@ public actor ThumbnailFeed {
 /// mutable state) — the same reason the `decoded` NSCache is `nonisolated(unsafe)`.
 private struct DecodedTile: @unchecked Sendable {
     let uid: PhotoUID
-    let image: NSImage?
+    let decoded: MacDecodedThumbnail?
     let diskHadData: Bool
     let durationMs: Double
 }

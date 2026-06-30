@@ -1,0 +1,7 @@
+import MediaByteCache
+
+public typealias CacheKeyStore = MediaByteCache.CacheKeyStore
+public typealias KeychainCacheKeyStore = MediaByteCache.KeychainCacheKeyStore
+public typealias SecureBlobCipher = MediaByteCache.SecureBlobCipher
+public typealias SecureBlobCipherError = MediaByteCache.SecureBlobCipherError
+public typealias ThumbnailCache = MediaByteCache.ThumbnailCache
