@@ -2,7 +2,6 @@ import Foundation
 import AppKit
 import ImageIO
 import PhotosCore
-
 /// Loads thumbnails for the whole library with a single, bounded worker pool:
 ///  • on-screen cells call `requestPriority` + poll `cachedImage`, so what you're looking at is
 ///    fetched first (and a scroll jump instantly re-prioritises),
@@ -74,8 +73,27 @@ public actor ThumbnailFeed {
         self.concurrency = concurrency
         self.batch = batch
         self.clock = clock
-        decoded.countLimit = 1500
+        decoded.totalCostLimit = Self.decodedRAMBudgetBytes()   // cost-based, scaled to physical RAM (see helper)
         targetConcurrency = max(2, concurrency / 2)   // AIMD starts at half the cap, then ramps toward it
+    }
+
+    /// RAM budget for the DECODED thumbnail cache, scaled to the device's physical memory so a big machine keeps
+    /// (nearly) the whole library decoded in RAM — no re-decode on scroll-back or pinch — while a small device
+    /// (iOS) stays bounded. NSCache ALSO evicts under system memory pressure, so this is a ceiling, not a
+    /// reservation. Platform-agnostic (Foundation only) for the universal-binary core.
+    static func decodedRAMBudgetBytes() -> Int {
+        let physical = Double(ProcessInfo.processInfo.physicalMemory)        // bytes
+        let floor = 256.0 * 1024 * 1024                                      // ≥ 256 MB even on tiny devices
+        let ceiling = 20.0 * 1024 * 1024 * 1024                             // ≤ 20 GB (plenty for a full library)
+        return Int(min(max(physical * 0.15, floor), ceiling))               // ~15 % of RAM
+    }
+
+    /// Approximate decoded byte cost (pixels × 4 RGBA) for cost-based NSCache eviction.
+    static func decodedCost(_ image: NSImage) -> Int {
+        if let rep = image.representations.first, rep.pixelsWide > 0, rep.pixelsHigh > 0 {
+            return rep.pixelsWide * rep.pixelsHigh * 4
+        }
+        return max(1, Int(image.size.width * image.size.height * 4))
     }
 
     // MARK: - Reads
@@ -93,7 +111,7 @@ public actor ThumbnailFeed {
             diskPresence.set(uid, present: true)
             PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
             guard let img = decode(data, for: uid) else { return nil }
-            decoded.setObject(img, forKey: key)
+            decoded.setObject(img, forKey: key, cost: Self.decodedCost(img))
             aspects.record(uid, aspect: img.size.width / max(img.size.height, 1))
             return img
         }
@@ -183,37 +201,73 @@ public actor ThumbnailFeed {
         limit: Int
     ) async -> WarmDecodedResult {
         let targets = Array(requests.prefix(max(0, limit)))
+        lastDemandAt = clock()   // visible decode IS visible demand → the sequential crawl yields the actor/CPU to it
         var alreadyDecoded = 0, decodedFromDisk = 0, queuedNetwork = 0, missing = 0, mainThreadDecodeCount = 0
+        // Partition into already-decoded (skip) and needs-decode. The disk-resident misses are then decoded
+        // CONCURRENTLY off the actor — `cache.diskData` (disk read + decrypt) and `Self.downsample` (JPEG →
+        // bitmap) are both nonisolated/pure — so a warm batch saturates all cores instead of decoding one tile
+        // at a time on the actor. This is what collapses the banded pinch fill (a screenful no longer streams in
+        // 48-tile serial waves). Results merge back on-actor (NSCache + counters are actor/thread-safe).
+        var needDecode: [PhotoUID] = []
+        needDecode.reserveCapacity(targets.count)
         for request in targets {
-            let uid = request.uid
-            let key = Self.key(uid)
-            if decoded.object(forKey: key) != nil {
+            if decoded.object(forKey: Self.key(request.uid)) != nil {
                 PhotoDiagnostics.shared.increment("thumb.ramDecodedHit")
                 alreadyDecoded += 1
-                continue
-            }
-            PhotoDiagnostics.shared.increment("thumb.ramDecodeMiss")
-            PhotoDiagnostics.shared.recordDiskReadDuringPinch()
-            if let data = cache.diskData(for: uid) {
-                diskPresence.set(uid, present: true)
-                PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
-                let img = decode(data, for: uid)
-                guard let img else {
-                    missing += 1
-                    continue
-                }
-                decoded.setObject(img, forKey: key)
-                aspects.record(uid, aspect: img.size.width / max(img.size.height, 1))
-                decodedFromDisk += 1
-            } else if cache.hasUsableDiskData(uid) {
-                diskPresence.set(uid, present: true)
-                PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
-                missing += 1   // on disk but undecodable (corrupt/partial) — rare (diskData already drops it)
             } else {
-                diskPresence.set(uid, present: false)
-                PhotoDiagnostics.shared.increment("thumb.diskCacheMiss")
-                requestPriority(uid, priority: requestedPriority)   // not on disk yet; queue network, do not block pinch
-                queuedNetwork += 1
+                needDecode.append(request.uid)
+            }
+        }
+        if !needDecode.isEmpty {
+            let cache = self.cache
+            let maxPixels = targetPixels
+            let lanes = max(1, min(needDecode.count, ProcessInfo.processInfo.activeProcessorCount))
+            let outcomes = await withTaskGroup(of: DecodedTile.self) { group -> [DecodedTile] in
+                var it = needDecode.makeIterator()
+                func addNext() {
+                    guard let uid = it.next() else { return }
+                    group.addTask {
+                        guard let data = cache.diskData(for: uid) else { return DecodedTile(uid: uid, image: nil, diskHadData: false, durationMs: 0) }
+                        let start = Date()
+                        let img = Self.downsample(data, max: maxPixels)
+                        return DecodedTile(uid: uid, image: img, diskHadData: true, durationMs: Date().timeIntervalSince(start) * 1000)
+                    }
+                }
+                for _ in 0..<lanes { addNext() }   // keep at most `lanes` decodes in flight (no core over-subscription)
+                var results: [DecodedTile] = []
+                results.reserveCapacity(needDecode.count)
+                for await tile in group { results.append(tile); addNext() }
+                return results
+            }
+            for tile in outcomes {
+                PhotoDiagnostics.shared.increment("thumb.ramDecodeMiss")
+                if tile.diskHadData {
+                    diskPresence.set(tile.uid, present: true)
+                    PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
+                    prefetchDecodeStarted += 1
+                    PhotoDiagnostics.shared.recordDecodeStarted(queueDepth: 0)
+                    if let img = tile.image {
+                        decoded.setObject(img, forKey: Self.key(tile.uid), cost: Self.decodedCost(img))
+                        aspects.record(tile.uid, aspect: img.size.width / max(img.size.height, 1))
+                        prefetchDecodeCompleted += 1
+                        PhotoDiagnostics.shared.recordDecodeCompleted(durationMs: tile.durationMs, queueDepth: 0)
+                        decodedFromDisk += 1
+                    } else {
+                        missing += 1   // on disk but undecodable (corrupt/partial) — rare
+                        PhotoDiagnostics.shared.increment("thumb.diskDecodeFailed")
+                        PhotoDiagnostics.shared.recordDecodeFailed(queueDepth: 0)
+                        recordError("decode failed for \(Self.key(tile.uid))")
+                    }
+                } else if cache.hasUsableDiskData(tile.uid) {
+                    diskPresence.set(tile.uid, present: true)
+                    PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
+                    missing += 1
+                } else {
+                    diskPresence.set(tile.uid, present: false)
+                    PhotoDiagnostics.shared.increment("thumb.diskCacheMiss")
+                    requestPriority(tile.uid, priority: requestedPriority)   // not on disk yet; queue network
+                    queuedNetwork += 1
+                }
             }
         }
         let result = WarmDecodedResult(
@@ -244,7 +298,7 @@ public actor ThumbnailFeed {
         guard let data = box.value else { return nil }
         cache.storeToDisk(data, for: uid)
         let img = decode(data, for: uid)
-        if let img { decoded.setObject(img, forKey: Self.key(uid)) }
+        if let img { decoded.setObject(img, forKey: Self.key(uid), cost: Self.decodedCost(img)) }
         return img
     }
 
@@ -464,7 +518,7 @@ public actor ThumbnailFeed {
             let uid = priority.remove(at: bestIndex)
             priorityByUID.removeValue(forKey: uid)
             PhotoDiagnostics.shared.recordDiskPresenceCheckDuringPinch()
-            let diskHit = cache.hasUsableDiskData(uid)   // decryptable-only → corrupt blobs still refetch
+            let diskHit = cache.has(uid)   // cheap existence stat; corrupt blobs refetch lazily on view (a per-uid decrypt here blocked the feed actor ~18 s at cold start, starving the visible decode)
             diskPresence.set(uid, present: diskHit)
             if !diskHit { out.append(uid) } else { prefetchDiskHit += 1 }
         }
@@ -475,10 +529,16 @@ public actor ThumbnailFeed {
         let recentDemand = lastDemandAt.map { now.timeIntervalSince($0) < visibleQuietWindow } ?? false
         let backingOff = crawlBackoffUntil.map { now < $0 } ?? false
         guard !interactionActive, !prefetchPaused, prefetchEnabled, !recentDemand, !backingOff else { return out }
-        while out.count < batch, sequentialIndex < sequential.count {
+        // BOUND the scan: with everything already on disk, this loop would otherwise walk the WHOLE library
+        // (20k+) in one synchronous pass on the feed actor (~900 ms+), starving the visible `warmDecoded` that
+        // shares this actor — the cold-start regression. Cap each call so the actor yields frequently; the worker
+        // simply resumes from `sequentialIndex` on the next call.
+        var scannedThisCall = 0
+        while out.count < batch, sequentialIndex < sequential.count, scannedThisCall < 128 {
+            scannedThisCall += 1
             let uid = sequential[sequentialIndex]
             sequentialIndex += 1
-            let diskHit = cache.hasUsableDiskData(uid)   // decryptable-only → corrupt blobs still refetch
+            let diskHit = cache.has(uid)   // cheap existence stat; corrupt blobs refetch lazily on view
             diskPresence.set(uid, present: diskHit)
             if !diskHit && !out.contains(uid) {
                 out.append(uid)
@@ -567,6 +627,16 @@ public actor ThumbnailFeed {
         let cleaned = raw.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? String($0) : "_" }.joined()
         return "ProtonPhotos.thumbnailPrefetch." + String(cleaned.prefix(180))
     }
+}
+
+/// Carries a decoded thumbnail back from an off-actor decode task. `@unchecked Sendable` because `NSImage`
+/// isn't `Sendable`, yet the image is freshly created inside the decode task and only read after (never shared
+/// mutable state) — the same reason the `decoded` NSCache is `nonisolated(unsafe)`.
+private struct DecodedTile: @unchecked Sendable {
+    let uid: PhotoUID
+    let image: NSImage?
+    let diskHadData: Bool
+    let durationMs: Double
 }
 
 /// Thread-safe holder for collecting a thumbnail from the SDK's `@Sendable` callback.

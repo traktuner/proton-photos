@@ -49,7 +49,17 @@ public actor ThumbnailCache {
                                      derivative: self.derivative),
             account: CryptoBox.ephemeralAccount
         )
-        memory.countLimit = 2000
+        memory.totalCostLimit = Self.dataRAMBudgetBytes()   // cost-based (decrypted JPEG bytes), scaled to RAM
+    }
+
+    /// RAM budget for the in-memory DECRYPTED-jpeg tier, scaled to physical memory (modest cap — these compressed
+    /// blobs are small vs decoded bitmaps; the decoded cache is the big lever). NSCache also evicts under
+    /// pressure. Platform-agnostic for the universal-binary core.
+    static func dataRAMBudgetBytes() -> Int {
+        let physical = Double(ProcessInfo.processInfo.physicalMemory)
+        let floor = 64.0 * 1024 * 1024
+        let ceiling = 2.0 * 1024 * 1024 * 1024
+        return Int(min(max(physical * 0.02, floor), ceiling))   // ~2 % of RAM
     }
 
     // MARK: - Account configuration
@@ -91,7 +101,7 @@ public actor ThumbnailCache {
         let mk = Self.memKey(uid)
         if let cached = memory.object(forKey: mk) { return cached as Data }
         guard let data = diskData(for: uid) else { return nil }
-        memory.setObject(data as NSData, forKey: mk)
+        memory.setObject(data as NSData, forKey: mk, cost: data.count)
         return data
     }
 
@@ -160,7 +170,7 @@ public actor ThumbnailCache {
     }
 
     public func store(_ data: Data, for uid: PhotoUID) {
-        memory.setObject(data as NSData, forKey: Self.memKey(uid))   // RAM holds plaintext for this process
+        memory.setObject(data as NSData, forKey: Self.memKey(uid), cost: data.count)   // RAM holds plaintext for this process
         storeToDisk(data, for: uid)
     }
 
