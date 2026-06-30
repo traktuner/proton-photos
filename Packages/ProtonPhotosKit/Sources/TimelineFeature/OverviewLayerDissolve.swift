@@ -15,7 +15,7 @@ import CoreGraphics
 //
 // IMPORTANT — renderer requirement: correctly blending two partially-covered rasters over the shared dark
 // background CANNOT be done by the current single-pass premultiplied source-over renderer without a mid-fade
-// background-bleed artifact (proof in PHASE_B_OVERVIEW_LAYER_DISSOLVE_REPORT.md). It needs OFFSCREEN
+// background-bleed artifact (proof in reports/archive/PHASE_B_OVERVIEW_LAYER_DISSOLVE_REPORT.md). It needs OFFSCREEN
 // layer compositing (render each layer to its own texture, then blend the two textures). This type is the
 // pure, renderer-independent PLAN + the deterministic guarantees; it does not itself rasterise.
 

@@ -218,7 +218,7 @@ ratio · change the engine/fitter/resize ownership boundaries above.
 ### 13.1 Implemented: the integrated normal-level transition (single-lattice click + continuous pinch)
 
 The production normal-level transition (L0↔L1↔L2↔L3) is the **integrated Phase-B single-lattice** effect — the
-production default with **no feature flag** (see `PHASE_B_GRID_EFFECTS_INTEGRATION.md`):
+production default with **no feature flag** (see `reports/archive/PHASE_B_GRID_EFFECTS_INTEGRATION.md`):
 
 - **Click `+/-`** runs through `GridTransitionController` + the transition scheduler/component layer
   (`GridTransitionScheduler` / `GridTransitionComponentBuilder` / `GridTransitionPlan`) — a per-region

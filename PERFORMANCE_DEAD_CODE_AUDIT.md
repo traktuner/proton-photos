@@ -87,7 +87,7 @@ should be left alone.
   no-regression mandate.
 - The presentation layer's behavioral contract remains source-string-guarded (brittle to a rename, blind to a
   substring-preserving regression).
-- `GridSizePolicy` scaffolding remains in the tree (not adopted) — see `CONTRACT_REFRESH_REPORT.md` §6.
+- `GridSizePolicy` scaffolding remains in the tree (not adopted) — see `reports/archive/CONTRACT_REFRESH_REPORT.md` §6.
 
 ## 7. Tests run
 

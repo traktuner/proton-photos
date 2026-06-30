@@ -2,7 +2,7 @@
 
 Status: **IMPLEMENTED.** `GridZoomTransaction` is the engine-owned live-pinch / cursor-anchor transaction in
 production, and continuous live pinch is the production default (driven via `PinchLiveZoomDriver` /
-`GridTransitionController`; see `PHASE_B_GRID_EFFECTS_INTEGRATION.md`). The transaction model and the
+`GridTransitionController`; see `reports/archive/PHASE_B_GRID_EFFECTS_INTEGRATION.md`). The transaction model and the
 continuity / anchor rules this document specifies below remain the contract.
 
 ## Why a transaction (and not a per-frame plan)

@@ -7,7 +7,7 @@ import CoreGraphics
 // target), blended by opacity. No relocation, no per-cell identity handoff, no `GridTransitionComponentBuilder`.
 // Source keeps its own display mode; target is square (overview is square-only). These tests pin the
 // deterministic model; the offscreen renderer that actually blends the two layers is a separate, documented
-// step (PHASE_B_OVERVIEW_LAYER_DISSOLVE_REPORT.md).
+// step (reports/archive/PHASE_B_OVERVIEW_LAYER_DISSOLVE_REPORT.md).
 @Suite struct OverviewLayerDissolveTests {
     private let viewport = CGSize(width: 1000, height: 760)
     private func engine(_ n: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [n]) }
