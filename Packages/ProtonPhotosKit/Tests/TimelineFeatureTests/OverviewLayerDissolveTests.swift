@@ -139,6 +139,7 @@ import GridCore
         #expect(r.contains("encodeLayerPass"))                      // each layer rendered to its own texture
         #expect(r.contains("mix(a.rgb, b.rgb, t)"))                 // linear composite in the shader
         #expect(r.contains("metalGridCompositeFragment"))
+        #expect(r.contains("render(to: target, viewportSize: viewportSize, groups: targetGroups)"))
     }
 
     // GUARD: the overview layer dissolve must NOT touch the relocation lattice / transition controller — that

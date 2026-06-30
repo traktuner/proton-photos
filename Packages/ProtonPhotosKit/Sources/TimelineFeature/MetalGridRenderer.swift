@@ -1,5 +1,6 @@
 import Metal
 import MetalKit
+import QuartzCore
 import CoreGraphics
 import simd
 
@@ -31,6 +32,27 @@ struct MetalGridRenderGroup {
     }
     var source: Source
     var quads: [MetalGridQuad]
+}
+
+/// Narrow drawable boundary for the renderer. `MTKView` is converted to this adapter at the edge; the draw
+/// path below only needs a drawable, pass descriptor, and present mode.
+struct MetalGridDrawableTarget {
+    let drawable: CAMetalDrawable
+    let renderPassDescriptor: MTLRenderPassDescriptor
+    let presentsWithTransaction: Bool
+
+    var pixelSize: CGSize {
+        CGSize(width: drawable.texture.width, height: drawable.texture.height)
+    }
+
+    @MainActor
+    init?(view: MTKView) {
+        guard let drawable = view.currentDrawable,
+              let pass = view.currentRenderPassDescriptor else { return nil }
+        self.drawable = drawable
+        self.renderPassDescriptor = pass
+        self.presentsWithTransaction = view.presentsWithTransaction
+    }
 }
 
 /// The persistent Metal renderer for the grid. Draws one quad per visible cell (rounded-corner SDF +
@@ -127,10 +149,15 @@ final class MetalGridRenderer {
     /// quads in one call; `perQuadTexture` groups draw one call per quad.
     @MainActor
     func render(in view: MTKView, viewportSize: CGSize, groups: [MetalGridRenderGroup]) {
+        guard let target = MetalGridDrawableTarget(view: view) else { return }
+        render(to: target, viewportSize: viewportSize, groups: groups)
+    }
+
+    @MainActor
+    func render(to target: MetalGridDrawableTarget, viewportSize: CGSize, groups: [MetalGridRenderGroup]) {
         let start = CFAbsoluteTimeGetCurrent()
-        guard let drawable = view.currentDrawable,
-              let pass = view.currentRenderPassDescriptor,
-              let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
+        let pass = target.renderPassDescriptor
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].clearColor = MetalGridPalette.clearColor   // uniform Apple-like dark surface
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
@@ -145,19 +172,7 @@ final class MetalGridRenderer {
         configure(encoder, viewportSize: viewportSize)
         let (drawCalls, instances) = encode(groups: groups, into: encoder, pooledSlot: slot)
         encoder.endEncoding()
-        if view.presentsWithTransaction {
-            // LIVE-RESIZE SYNC: when the host has armed `presentsWithTransaction` (during a live window resize),
-            // present the drawable INSIDE the window's current CATransaction — commit, wait until scheduled, then
-            // present explicitly. This locks the Metal frame to the window border for that tick, killing the
-            // "rubber-band / content trails the cursor" lag. The normal (settled / scroll / zoom) path keeps the
-            // cheaper async `commandBuffer.present(drawable)` below.
-            commandBuffer.commit()
-            commandBuffer.waitUntilScheduled()
-            drawable.present()
-        } else {
-            commandBuffer.present(drawable)
-            commandBuffer.commit()
-        }
+        present(commandBuffer, to: target)
         lastDrawMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
         lastDrawCalls = drawCalls
         lastInstanceCount = instances
@@ -288,17 +303,26 @@ final class MetalGridRenderer {
     @MainActor
     func renderLayerDissolve(in view: MTKView, viewportSize: CGSize,
                              sourceGroups: [MetalGridRenderGroup], targetGroups: [MetalGridRenderGroup], t: Float) {
+        guard let target = MetalGridDrawableTarget(view: view) else { return }
+        renderLayerDissolve(to: target, viewportSize: viewportSize, sourceGroups: sourceGroups, targetGroups: targetGroups, t: t)
+    }
+
+    @MainActor
+    func renderLayerDissolve(to target: MetalGridDrawableTarget, viewportSize: CGSize,
+                             sourceGroups: [MetalGridRenderGroup], targetGroups: [MetalGridRenderGroup], t: Float) {
         let start = CFAbsoluteTimeGetCurrent()
-        guard let drawable = view.currentDrawable,
-              let drawablePass = view.currentRenderPassDescriptor,
-              let composite = compositePipeline,
-              let cmd = commandQueue.makeCommandBuffer() else { return }
-        ensureLayerTextures(width: drawable.texture.width, height: drawable.texture.height)
+        guard let composite = compositePipeline,
+              let cmd = commandQueue.makeCommandBuffer() else {
+            render(to: target, viewportSize: viewportSize, groups: targetGroups)
+            return
+        }
+        ensureLayerTextures(width: Int(target.pixelSize.width), height: Int(target.pixelSize.height))
         guard let texA = layerA, let texB = layerB else {
-            render(in: view, viewportSize: viewportSize, groups: targetGroups); return   // safe fallback
+            render(to: target, viewportSize: viewportSize, groups: targetGroups); return   // safe fallback
         }
         encodeLayerPass(into: cmd, texture: texA, groups: sourceGroups, viewportSize: viewportSize)
         encodeLayerPass(into: cmd, texture: texB, groups: targetGroups, viewportSize: viewportSize)
+        let drawablePass = target.renderPassDescriptor
         drawablePass.colorAttachments[0].loadAction = .clear
         drawablePass.colorAttachments[0].clearColor = MetalGridPalette.clearColor
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: drawablePass) else { cmd.commit(); return }
@@ -310,9 +334,24 @@ final class MetalGridRenderer {
         enc.setFragmentBytes(&tt, length: MemoryLayout<Float>.stride, index: 0)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)   // fullscreen triangle
         enc.endEncoding()
-        cmd.present(drawable)
-        cmd.commit()
+        present(cmd, to: target)
         lastDrawMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
+    }
+
+    private func present(_ commandBuffer: MTLCommandBuffer, to target: MetalGridDrawableTarget) {
+        if target.presentsWithTransaction {
+            // LIVE-RESIZE SYNC: when the host has armed `presentsWithTransaction` (during a live window resize),
+            // present the drawable INSIDE the window's current CATransaction — commit, wait until scheduled, then
+            // present explicitly. This locks the Metal frame to the window border for that tick, killing the
+            // "rubber-band / content trails the cursor" lag. The normal (settled / scroll / zoom) path keeps the
+            // cheaper async `commandBuffer.present(drawable)` below.
+            commandBuffer.commit()
+            commandBuffer.waitUntilScheduled()
+            target.drawable.present()
+        } else {
+            commandBuffer.present(target.drawable)
+            commandBuffer.commit()
+        }
     }
 
     private func appendQuad(into verts: inout [Vertex], _ q: MetalGridQuad) {

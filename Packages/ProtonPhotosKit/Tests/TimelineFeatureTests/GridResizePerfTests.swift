@@ -72,6 +72,26 @@ import GridCore
         #expect(!renderBody.contains("makeRenderPipelineState"), "render() must NOT recreate the pipeline")
     }
 
+    // 4b — renderer internals take a drawable boundary, not an MTKView. This keeps the MTKView/AppKit edge
+    // thin so the Metal renderer can later move behind a platform-neutral adapter.
+    @Test func rendererUsesDrawableTargetBoundary() {
+        let r = src("MetalGridRenderer.swift")
+        #expect(r.contains("struct MetalGridDrawableTarget"))
+        #expect(r.contains("guard let target = MetalGridDrawableTarget(view: view) else { return }"))
+        #expect(r.contains("func render(to target: MetalGridDrawableTarget"))
+        #expect(r.contains("func renderLayerDissolve(to target: MetalGridDrawableTarget"))
+
+        guard let renderStart = r.range(of: "func render(to target: MetalGridDrawableTarget"),
+              let renderEnd = r.range(of: "/// Set the shared per-frame state") else {
+            Issue.record("drawable-target render body missing")
+            return
+        }
+        let renderBody = String(r[renderStart.lowerBound ..< renderEnd.lowerBound])
+        #expect(!renderBody.contains("MTKView"))
+        #expect(!renderBody.contains("currentDrawable"))
+        #expect(!renderBody.contains("currentRenderPassDescriptor"))
+    }
+
     // 5 — resize/perf diagnostics are throttled (a live drag fires per frame; DEBUG emit prints synchronously).
     @Test func resizeDiagnosticsThrottled() {
         let coord = src("MetalGridCoordinator.swift")
