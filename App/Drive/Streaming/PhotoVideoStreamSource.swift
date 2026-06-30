@@ -61,8 +61,9 @@ actor PhotoVideoStreamSource {
         self.shareID = shareID
     }
 
-    /// Resolves keys + block map for the file `uid`. Throws `.notAVideo` cheaply (before any key
-    /// derivation) if the link isn't a video, so the viewer can fall back to the image path.
+    /// Resolves keys + block map for the file `uid`. Throws `.notAVideo` if the link isn't a video
+    /// (after the full key/XAttr resolve, since the UTI comes from the resolved link), so the viewer
+    /// can fall back to the image path.
     func prepare(uid: PhotoUID) async throws -> PreparedVideo {
         let prepared = try await prepareAnyFile(uid: uid)
         guard prepared.contentTypeUTI.hasPrefix("public.movie")
@@ -288,8 +289,7 @@ struct ExtendedAttributes: Decodable {
     }
     struct Camera: Decodable {
         let device: String?
-        let orientation: Int?
-        enum CodingKeys: String, CodingKey { case device = "Device", orientation = "Orientation" }
+        enum CodingKeys: String, CodingKey { case device = "Device" }
     }
     struct Media: Decodable {
         let width: Int?

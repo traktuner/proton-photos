@@ -2,8 +2,8 @@
 //
 // The relocation-component model for the single presentation lattice. A lattice key is an
 // anchor-relative (row, col) offset. The anchor (the pinned focus item under the cursor / viewport
-// centre) is key (0,0) and is always stable. The focus ROW (dr == 0) stays put; other rows
-// re-lay-out when the column count changes between levels — those keys "relocate" and are grouped
+// centre) is key (0,0) and is always stable. The anchor (0,0) stays put; the rest of the focus row AND other rows re-lay-out when the column
+// count changes between levels — those keys "relocate" and are grouped
 // into components that hand off one window at a time.
 
 import CoreGraphics
@@ -32,6 +32,4 @@ struct GridTransitionComponent: Equatable, Sendable, Identifiable {
     let visibleAreaFraction: Double
     /// Assigned canonical-q dissolve window [w0, w1]. nil ⇒ not scheduled (stable / pure entry-exit).
     var window: ClosedRange<Double>?
-
-    var areaPct: Double { visibleAreaFraction * 100 }
 }

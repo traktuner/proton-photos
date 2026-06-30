@@ -22,12 +22,13 @@ public enum VideoContentSniffer {
         "jpg", "jpeg", "png", "gif", "heic", "heif", "webp", "tiff", "tif", "bmp", "dng", "raw"
     ]
 
+    /// ISO-BMFF brands that are still images (HEIC/HEIF/AVIF), not playable video containers.
+    private static let imageBrands = ["heic", "heix", "heif", "mif1", "msf1", "avif"]
+
     /// Returns the playable container extension ("mov"/"mp4") sniffed from an ISO-BMFF `ftyp` header,
     /// or `nil` if the bytes aren't a recognized MP4/QuickTime container. AVFoundation opens
     /// extensionless temp files unreliably, so the download path uses this to give the file a real
     /// extension before handing it to `AVURLAsset`.
-    private static let imageBrands = ["heic", "heix", "heif", "mif1", "msf1", "avif"]
-
     public static func videoExtension(forHeader head: Data) -> String? {
         guard head.count >= 12 else { return nil }
         let box = head.subdata(in: 4..<8)

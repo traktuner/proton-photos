@@ -1,10 +1,10 @@
 import Foundation
 
 /// Central, honest record of what the wired Proton SDK / HTTP layer can actually do. Logged once at
-/// sign-in and used to gate UI — nothing is advertised that the backend can't deliver.
+/// sign-in for diagnostics — nothing here currently gates UI (see UploadBackendCapabilities for that).
 ///
-/// This is the single place that answers "does the SDK support X?". When the SDK gains album APIs (or
-/// we implement album-write crypto over HTTP), flip the relevant flag here and the UI follows.
+/// This documents "does the SDK support X?" for the diagnostic log. When the SDK gains album APIs (or
+/// we implement album-write crypto over HTTP), flip the relevant flag here (purely informational today).
 struct SDKCapabilities {
     // ProtonPhotosClient — present and wrapped by `DriveSDKBridge`.
     var photosClientAvailable = true

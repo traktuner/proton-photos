@@ -840,7 +840,7 @@ final class MetalGridScrollHost: NSView {
     @objc private func step() {
         if coordinator.isCommitBridging { advanceCommitBridge() }
         if coordinator.isSidebarResizing { advanceSidebarResize() }    // sidebar open/close scales the grid
-        if coordinator.isResizeSettling { advanceResizeSettle() }      // reserved for future release-time column-count changes
+        if coordinator.isResizeSettling { advanceResizeSettle() }      // drives the release-time column-reflow morph (window resize or sidebar settle); armed only when the column count actually changes (rare under fixed columns)
         // Live-pinch post-release settle. Gated on lattice mode so the driver never drives the reflow fallback;
         // reset the tick dt whenever it isn't running.
         if pinchMode == .lattice, pinchDriver.isSelfAdvancing { advanceLivePinch() } else { pinchAdvancePrevTime = 0 }
@@ -1172,12 +1172,6 @@ final class MetalGridScrollHost: NSView {
         }
         coordinator.setDataSource(source)                 // rebuild + onContentSizeChange → applyContentSize
         applyContentSize(coordinator.contentSize())       // pins to bottom when sticky / consumes a pending policy
-    }
-
-    func scrollToTop() {
-        stickToBottom = false
-        scrollView.contentView.scroll(to: .zero)
-        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     /// Scroll to the newest (bottom) and re-arm the bottom pin. Resets the camera to the canonical bottom-right

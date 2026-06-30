@@ -25,6 +25,4 @@ final class RateLimitGate: @unchecked Sendable {
         }
         DebugLog.log("⚠️ RATE LIMIT (429): backing off \(Int(clamped))s")
     }
-
-    var isPenalized: Bool { lock.withLock { pausedUntil.timeIntervalSinceNow > 0 } }
 }

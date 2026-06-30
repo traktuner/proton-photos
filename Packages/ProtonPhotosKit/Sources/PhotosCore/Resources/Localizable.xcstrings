@@ -881,24 +881,6 @@
         }
       }
     },
-    "error.album_not_found %@": {
-      "extractionState": "manual",
-      "comment": "Album lookup failed. %@ is the album id.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Album %@ was not found."
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Album %@ wurde nicht gefunden."
-          }
-        }
-      }
-    },
     "error.album_name_empty": {
       "extractionState": "manual",
       "comment": "Validation when creating an album with no name.",

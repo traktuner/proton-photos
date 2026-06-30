@@ -30,17 +30,6 @@ public struct AlbumSummary: Identifiable, Sendable, Equatable {
     }
 }
 
-/// Records that a photo belongs to an album — returned by add operations so callers can reconcile.
-public struct AlbumPhotoMembership: Sendable, Equatable {
-    public let albumID: AlbumID
-    public let photoUID: PhotoUID
-
-    public init(albumID: AlbumID, photoUID: PhotoUID) {
-        self.albumID = albumID
-        self.photoUID = photoUID
-    }
-}
-
 // MARK: - Capabilities
 
 /// Which album operations the wired backend can actually perform. Drives UI gating and honest
@@ -74,7 +63,6 @@ public enum AlbumError: LocalizedError, Equatable {
     /// diagnostics (the exact missing capability + a stable operation token used by tests/logs) and are
     /// deliberately NOT surfaced in `errorDescription` — users see a clean, localized message instead.
     case unsupported(operation: String, gap: String)
-    case notFound(AlbumID)
     case backend(String)
 
     public var errorDescription: String? {
@@ -83,8 +71,6 @@ public enum AlbumError: LocalizedError, Equatable {
             // The technical SDK-gap prose (operation/gap) stays in the associated values for
             // diagnostics; the user sees only this localized line.
             L10n.string("error.album_action_unavailable")
-        case let .notFound(id):
-            L10n.string("error.album_not_found \(id)")
         case let .backend(message):
             message
         }

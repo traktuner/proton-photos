@@ -21,11 +21,6 @@ final class MetalGridSelectionController {
         onChange?(selected)
     }
 
-    func replaceExternally(_ set: Set<PhotoUID>) {
-        selected = set
-        onChange?(selected)
-    }
-
     /// Apply a single click on the item at `flatIndex` (`uid`), using the modifier-driven decision.
     func click(flatIndex: Int, uid: PhotoUID, orderedUIDs: [PhotoUID], modifiers: GridClickModifiers, selectionMode: Bool) {
         let decision = GridInteractionPolicy.decision(click: .single, modifiers: modifiers, selectionMode: selectionMode)

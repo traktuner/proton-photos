@@ -1,5 +1,7 @@
 # Native Liquid-Glass Toolbar + Unboxed Sidebar — Fix Report
 
+> **Status: SUPERSEDED** — the native toolbar/sidebar contracts described here are now the live, guard-tested baseline; see [LIQUID_GLASS_PHASE2_REBASE_2026-06-30.md](LIQUID_GLASS_PHASE2_REBASE_2026-06-30.md). Kept for historical reference.
+
 **Branch:** `apple-normal-focusrow-transition`
 **Scope:** UI/UX correction only. No grid geometry, pinch/zoom, E2EE, keychain, cache, thumbnail, SDK, upload/download, or data-model changes.
 **File touched:** `App/Views/MainView.swift` (27 insertions, 35 deletions — net **−8 lines**).

@@ -1,5 +1,7 @@
 # Native Liquid Glass UI/UX Audit — ProtonPhotos (macOS)
 
+> **Status: SUPERSEDED** — replaced by [LIQUID_GLASS_PHASE2_REBASE_2026-06-30.md](LIQUID_GLASS_PHASE2_REBASE_2026-06-30.md). Kept for historical reference.
+
 Date: 2026-06-25 · Scope: **full app**, documentation only.
 **No UI was changed in this pass.** This audit inventories every surface, flags where it deviates from
 native AppKit/SwiftUI primitives (especially any hand‑rolled "glass"/blur), and recommends a native‑first

@@ -38,7 +38,7 @@ struct PinchLiveZoomDriver: Equatable, Sendable {
         var shortStepQPerSecond: Double = 1000.0 / 420.0
         /// EMA weight for the recent pinch velocity (drives the settle speed). 0…1.
         var velocityEmaAlpha: Double = 0.25
-        /// |continuousLevel − startLevel| needed before the first segment engages (a tiny rest dead-band).
+        /// |continuousLevel − startLevel| (level units) needed before the first segment engages (rest dead-band).
         var directionResolveQ: Double = 0.02
         /// Hysteresis (level units) around an integer detent before the active interval switches — prevents
         /// rebuild thrash when the finger holds right on a detent.

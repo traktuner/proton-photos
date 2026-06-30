@@ -3,12 +3,12 @@ import CoreGraphics
 import PhotosCore
 import MediaCache
 
-/// Supplies the lab with the library structure (per-section counts + flat UID order) and decoded RAM
-/// images for upload. Two implementations: one backed by the real `ThumbnailFeed`/timeline, one
-/// synthetic (so the lab runs before sign-in and for deterministic stress testing).
+/// Supplies the grid with the library structure (per-section counts + flat UID order) and decoded RAM
+/// images for GPU texture upload. One production implementation, `RealMetalGridDataSource`, backed by the
+/// real `ThumbnailFeed`/timeline (a `PresentationTestDataSource` exists only in tests).
 @MainActor
 protocol MetalGridDataSource: AnyObject {
-    var label: String { get }            // "real" / "synthetic"
+    var label: String { get }            // "real" (the only production source)
     var sectionCounts: [Int] { get }
     var flatUIDs: [PhotoUID] { get }
     /// Cheap "is a RAM image ready?" check (no decode/conversion) — drives upload selection.

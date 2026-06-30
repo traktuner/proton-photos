@@ -8,7 +8,7 @@ import PhotosCore
 /// `MTKView` delegate: every frame it reads the clip view's scroll origin, queries the visible square
 /// slots from the canonical `SquareTileGridEngine`, uploads a bounded number of newly-available
 /// thumbnails, draws the viewport, and emits diagnostics. Only items intersecting the (overscan-expanded)
-/// visible rect are ever touched — never all 20k.
+/// visible rect are ever touched — never the whole library.
 @MainActor
 final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private let renderer: MetalGridRenderer
@@ -1598,7 +1598,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             if selectedUIDs.contains(uid) { checkFilled.append(MetalGridQuad(rect: brCorner, radius: 0)) }
             else { checkEmpty.append(MetalGridQuad(rect: brCorner, radius: 0)) }
         } else if dataSource.isVideo(uid) {
-            // Video marker, bottom-right (no duration text in this pass — see report).
+            // Video marker, bottom-right (no duration text yet).
             video.append(MetalGridQuad(rect: brCorner, radius: 0))
         }
     }

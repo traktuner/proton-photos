@@ -14,23 +14,14 @@ public enum ProtonColor {
     // Backgrounds → semantic, appearance-adaptive. Prefer letting native materials/window background show;
     // these are for the few chrome surfaces that need an explicit fill.
     public static let backgroundNorm = Color(nsColor: .windowBackgroundColor)
-    public static let backgroundWeak = Color(nsColor: .underPageBackgroundColor)
-    public static let backgroundStrong = Color(nsColor: .controlBackgroundColor)
-    public static let backgroundElevated = Color(nsColor: .controlBackgroundColor)
 
     // Text → semantic label roles (Dynamic-Type + vibrancy aware).
     public static let textNorm = Color.primary
     public static let textWeak = Color.secondary
     public static let textHint = Color(nsColor: .tertiaryLabelColor)
-    public static let textInverted = Color.white   // text drawn ON the brand accent
-
-    // Borders / separators → semantic.
-    public static let borderNorm = Color(nsColor: .separatorColor)
-    public static let borderWeak = Color(nsColor: .separatorColor)
 
     // Signal — brand-tuned, readable in both appearances.
     public static let danger = Color(hex: 0xDC3251)
-    public static let success = Color(hex: 0x1EA885)
     public static let warning = Color(hex: 0xFF9900)
 }
 

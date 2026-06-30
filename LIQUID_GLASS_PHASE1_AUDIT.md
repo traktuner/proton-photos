@@ -1,5 +1,7 @@
 # ProtonPhotos — Native Liquid Glass UI/UX Audit (Phase 1)
 
+> **Status: SUPERSEDED** — replaced by [LIQUID_GLASS_PHASE2_REBASE_2026-06-30.md](LIQUID_GLASS_PHASE2_REBASE_2026-06-30.md), which records these Phase-1 findings as resolved and guard-tested. Kept for historical reference.
+
 Date: 2026-06-26 · Stable SDK macOS **26.5** (Xcode.app) · Beta SDK macOS **27.0** (Xcode-beta.app)
 Scope: every user-facing surface. Excludes the Metal grid engine/renderer/pinch internals (per non-goals).
 89 audit rows: **8 high · 16 medium · 65 low**; 6 fake-glass, 2 nonfunctional, 45 accessibility gaps, 5 copy notes.

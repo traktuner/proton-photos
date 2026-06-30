@@ -100,12 +100,6 @@ public actor ThumbnailFeed {
         decoded.object(forKey: Self.key(uid))
     }
 
-    public nonisolated func knownDiskThumbnailPresent(for uid: PhotoUID) -> Bool? {
-        diskPresence.value(for: uid)
-    }
-
-    private func persist(_ data: Data, for uid: PhotoUID) { cache.storeToDisk(data, for: uid) }
-
     public func cacheState(for request: ThumbnailRequest, gpuTextureResident: Bool = false) -> ThumbnailCacheTierState {
         let diskThumbnail = cache.has(request.uid)
         diskPresence.set(request.uid, present: diskThumbnail)
@@ -114,37 +108,6 @@ public actor ThumbnailFeed {
             diskThumbnail: diskThumbnail,
             ramDecoded: decoded.object(forKey: Self.key(request.uid)) != nil,
             gpuTexture: gpuTextureResident
-        )
-    }
-
-    public func thumbnailHealth(for uids: [PhotoUID], gpuResident: Set<PhotoUID> = []) -> ThumbnailHealthSnapshot {
-        var real = 0
-        var disk = 0
-        var missingDisk = 0
-        var gpuHit = 0
-        var gpuMiss = 0
-        for uid in uids {
-            if decoded.object(forKey: Self.key(uid)) != nil { real += 1 }
-            if cache.has(uid) {
-                diskPresence.set(uid, present: true)
-                disk += 1
-            } else {
-                diskPresence.set(uid, present: false)
-                missingDisk += 1
-            }
-            if gpuResident.contains(uid) { gpuHit += 1 } else { gpuMiss += 1 }
-        }
-        return ThumbnailHealthSnapshot(
-            visibleCellCount: uids.count,
-            realThumbnailCount: real,
-            missingDiskCount: missingDisk,
-            missingNetworkCount: missingDisk,
-            decodeInFlightCount: decodeInFlight,
-            downloadInFlightCount: downloadInFlight,
-            diskCacheHitCount: disk,
-            ramDecodedHitCount: real,
-            gpuTextureHitCount: gpuHit,
-            gpuTextureMissCount: gpuMiss
         )
     }
 
@@ -181,7 +144,7 @@ public actor ThumbnailFeed {
     /// Force a bounded set of thumbnails into the *decoded* in-memory cache so a synchronous
     /// `memoryImage(for:)` will hit. `requestPriority`/`cachedImage` are not enough for the zoom
     /// overlay: a thumbnail can be on disk yet absent from RAM (so the overlay treats it as missing),
-    /// and `requestPriority` deliberately skips anything already on disk (`cache.has`) — it only drives
+    /// and `requestPriority` deliberately skips anything already on disk (`cache.hasUsableDiskData`) — it only drives
     /// *network* fetches, never disk→RAM decode. This fills that gap.
     ///
     /// For each uid: count it if already decoded; else read+downsample the disk thumbnail into the
@@ -243,21 +206,6 @@ public actor ThumbnailFeed {
             uids.map { ThumbnailRequest(uid: $0, pixelSize: Int(targetPixels)) },
             priority: .zoomAnchorAndFocusRow,
             limit: limit
-        )
-    }
-
-    public func warmTextures(
-        _ requests: [ThumbnailRequest],
-        priority requestedPriority: ThumbnailPriority,
-        limit: Int
-    ) async -> WarmTextureResult {
-        let decodedResult = await warmDecoded(requests, priority: requestedPriority, limit: limit)
-        return WarmTextureResult(
-            requested: decodedResult.requested,
-            alreadyResident: 0,
-            decodedWarmed: decodedResult.alreadyDecoded + decodedResult.decodedFromDisk,
-            uploadQueued: 0,
-            missing: decodedResult.queuedNetwork + decodedResult.missing
         )
     }
 
@@ -478,10 +426,6 @@ public actor ThumbnailFeed {
             }
         }
         return out
-    }
-
-    private func store(_ uid: PhotoUID, _ data: Data) {
-        cache.storeToDisk(data, for: uid)
     }
 
     // MARK: - Decoding

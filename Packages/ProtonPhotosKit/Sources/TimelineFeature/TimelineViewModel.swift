@@ -69,8 +69,8 @@ public final class TimelineViewModel {
     public private(set) var state: State = .loading {
         didSet { invalidateVisibleContentCache(bumpGeneration: true) }
     }
-    /// Flat, chronological list of every photo — used so the viewer can page through the whole
-    /// library, not just the day that was tapped.
+    /// Flat, chronological items of the CURRENTLY active route (whole library for `.all`, else the
+    /// filtered tag/album/trash set) — backs selection and the upload-found lookup, not viewer paging.
     public private(set) var allItems: [PhotoItem] = []
 
     private let repository: PhotosRepository

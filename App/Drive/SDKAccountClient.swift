@@ -5,12 +5,11 @@ import ProtonCoreCrypto
 import ProtonCoreCryptoGoInterface
 
 /// Supplies the Proton Drive SDK with the user's addresses and their *unlocked* private keys,
-/// so the C# core can decrypt node/thumbnail metadata. All key material is derived once at
+/// so the C# core can decrypt node/thumbnail metadata. All key material is unlocked once at
 /// sign-in (see `SDKAccountClientBuilder`) and read synchronously here, as the SDK requires.
 struct SDKAccountClient: AccountClientProtocol, @unchecked Sendable {
     let addresses: [Address]
     let unlockedByKeyID: [String: Data]
-    let emailToAddressID: [String: String]
 
     func getAddress(addressId: String) -> Address? {
         addresses.first { $0.addressID == addressId }
@@ -44,10 +43,8 @@ enum SDKAccountClientBuilder {
     /// Unlocks every active address key using the mailbox key password from the fork payload.
     static func build(account: AccountData, keyPassword: String) throws -> SDKAccountClient {
         var unlocked: [String: Data] = [:]
-        var emailMap: [String: String] = [:]
 
         for address in account.addresses {
-            emailMap[address.email.lowercased()] = address.addressID
             for key in address.keys where key.active == 1 {
                 guard let data = try? unlock(key, userKeys: account.userKeys, keyPassword: keyPassword) else {
                     continue
@@ -55,7 +52,7 @@ enum SDKAccountClientBuilder {
                 unlocked[key.keyID] = data
             }
         }
-        return SDKAccountClient(addresses: account.addresses, unlockedByKeyID: unlocked, emailToAddressID: emailMap)
+        return SDKAccountClient(addresses: account.addresses, unlockedByKeyID: unlocked)
     }
 
     private static func unlock(_ key: Key, userKeys: [Key], keyPassword: String) throws -> Data {

@@ -4,10 +4,10 @@ import AVFoundation
 import PhotosCore
 import MediaCache
 
-/// Drives the full-screen viewer with progressive quality (blur-up):
-///  1. show the grid thumbnail instantly (blurred — it's small for full-screen),
+/// Drives the full-screen viewer with progressive quality (thumbnail → preview → original):
+///  1. show the grid thumbnail instantly (soft — small image scaled up for full-screen),
 ///  2. swap to the larger preview when it arrives (disk-cached for offline),
-    ///  3. swap to the full original (sharp) once decrypted into RAM.
+    ///  3. crossfade to the full original (sharp) once decrypted into RAM.
 ///
 /// Video (Deliverable 5) runs an explicit `VideoViewerState` machine instead of inferring "loading"
 /// from a tangle of optionals: try range-streaming first (which also detects image-vs-video reliably
@@ -23,7 +23,7 @@ public final class PhotoViewerModel {
 
     /// Best image available so far for the current item.
     public private(set) var image: NSImage?
-    /// True once the original (full-res) is shown — the blur is removed.
+    /// True once the original (full-res) is shown — drives the crossfade reveal from the interim image.
     public private(set) var isSharp = false
     /// Owns the AVPlayer + the video state machine (streaming, watchdog, stall/buffer handling). The
     /// model decides *which* source to play; the controller decides *how it's going*.

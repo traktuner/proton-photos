@@ -29,9 +29,6 @@ public struct GridInteractionDecision: Sendable, Equatable {
         self.selection = selection
         self.opensViewer = opensViewer
     }
-
-    /// Back-compat convenience used by older call sites/tests.
-    public var togglesSelection: Bool { selection == .toggle }
 }
 
 /// Pure decision table for grid pointer interactions. Selection is ALWAYS available now (no explicit

@@ -3,7 +3,8 @@
 // Consumes the engine's settled source/target GridFramePlan (no engine mutation) and derives the
 // single presentation lattice: anchor-relative keys, per-key source/target occupants + rects, and
 // the relocation components (union-find linking each relocating identity's source key ↔ target key).
-// The focus row (dr == 0) is stable by construction; other rows relocate and form components.
+// Only the ANCHOR (0,0) is stable by construction; the rest of the focus row relocates when the column
+// count changes between levels (its keys form a side == .focus relocation component), as do other rows.
 
 import CoreGraphics
 

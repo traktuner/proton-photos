@@ -1,5 +1,7 @@
 # Offline Thumbnail Pipeline & Secure Local Cache — Implementation Report
 
+> **Status: HISTORICAL (largely still accurate).** The encrypted AES-GCM thumbnail/preview cache, in-memory SDK secret cache, and session hardening described here remain live. NOTE: the Live-Photo motion path mentioned later was subsequently re-implemented as encrypted streaming (no decrypted temp file) — see [SECURITY_E2EE_AUDIT_2026-06-30.md](SECURITY_E2EE_AUDIT_2026-06-30.md) for the current, verified E2EE invariants.
+
 Date: 2026-06-25 · Branch: `apple-normal-focusrow-transition`
 Scope: (1) fix offline/grid thumbnail behavior, (2) make local thumbnail/preview persistence
 security‑auditable and Proton‑style, (3) inventory all local stores and report residual risk.

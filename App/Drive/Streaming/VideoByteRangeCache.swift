@@ -56,11 +56,6 @@ final class VideoByteRangeCache: @unchecked Sendable {
         enforceBudget(uid: uid)
     }
 
-    /// Drops one video's cached blocks (e.g. on explicit eviction).
-    func delete(uid: PhotoUID) {
-        lock.withLock { try? fm.removeItem(at: dir(for: uid)) }
-    }
-
     /// Clears the whole video block cache (wired to the existing "delete cache" Settings action).
     func clearAll() {
         lock.withLock {
@@ -68,11 +63,6 @@ final class VideoByteRangeCache: @unchecked Sendable {
             try? fm.createDirectory(at: root, withIntermediateDirectories: true)
         }
         PhotoDiagnostics.shared.emit("VideoCache", ["action": "clearAll", "sizeOnDisk": "0"])
-    }
-
-    /// Current on-disk size of the whole cache (for Settings / diagnostics).
-    func totalSizeOnDisk() -> Int {
-        lock.withLock { directorySize(root) }
     }
 
     // MARK: - Budget

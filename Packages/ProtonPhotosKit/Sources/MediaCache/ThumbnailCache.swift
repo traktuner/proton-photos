@@ -11,8 +11,9 @@ import PhotosCore
 /// `configure(accountUID:)` with an injected `CacheKeyStore`. Plaintext thumbnail/preview bytes are NEVER
 /// written to disk; the in-memory tier holds plaintext for the running process only. The cache is usable
 /// before sign-in via a process-ephemeral key (nothing readable persists), then account configuration purges
-/// any legacy plaintext cache. Reads transparently decrypt; a missing key or a failed authentication tag is a
-/// cache MISS (and the corrupt blob is deleted), never a crash.
+/// any legacy plaintext cache. Reads transparently decrypt; a failed authentication tag is a cache MISS and
+/// the corrupt blob is deleted, while a missing key (locked cache) is a plain MISS that keeps the blob — never
+/// a crash.
 public actor ThumbnailCache {
     private nonisolated(unsafe) let memory = NSCache<NSString, NSData>()   // NSCache is thread-safe
     /// Encrypted blob directory (`<namespace>.enc`). The legacy plaintext dir (`<namespace>`) is purged.

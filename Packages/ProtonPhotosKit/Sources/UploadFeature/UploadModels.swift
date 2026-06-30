@@ -169,7 +169,7 @@ public struct UploadCompletedEvent: Identifiable, Sendable, Equatable {
 
 // MARK: - Aggregate counts
 
-/// Roll-up of the queue, mirrored into the `[UploadQueue]` log line.
+/// Roll-up of the queue, surfaced to the UI (progress + summary text).
 public struct UploadQueueStats: Sendable, Equatable {
     public var queued = 0
     public var active = 0

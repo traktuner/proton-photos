@@ -2,7 +2,8 @@
 //
 // Centralized production defaults for the normal-grid single-presentation-lattice transition.
 // Values are gathered here so duration / curve / window parameters can be tuned without changing
-// renderer, geometry, or gesture architecture. No constants for this transition live elsewhere.
+// renderer, geometry, or gesture architecture. (Some lattice constants still live in the builder/
+// scheduler, e.g. the {0.3…0.7} peak-area samples and the focus-frame offset.)
 
 import Foundation
 import CoreGraphics
@@ -16,11 +17,9 @@ struct GridTransitionTuning: Equatable, Sendable {
     // ── structural targets (validated by tests; NOT enforced by a per-frame optimizer) ──
     var minFocusInteriorSamples60: Int = 4       // cid0 focus ≥ 4 useful interior samples @60
     var minCornerInteriorSamples60: Int = 2      // cid5 corner ≥ 2 useful interior samples @60
-    var maxSimultaneousPartialComponents: Int = 1
 
     // ── live pinch (PINCH071) ──
     var pinchWidthQ: Double = 0.0706             // W071 fixed handoff width in q-space
-    var pinchFollowerOmegaN: Double = 27.8       // host-owned critically-damped follower (rad/s)
 
     // ── V3.9 continuous multi-level live-pinch scrub driver (PinchLiveZoomDriver) ──
     // The grid is one continuous scrub surface across detents: segmentQ follows the finger 1:1 within the
@@ -36,11 +35,9 @@ struct GridTransitionTuning: Equatable, Sendable {
 
     // ── window placement (click variable-window scheduler) ──
     var leadInFrames60: Int = 1                  // pure-source lead-in @60 (keeps first window off q=0)
-    var leadOutFrames60: Int = 3                 // pure-target lead-out @60 (keeps last window < q=0.99)
     var edgeZoneLo: Double = 0.01                // no visible component compressed ONLY into [0, edgeZoneLo]
     var edgeZoneHi: Double = 0.99                // …or ONLY into [edgeZoneHi, 1]
     var minVisibleWindowWidthQ: Double = 0.035   // visible (≥2%) component window width floor
-    var visibleAreaThresholdPct: Double = 2.0    // "visible" component peak-area threshold
 
     /// Reference refresh used to allocate the immutable plan (the harder rate; finer is smoother).
     var planRefreshHz: Double = 60

@@ -376,8 +376,6 @@ public actor UploadManager: UploadManaging {
         order.compactMap { jobs[$0]?.item }
     }
 
-    public func stats() -> UploadQueueStats { computeStats() }
-
     private func computeStats() -> UploadQueueStats {
         var s = UploadQueueStats()
         s.concurrency = maxConcurrent

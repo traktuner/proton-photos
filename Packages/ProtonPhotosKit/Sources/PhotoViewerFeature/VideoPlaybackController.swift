@@ -39,7 +39,6 @@ public final class VideoPlaybackController {
     // MARK: - State the model pushes in (resolution phase, before a player exists)
 
     public func setResolving() { transition(.resolving) }
-    public func setPreparingStream() { transition(.preparingStream) }
     public func setDownloading(_ progress: Double) { transition(.downloading(progress)) }
 
     /// Resets to idle and tears down any player — used when navigating to a new item or when a
@@ -57,16 +56,6 @@ public final class VideoPlaybackController {
         streamingAsset = retaining
         transition(.preparingStream)
         attach(AVPlayerItem(asset: asset), uid: uid, initial: .buffering(nil))
-    }
-
-    /// Plays a fully-downloaded local file. Becomes `.ready` then `.playing` quickly.
-    public func playLocalFile(url: URL, uid: PhotoUID) {
-        teardown()
-        currentUID = uid
-        isStreaming = false
-        let asset = AVURLAsset(url: url)
-        transition(.ready)
-        attach(AVPlayerItem(asset: asset), uid: uid, initial: .ready)
     }
 
     /// Hard failure (resolution/download path gave up). Shows the error; no player.

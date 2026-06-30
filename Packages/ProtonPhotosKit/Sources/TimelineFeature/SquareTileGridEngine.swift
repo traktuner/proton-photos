@@ -148,19 +148,6 @@ public struct GridSectionHeader: Equatable, Sendable {
     }
 }
 
-/// Per-frame diagnostics — what the engine resolved this frame. Pure data; never an input to layout.
-public struct GridDebugInfo: Equatable, Sendable {
-    public let levelID: Int
-    public let continuousLevel: CGFloat
-    public let columns: Int
-    public let slotSide: CGFloat
-    public let gap: CGFloat
-    public let pitch: CGFloat
-    public let contentSize: CGSize
-    public let visibleSlotCount: Int
-    public let sectionCount: Int
-}
-
 /// The complete renderable plan for ONE frame. The renderer converts `visibleSlots`/`visibleHeaders` to
 /// quads; it invents nothing. `slotSide`/`gap`/`pitch`/`columns` describe the RESOLVED grid (the grid that
 /// actually fills the width at this frame's metrics).
@@ -173,31 +160,8 @@ public struct GridFramePlan: Equatable, Sendable {
     public let viewportRect: CGRect
     public let visibleSlots: [GridSlot]
     public let visibleHeaders: [GridSectionHeader]
-    public let debug: GridDebugInfo
 
     public var pitch: CGFloat { slotSide + gap }
-}
-
-/// What the app/coordinator sends the engine each frame. `continuousLevel == nil` → a settled integer
-/// `level` with free user scroll (`scrollOffset`). `continuousLevel != nil` → a live pinch: the engine
-/// resolves apparent metrics for the fractional level and computes the anchored scroll offset itself.
-public struct GridEngineInput: Equatable, Sendable {
-    public let viewportSize: CGSize
-    public let scrollOffset: CGPoint
-    public let overscan: CGFloat
-    public let level: Int
-    public let continuousLevel: CGFloat?
-    public let anchor: GridZoomAnchor?
-
-    public init(viewportSize: CGSize, scrollOffset: CGPoint, overscan: CGFloat,
-                level: Int, continuousLevel: CGFloat? = nil, anchor: GridZoomAnchor? = nil) {
-        self.viewportSize = viewportSize
-        self.scrollOffset = scrollOffset
-        self.overscan = overscan
-        self.level = level
-        self.continuousLevel = continuousLevel
-        self.anchor = anchor
-    }
 }
 
 /// The fixed point a live zoom holds: the item under the cursor (or a content fraction over a gap) is kept
@@ -248,8 +212,8 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     }
 
     public var levelCount: Int { levels.count }
-    /// Opens at the comfortable medium density (slotSide 140), which is index 3 in the default ladder
-    /// (after the larger level 0 was prepended). Clamped for custom ladders.
+    /// Opens at the comfortable medium density (level 3 = 9 columns; the width-filled side is ~135pt at the
+    /// 1280 reference width). Clamped for custom ladders.
     public var defaultLevel: Int { min(3, levels.count - 1) }
     public var sectionCount: Int { sectionCounts.count }
 
@@ -544,9 +508,9 @@ public struct SquareTileGridEngine: Equatable, Sendable {
 
     /// Apparent-metrics plan for a fractional level. NOTE: this RE-RESOLVES columns from the apparent slot
     /// size every call, so a continuous sweep rewraps flat indices at every column-count threshold — visually
-    /// discontinuous. It is therefore NOT used by the production pinch (Option A is detent-only). It remains
-    /// as a building block for the future engine-owned `GridZoomTransaction` (Option B), which must wrap it
-    /// in source/target topology continuity rather than calling it per frame.
+    /// discontinuous. It is therefore NOT used by the production pinch. The engine-owned live zoom
+    /// (`GridZoomTransaction`) already exists and computes its own anchor-relative layout WITHOUT calling this;
+    /// this method is now exercised only by engine unit tests.
     public func zoomFramePlan(continuousLevel x: CGFloat, viewportSize: CGSize, anchor: GridZoomAnchor, overscan: CGFloat) -> GridFramePlan {
         let baseLevel = clampLevel(Int(x.rounded()))
         let side = apparentSlotSide(at: x, width: viewportSize.width)
@@ -567,13 +531,9 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         let query = CGRect(x: viewportRect.minX, y: minY, width: viewportRect.width, height: max(0, maxY - minY))
         let slots = grid.visibleSlots(in: query, viewportOrigin: scrollOffset)
         let headers = grid.visibleHeaders(in: query, viewportOrigin: scrollOffset)
-        let debug = GridDebugInfo(levelID: levelID, continuousLevel: continuousLevel, columns: grid.columns,
-                                  slotSide: grid.slotSide, gap: grid.gap, pitch: grid.pitch,
-                                  contentSize: grid.contentSize, visibleSlotCount: slots.count,
-                                  sectionCount: sectionCounts.count)
         return GridFramePlan(levelID: levelID, columns: grid.columns, slotSide: grid.slotSide, gap: grid.gap,
                              contentSize: grid.contentSize, viewportRect: viewportRect,
-                             visibleSlots: slots, visibleHeaders: headers, debug: debug)
+                             visibleSlots: slots, visibleHeaders: headers)
     }
 
     // MARK: Single-item / section queries (settled level)

@@ -256,53 +256,12 @@ public struct DBQueryMetric: Sendable, Equatable {
     }
 }
 
-public struct FrameHealthMetric: Sendable, Equatable {
-    public let phase: String
-    public let frameTimeMs: Double
-    public let pinchChangedDurationMs: Double
-    public let layoutComputeMs: Double
-    public let overlayRenderMs: Double
-    public let metalDrawMs: Double
-    public let textureUploadMs: Double
-    public let atlasBuildMs: Double
-    public let vertexBuildMs: Double
-    public let timeToFirstOverlayMs: Double
-    public let timestamp: Date
-
-    public init(
-        phase: String,
-        frameTimeMs: Double = 0,
-        pinchChangedDurationMs: Double = 0,
-        layoutComputeMs: Double = 0,
-        overlayRenderMs: Double = 0,
-        metalDrawMs: Double = 0,
-        textureUploadMs: Double = 0,
-        atlasBuildMs: Double = 0,
-        vertexBuildMs: Double = 0,
-        timeToFirstOverlayMs: Double = 0,
-        timestamp: Date = Date()
-    ) {
-        self.phase = phase
-        self.frameTimeMs = frameTimeMs
-        self.pinchChangedDurationMs = pinchChangedDurationMs
-        self.layoutComputeMs = layoutComputeMs
-        self.overlayRenderMs = overlayRenderMs
-        self.metalDrawMs = metalDrawMs
-        self.textureUploadMs = textureUploadMs
-        self.atlasBuildMs = atlasBuildMs
-        self.vertexBuildMs = vertexBuildMs
-        self.timeToFirstOverlayMs = timeToFirstOverlayMs
-        self.timestamp = timestamp
-    }
-}
-
 public final class PhotoDiagnostics: @unchecked Sendable {
     public static let shared = PhotoDiagnostics()
 
     private let lock = NSLock()
     private var activePinch = false
     private var dbQueries: [DBQueryMetric] = []
-    private var frameMetrics: [FrameHealthMetric] = []
     private var counters: [String: Int] = [:]
     private var lastEventLog: [String: Date] = [:]
     private var thumbHealth = ThumbnailHealthCounters()
@@ -336,7 +295,6 @@ public final class PhotoDiagnostics: @unchecked Sendable {
         lock.withLock {
             activePinch = false
             dbQueries.removeAll()
-            frameMetrics.removeAll()
             counters.removeAll()
             lastEventLog.removeAll()
             thumbHealth = ThumbnailHealthCounters()
@@ -402,22 +360,6 @@ public final class PhotoDiagnostics: @unchecked Sendable {
         }
     }
 
-    public func emitThumbHealthSummary(phase: String, reset: Bool = false, throttleSeconds: TimeInterval = 0.5) {
-        let s = thumbHealthCounters(reset: reset)
-        emit("ThumbHealth", [
-            "phase": phase,
-            "visibleCount": "\(s.visibleCount)",
-            "realImageDrawn": "\(s.realImageDrawn)",
-            "placeholderDrawn": "\(s.placeholderDrawn)",
-            "diskMissing": "\(s.diskMissing)",
-            "diskHitRamMissing": "\(s.diskHitRamMissing)",
-            "ramHitGpuMissing": "\(s.ramHitGpuMissing)",
-            "atlasMissing": "\(s.atlasMissing)",
-            "geometryHole": "\(s.geometryHole)",
-            "unknownBug": "\(s.unknownBug)",
-        ], throttleSeconds: throttleSeconds)
-    }
-
     public func recordDiskReadDuringPinch() {
         guard isActivePinch() else { return }
         lock.withLock { hotPath.diskReadDuringPinch += 1 }
@@ -433,11 +375,6 @@ public final class PhotoDiagnostics: @unchecked Sendable {
     public func recordNetworkRequestDuringPinch() {
         guard isActivePinch() else { return }
         lock.withLock { hotPath.networkRequestDuringPinch += 1 }
-    }
-
-    public func recordMainThreadDecodeDuringPinch() {
-        guard isActivePinch() else { return }
-        lock.withLock { hotPath.mainThreadDecodeDuringPinch += 1 }
     }
 
     public func recordDecodeStarted(queueDepth: Int) {
@@ -491,75 +428,8 @@ public final class PhotoDiagnostics: @unchecked Sendable {
         }
     }
 
-    public func emitGridZoomHotPath(reset: Bool = false, throttleSeconds: TimeInterval = 0.5) {
-        let s = hotPathCounters(reset: reset)
-        emit("GridZoomHotPath", [
-            "dbQueryDuringPinch": "\(s.dbQueryDuringPinch)",
-            "diskReadDuringPinch": "\(s.diskReadDuringPinch)",
-            "diskPresenceCheckDuringPinch": "\(s.diskPresenceCheckDuringPinch)",
-            "decodeDuringPinch": "\(s.decodeDuringPinch)",
-            "networkRequestDuringPinch": "\(s.networkRequestDuringPinch)",
-            "mainThreadDecodeDuringPinch": "\(s.mainThreadDecodeDuringPinch)",
-        ], throttleSeconds: throttleSeconds)
-    }
-
-    // MARK: - Small perf pass counters
-
-    /// Records `value` as the new running maximum for `key` (used for "…Max" gauges like the polling
-    /// backoff ceiling and the peak concurrent duration lookups). Stored alongside the plain counters.
-    public func recordMax(_ key: String, _ value: Int) {
-        lock.withLock {
-            if value > counters[key, default: 0] { counters[key] = value }
-        }
-    }
-
-    /// Snapshot of the small-perf-pass counters (Parts 1–9). Throttle-safe; intended for an occasional
-    /// debug dump, not per-frame logging.
-    public func emitPerfSmallPass(throttleSeconds: TimeInterval = 0) {
-        emit("PerfSmallPass", [
-            "photoGridItemPolls": "\(counter("perf.photoGridItemPolls"))",
-            "photoGridItemPollBackoffMax": "\(counter("perf.photoGridItemPollBackoffMax"))",
-            "placeholderDirectFill": "\(counter("perf.placeholderDirectFill"))",
-            "displayedRectCacheHit": "\(counter("perf.displayedRectCacheHit"))",
-            "displayedRectCacheMiss": "\(counter("perf.displayedRectCacheMiss"))",
-            "badgeLayoutSkipped": "\(counter("perf.badgeLayoutSkipped"))",
-            "videoBlockMapBinarySearch": "true",
-            "videoPrefetchScheduled": "\(counter("perf.videoPrefetchScheduled"))",
-            "videoPrefetchDeduped": "\(counter("perf.videoPrefetchDeduped"))",
-            "durationLookupActiveMax": "\(counter("perf.durationLookupActiveMax"))",
-        ], throttleSeconds: throttleSeconds)
-    }
-
-    public func slowestDBQueries(limit: Int = 10) -> [DBQueryMetric] {
-        lock.withLock {
-            Array(dbQueries.sorted { $0.durationMs > $1.durationMs }.prefix(max(0, limit)))
-        }
-    }
-
     public func dbQueryCountDuringActivePinch() -> Int {
         lock.withLock { dbQueries.filter(\.duringActivePinch).count }
-    }
-
-    public func recordFrame(_ metric: FrameHealthMetric) {
-        lock.withLock {
-            frameMetrics.append(metric)
-            if frameMetrics.count > 300 {
-                frameMetrics.removeFirst(frameMetrics.count - 300)
-            }
-        }
-    }
-
-    public func recentFrames(limit: Int = 20) -> [FrameHealthMetric] {
-        lock.withLock { Array(frameMetrics.suffix(max(0, limit))) }
-    }
-
-    public func logThumbHealth(uid: PhotoUID, rect: CGRect, reason: String, phase: String) {
-        emit("ThumbHealth", [
-            "EMPTY_VISIBLE": "uid=\(uid.volumeID)~\(uid.nodeID)",
-            "rect": rectDescription(rect),
-            "reason": reason,
-            "phase": phase,
-        ])
     }
 
     public func emit(_ event: String, _ fields: [String: String], throttleSeconds: TimeInterval = 0) {

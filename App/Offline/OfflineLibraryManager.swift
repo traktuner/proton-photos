@@ -147,7 +147,7 @@ final class OfflineLibraryManager {
         s.metadataRows = metadataRows
         s.thumbnailsOnDisk = onDisk
         s.thumbnailsMissing = max(0, totalAssets - onDisk)
-        // NSCache count isn't observable; bound the cumulative decode count by the cache limit.
+        // NSCache count isn't observable; bound the cumulative decode count by a fixed display ceiling.
         s.ramDecodedEstimate = min(1500, max(0, decode.ramDecodeCompleted - decode.ramDecodeFailed))
         s.prefetchQueueDepth = prefetch?.currentQueueLength ?? 0
         s.activePrefetchJobs = prefetch?.activeJobs ?? 0

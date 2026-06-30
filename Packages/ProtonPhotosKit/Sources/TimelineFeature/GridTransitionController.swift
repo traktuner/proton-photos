@@ -1,6 +1,7 @@
 // GridTransitionController.swift
 //
-// Coordinator-side driver for the single-presentation-lattice L0↔L1 transition. It is the single
+// Coordinator-side driver for the single-presentation-lattice transition between ADJACENT normal
+// levels (any lo→lo+1 in the focusRowRelayout band [0,3]; pinch chains across the band). It is the single
 // integration point: builds the immutable plan from engine frame plans, enforces selection eligibility
 // (else reports a fallback reason and the host uses the stable instant snap),
 // holds the HOST-OWNED canonical q (the coordinator's display-link advances it — there is NO
@@ -20,7 +21,6 @@ final class GridTransitionController {
     private(set) var q: Double = 0
     private(set) var lastFallback: GridTransitionFallbackReason = .none
     private var elapsed: Double = 0
-    private var reversing = false
     var tuning: GridTransitionTuning
 
     init(tuning: GridTransitionTuning = .default) { self.tuning = tuning }
@@ -41,7 +41,7 @@ final class GridTransitionController {
         guard let p = ClickZoomTransitionScheduler.makePlan(source: source, target: target, anchorIndex: anchorIndex,
                                                             viewportSize: viewportSize, tuning: tuning)
         else { return fail(.scheduleDegenerate) }
-        plan = p; q = 0; elapsed = 0; reversing = false; lastFallback = .none
+        plan = p; q = 0; elapsed = 0; lastFallback = .none
         PhotoDiagnostics.shared.emit("GridTransition", [
             "event": "PLAN_BUILT", "candidate": "CLICKV2_420_FULLER_CORNER",
             "durationMs": "\(Int(tuning.clickDurationMs))", "components": "\(p.components.count)",
@@ -65,7 +65,7 @@ final class GridTransitionController {
         guard let p = PinchZoomTransitionScheduler.makePlan(source: source, target: target, anchorIndex: anchorIndex,
                                                             viewportSize: viewportSize, tuning: tuning)
         else { return fail(.scheduleDegenerate) }
-        plan = p; q = 0; elapsed = 0; reversing = false; lastFallback = .none
+        plan = p; q = 0; elapsed = 0; lastFallback = .none
         PhotoDiagnostics.shared.emit("GridTransition", [
             "event": "PLAN_BUILT", "candidate": "PINCH071",
             "components": "\(p.components.count)", "src": "\(source.levelID)", "tgt": "\(target.levelID)"])

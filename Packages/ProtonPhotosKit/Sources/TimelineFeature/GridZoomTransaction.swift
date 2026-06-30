@@ -22,8 +22,8 @@ import CoreGraphics
 // layout section by design — `RealMetalGridDataSource` flattens all `TimelineSection`s into a single
 // continuous photo wall — so the transaction drives the production live pinch. A genuinely multi-section
 // engine wraps each section independently (its own partial row + header offset), so the flat fan-out would be
-// wrong across section boundaries; `beginZoomTransaction` therefore returns nil for one (a safety guard, not a
-// production path).
+// wrong across section boundaries; `beginZoomTransaction` therefore returns nil for a multi-section engine (a
+// safety guard, not a production path).
 
 /// A renderable square slot in VIEWPORT coordinates — exactly what the Metal renderer draws. Produced both
 /// by the settled `GridFramePlan` (mapped from `GridSlot.viewportRect`) and by the live `GridZoomTransaction`.

@@ -50,7 +50,6 @@ final class MetalGridTextureCache {
 
     func noteUsed(_ uid: PhotoUID) { lru.noteUsed(uid) }
 
-    func drawState(_ uid: PhotoUID) -> MetalGridTextureLRU.DrawState { lru.drawState(uid) }
     func isResident(_ uid: PhotoUID) -> Bool { lru.isResident(uid) }
     func isInFlight(_ uid: PhotoUID) -> Bool { lru.isInFlight(uid) }
 
@@ -94,20 +93,6 @@ final class MetalGridTextureCache {
         }
         evictionsThisFrame = evicted.count
     }
-
-    // MARK: - Diagnostics
-
-    var cacheStats: MetalGridCacheStats {
-        MetalGridCacheStats(
-            textureCount: textures.count,
-            pinnedVisible: lru.pinnedCount,
-            lruSize: lru.residentCount,
-            uploadQueueDepth: lru.inFlightCount
-        )
-    }
-
-    var totalEvictions: Int { lru.evictionCount }
-    var memoryEstimateBytes: Int { residentBytes + placeholderTexture.width * placeholderTexture.height * 4 }
 
     // MARK: - Texture creation
 

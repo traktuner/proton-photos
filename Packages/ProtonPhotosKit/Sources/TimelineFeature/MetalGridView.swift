@@ -17,7 +17,7 @@ final class MetalGridView: MTKView {
 final class MetalGridDocumentSpacer: NSView {
     /// Reports a click in CONTENT coordinates with its click count + modifier keys.
     var onClick: ((CGPoint, Int, GridClickModifiers) -> Void)?
-    /// Raw trackpad magnify events (for discrete pinch-to-zoom that mirrors the +/- buttons).
+    /// Raw trackpad magnify events (for the continuous live-pinch lattice scrub; see `handleMagnify`).
     var onMagnify: ((NSEvent) -> Void)?
     /// While this returns true (a pinch / its settle / post-pinch grace is in flight) scrollWheel events are
     /// SWALLOWED instead of bubbling to the enclosing scroll view — so a pinch whose fingers also drift can't

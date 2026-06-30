@@ -1,5 +1,7 @@
 # Observed Apple Grid Zoom Model (macOS Photos)
 
+> **Status: REFERENCE (observations current; §E mapping historical).** Sections A–D (the frame-by-frame Apple observations) remain valid reference material. The §E mapping onto the ProtonPhotos engine predates the shipped `GridZoomTransaction` live-zoom model — see [grid-zoom-transaction.md](grid-zoom-transaction.md) and `SquareTileGridEngine.zoomFramePlan` for the current implementation.
+
 Derived **frame-by-frame** from two Apple Photos screen recordings (German locale, macOS 26),
 both with a **stable window** — only the in-grid zoom changes:
 

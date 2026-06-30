@@ -75,7 +75,6 @@ struct MainView: View {
     /// explicitly so the banner never compares against localized message text.
     @State private var uploadRefreshSuccess = false
     private let feed: ThumbnailFeed
-    private let aspects: AspectRegistry
     private let zoomOpenSpring = (response: 0.34, damping: 0.86)
     private let zoomCloseSpring = (response: 0.32, damping: 0.88)
 
@@ -85,7 +84,6 @@ struct MainView: View {
         self.backend = facade.backend
         self.uploadCoordinator = facade.uploadCoordinator
         let aspects = AspectRegistry()
-        self.aspects = aspects
         // Use the SHARED, account-configured cache (AppModel.prepareBackend calls
         // OfflineLibraryManager.shared.configure(session:) before this view is built) so the encrypted
         // disk cache uses the durable per-account session-derived key and survives relaunch. A fresh
