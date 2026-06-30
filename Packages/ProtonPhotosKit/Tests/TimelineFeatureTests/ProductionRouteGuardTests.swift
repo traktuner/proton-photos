@@ -140,6 +140,39 @@ struct ProductionRouteGuardTests {
         #expect(!text.contains("Label(\"Toggle sidebar\""))             // no duplicate / explicit toggle label
     }
 
+    @Test func liquidGlassChromeUsesNativeContracts() throws {
+        let app = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/ProtonPhotosApp.swift"), encoding: .utf8)
+        #expect(app.contains(".windowToolbarStyle(.unified)"), "window chrome should stay on the native unified toolbar")
+        #expect(app.contains(".launchVeil(active: model.isPreparing)"), "startup must use the native launch veil instead of a black loading screen")
+        #expect(!app.contains(".preferredColorScheme(.dark)"), "the app must not globally lock native Liquid Glass to dark mode")
+
+        let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
+        #expect(mainView.contains("GridTopFrost("), "Metal-backed grid needs the measured within-window frost bridge")
+        #expect(mainView.contains("NSVisualEffectView()"), "toolbar frost must use public AppKit material, not painted rectangles")
+        #expect(mainView.contains("view.blendingMode = .withinWindow"), "frost must sample the Metal grid inside the window")
+        #expect(mainView.contains("view.state = .followsWindowActiveState"), "active/inactive toolbar vividness must remain system-driven")
+        #expect(mainView.contains(".searchable(text: $searchText"), "search must remain a native toolbar search field")
+        #expect(mainView.contains(".confirmationDialog(trashConfirmationTitle"), "destructive trash actions need a native confirmation dialog")
+        #expect(!mainView.contains(".toolbarBackground("), "custom toolbar backgrounds box the sidebar and fight Liquid Glass")
+        #expect(!mainView.contains("gridToolbarGlassFade"), "old hand-painted toolbar gradient must not return")
+        #expect(!mainView.contains("SidebarResizeHandle"), "the custom sidebar resize handle must not return")
+
+        let colors = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/DesignSystem/ProtonColors.swift"), encoding: .utf8)
+        #expect(colors.contains("Color(nsColor: .windowBackgroundColor)"), "neutral backgrounds should stay semantic")
+        #expect(colors.contains("public static let textNorm = Color.primary"), "foreground neutrals should stay semantic")
+
+        let components = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/DesignSystem/ProtonComponents.swift"), encoding: .utf8)
+        #expect(!components.contains("struct ProtonPrimaryButtonStyle"), "dead custom button style must not return")
+        #expect(!components.contains("struct ProtonSpinner"), "dead custom spinner must not return")
+
+        let timeline = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/TimelineView.swift"), encoding: .utf8)
+        #expect(timeline.contains("ContentUnavailableView"), "grid empty/error/search states should use native unavailable views")
+
+        let uploadQueue = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/UploadFeature/UploadQueuePanel.swift"), encoding: .utf8)
+        #expect(uploadQueue.contains("ContentUnavailableView"), "upload queue empty state should use native unavailable view")
+        #expect(!uploadQueue.contains(".background(.regularMaterial)"), "popover content must not stack a second material over native popover glass")
+    }
+
     @Test func sidebarFilterChangesUseInitialViewportPolicy() throws {
         // A sidebar route switch opens the route via a ONE-SHOT INITIAL-VIEWPORT POLICY owned by the Metal grid
         // host — restoring the route's remembered scroll position, or opening at newest on first visit — NEVER an
