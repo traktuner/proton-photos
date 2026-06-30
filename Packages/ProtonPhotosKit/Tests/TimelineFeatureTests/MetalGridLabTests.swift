@@ -25,21 +25,6 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
         let vp = MetalGridGeometry.viewportRect(contentRect: content, visibleOrigin: origin)
         #expect(vp == CGRect(x: 100, y: 200, width: 130, height: 130))
     }
-
-    @Test func viewportPointRoundTripsToContent() {
-        let origin = CGPoint(x: 0, y: 4800)
-        let content = MetalGridGeometry.contentPoint(viewportPoint: CGPoint(x: 50, y: 200), visibleOrigin: origin)
-        #expect(content == CGPoint(x: 50, y: 5000))
-    }
-
-    @Test func overscanExpandsAndClampsToContent() {
-        let mid = MetalGridGeometry.overscanRect(visibleRect: CGRect(x: 0, y: 1000, width: 800, height: 600), overscan: 300, contentHeight: 5000)
-        #expect(mid.minY == 700)
-        #expect(mid.maxY == 1900)
-        let top = MetalGridGeometry.overscanRect(visibleRect: CGRect(x: 0, y: 100, width: 800, height: 600), overscan: 300, contentHeight: 5000)
-        #expect(top.minY == 0)            // clamped at the content top
-        #expect(top.maxY == 1000)
-    }
 }
 
 // MARK: 2 — Texture LRU eviction / pinning

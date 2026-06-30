@@ -54,24 +54,6 @@ struct MetalGridStats: Equatable, Sendable {
     }
 }
 
-/// Scroll-state diagnostics (the `[MetalGridScroll]` block).
-struct MetalGridScrollStats: Equatable, Sendable {
-    var visibleRect: CGRect = .zero
-    var contentSize: CGSize = .zero
-    var scrollVelocity: CGFloat = 0      // points/sec, vertical
-    var overscanAhead: CGFloat = 0
-    var overscanBehind: CGFloat = 0
-
-    var summary: String {
-        "visibleRect=\(rectStr(visibleRect)) contentSize=(\(Int(contentSize.width))x\(Int(contentSize.height))) "
-        + "scrollVelocity=\(Int(scrollVelocity)) overscanAhead=\(Int(overscanAhead)) overscanBehind=\(Int(overscanBehind))"
-    }
-
-    private func rectStr(_ r: CGRect) -> String {
-        "(\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height)))"
-    }
-}
-
 /// Texture-cache diagnostics (the `[MetalGridCache]` block).
 struct MetalGridCacheStats: Equatable, Sendable {
     var textureCount = 0
@@ -87,7 +69,6 @@ struct MetalGridCacheStats: Equatable, Sendable {
 /// Everything the SwiftUI HUD overlay mirrors each (throttled) update.
 struct MetalGridHUD: Equatable, Sendable {
     var stats = MetalGridStats()
-    var scroll = MetalGridScrollStats()
     var cache = MetalGridCacheStats()
     var level = 2
     var totalItems = 0

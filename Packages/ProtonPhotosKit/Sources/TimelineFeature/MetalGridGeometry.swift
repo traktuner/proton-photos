@@ -15,16 +15,4 @@ enum MetalGridGeometry {
             height: contentRect.height
         )
     }
-
-    /// Convert a viewport-space point (e.g. a mouse location in the MTKView) back to content space.
-    static func contentPoint(viewportPoint: CGPoint, visibleOrigin: CGPoint) -> CGPoint {
-        CGPoint(x: viewportPoint.x + visibleOrigin.x, y: viewportPoint.y + visibleOrigin.y)
-    }
-
-    /// The visible rect expanded vertically by `overscan` points above and below (clamped to content).
-    static func overscanRect(visibleRect: CGRect, overscan: CGFloat, contentHeight: CGFloat) -> CGRect {
-        let minY = max(0, visibleRect.minY - overscan)
-        let maxY = min(max(contentHeight, visibleRect.maxY), visibleRect.maxY + overscan)
-        return CGRect(x: visibleRect.minX, y: minY, width: visibleRect.width, height: max(0, maxY - minY))
-    }
 }
