@@ -174,4 +174,15 @@ import GridCore
         #expect(SquareTileGridEngine.appleLevelSpecs.map(\.nominalColumns) == [3, 5, 7, 9, 20, 30],
                 "accepted six-level nominal columns")
     }
+
+    @Test func coordinatorUsesInjectedViewportProfileWithRegularDefault() {
+        let coord = src("MetalGridCoordinator.swift")
+        let host = src("MetalGridScrollHost.swift")
+
+        #expect(coord.contains("gridProfile: GridLevelProfile = SquareTileGridEngine.regularTimelineProfile"))
+        #expect(coord.contains("engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: gridProfile)"))
+        #expect(coord.contains("level = gridProfile.defaultLevel"))
+        #expect(host.contains("gridProfile: GridLevelProfile = SquareTileGridEngine.regularTimelineProfile"))
+        #expect(host.contains("gridProfile: gridProfile"))
+    }
 }

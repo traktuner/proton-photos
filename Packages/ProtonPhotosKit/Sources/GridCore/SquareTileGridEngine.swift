@@ -108,6 +108,22 @@ public struct GridLevelMetrics: Equatable, Sendable {
     }
 }
 
+/// A named density ladder for a class of available viewport, not for a device family. Platform adapters may map
+/// UIKit/AppKit/SwiftUI traits to one of these profiles, but the core grid stays scene-size driven and does not
+/// know about a concrete operating system, orientation, or device idiom.
+public struct GridLevelProfile: Equatable, Sendable {
+    public let id: String
+    public let levels: [GridLevelMetrics]
+    public let defaultLevel: Int
+
+    public init(id: String, levels: [GridLevelMetrics], defaultLevel: Int) {
+        let resolvedLevels = levels.isEmpty ? SquareTileGridEngine.defaultLevels : levels
+        self.id = id
+        self.levels = resolvedLevels
+        self.defaultLevel = min(max(defaultLevel, 0), resolvedLevels.count - 1)
+    }
+}
+
 /// One square slot in the resolved grid. The OUTER rect (`slotRect` / `viewportRect`) is ALWAYS square and
 /// is the single authority for layout, outer-tile rendering, hit testing, selection, visible queries,
 /// scroll/content size and zoom geometry. `row` is the slot's row WITHIN its section; `column` is the grid
@@ -187,6 +203,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     public let sectionCounts: [Int]
     /// The SINGLE source of truth for grid density — one square ladder, one place to retune.
     public let levels: [GridLevelMetrics]
+    private let configuredDefaultLevel: Int
 
     /// Flat index of the first item of each section (prefix sum), and the library total.
     private let sectionFlatStart: [Int]
@@ -200,9 +217,11 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// `MetalGridCoordinator` sets it to the toolbar height (plumbed from `MainView` → host).
     public var topInset: CGFloat = 0
 
-    public init(sectionCounts: [Int], levels: [GridLevelMetrics] = SquareTileGridEngine.defaultLevels) {
+    public init(sectionCounts: [Int], levels: [GridLevelMetrics] = SquareTileGridEngine.defaultLevels, defaultLevel: Int = 3) {
+        let resolvedLevels = levels.isEmpty ? SquareTileGridEngine.defaultLevels : levels
         self.sectionCounts = sectionCounts
-        self.levels = levels.isEmpty ? SquareTileGridEngine.defaultLevels : levels
+        self.levels = resolvedLevels
+        self.configuredDefaultLevel = min(max(defaultLevel, 0), resolvedLevels.count - 1)
         var starts: [Int] = []
         starts.reserveCapacity(sectionCounts.count)
         var running = 0
@@ -211,10 +230,14 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         self.totalItems = running
     }
 
+    public init(sectionCounts: [Int], profile: GridLevelProfile) {
+        self.init(sectionCounts: sectionCounts, levels: profile.levels, defaultLevel: profile.defaultLevel)
+    }
+
     public var levelCount: Int { levels.count }
     /// Opens at the comfortable medium density (level 3 = 9 columns; the width-filled side is ~135pt at the
     /// 1280 reference width). Clamped for custom ladders.
-    public var defaultLevel: Int { min(3, levels.count - 1) }
+    public var defaultLevel: Int { configuredDefaultLevel }
     public var sectionCount: Int { sectionCounts.count }
 
     public func clampLevel(_ l: Int) -> Int { min(max(l, 0), levels.count - 1) }
@@ -269,6 +292,41 @@ public struct SquareTileGridEngine: Equatable, Sendable {
                          supportedContentModes: $0.supportedContentModes, defaultContentMode: $0.defaultContentMode,
                          transitionKindToNext: $0.transitionKindToNext)
     }
+
+    /// Default profile for regular-width timeline surfaces. This intentionally preserves the shipped production
+    /// ladder exactly; adapters choose it for today's regular desktop host.
+    public static let regularTimelineProfile = GridLevelProfile(
+        id: "regularTimeline",
+        levels: defaultLevels,
+        defaultLevel: 3
+    )
+
+    /// Compact-width timeline profile for narrow scene surfaces. It keeps the same transition topology
+    /// (normal levels 0...3, overview levels 4...5) while adding a one-column large-thumbnail level.
+    public static let compactTimelineProfile = GridLevelProfile(
+        id: "compactTimeline",
+        levels: [
+            GridLevelMetrics(levelID: 0, nominalColumns: 1,  gap: 0,  monthLabels: false,
+                             supportedContentModes: [.aspectFitInsideSquare, .squareFillCrop],
+                             defaultContentMode: .aspectFitInsideSquare, transitionKindToNext: .focusRowRelayout),
+            GridLevelMetrics(levelID: 1, nominalColumns: 2,  gap: 12, monthLabels: false,
+                             supportedContentModes: [.aspectFitInsideSquare, .squareFillCrop],
+                             defaultContentMode: .aspectFitInsideSquare, transitionKindToNext: .focusRowRelayout),
+            GridLevelMetrics(levelID: 2, nominalColumns: 3,  gap: 10, monthLabels: false,
+                             supportedContentModes: [.aspectFitInsideSquare, .squareFillCrop],
+                             defaultContentMode: .aspectFitInsideSquare, transitionKindToNext: .focusRowRelayout),
+            GridLevelMetrics(levelID: 3, nominalColumns: 5,  gap: 8,  monthLabels: false,
+                             supportedContentModes: [.aspectFitInsideSquare, .squareFillCrop],
+                             defaultContentMode: .aspectFitInsideSquare, transitionKindToNext: .overviewWarp),
+            GridLevelMetrics(levelID: 4, nominalColumns: 12, gap: 2,  monthLabels: true,
+                             supportedContentModes: [.squareFillCrop],
+                             defaultContentMode: .squareFillCrop, transitionKindToNext: .denseOverviewZoom),
+            GridLevelMetrics(levelID: 5, nominalColumns: 20, gap: 1,  monthLabels: true,
+                             supportedContentModes: [.squareFillCrop],
+                             defaultContentMode: .squareFillCrop, transitionKindToNext: nil),
+        ],
+        defaultLevel: 2
+    )
 
     /// The width-filling square side for a column count + gap — the resolution-independent slot size. Levels
     /// are defined by columns; this derives the pixel side at the CURRENT width: `(width − gap·(cols−1))/cols`.

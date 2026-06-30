@@ -181,8 +181,10 @@ final class MetalGridScrollHost: NSView {
     private var bridgeStart: CFTimeInterval = 0
     private let bridgeDuration: CFTimeInterval = GridZoomCommitBridge.duration
 
-    init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default) {
-        guard let coordinator = MetalGridCoordinator(device: device, dataSource: dataSource, budget: budget) else { return nil }
+    init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
+          gridProfile: GridLevelProfile = SquareTileGridEngine.regularTimelineProfile) {
+        guard let coordinator = MetalGridCoordinator(device: device, dataSource: dataSource, budget: budget,
+                                                     gridProfile: gridProfile) else { return nil }
         self.coordinator = coordinator
         self.metalView = MetalGridView(frame: .zero, device: device)
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))

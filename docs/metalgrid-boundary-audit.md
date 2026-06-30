@@ -164,10 +164,13 @@ Solutions:
 
 1. `GridCore` target: pure geometry, zoom, resize, transition plans, selection, texture LRU policy, and renderer
    input value types that do not import `Metal`, `MetalKit`, `AppKit`, `UIKit`, `SwiftUI`, or `MediaCache`.
-2. macOS `TimelineFeature` adapter keeps `MetalProductionGridView`, `MetalGridScrollHost`, header/accessibility,
+2. `GridCore` layout profiles must stay viewport-scoped (`regularTimeline`, `compactTimeline`, etc.). Platform
+   adapters map scene size, safe areas, traits, and hardware capability to a profile; the renderer just draws
+   the resulting `GridFramePlan`.
+3. macOS `TimelineFeature` adapter keeps `MetalProductionGridView`, `MetalGridScrollHost`, header/accessibility,
    real data source, and AppKit symbol rasterization.
-3. `MetalRenderingCore` target only after `MetalGridRenderer` no longer accepts `MTKView` directly.
-4. iOS/iPadOS adapter: `UIViewRepresentable`/`UIView`, `UIScrollView` or SwiftUI scroll host, platform
+4. `MetalRenderingCore` target only after `MetalGridRenderer` no longer accepts `MTKView` directly.
+5. iOS/iPadOS adapter: `UIViewRepresentable`/`UIView`, `UIScrollView` or SwiftUI scroll host, platform
    safe-area/input policy, platform `MetalGridBudget`, and platform glyph rasterizer.
 
 ## Stop conditions for Phase 3.2

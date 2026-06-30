@@ -212,3 +212,15 @@ accessibility overlays, texture budgets, and glyph/image rasterization. Do not m
 Moving additional grid code into `GridCore` requires the same gate as any other universal Core change:
 `scripts/verify-universal-core.sh` must pass, including `GridCore` builds for `generic/platform=iOS` and
 `generic/platform=macOS`.
+
+#### Phase 3.3 — Viewport-scoped GridCore layout profiles
+
+`GridCore` may define reusable `GridLevelProfile` values, but their names and behavior must describe viewport
+classes rather than platforms. The current shared profiles are `regularTimeline` and `compactTimeline`.
+Platform adapters choose a profile from scene size, safe-area, trait, and capability context; Core must not branch
+on device idiom, orientation, or operating system.
+
+The regular timeline profile preserves the shipped six-level production ladder exactly: `3/5/7/9/20/30`,
+default level `3`, normal levels `0...3`, and overview levels `4...5`. The compact profile keeps the same
+transition topology but starts with a one-column large-thumbnail level for narrow scene surfaces. Renderer code
+must remain profile-agnostic and draw the `GridFramePlan` it receives.

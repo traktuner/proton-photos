@@ -112,6 +112,48 @@ import GridCore
         #expect(specs[5].transitionKindToNext == nil, "the densest level has no next")
     }
 
+    @Test func regularTimelineProfilePreservesProductionDefaults() {
+        let profile = SquareTileGridEngine.regularTimelineProfile
+        let e = SquareTileGridEngine(sectionCounts: [4000], profile: profile)
+
+        #expect(profile.id == "regularTimeline")
+        #expect(profile.levels == SquareTileGridEngine.defaultLevels)
+        #expect(profile.defaultLevel == 3)
+        #expect(e.defaultLevel == 3)
+        #expect(e.levelCount == 6)
+        #expect(e.levels.map(\.nominalColumns) == [3, 5, 7, 9, 20, 30])
+        #expect(e.resolvedMetrics(level: e.defaultLevel, width: width).columns == 9)
+    }
+
+    @Test func compactTimelineProfileStartsWithOneColumnAndKeepsTopology() {
+        let profile = SquareTileGridEngine.compactTimelineProfile
+        let e = SquareTileGridEngine(sectionCounts: [4000], profile: profile)
+
+        #expect(profile.id == "compactTimeline")
+        #expect(profile.defaultLevel == 2)
+        #expect(e.defaultLevel == 2)
+        #expect(e.levelCount == 6)
+        #expect(e.levels.map(\.nominalColumns) == [1, 2, 3, 5, 12, 20])
+        #expect(e.resolvedMetrics(level: 0, width: 390).columns == 1)
+        #expect(abs(e.resolvedMetrics(level: 0, width: 390).slotSide - 390) < eps)
+
+        for level in 0 ... 3 { #expect(e.contentModeToggleAvailable(level: level)) }
+        for level in [4, 5] { #expect(!e.contentModeToggleAvailable(level: level)) }
+        #expect(e.adjacentTransitionKind(2, 3) == .focusRowRelayout)
+        #expect(e.adjacentTransitionKind(3, 4) == .overviewWarp)
+        #expect(e.adjacentTransitionKind(4, 5) == .denseOverviewZoom)
+    }
+
+    @Test func profileNamesAreViewportScopedNotPlatformScoped() {
+        for id in [SquareTileGridEngine.regularTimelineProfile.id, SquareTileGridEngine.compactTimelineProfile.id] {
+            let lower = id.lowercased()
+            #expect(!lower.contains("mac"))
+            #expect(!lower.contains("ios"))
+            #expect(!lower.contains("ipad"))
+            #expect(!lower.contains("iphone"))
+        }
+    }
+
     // MARK: - Content fitting (9–16)
 
     private func slot() -> CGRect { CGRect(x: 120, y: 240, width: 180, height: 180) }   // a square slot

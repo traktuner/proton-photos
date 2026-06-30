@@ -16,6 +16,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private let cache: MetalGridTextureCache
     private var dataSource: MetalGridDataSource
     private let budget: MetalGridBudget
+    private let gridProfile: GridLevelProfile
 
     /// Fired ONCE, the first time every visible cell is GPU-resident (the first fully-drawn frame). The shell
     /// holds the launch veil until this so it never lifts onto blank thumbnails. See `streamTextures`.
@@ -197,14 +198,17 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// holds (so placeholders swap to thumbnails without needing a scroll), and goes idle once false.
     private(set) var hasPendingVisibleThumbnails = false
 
-    init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default) {
+    init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
+          gridProfile: GridLevelProfile = SquareTileGridEngine.regularTimelineProfile) {
         guard let renderer = MetalGridRenderer(device: device),
               let cache = MetalGridTextureCache(device: device, budget: budget) else { return nil }
         self.renderer = renderer
         self.cache = cache
         self.dataSource = dataSource
         self.budget = budget
+        self.gridProfile = gridProfile
         super.init()
+        level = gridProfile.defaultLevel
         rebuildIndex()
     }
 
@@ -240,7 +244,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         for (i, uid) in dataSource.flatUIDs.enumerated() { map[uid] = i }
         indexByUID = map
         // Rebuild the canonical engine from the new section structure (single source of truth).
-        engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts)
+        engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: gridProfile)
         engine.topInset = topBarInset             // a fresh engine resets topInset → re-apply the toolbar margin
         committedPhase = nil                      // a stale phase could point past the new data → canonical
     }
