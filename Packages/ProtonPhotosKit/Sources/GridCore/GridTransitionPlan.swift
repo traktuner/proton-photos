@@ -8,9 +8,9 @@
 
 import CoreGraphics
 
-enum GridTransitionKindTag: String, Sendable { case click, pinch }
+package enum GridTransitionKindTag: String, Sendable { case click, pinch }
 
-enum TransitionSlotRole: String, Sendable, Equatable {
+package enum TransitionSlotRole: String, Sendable, Equatable {
     case stable     // same occupant both ends — drawn once
     case source     // mixed key, before window — source occupant
     case target     // mixed key, after window — target occupant
@@ -20,48 +20,48 @@ enum TransitionSlotRole: String, Sendable, Equatable {
 }
 
 /// Immutable per-frame draw intent for one lattice key at one canonical q.
-struct ResolvedTransitionSlot: Equatable, Sendable {
-    let key: RelativeSlotKey
-    let rect: CGRect                 // continuous viewport rect at this q
-    let role: TransitionSlotRole
-    let sourceIdentity: Int?         // flat index of source occupant (nil ⇒ background)
-    let targetIdentity: Int?         // flat index of target occupant (nil ⇒ background)
-    let sourceWeight: Double         // 1-lp for dissolve; 1 for source/stable/exit; 0 for entry/target
-    let targetWeight: Double         // lp for dissolve; 1 for target/entry; 0 otherwise
-    let localProgress: Double        // crossfade progress within the component window (0…1)
-    let componentID: Int             // -1 ⇒ none
+package struct ResolvedTransitionSlot: Equatable, Sendable {
+    package let key: RelativeSlotKey
+    package let rect: CGRect                 // continuous viewport rect at this q
+    package let role: TransitionSlotRole
+    package let sourceIdentity: Int?         // flat index of source occupant (nil ⇒ background)
+    package let targetIdentity: Int?         // flat index of target occupant (nil ⇒ background)
+    package let sourceWeight: Double         // 1-lp for dissolve; 1 for source/stable/exit; 0 for entry/target
+    package let targetWeight: Double         // lp for dissolve; 1 for target/entry; 0 otherwise
+    package let localProgress: Double        // crossfade progress within the component window (0…1)
+    package let componentID: Int             // -1 ⇒ none
 }
 
-func gridTransitionSmootherstep(_ x: Double) -> Double {
+package func gridTransitionSmootherstep(_ x: Double) -> Double {
     if x <= 0 { return 0 }
     if x >= 1 { return 1 }
     return x * x * x * (x * (x * 6 - 15) + 10)
 }
 
-struct GridTransitionPlan: Sendable {
-    let kind: GridTransitionKindTag
-    let sourceLevel: Int
-    let targetLevel: Int
-    let durationMs: Double
-    let curve: LocalAlphaCurve
+package struct GridTransitionPlan: Sendable {
+    package let kind: GridTransitionKindTag
+    package let sourceLevel: Int
+    package let targetLevel: Int
+    package let durationMs: Double
+    package let curve: LocalAlphaCurve
 
-    let components: [GridTransitionComponent]
-    let keys: [RelativeSlotKey]
-    let sourceOcc: [RelativeSlotKey: Int]      // flat index of source occupant
-    let targetOcc: [RelativeSlotKey: Int]
-    let sourceRect: [RelativeSlotKey: CGRect]  // REAL viewport rect at q=0 (nil for entries)
-    let targetRect: [RelativeSlotKey: CGRect]  // REAL viewport rect at q=1 (nil for exits)
+    package let components: [GridTransitionComponent]
+    package let keys: [RelativeSlotKey]
+    package let sourceOcc: [RelativeSlotKey: Int]      // flat index of source occupant
+    package let targetOcc: [RelativeSlotKey: Int]
+    package let sourceRect: [RelativeSlotKey: CGRect]  // REAL viewport rect at q=0 (nil for entries)
+    package let targetRect: [RelativeSlotKey: CGRect]  // REAL viewport rect at q=1 (nil for exits)
     // V3.7 presentation geometry — filled for EVERY key. Mixed/stable: real source/target. Entries:
     // a SYNTHESIZED source-side endpoint (so they slide/scale IN). Exits: a synthesized target-side
     // endpoint (so they slide/scale OUT). Identity/role decisions still use sourceOcc/targetOcc +
     // the REAL source/targetRect; only the spatial path uses these.
-    let presentationSourceRect: [RelativeSlotKey: CGRect]
-    let presentationTargetRect: [RelativeSlotKey: CGRect]
-    let componentOfKey: [RelativeSlotKey: Int]
-    let windowOf: [Int: ClosedRange<Double>]   // componentID → q-window
+    package let presentationSourceRect: [RelativeSlotKey: CGRect]
+    package let presentationTargetRect: [RelativeSlotKey: CGRect]
+    package let componentOfKey: [RelativeSlotKey: Int]
+    package let windowOf: [Int: ClosedRange<Double>]   // componentID → q-window
 
     /// Geometry eases with smootherstep(q); the occupant crossfade is gated by the component window.
-    func geomProgress(_ q: Double) -> Double { gridTransitionSmootherstep(q) }
+    package func geomProgress(_ q: Double) -> Double { gridTransitionSmootherstep(q) }
 
     /// Continuous spatial path for a key: interpolate its PRESENTATION endpoints (defined for every
     /// key). Mixed/stable keys move real source → real target; entries/exits move along their
@@ -76,7 +76,7 @@ struct GridTransitionPlan: Sendable {
     }
 
     /// Pure per-frame draw intent at canonical progress q ∈ [0,1].
-    func renderIntent(at q: Double) -> [ResolvedTransitionSlot] {
+    package func renderIntent(at q: Double) -> [ResolvedTransitionSlot] {
         let gp = geomProgress(q)
         var out: [ResolvedTransitionSlot] = []
         out.reserveCapacity(keys.count)
@@ -143,7 +143,7 @@ struct GridTransitionPlan: Sendable {
     }
 
     /// Count of keys whose component is partially dissolving (0 < lp < 1) at this q.
-    func partialComponentCount(at q: Double) -> Int {
+    package func partialComponentCount(at q: Double) -> Int {
         var cids = Set<Int>()
         for (cid, win) in windowOf {
             let lp = curve.localProgress(w0: win.lowerBound, w1: win.upperBound, q: q)

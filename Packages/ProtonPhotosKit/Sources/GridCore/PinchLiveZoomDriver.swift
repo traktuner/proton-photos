@@ -22,32 +22,30 @@
 // the gesture started in — the normal levels L0–L3); the host decides lattice-vs-reflow up front and clamps
 // the position into the band, so an out-of-band (overview) excursion holds at the boundary detent.
 
-import CoreGraphics
+package struct PinchLiveZoomDriver: Equatable, Sendable {
 
-struct PinchLiveZoomDriver: Equatable, Sendable {
-
-    struct Tunables: Equatable, Sendable {
+    package struct Tunables: Equatable, Sendable {
         /// Release decision (fingers up): the active segment settles to its target if `segmentQ ≥` this, else
         /// back to its source — i.e. the nearest detent to the global position.
-        var releaseCommitQ: Double = 0.50
+        package var releaseCommitQ: Double = 0.50
         /// Settle ramp speed floor / cap (q per second) — never stalls, never an instant snap.
-        var autoCompleteMinQPerSecond: Double = 1.8
-        var autoCompleteMaxQPerSecond: Double = 8.0
+        package var autoCompleteMinQPerSecond: Double = 1.8
+        package var autoCompleteMaxQPerSecond: Double = 8.0
         /// A very short directional pinch that never clears the live-scrub dead-band should still behave like
         /// a discrete +/- step: complete one adjacent segment at the accepted click duration.
-        var shortStepQPerSecond: Double = 1000.0 / 420.0
+        package var shortStepQPerSecond: Double = 1000.0 / 420.0
         /// EMA weight for the recent pinch velocity (drives the settle speed). 0…1.
-        var velocityEmaAlpha: Double = 0.25
+        package var velocityEmaAlpha: Double = 0.25
         /// |continuousLevel − startLevel| (level units) needed before the first segment engages (rest dead-band).
-        var directionResolveQ: Double = 0.02
+        package var directionResolveQ: Double = 0.02
         /// Hysteresis (level units) around an integer detent before the active interval switches — prevents
         /// rebuild thrash when the finger holds right on a detent.
-        var detentHysteresisQ: Double = 0.02
+        package var detentHysteresisQ: Double = 0.02
         /// Low-pass on `segmentQ`. 1.0 = pass-through (DEFAULT — exact 1:1, no lag); < 1 = light filter.
-        var displayQLowPassAlpha: Double = 1.0
+        package var displayQLowPassAlpha: Double = 1.0
 
-        init() {}
-        init(from t: GridTransitionTuning) {
+        package init() {}
+        package init(from t: GridTransitionTuning) {
             releaseCommitQ = t.pinchReleaseCommitQ
             autoCompleteMinQPerSecond = t.pinchAutoCompleteMinQPerSecond
             autoCompleteMaxQPerSecond = t.pinchAutoCompleteMaxQPerSecond
@@ -59,7 +57,7 @@ struct PinchLiveZoomDriver: Equatable, Sendable {
         }
     }
 
-    enum Phase: Equatable, Sendable {
+    package enum Phase: Equatable, Sendable {
         case idle
         case scrub          // fingers down, segmentQ follows the finger 1:1 across detents
         case settling       // fingers up, velocity-aware ramp of the active segment to its nearest detent
@@ -67,41 +65,41 @@ struct PinchLiveZoomDriver: Equatable, Sendable {
     }
 
     /// What the host needs after a live sample: the active adjacent segment + its scrub position.
-    struct Update: Equatable {
-        var segmentSource: Int     // denser (higher index) interval end ⇒ shown at segmentQ = 0
-        var segmentTarget: Int     // larger-tile (lower index) end     ⇒ shown at segmentQ = 1
-        var segmentQ: Double
-        var hasSegment: Bool       // false before the first move clears the rest dead-band
+    package struct Update: Equatable {
+        package var segmentSource: Int     // denser (higher index) interval end => shown at segmentQ = 0
+        package var segmentTarget: Int     // larger-tile (lower index) end     => shown at segmentQ = 1
+        package var segmentQ: Double
+        package var hasSegment: Bool       // false before the first move clears the rest dead-band
     }
 
-    private(set) var phase: Phase = .idle
-    private(set) var startLevel = 0
-    private(set) var chainLo = 0
-    private(set) var chainHi = 0
-    private(set) var seg = 0                // current interval index: active interval = [seg, seg+1]
-    private(set) var segmentQ: Double = 0
-    private(set) var directionResolved = false
-    private(set) var velocityQPerSecond: Double = 0
-    private(set) var settleTargetQ: Double = 1
-    private(set) var finalLevel = 0        // the detent the gesture lands on (set on commit)
-    private(set) var chainable = false     // false for a degenerate band (lo == hi) ⇒ driver stays inert
+    package private(set) var phase: Phase = .idle
+    package private(set) var startLevel = 0
+    package private(set) var chainLo = 0
+    package private(set) var chainHi = 0
+    package private(set) var seg = 0                // current interval index: active interval = [seg, seg+1]
+    package private(set) var segmentQ: Double = 0
+    package private(set) var directionResolved = false
+    package private(set) var velocityQPerSecond: Double = 0
+    package private(set) var settleTargetQ: Double = 1
+    package private(set) var finalLevel = 0        // the detent the gesture lands on (set on commit)
+    package private(set) var chainable = false     // false for a degenerate band (lo == hi) => driver stays inert
 
     private var lastX: Double = 0
 
-    var tuning = Tunables()
+    package var tuning = Tunables()
 
-    init(tuning: Tunables = Tunables()) { self.tuning = tuning }
+    package init(tuning: Tunables = Tunables()) { self.tuning = tuning }
 
-    var segmentSource: Int { seg + 1 }
-    var segmentTarget: Int { seg }
-    var isActive: Bool { phase == .scrub || phase == .settling }
-    var isSelfAdvancing: Bool { phase == .settling }   // only the post-release settle self-advances (no capture)
-    var isCommitted: Bool { phase == .committed }
+    package var segmentSource: Int { seg + 1 }
+    package var segmentTarget: Int { seg }
+    package var isActive: Bool { phase == .scrub || phase == .settling }
+    package var isSelfAdvancing: Bool { phase == .settling }   // only the post-release settle self-advances (no capture)
+    package var isCommitted: Bool { phase == .committed }
 
     /// Begin a chaining gesture on `startLevel`, bounded to the eligible band `[chainLo, chainHi]` (the host's
     /// contiguous focusRowRelayout run). The first interval brackets `startLevel`; the start detent is shown
     /// until the finger clears the rest dead-band.
-    mutating func begin(startLevel: Int, chainLo: Int, chainHi: Int) {
+    package mutating func begin(startLevel: Int, chainLo: Int, chainHi: Int) {
         self.startLevel = startLevel
         self.chainLo = min(chainLo, startLevel)
         self.chainHi = max(chainHi, startLevel)
@@ -119,7 +117,7 @@ struct PinchLiveZoomDriver: Equatable, Sendable {
     /// Feed a live pinch sample. Picks the active interval from the (band-clamped) position with detent
     /// hysteresis, and sets `segmentQ` 1:1. Returns the active segment for the host to (re)build + scrub.
     @discardableResult
-    mutating func update(continuousLevel rawX: Double, dt: Double) -> Update {
+    package mutating func update(continuousLevel rawX: Double, dt: Double) -> Update {
         guard phase == .scrub, chainable else {                    // degenerate band ⇒ inert (host routes to reflow)
             return Update(segmentSource: segmentSource, segmentTarget: segmentTarget, segmentQ: segmentQ, hasSegment: directionResolved && chainable)
         }
@@ -159,7 +157,7 @@ struct PinchLiveZoomDriver: Equatable, Sendable {
     /// Advance the post-release settle on the driver's own clock. No-op while scrubbing (a still finger keeps
     /// the grid still). Speed respects recent pinch velocity, clamped to [min, max] q/s.
     @discardableResult
-    mutating func advance(dt: Double) -> Double {
+    package mutating func advance(dt: Double) -> Double {
         guard dt > 0, phase == .settling else { return segmentQ }
         let speed = max(tuning.autoCompleteMinQPerSecond, min(tuning.autoCompleteMaxQPerSecond, velocityQPerSecond))
         if segmentQ < settleTargetQ { segmentQ = min(settleTargetQ, segmentQ + speed * dt) }
@@ -175,7 +173,7 @@ struct PinchLiveZoomDriver: Equatable, Sendable {
     /// Fingers up. Settle the ACTIVE segment to its nearest detent (by the global position, via `segmentQ`).
     /// Returns the detent the gesture will land on. No hard snap; velocity-aware ramp in `advance`.
     @discardableResult
-    mutating func release(cancelled: Bool = false) -> Int {
+    package mutating func release(cancelled: Bool = false) -> Int {
         guard phase == .scrub else { return finalLevel }
         // cancelled gestures also settle to nearest (graceful) — there is no abrupt revert.
         _ = cancelled
@@ -198,7 +196,7 @@ struct PinchLiveZoomDriver: Equatable, Sendable {
     /// `direction < 0` means toward lower levels (larger thumbnails / pinch-in); `direction > 0` means toward
     /// higher levels (denser thumbnails / pinch-out).
     @discardableResult
-    mutating func releaseTowardAdjacent(direction: Int, cancelled: Bool = false) -> Update {
+    package mutating func releaseTowardAdjacent(direction: Int, cancelled: Bool = false) -> Update {
         guard phase == .scrub, chainable, !cancelled else {
             _ = release(cancelled: cancelled)
             return Update(segmentSource: segmentSource, segmentTarget: segmentTarget, segmentQ: segmentQ, hasSegment: false)
@@ -232,5 +230,5 @@ struct PinchLiveZoomDriver: Equatable, Sendable {
         return Update(segmentSource: segmentSource, segmentTarget: segmentTarget, segmentQ: segmentQ, hasSegment: true)
     }
 
-    mutating func reset() { self = PinchLiveZoomDriver(tuning: tuning) }
+    package mutating func reset() { self = PinchLiveZoomDriver(tuning: tuning) }
 }

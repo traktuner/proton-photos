@@ -17,8 +17,7 @@ import CoreGraphics
 //   • resize behaviour (FIXED-COLUMNS + WIDTH-FILL: each level HOLDS its `nominalColumns`; the square tile is
 //     sized to FILL the viewport width exactly (no trailing gutter), so a width change SCALES the tile — a wider
 //     window shows the SAME columns at a LARGER tile. The column count changes ONLY on a zoom, NEVER on resize.
-//     A live resize/sidebar drag presents this as a uniform snapshot scale — see the MetalGridCoordinator
-//     presentation layer.)
+//     A live resize/sidebar drag presents this as a uniform snapshot scale in the platform presentation layer.)
 //
 // No coordinator, renderer, thumbnail loader, or transition code may compute independent grid positions,
 // gaps, pitch, columns, or section offsets. If a visible cell, header, or gap is wrong, the fix is HERE or
@@ -244,8 +243,8 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// translucent toolbar instead of being tucked under it. Baked into the layout ORIGIN (every section / slot /
     /// header Y shifts down by it) AND into `contentHeight`, so the scroll coordinate stays natural — the host's
     /// existing `max(0, …)` pin/clamp math is untouched; the first row simply lands at viewport-y `topInset` when
-    /// scrolled to the top. Default 0 (engine geometry tests + standalone callers are unaffected); the production
-    /// `MetalGridCoordinator` sets it to the toolbar height (plumbed from `MainView` → host).
+    /// scrolled to the top. Default 0 (engine geometry tests + standalone callers are unaffected); production
+    /// adapters set it to the toolbar/safe-area height plumbed from their host view.
     public var topInset: CGFloat = 0
 
     public init(sectionCounts: [Int], levels: [GridLevelMetrics], defaultLevel: Int) {

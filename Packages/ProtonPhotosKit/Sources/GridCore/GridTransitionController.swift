@@ -8,31 +8,34 @@
 // component-local timer here), and produces per-frame draw intent. Reversible: setting q backward
 // reverses the presentation exactly. Building happens ONCE per gesture; per frame is read-only.
 
-import Foundation
 import CoreGraphics
-import PhotosCore
-import GridCore
 
-enum GridTransitionFallbackReason: String, Sendable {
+package typealias GridTransitionEventSink = (String, [String: String]) -> Void
+
+package enum GridTransitionFallbackReason: String, Sendable {
     case latticeBuildFailed, selectionRelocates, scheduleDegenerate, none
 }
 
-final class GridTransitionController {
-    private(set) var plan: GridTransitionPlan?
-    private(set) var q: Double = 0
-    private(set) var lastFallback: GridTransitionFallbackReason = .none
+package final class GridTransitionController {
+    package private(set) var plan: GridTransitionPlan?
+    package private(set) var q: Double = 0
+    package private(set) var lastFallback: GridTransitionFallbackReason = .none
     private var elapsed: Double = 0
-    var tuning: GridTransitionTuning
+    package var tuning: GridTransitionTuning
+    private let eventSink: GridTransitionEventSink?
 
-    init(tuning: GridTransitionTuning = .default) { self.tuning = tuning }
+    package init(tuning: GridTransitionTuning = .default, eventSink: GridTransitionEventSink? = nil) {
+        self.tuning = tuning
+        self.eventSink = eventSink
+    }
 
-    var isActive: Bool { plan != nil }
+    package var isActive: Bool { plan != nil }
 
     /// Try to begin a click (toolbar/keyboard +/-) transition. Returns true iff a plan was built and
     /// is eligible; false ⇒ the host must use the stable instant snap (reason in `lastFallback`).
     @discardableResult
-    func beginClick(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,
-                    viewportSize: CGSize, selection: Set<Int>) -> Bool {
+    package func beginClick(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,
+                            viewportSize: CGSize, selection: Set<Int>) -> Bool {
         guard let lat = GridTransitionComponentBuilder.build(source: source, target: target,
                                                              anchorIndex: anchorIndex, viewportSize: viewportSize),
               !lat.components.isEmpty else { return fail(.latticeBuildFailed) }
@@ -43,7 +46,7 @@ final class GridTransitionController {
                                                             viewportSize: viewportSize, tuning: tuning)
         else { return fail(.scheduleDegenerate) }
         plan = p; q = 0; elapsed = 0; lastFallback = .none
-        PhotoDiagnostics.shared.emit("GridTransition", [
+        emit("GridTransition", [
             "event": "PLAN_BUILT", "candidate": "CLICKV2_420_FULLER_CORNER",
             "durationMs": "\(Int(tuning.clickDurationMs))", "components": "\(p.components.count)",
             "src": "\(source.levelID)", "tgt": "\(target.levelID)"])
@@ -55,8 +58,8 @@ final class GridTransitionController {
     /// time profile — there is no `advanceClick`/timer for a pinch plan. Returns true iff a plan was built
     /// and is eligible; false ⇒ the host uses the legacy geometry-only `GridZoomTransaction` reflow.
     @discardableResult
-    func beginPinch(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,
-                    viewportSize: CGSize, selection: Set<Int>) -> Bool {
+    package func beginPinch(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,
+                            viewportSize: CGSize, selection: Set<Int>) -> Bool {
         guard let lat = GridTransitionComponentBuilder.build(source: source, target: target,
                                                              anchorIndex: anchorIndex, viewportSize: viewportSize),
               !lat.components.isEmpty else { return fail(.latticeBuildFailed) }
@@ -67,7 +70,7 @@ final class GridTransitionController {
                                                             viewportSize: viewportSize, tuning: tuning)
         else { return fail(.scheduleDegenerate) }
         plan = p; q = 0; elapsed = 0; lastFallback = .none
-        PhotoDiagnostics.shared.emit("GridTransition", [
+        emit("GridTransition", [
             "event": "PLAN_BUILT", "candidate": "PINCH071",
             "components": "\(p.components.count)", "src": "\(source.levelID)", "tgt": "\(target.levelID)"])
         return true
@@ -75,12 +78,12 @@ final class GridTransitionController {
 
     /// The kind of the active plan (nil when inactive). The coordinator's draw branch uses it to pick the
     /// progress source: `.click` ⇒ trapezoidal `advanceClick`; `.pinch` ⇒ host-driven `setProgress`.
-    var activeKind: GridTransitionKindTag? { plan?.kind }
+    package var activeKind: GridTransitionKindTag? { plan?.kind }
 
     private func fail(_ reason: GridTransitionFallbackReason) -> Bool {
         lastFallback = reason; plan = nil; q = 0
         // Every fallback now is a genuine ineligible-geometry case (the feature flag is gone) → worth logging.
-        PhotoDiagnostics.shared.emit("GridTransition", ["event": "FALLBACK", "reason": reason.rawValue])
+        emit("GridTransition", ["event": "FALLBACK", "reason": reason.rawValue])
         return false
     }
 
@@ -88,7 +91,7 @@ final class GridTransitionController {
     /// delta; q is the trapezoidal click profile of total elapsed time (NOT a component timer).
     /// Returns true while the transition is still running; false once it has settled (q==1) and ended.
     @discardableResult
-    func advanceClick(bySeconds dt: Double) -> Bool {
+    package func advanceClick(bySeconds dt: Double) -> Bool {
         guard plan != nil else { return false }
         elapsed += max(0, dt)
         q = ClickZoomTransitionScheduler.progress(atElapsed: elapsed, tuning: tuning)
@@ -97,16 +100,20 @@ final class GridTransitionController {
     }
 
     /// Directly set host-owned q (used by live pinch / reverse — q is authoritative, lp follows it).
-    func setProgress(_ value: Double) { q = min(1, max(0, value)) }
+    package func setProgress(_ value: Double) { q = min(1, max(0, value)) }
 
-    func end() { let was = plan != nil; plan = nil; q = 0; elapsed = 0
-        if was { PhotoDiagnostics.shared.emit("GridTransition", ["event": "SETTLED"]) } }
+    package func end() { let was = plan != nil; plan = nil; q = 0; elapsed = 0
+        if was { emit("GridTransition", ["event": "SETTLED"]) } }
 
     /// Per-frame draw intent (read-only on the immutable plan). Empty when inactive.
-    func currentDraws() -> [GridTransitionDraw] {
+    package func currentDraws() -> [GridTransitionDraw] {
         guard let plan else { return [] }
         return GridTransitionRendererInput.draws(plan: plan, at: q)
     }
 
-    func partialComponentCount() -> Int { plan?.partialComponentCount(at: q) ?? 0 }
+    package func partialComponentCount() -> Int { plan?.partialComponentCount(at: q) ?? 0 }
+
+    private func emit(_ event: String, _ fields: [String: String]) {
+        eventSink?(event, fields)
+    }
 }

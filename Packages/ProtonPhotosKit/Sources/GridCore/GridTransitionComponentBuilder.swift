@@ -7,29 +7,46 @@
 // count changes between levels (its keys form a side == .focus relocation component), as do other rows.
 
 import CoreGraphics
-import GridCore
 
-struct GridTransitionLattice: Sendable {
-    let keys: [RelativeSlotKey]
-    let sourceOcc: [RelativeSlotKey: Int]
-    let targetOcc: [RelativeSlotKey: Int]
-    let sourceRect: [RelativeSlotKey: CGRect]            // real (nil for entries)
-    let targetRect: [RelativeSlotKey: CGRect]            // real (nil for exits)
-    let presentationSourceRect: [RelativeSlotKey: CGRect]   // filled for every key (V3.7)
-    let presentationTargetRect: [RelativeSlotKey: CGRect]
-    let components: [GridTransitionComponent]   // windows nil (assigned later by a scheduler)
+package struct GridTransitionLattice: Sendable {
+    package let keys: [RelativeSlotKey]
+    package let sourceOcc: [RelativeSlotKey: Int]
+    package let targetOcc: [RelativeSlotKey: Int]
+    package let sourceRect: [RelativeSlotKey: CGRect]            // real (nil for entries)
+    package let targetRect: [RelativeSlotKey: CGRect]            // real (nil for exits)
+    package let presentationSourceRect: [RelativeSlotKey: CGRect]   // filled for every key (V3.7)
+    package let presentationTargetRect: [RelativeSlotKey: CGRect]
+    package let components: [GridTransitionComponent]   // windows nil (assigned later by a scheduler)
+
+    package init(keys: [RelativeSlotKey],
+                 sourceOcc: [RelativeSlotKey: Int],
+                 targetOcc: [RelativeSlotKey: Int],
+                 sourceRect: [RelativeSlotKey: CGRect],
+                 targetRect: [RelativeSlotKey: CGRect],
+                 presentationSourceRect: [RelativeSlotKey: CGRect],
+                 presentationTargetRect: [RelativeSlotKey: CGRect],
+                 components: [GridTransitionComponent]) {
+        self.keys = keys
+        self.sourceOcc = sourceOcc
+        self.targetOcc = targetOcc
+        self.sourceRect = sourceRect
+        self.targetRect = targetRect
+        self.presentationSourceRect = presentationSourceRect
+        self.presentationTargetRect = presentationTargetRect
+        self.components = components
+    }
 }
 
 /// Affine source↔target presentation transform (per-axis median scale + median translation), fit
 /// from keys that have BOTH real rects, used to synthesize off-grid endpoints for entries/exits.
-struct GridTransitionPresentationTransform {
-    let sx: Double, sy: Double, tx: Double, ty: Double
+package struct GridTransitionPresentationTransform {
+    package let sx: Double, sy: Double, tx: Double, ty: Double
 
     /// Returns nil when no common rect exists to fit a stable transform ⇒ caller aborts → snap.
     // One common rect is enough for the accepted fixed-column grid: source/target rect sizes provide scale,
     // and their centres provide translation. More common rects make the median robust but are not required.
-    static func fit(keys: [RelativeSlotKey], sourceRect: [RelativeSlotKey: CGRect],
-                    targetRect: [RelativeSlotKey: CGRect], minCommon: Int = 1) -> GridTransitionPresentationTransform? {
+    package static func fit(keys: [RelativeSlotKey], sourceRect: [RelativeSlotKey: CGRect],
+                            targetRect: [RelativeSlotKey: CGRect], minCommon: Int = 1) -> GridTransitionPresentationTransform? {
         let common = keys.filter { sourceRect[$0] != nil && targetRect[$0] != nil }
         guard common.count >= minCommon else { return nil }
         func median(_ xs: [Double]) -> Double { let s = xs.sorted(); let n = s.count; return n % 2 == 1 ? s[n / 2] : 0.5 * (s[n / 2 - 1] + s[n / 2]) }
@@ -41,20 +58,20 @@ struct GridTransitionPresentationTransform {
         return .init(sx: sx, sy: sy, tx: tx, ty: ty)
     }
 
-    func forward(_ r: CGRect) -> CGRect {   // source-space → target-space
+    package func forward(_ r: CGRect) -> CGRect {   // source-space → target-space
         let w = sx * Double(r.width), h = sy * Double(r.height)
         let cx = sx * Double(r.midX) + tx, cy = sy * Double(r.midY) + ty
         return CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
     }
-    func inverse(_ r: CGRect) -> CGRect {   // target-space → source-space
+    package func inverse(_ r: CGRect) -> CGRect {   // target-space → source-space
         let w = Double(r.width) / sx, h = Double(r.height) / sy
         let cx = (Double(r.midX) - tx) / sx, cy = (Double(r.midY) - ty) / sy
         return CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
     }
 
     /// Presentation endpoints for every key: real where it exists, else synthesized off-grid.
-    func endpoints(keys: [RelativeSlotKey], sourceRect: [RelativeSlotKey: CGRect],
-                   targetRect: [RelativeSlotKey: CGRect]) -> (source: [RelativeSlotKey: CGRect], target: [RelativeSlotKey: CGRect]) {
+    package func endpoints(keys: [RelativeSlotKey], sourceRect: [RelativeSlotKey: CGRect],
+                           targetRect: [RelativeSlotKey: CGRect]) -> (source: [RelativeSlotKey: CGRect], target: [RelativeSlotKey: CGRect]) {
         var ps: [RelativeSlotKey: CGRect] = [:], pt: [RelativeSlotKey: CGRect] = [:]
         for k in keys {
             if let s = sourceRect[k] { ps[k] = s } else if let t = targetRect[k] { ps[k] = inverse(t) }   // entry: source-side
@@ -64,10 +81,10 @@ struct GridTransitionPresentationTransform {
     }
 }
 
-enum GridTransitionComponentBuilder {
+package enum GridTransitionComponentBuilder {
 
-    static func build(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,
-                      viewportSize: CGSize) -> GridTransitionLattice? {
+    package static func build(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,
+                              viewportSize: CGSize) -> GridTransitionLattice? {
         guard let aS = source.visibleSlots.first(where: { $0.index == anchorIndex }),
               let aT = target.visibleSlots.first(where: { $0.index == anchorIndex }) else { return nil }
         // single-section in the visible region (matches the engine's single-section zoom guard)
@@ -155,9 +172,9 @@ enum GridTransitionComponentBuilder {
     }
 
     /// Assemble an immutable plan from a lattice + assigned component windows.
-    static func assemble(kind: GridTransitionKindTag, lattice lat: GridTransitionLattice,
-                         windows: [Int: ClosedRange<Double>], sourceLevel: Int, targetLevel: Int,
-                         durationMs: Double, curve: LocalAlphaCurve) -> GridTransitionPlan {
+    package static func assemble(kind: GridTransitionKindTag, lattice lat: GridTransitionLattice,
+                                 windows: [Int: ClosedRange<Double>], sourceLevel: Int, targetLevel: Int,
+                                 durationMs: Double, curve: LocalAlphaCurve) -> GridTransitionPlan {
         var comps = lat.components
         for i in comps.indices { comps[i].window = windows[comps[i].id] }
         var componentOfKey: [RelativeSlotKey: Int] = [:]

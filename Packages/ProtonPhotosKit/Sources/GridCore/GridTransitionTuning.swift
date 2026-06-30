@@ -1,0 +1,46 @@
+// GridTransitionTuning.swift
+//
+// Centralized production defaults for the normal-grid single-presentation-lattice transition.
+// Values are gathered here so duration / curve / window parameters can be tuned without changing
+// renderer, geometry, or gesture architecture. (Some lattice constants still live in the builder/
+// scheduler, e.g. the {0.3…0.7} peak-area samples and the focus-frame offset.)
+
+package struct GridTransitionTuning: Equatable, Sendable {
+    // ── click (toolbar / keyboard +/-) ──
+    package var clickDurationMs: Double = 420            // V3.6 chosen duration (420 best trade-off; 360 fallback)
+    package var clickRampFraction: Double = 0.20         // trapezoidal-velocity accel/decel fraction r/D
+    package var c1EdgeFraction: Double = 0.20            // C1 linear-core edge fraction a (s = 1/(1-a) = 1.25)
+
+    // ── structural targets (validated by tests; NOT enforced by a per-frame optimizer) ──
+    package var minFocusInteriorSamples60: Int = 4       // cid0 focus >= 4 useful interior samples @60
+    package var minCornerInteriorSamples60: Int = 2      // cid5 corner >= 2 useful interior samples @60
+
+    // ── live pinch (PINCH071) ──
+    package var pinchWidthQ: Double = 0.0706             // W071 fixed handoff width in q-space
+
+    // ── V3.9 continuous multi-level live-pinch scrub driver (PinchLiveZoomDriver) ──
+    // The grid is one continuous scrub surface across detents: segmentQ follows the finger 1:1 within the
+    // active adjacent interval; crossing a detent swaps the interval (seam-continuous); NO mid-gesture latch.
+    // On release the active segment settles to its nearest detent (the SEPARATE release-commit threshold).
+    package var pinchReleaseCommitQ: Double = 0.50          // fingers-up: active segment >= target detent, < source
+    package var pinchAutoCompleteMinQPerSecond: Double = 1.8 // release-settle floor (never stalls)
+    package var pinchAutoCompleteMaxQPerSecond: Double = 8.0 // release-settle cap (no instant snap)
+    package var pinchVelocityEmaAlpha: Double = 0.25         // recent-velocity EMA weight
+    package var pinchDirectionResolveQ: Double = 0.02        // rest dead-band before the first segment engages
+    package var pinchDetentHysteresisQ: Double = 0.02        // hysteresis around a detent before the interval switches
+    package var pinchDisplayLowPassAlpha: Double = 1.0       // 1.0 = no smoothing (default); < 1 = light low-pass
+
+    // ── window placement (click variable-window scheduler) ──
+    package var leadInFrames60: Int = 1                  // pure-source lead-in @60 (keeps first window off q=0)
+    package var edgeZoneLo: Double = 0.01                // no visible component compressed ONLY into [0, edgeZoneLo]
+    package var edgeZoneHi: Double = 0.99                // or ONLY into [edgeZoneHi, 1]
+    package var minVisibleWindowWidthQ: Double = 0.035   // visible (>=2%) component window width floor
+
+    /// Reference refresh used to allocate the immutable plan (the harder rate; finer is smoother).
+    package var planRefreshHz: Double = 60
+
+    package static let `default` = GridTransitionTuning()
+
+    package var localAlphaCurve: LocalAlphaCurve { LocalAlphaCurve(edgeFraction: c1EdgeFraction) }
+    package var clickDurationSeconds: Double { clickDurationMs / 1000.0 }
+}

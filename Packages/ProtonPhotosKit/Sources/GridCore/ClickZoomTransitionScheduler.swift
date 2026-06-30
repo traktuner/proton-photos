@@ -4,13 +4,12 @@
 // area-weighted variable windows (V3.6 split), C1 linear-core alpha, host-owned trapezoidal q.
 
 import CoreGraphics
-import GridCore
 
-enum ClickZoomTransitionScheduler {
+package enum ClickZoomTransitionScheduler {
     /// Build a click transition plan from settled source/target frame plans. Returns nil if the
     /// lattice can't be derived or the schedule would be degenerate ⇒ caller falls back to snap.
-    static func makePlan(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,
-                         viewportSize: CGSize, tuning: GridTransitionTuning = .default) -> GridTransitionPlan? {
+    package static func makePlan(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,
+                                 viewportSize: CGSize, tuning: GridTransitionTuning = .default) -> GridTransitionPlan? {
         guard let lat = GridTransitionComponentBuilder.build(source: source, target: target,
                                                              anchorIndex: anchorIndex, viewportSize: viewportSize),
               !lat.components.isEmpty else { return nil }
@@ -24,7 +23,7 @@ enum ClickZoomTransitionScheduler {
 
     /// Host-owned canonical progress for the click at elapsed time `t` (seconds). Forward only;
     /// the reverse path replays q backward (lp is a pure function of q ⇒ reversible).
-    static func progress(atElapsed t: Double, tuning: GridTransitionTuning = .default) -> Double {
+    package static func progress(atElapsed t: Double, tuning: GridTransitionTuning = .default) -> Double {
         GridTransitionScheduler.clickQ(t, durationSeconds: tuning.clickDurationSeconds,
                                        rampFraction: tuning.clickRampFraction)
     }

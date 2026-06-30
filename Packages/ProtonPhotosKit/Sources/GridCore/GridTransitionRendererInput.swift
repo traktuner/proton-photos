@@ -16,17 +16,17 @@
 
 import CoreGraphics
 
-struct GridTransitionDraw: Equatable, Sendable {
-    let index: Int          // flat identity index → UID / texture lookup
-    let rect: CGRect        // viewport-space
-    let alpha: Double       // 0…1
-    let componentID: Int
-    let isTarget: Bool      // source vs target occupant (diagnostics / ordering)
-    let localProgress: Double
+package struct GridTransitionDraw: Equatable, Sendable {
+    package let index: Int          // flat identity index → UID / texture lookup
+    package let rect: CGRect        // viewport-space
+    package let alpha: Double       // 0…1
+    package let componentID: Int
+    package let isTarget: Bool      // source vs target occupant (diagnostics / ordering)
+    package let localProgress: Double
 }
 
-enum GridTransitionRendererInput {
-    static func draws(plan: GridTransitionPlan, at q: Double) -> [GridTransitionDraw] {
+package enum GridTransitionRendererInput {
+    package static func draws(plan: GridTransitionPlan, at q: Double) -> [GridTransitionDraw] {
         var out: [GridTransitionDraw] = []
         for slot in plan.renderIntent(at: q) {
             switch slot.role {

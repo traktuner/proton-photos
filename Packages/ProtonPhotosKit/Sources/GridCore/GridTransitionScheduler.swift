@@ -9,10 +9,10 @@
 
 import CoreGraphics
 
-enum GridTransitionScheduler {
+package enum GridTransitionScheduler {
 
     // ── host-owned click q(t): C1 trapezoidal velocity (matches V3.4–V3.6) ──
-    static func clickQ(_ t: Double, durationSeconds d: Double, rampFraction: Double) -> Double {
+    package static func clickQ(_ t: Double, durationSeconds d: Double, rampFraction: Double) -> Double {
         let r = rampFraction * d
         let vpk = 1.0 / (d - r)
         if t <= 0 { return 0 }
@@ -24,8 +24,8 @@ enum GridTransitionScheduler {
     }
 
     /// Frame-sampled q at a given refresh. n = ceil(d·hz) so the final tick reaches q == 1 (settle).
-    static func clickQSamples(durationSeconds d: Double, hz: Double, rampFraction: Double,
-                              phase: Double = 0) -> [Double] {
+    package static func clickQSamples(durationSeconds d: Double, hz: Double, rampFraction: Double,
+                                      phase: Double = 0) -> [Double] {
         let n = Int(ceil(d * hz - 1e-9))
         return (0...n).map { k in clickQ(min(d, (Double(k) + phase) / hz), durationSeconds: d, rampFraction: rampFraction) }
     }
@@ -35,8 +35,8 @@ enum GridTransitionScheduler {
     // Surplus is spent first de-atomizing all components to 2 frames, then raising them to 3 frames
     // (= 2 interior samples) in descending area order, then any remainder by descending area.
     // Reproduces the V3.6 splits exactly: 360→{5,3,3,2,2,2,2}, 420→{5,3,3,3,3,3,2}, 450→{5,3,3,3,3,3,3}.
-    static func allocateFrames(components: [GridTransitionComponent], budget: Int,
-                               focusID: Int, focusMinFrames: Int) -> [Int: Int] {
+    package static func allocateFrames(components: [GridTransitionComponent], budget: Int,
+                                       focusID: Int, focusMinFrames: Int) -> [Int: Int] {
         let n = components.count
         guard n > 0 else { return [:] }
         if budget < n {  // degenerate: cannot give 1 each — area-weighted (caller will fall back)
@@ -62,7 +62,7 @@ enum GridTransitionScheduler {
 
     /// Left→right component order: largest area at the timeline centre (≈ peak geometry velocity),
     /// smaller/farther components fanned outward.
-    static func centreOutOrder(components: [GridTransitionComponent]) -> [Int] {
+    package static func centreOutOrder(components: [GridTransitionComponent]) -> [Int] {
         let byArea = components.sorted {
             ($0.visibleAreaFraction, -Double($0.focusDistance), -Double($0.id))
                 > ($1.visibleAreaFraction, -Double($1.focusDistance), -Double($1.id))
@@ -82,8 +82,8 @@ enum GridTransitionScheduler {
     }
 
     /// Build the CLICKV2_420-style variable, area-weighted, disjoint (touching) q-windows.
-    static func clickWindows(components: [GridTransitionComponent],
-                             tuning: GridTransitionTuning) -> [Int: ClosedRange<Double>] {
+    package static func clickWindows(components: [GridTransitionComponent],
+                                     tuning: GridTransitionTuning) -> [Int: ClosedRange<Double>] {
         guard !components.isEmpty else { return [:] }
         let d = tuning.clickDurationSeconds, hz = tuning.planRefreshHz, r = tuning.clickRampFraction
         let qs = clickQSamples(durationSeconds: d, hz: hz, rampFraction: r)
@@ -109,8 +109,8 @@ enum GridTransitionScheduler {
     }
 
     /// Fixed-width W071-style pinch windows, centre-out, disjoint within a central band.
-    static func pinchWindows(components: [GridTransitionComponent],
-                             tuning: GridTransitionTuning) -> [Int: ClosedRange<Double>] {
+    package static func pinchWindows(components: [GridTransitionComponent],
+                                     tuning: GridTransitionTuning) -> [Int: ClosedRange<Double>] {
         guard !components.isEmpty else { return [:] }
         let w = tuning.pinchWidthQ
         let order = centreOutOrder(components: components)

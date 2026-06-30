@@ -4,7 +4,7 @@ import CoreGraphics
 ///
 /// Pinching IN at level 0 drives the raw continuous level NEGATIVE. The apparent-metric model
 /// (`GridZoomTransaction.apparentSlotSide` / `SquareTileGridEngine.apparentSlotSide`) already grows the tile
-/// for `x < 0` — that is the intended elastic over-zoom — but `MetalGridCoordinator.updateLiveZoom` used to
+/// for `x < 0` — that is the intended elastic over-zoom — but an older host-level live-zoom path used to
 /// hard-clamp `x` to `0`, so the rubber-band never showed.
 ///
 /// This maps the raw pinch level to the bounded VISUAL level:

@@ -8,12 +8,10 @@
 // forced the selected/focused-photo pinch onto the legacy reflow fallback, which can diverge at release from the
 // single-lattice endpoint the user was visually following.
 
-import Foundation
-
-enum GridTransitionSelectionEligibility {
+package enum GridTransitionSelectionEligibility {
     /// Kept as a named policy because the controller still owns the decision point. Today, selection is a
     /// decoration-layer concern, not a geometry eligibility concern.
-    static func isEligible(selection: Set<Int>, relocatingIdentities: Set<Int>) -> Bool {
+    package static func isEligible(selection: Set<Int>, relocatingIdentities: Set<Int>) -> Bool {
         _ = selection
         _ = relocatingIdentities
         return true
@@ -21,7 +19,7 @@ enum GridTransitionSelectionEligibility {
 
     /// `relocatingIdentities` are the flat indices that change relative key between source and target.
     /// Derive the set of relocating identities from a built lattice.
-    static func relocatingIdentities(in lattice: GridTransitionLattice) -> Set<Int> {
+    package static func relocatingIdentities(in lattice: GridTransitionLattice) -> Set<Int> {
         var srcKeyOf: [Int: RelativeSlotKey] = [:], tgtKeyOf: [Int: RelativeSlotKey] = [:]
         for (k, id) in lattice.sourceOcc { srcKeyOf[id] = k }
         for (k, id) in lattice.targetOcc { tgtKeyOf[id] = k }

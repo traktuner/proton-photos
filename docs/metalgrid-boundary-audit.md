@@ -201,7 +201,8 @@ The first `GridCore` cut moved only pure, already-tested value math:
 The new target has no package dependencies and is covered by the universal Core gate. `TimelineFeature` imports
 it as the macOS grid adapter. Transition controllers, Metal renderer input orchestration, selection controller,
 texture residency policy, renderer code, and platform hosts were deliberately left out of this pass because
-their module boundary still needs a separate API/access audit.
+their module boundary still needed a separate API/access audit. The pure transition stack was moved in Phase 3.8;
+selection controller, texture residency, renderer code, and platform hosts remain adapter-owned.
 
 ## Phase 3.5 result
 
@@ -241,3 +242,18 @@ removes an unnecessary snap fallback on the regular `9 ↔ 7` step without addin
 
 Performance impact is neutral to positive: semantic derivation runs only while loading profiles, and the planner
 change avoids a fallback path but does not increase steady-state rendering cost.
+
+## Phase 3.8 result
+
+`GridCore` now owns the pure normal-level transition stack: component/lattice construction, click and pinch
+schedulers, local alpha curve, transition draw-intent generation, the host-progress controller, and the continuous
+multi-level `PinchLiveZoomDriver`.
+
+The move did not make Metal rendering universal. `TimelineFeature` still owns `MTKView`, `NSScrollView`/AppKit
+gesture intake, texture streaming, real `PhotoUID` lookup, and Metal quad emission. The macOS adapter injects
+`PhotoDiagnostics.shared.emit` into the Core transition controller through a platform-neutral string event sink,
+so `GridCore` remains free of `PhotosCore`.
+
+Performance impact should be neutral: files moved across targets, but plan construction and per-frame draw-intent
+logic are unchanged. The only additional runtime work is one optional closure call for transition diagnostics at
+plan/fallback/settle events, not per rendered thumbnail.

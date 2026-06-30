@@ -27,8 +27,8 @@ overlaid transparent `NSScrollView` document spacer provides physics + pointer e
 |---|---|---|
 | `SquareTileGridEngine` | `SquareTileGridEngine.swift` | Pure value type. **All** outer grid geometry. |
 | `GridZoomTransaction` | `GridZoomTransaction.swift` | Live pinch zoom / cursor-anchor transaction. |
-| `GridTransitionController` (+ `GridTransitionPlan`/`Scheduler`/`Component`) | `GridTransition*.swift` | Integrated Phase-B single-lattice click+pinch transition (production default, no flag). |
-| `PinchLiveZoomDriver` | `PinchLiveZoomDriver.swift` | Continuous multi-level live-pinch scrub driver (chains across detents). |
+| `GridTransitionController` (+ `GridTransitionPlan`/`Scheduler`/`Component`) | `GridCore/GridTransition*.swift` | Integrated Phase-B single-lattice click+pinch transition (production default, no flag). |
+| `PinchLiveZoomDriver` | `GridCore/PinchLiveZoomDriver.swift` | Continuous multi-level live-pinch scrub driver (chains across detents). |
 | `OverviewLayerDissolve` | `OverviewLayerDissolve.swift` | L3↔L4 / L4↔L5 offscreen two-layer cross-dissolve. |
 | `GridViewportResizeRebase` | `GridViewportResizeRebase.swift` | Resize/sidebar scroll rebase (pure) — the **settle/fallback** path under the presentation layer. |
 | `TileContentFitter` | `TileContentFitter.swift` | How media fits **inside** a square slot (content only). |
@@ -228,6 +228,8 @@ production default with **no feature flag** (see `reports/archive/PHASE_B_GRID_E
 - **Continuous trackpad pinch** runs `PinchLiveZoomDriver` — a host-driven progress scrub that chains across
   multiple normal detents in one gesture and commits the nearest detent on release. The seam closes because each
   detent's presentation frame is deterministic (prev-q=1 == next-q=0).
+- The transition planner lives in `GridCore`. `TimelineFeature` owns only the macOS host/renderer plumbing:
+  diagnostics injection, texture lookup, and conversion from `GridTransitionDraw` to Metal quads.
 - Eligibility is gated to adjacent normal levels whose derived/stored `transitionKindToNext == .focusRowRelayout`
   (the `MetalGridCoordinator` chain-band logic); an ineligible / degenerate step falls back to a clean instant
   settle. The transition kind is semantic metadata of the two levels, not renderer-specific animation policy in the

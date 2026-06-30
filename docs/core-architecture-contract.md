@@ -288,3 +288,20 @@ tests instead of hard-coding one platform's animation choice in app configuratio
 Normal-level click/pinch transition planning may use a single common presentation rect as a valid transform fit
 when source/target slot sizes are known. This is required for some fixed-column phase changes, including the
 regular `9 ↔ 7` normal-level step, and keeps the fallback-to-snap path reserved for genuinely degenerate plans.
+
+#### Phase 3.8 — GridCore transition planning
+
+`GridCore` owns the pure normal-level transition planning stack: `GridTransitionController`,
+`GridTransitionPlan`, `GridTransitionComponentBuilder`, `GridTransitionScheduler`,
+`ClickZoomTransitionScheduler`, `PinchZoomTransitionScheduler`, `GridTransitionRendererInput`,
+`LocalAlphaCurve`, `GridTransitionTuning`, `GridTransitionSelectionEligibility`, and
+`PinchLiveZoomDriver`.
+
+This stack is UI-free and renderer-free. It consumes `GridFramePlan` values and emits draw intents plus optional
+string-keyed transition telemetry through an injected event sink. It must not import `PhotosCore`, `MediaCache`,
+`Metal`, `MetalKit`, `AppKit`, `UIKit`, or `SwiftUI`.
+
+`TimelineFeature` remains the macOS adapter. It owns `MTKView` hosting, scroll/gesture intake, texture streaming,
+real UID lookup, platform diagnostics wiring, and conversion of `GridTransitionDraw` into Metal quads. Future
+iOS/iPadOS adapters must use the same `GridCore` transition plan and provide their own host/renderer plumbing
+instead of forking transition math.
