@@ -63,8 +63,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // feature flag): it is attempted for every eligible normal-level +/- and pinch, falling back to the
     // stable instant snap / legacy reflow ONLY when the geometry is ineligible (invalid case), never as a
     // switch. The clean instant settle remains the fallback for those invalid cases.
-    let gridTransition = GridTransitionController(eventSink: { event, fields in
-        PhotoDiagnostics.shared.emit(event, fields)
+    let gridTransition = GridTransitionController(telemetrySink: { event in
+        PhotoDiagnostics.shared.emit(event.name, event.fields)
     })
     private var transitionPrevNow: CFTimeInterval = 0
     private var selectedFlatIndices: Set<Int> { Set(selectedUIDs.compactMap { indexByUID[$0] }) }

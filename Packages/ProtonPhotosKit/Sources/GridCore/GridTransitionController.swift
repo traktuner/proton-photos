@@ -10,8 +10,6 @@
 
 import CoreGraphics
 
-package typealias GridTransitionEventSink = (String, [String: String]) -> Void
-
 package enum GridTransitionFallbackReason: String, Sendable {
     case latticeBuildFailed, selectionRelocates, scheduleDegenerate, none
 }
@@ -22,11 +20,11 @@ package final class GridTransitionController {
     package private(set) var lastFallback: GridTransitionFallbackReason = .none
     private var elapsed: Double = 0
     package var tuning: GridTransitionTuning
-    private let eventSink: GridTransitionEventSink?
+    private let telemetrySink: CoreTelemetrySink?
 
-    package init(tuning: GridTransitionTuning = .default, eventSink: GridTransitionEventSink? = nil) {
+    package init(tuning: GridTransitionTuning = .default, telemetrySink: CoreTelemetrySink? = nil) {
         self.tuning = tuning
-        self.eventSink = eventSink
+        self.telemetrySink = telemetrySink
     }
 
     package var isActive: Bool { plan != nil }
@@ -114,6 +112,6 @@ package final class GridTransitionController {
     package func partialComponentCount() -> Int { plan?.partialComponentCount(at: q) ?? 0 }
 
     private func emit(_ event: String, _ fields: [String: String]) {
-        eventSink?(event, fields)
+        telemetrySink?(CoreTelemetryEvent(name: event, fields: fields))
     }
 }

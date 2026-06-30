@@ -1,6 +1,16 @@
 import Testing
 import GridCore
 
+@Suite struct CoreTelemetryEventTests {
+    @Test func eventIsPlainSendableValue() {
+        let event = CoreTelemetryEvent(name: "GridTransition", fields: ["event": "PLAN_BUILT"])
+
+        #expect(event == CoreTelemetryEvent(name: "GridTransition", fields: ["event": "PLAN_BUILT"]))
+        #expect(event.name == "GridTransition")
+        #expect(event.fields["event"] == "PLAN_BUILT")
+    }
+}
+
 @Suite struct GridTextureResidencyPolicyTests {
     @Test func pinnedVisibleSurvivesEviction_offscreenEvicts() {
         var policy = GridTextureResidencyPolicy<String>(capacity: 2, uploadBudgetPerFrame: 10)

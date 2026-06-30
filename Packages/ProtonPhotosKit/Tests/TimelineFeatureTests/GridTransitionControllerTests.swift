@@ -37,6 +37,21 @@ import GridCore
         #expect(c.isActive == false)        // settled and ended itself (host clock owns q, no timer)
     }
 
+    @Test func emitsTypedCoreTelemetryEvents() {
+        let (src, tgt) = plans()
+        var events: [CoreTelemetryEvent] = []
+        let c = GridTransitionController(telemetrySink: { events.append($0) })
+
+        #expect(c.beginClick(source: src, target: tgt, anchorIndex: 0,
+                             viewportSize: CGSize(width: 1400, height: 900), selection: []))
+        c.end()
+
+        #expect(events.map(\.name) == ["GridTransition", "GridTransition"])
+        #expect(events[0].fields["event"] == "PLAN_BUILT")
+        #expect(events[0].fields["candidate"] == "CLICKV2_420_FULLER_CORNER")
+        #expect(events[1].fields["event"] == "SETTLED")
+    }
+
     @Test func sevenNineViewportCenterClickBuildsPlan() throws {
         let viewport = CGSize(width: 1400, height: 900)
         let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
