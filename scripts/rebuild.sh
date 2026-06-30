@@ -13,6 +13,8 @@ cd "$(dirname "$0")/.."
 
 DD="build/DD.noindex"
 rm -rf build/DD   # remove any legacy INDEXED build dir so its product stops appearing in Spotlight
+PROJECT="ProtonPhotos.xcodeproj"
+SCHEME="ProtonPhotos"
 
 SIGNING_IDENTITY_HASH="${PROTONPHOTOS_CODE_SIGN_IDENTITY:-}"
 SIGNING_IDENTITY_NAME=""
@@ -33,7 +35,13 @@ else
   echo "Signing with: Xcode default (no Apple Development identity found)"
 fi
 
-xcodebuild build -project ProtonPhotos.xcodeproj -scheme ProtonPhotos \
+echo "Preflight: building $SCHEME scheme for generic macOS"
+xcodebuild build -project "$PROJECT" -scheme "$SCHEME" \
+  -destination 'generic/platform=macOS' -derivedDataPath "$DD" \
+  -skipPackagePluginValidation -skipMacroValidation "${SIGN_ARGS[@]}"
+
+echo "Install build: building $SCHEME for local arm64 launch"
+xcodebuild build -project "$PROJECT" -scheme "$SCHEME" \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath "$DD" \
   -skipPackagePluginValidation -skipMacroValidation "${SIGN_ARGS[@]}"
 
