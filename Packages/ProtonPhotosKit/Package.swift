@@ -46,6 +46,7 @@ let package = Package(
         .target(name: "ProtonAuth", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "ProtonAuthTests", dependencies: ["ProtonAuth"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCache", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "MediaCacheTests", dependencies: ["MediaCache", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",
             dependencies: ["PhotosCore", "DesignSystem", "MediaCache"],
