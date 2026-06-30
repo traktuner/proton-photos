@@ -89,22 +89,3 @@ struct MetalGridBudget: Sendable {
 
     static let `default` = MetalGridBudget()
 }
-
-struct MetalGridStreamingWindow: Equatable, Sendable {
-    let priority: [PhotoUID]
-    let pinned: Set<PhotoUID>
-}
-
-enum MetalGridStreamingPolicy {
-    /// Visible-first, duplicate-free streaming window. Near-viewport overscan is pinned too: on dense levels,
-    /// a small scroll reversal should reuse resident GPU textures instead of evicting and re-uploading them.
-    static func window(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID]) -> MetalGridStreamingWindow {
-        var seen = Set<PhotoUID>()
-        var priority: [PhotoUID] = []
-        priority.reserveCapacity(visibleUIDs.count + overscanUIDs.count)
-        for uid in visibleUIDs + overscanUIDs where seen.insert(uid).inserted {
-            priority.append(uid)
-        }
-        return MetalGridStreamingWindow(priority: priority, pinned: seen)
-    }
-}

@@ -62,6 +62,7 @@ let package = Package(
         .target(name: "MediaLocationCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "MediaLocationCoreTests", dependencies: ["MediaLocationCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "GridCore", swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "GridCoreTests", dependencies: ["GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCache", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",

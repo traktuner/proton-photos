@@ -1692,7 +1692,7 @@ extension MetalGridCoordinator {
     // MARK: Texture streaming (visible-first upload + off-main warm)
 
     private func streamTextures(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID]) {
-        let window = MetalGridStreamingPolicy.window(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
+        let window = GridTextureStreamingPolicy.window(visibleIDs: visibleUIDs, overscanIDs: overscanUIDs)
         cache.beginFrame(pinned: window.pinned)
         let priority = window.priority
         var wanted: [PhotoUID] = []

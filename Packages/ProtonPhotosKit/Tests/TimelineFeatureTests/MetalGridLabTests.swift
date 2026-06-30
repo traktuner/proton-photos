@@ -30,9 +30,9 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
 
 // MARK: 2 — Texture LRU eviction / pinning
 
-@Suite struct MetalGridTextureLRUTests {
+@Suite struct GridTextureResidencyPolicyPhotoUIDTests {
     @Test func pinnedVisibleSurvivesEviction_offscreenEvicts() {
-        var lru = MetalGridTextureLRU(capacity: 2, uploadBudgetPerFrame: 10)
+        var lru = GridTextureResidencyPolicy<PhotoUID>(capacity: 2, uploadBudgetPerFrame: 10)
         let (a, b, c) = (uid("a"), uid("b"), uid("c"))
         // Make a the OLDEST, then b, then c (one per frame).
         for u in [a, b, c] {
@@ -56,7 +56,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
 
 @Suite struct MetalGridPlaceholderTests {
     @Test func missingImageDrawsPlaceholderUntilResident() {
-        var lru = MetalGridTextureLRU(capacity: 10, uploadBudgetPerFrame: 10)
+        var lru = GridTextureResidencyPolicy<PhotoUID>(capacity: 10, uploadBudgetPerFrame: 10)
         let a = uid("a")
         #expect(lru.drawState(a) == .placeholder)   // never a hole — always a placeholder
         lru.beginFrame(pinned: [])
@@ -70,7 +70,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
 
 @Suite struct MetalGridUploadDedupTests {
     @Test func sameUIDNotUploadedTwiceConcurrently() {
-        var lru = MetalGridTextureLRU(capacity: 10, uploadBudgetPerFrame: 10)
+        var lru = GridTextureResidencyPolicy<PhotoUID>(capacity: 10, uploadBudgetPerFrame: 10)
         let (a, b, c) = (uid("a"), uid("b"), uid("c"))
         lru.beginFrame(pinned: [])
         #expect(lru.selectUploads(wanted: [a, b]) == [a, b])     // a,b now in flight
@@ -84,7 +84,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
 
 @Suite struct MetalGridUploadBudgetTests {
     @Test func perFrameUploadBudgetIsEnforced() {
-        var lru = MetalGridTextureLRU(capacity: 100, uploadBudgetPerFrame: 3)
+        var lru = GridTextureResidencyPolicy<PhotoUID>(capacity: 100, uploadBudgetPerFrame: 3)
         let wanted = (0 ..< 10).map { uid("\($0)") }
         let chosen = lru.selectUploads(wanted: wanted)
         #expect(chosen.count == 3)                  // capped at the budget
@@ -96,7 +96,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
     @Test func pinsVisibleAndOverscanForScrollReversalReuse() {
         let visible = [uid("visible-a"), uid("visible-b")]
         let overscan = [uid("above-a"), uid("below-a")]
-        let window = MetalGridStreamingPolicy.window(visibleUIDs: visible, overscanUIDs: overscan)
+        let window = GridTextureStreamingPolicy.window(visibleIDs: visible, overscanIDs: overscan)
 
         #expect(window.priority == visible + overscan)
         #expect(window.pinned == Set(visible + overscan))
@@ -104,7 +104,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
 
     @Test func deduplicatesWhilePreservingVisibleFirstOrder() {
         let a = uid("a"), b = uid("b"), c = uid("c")
-        let window = MetalGridStreamingPolicy.window(visibleUIDs: [a, b], overscanUIDs: [b, c, a])
+        let window = GridTextureStreamingPolicy.window(visibleIDs: [a, b], overscanIDs: [b, c, a])
 
         #expect(window.priority == [a, b, c])
         #expect(window.pinned == [a, b, c])

@@ -2,9 +2,10 @@ import Metal
 import CoreGraphics
 import AppKit
 import PhotosCore
+import GridCore
 
 /// One-`MTLTexture`-per-image GPU cache (Pixe-style, Option A) sitting on top of the pure
-/// `MetalGridTextureLRU` policy. Persistent across frames; visible items are pinned and never evicted;
+/// `GridTextureResidencyPolicy`. Persistent across frames; visible items are pinned and never evicted;
 /// offscreen items are evicted LRU once the budget is exceeded. A neutral placeholder texture is always
 /// resident so a missing thumbnail draws a stable card, never a transparent hole or black rectangle.
 ///
@@ -13,7 +14,7 @@ import PhotosCore
 @MainActor
 final class MetalGridTextureCache {
     private let device: MTLDevice
-    private var lru: MetalGridTextureLRU
+    private var lru: GridTextureResidencyPolicy<PhotoUID>
     private var textures: [PhotoUID: MTLTexture] = [:]
     private(set) var placeholderTexture: MTLTexture
 
@@ -30,7 +31,7 @@ final class MetalGridTextureCache {
     init?(device: MTLDevice, budget: MetalGridBudget, maxTexturePixels: Int = 320) {
         self.device = device
         self.maxTexturePixels = maxTexturePixels
-        self.lru = MetalGridTextureLRU(
+        self.lru = GridTextureResidencyPolicy(
             capacity: budget.maxCachedTextures,
             uploadBudgetPerFrame: budget.maxUploadsPerFrame
         )
