@@ -183,7 +183,7 @@ The performance contract from the existing Metal grid is preserved and tightened
 
 #### Phase 2.5 — Universal Core regression gate
 
-`CoreArchitectureGateTests` is the shared no-regression gate for the current universal Core set: `PhotosCore`, `MediaByteCache`, `MediaDecodingCore`, `MediaFeedCore`, and `MediaLocationCore`. New reusable Core targets must be added to this gate before they are treated as universal Core.
+`CoreArchitectureGateTests` is the shared no-regression gate for the current universal Core set: `PhotosCore`, `MediaByteCache`, `MediaDecodingCore`, `MediaFeedCore`, `MediaLocationCore`, and `GridCore`. New reusable Core targets must be added to this gate before they are treated as universal Core.
 
 The executable local gate is `scripts/verify-universal-core.sh`. It runs the shared architecture tests and builds every current universal Core target for `generic/platform=iOS` and `generic/platform=macOS`. Because SwiftPM models iPadOS through the iOS platform declaration, this iOS-family build is the package-level iPadOS compatibility check until separate iPad UI targets exist.
 
@@ -196,3 +196,19 @@ Agents MUST run `scripts/verify-universal-core.sh` before committing a change th
 The Phase 3.1 audit is recorded in `docs/metalgrid-boundary-audit.md`. It is audit-only: no production grid behavior changes, no file moves, and no renderer rewrites.
 
 Future MetalGrid extraction work MUST use that audit as input. Pure geometry/zoom/transition/value-policy code may move toward a future `GridCore`; `MTKView`, `NSView`/`UIView`, scroll physics, gesture intake, accessibility hosts, platform glyph rasterization, `MediaCache` feed adapters, and platform texture budgets must remain in platform adapters until explicitly split.
+
+#### Phase 3.2 — Initial universal GridCore extraction
+
+`GridCore` is the universal, UI-free grid model boundary. It owns square-slot geometry, zoom transaction math,
+viewport resize rebase math, scroll rebase easing, tile-content fitting, size-policy scaffolding, and the
+overview layer dissolve plan. It intentionally has no package dependencies and may import only portable Apple
+frameworks needed for value math (`CoreGraphics`, `QuartzCore`, `simd`).
+
+`TimelineFeature` now depends on `GridCore` and remains the macOS adapter around it. The adapter owns
+`MTKView`, AppKit scroll/gesture hosting, renderer composition, real `MediaCache` feed access, header and
+accessibility overlays, texture budgets, and glyph/image rasterization. Do not move those concerns into
+`GridCore` to make iOS compile; split another adapter or rendering target instead.
+
+Moving additional grid code into `GridCore` requires the same gate as any other universal Core change:
+`scripts/verify-universal-core.sh` must pass, including `GridCore` builds for `generic/platform=iOS` and
+`generic/platform=macOS`.

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// THE acceptance metric: `hitTest(cursorViewportPoint)` must return the SAME item before the gesture, in the

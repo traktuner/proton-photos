@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Pins the Apple anchor rule for detent zoom: a discrete level change is directed toward the item UNDER THE

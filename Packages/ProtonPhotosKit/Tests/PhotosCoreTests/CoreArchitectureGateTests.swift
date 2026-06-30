@@ -59,6 +59,12 @@ final class CoreArchitectureGateTests: XCTestCase {
             expectedDependencies: ["PhotosCore"],
             extraForbiddenTokens: []
         ),
+        CoreTargetRule(
+            name: "GridCore",
+            allowedImports: ["CoreGraphics", "QuartzCore", "simd"],
+            expectedDependencies: [],
+            extraForbiddenTokens: []
+        ),
     ]
 
     private static let forbiddenFrameworkImports: Set<String> = [

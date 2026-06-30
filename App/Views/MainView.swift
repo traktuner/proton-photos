@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import PhotosCore
 import DesignSystem
 import MediaCache
+import GridCore
 import TimelineFeature
 import PhotoViewerFeature
 import UploadFeature

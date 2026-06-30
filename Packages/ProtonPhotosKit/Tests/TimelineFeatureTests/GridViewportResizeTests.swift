@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 // Viewport-resize CAMERA rebase. RESIZE IS NOT ZOOM. Vertical resize preserves the content at a NORMALIZED
@@ -28,7 +29,11 @@ import CoreGraphics
     }
     private func repoRoot() -> URL { var u = URL(fileURLWithPath: #filePath); for _ in 0 ..< 5 { u.deleteLastPathComponent() }; return u }
     private func src(_ name: String) -> String {
-        (try? String(contentsOf: repoRoot().appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/\(name)"), encoding: .utf8)) ?? ""
+        for target in ["TimelineFeature", "GridCore"] {
+            let rel = "Packages/ProtonPhotosKit/Sources/\(target)/\(name)"
+            if let source = try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8) { return source }
+        }
+        return ""
     }
 
     // 1 — vertical resize uses the NORMALIZED viewport anchor: rebased (not raw), and strictly between the

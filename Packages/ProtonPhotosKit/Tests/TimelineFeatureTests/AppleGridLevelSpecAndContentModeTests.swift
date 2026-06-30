@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 // The six Apple-like zoom levels + the aspect/square content-mode toggle. The toggle changes ONLY how media
@@ -25,7 +26,13 @@ import CoreGraphics
     private func readSource(_ rel: String) -> String {
         (try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8)) ?? ""
     }
-    private func source(_ name: String) -> String { readSource("Packages/ProtonPhotosKit/Sources/TimelineFeature/\(name)") }
+    private func source(_ name: String) -> String {
+        for target in ["TimelineFeature", "GridCore"] {
+            let source = readSource("Packages/ProtonPhotosKit/Sources/\(target)/\(name)")
+            if !source.isEmpty { return source }
+        }
+        return ""
+    }
 
     // MARK: - Level specs (1–8)
 

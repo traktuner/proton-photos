@@ -3,6 +3,7 @@ import MetalKit
 import CoreGraphics
 import simd
 import PhotosCore
+import GridCore
 
 /// Bridges scroll position + geometry + texture cache + renderer for the Metal grid. It is the
 /// `MTKView` delegate: every frame it reads the clip view's scroll origin, queries the visible square

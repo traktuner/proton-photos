@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// THE FIXED-COLUMNS, WIDTH-FILLING resize contract (Apple parity). Each zoom level HOLDS its `nominalColumns`;

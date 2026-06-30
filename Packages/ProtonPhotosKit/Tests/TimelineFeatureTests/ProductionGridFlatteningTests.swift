@@ -3,6 +3,7 @@ import Foundation
 import CoreGraphics
 import PhotosCore
 import MediaCache
+import GridCore
 @testable import TimelineFeature
 
 /// Production MetalGrid geometry is ONE continuous square-tile photo wall: `RealMetalGridDataSource` flattens

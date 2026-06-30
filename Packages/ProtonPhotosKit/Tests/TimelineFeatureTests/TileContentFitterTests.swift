@@ -1,5 +1,6 @@
 import Testing
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Pins the content-fit contract: the fit is the ONLY place media aspect enters, the output is always

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Engine-owned COLUMN PHASE: the settled grid after a zoom keeps the anchor item in the CURSOR's column, so

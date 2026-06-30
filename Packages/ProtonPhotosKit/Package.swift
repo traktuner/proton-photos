@@ -32,6 +32,7 @@ let package = Package(
         .library(name: "MediaDecodingCore", targets: ["MediaDecodingCore"]),
         .library(name: "MediaFeedCore", targets: ["MediaFeedCore"]),
         .library(name: "MediaLocationCore", targets: ["MediaLocationCore"]),
+        .library(name: "GridCore", targets: ["GridCore"]),
         .library(name: "MediaCache", targets: ["MediaCache"]),
         .library(name: "TimelineFeature", targets: ["TimelineFeature"]),
         .library(name: "PhotoViewerFeature", targets: ["PhotoViewerFeature"]),
@@ -60,10 +61,11 @@ let package = Package(
         .testTarget(name: "MediaFeedCoreTests", dependencies: ["MediaFeedCore", "PhotosCore", "MediaByteCache", "MediaDecodingCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaLocationCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "MediaLocationCoreTests", dependencies: ["MediaLocationCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "GridCore", swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCache", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",
-            dependencies: ["PhotosCore", "DesignSystem", "MediaCache"],
+            dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "GridCore"],
             swiftSettings: disableDynamicActorIsolation
         ),
         .target(
@@ -74,7 +76,7 @@ let package = Package(
         .testTarget(name: "PhotoViewerFeatureTests", dependencies: ["PhotoViewerFeature"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(
             name: "TimelineFeatureTests",
-            dependencies: ["TimelineFeature", "MediaCache", "PhotosCore"],
+            dependencies: ["TimelineFeature", "GridCore", "MediaCache", "PhotosCore"],
             swiftSettings: disableDynamicActorIsolation
         ),
         // Albums: management protocols + repository over an injected backend (SDK has no album APIs,

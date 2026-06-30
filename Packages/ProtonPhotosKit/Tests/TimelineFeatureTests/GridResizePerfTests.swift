@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 // Performance guards for the resize/render hot path: resize is redraw-only (no texture reload / sync decode),
@@ -10,7 +11,11 @@ import CoreGraphics
     private func engine(_ count: Int = 20000) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
     private func repoRoot() -> URL { var u = URL(fileURLWithPath: #filePath); for _ in 0 ..< 5 { u.deleteLastPathComponent() }; return u }
     private func src(_ name: String) -> String {
-        (try? String(contentsOf: repoRoot().appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/\(name)"), encoding: .utf8)) ?? ""
+        for target in ["TimelineFeature", "GridCore"] {
+            let rel = "Packages/ProtonPhotosKit/Sources/\(target)/\(name)"
+            if let source = try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8) { return source }
+        }
+        return ""
     }
     private func appSrc(_ path: String) -> String {
         (try? String(contentsOf: repoRoot().appendingPathComponent("App/\(path)"), encoding: .utf8)) ?? ""

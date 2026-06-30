@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 // OVERVIEW LAYER DISSOLVE (replaces the rejected V3.10 warp). Two COMPLETE settled grid layers (source +
@@ -25,8 +26,11 @@ import CoreGraphics
         return u
     }
     private func source(_ name: String) -> String {
-        let rel = "Packages/ProtonPhotosKit/Sources/TimelineFeature/\(name)"
-        return (try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8)) ?? ""
+        for target in ["TimelineFeature", "GridCore"] {
+            let rel = "Packages/ProtonPhotosKit/Sources/\(target)/\(name)"
+            if let source = try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8) { return source }
+        }
+        return ""
     }
 
     // Builds ONLY for the overview boundaries — never for the accepted normal-level (focusRowRelayout) steps.

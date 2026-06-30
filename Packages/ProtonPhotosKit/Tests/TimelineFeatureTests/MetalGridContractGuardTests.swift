@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// THE canonical guard suite for the frozen MetalGrid engine contract — see `docs/metalgrid-engine-contract.md`.
@@ -11,18 +12,25 @@ import CoreGraphics
     private let eps: CGFloat = 0.5
     private func engine(_ count: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }
 
-    // MARK: source access (production TimelineFeature sources only — never the tests)
-    private func sourceDir() -> URL {
+    // MARK: source access (production sources only — never the tests)
+    private func packageRoot() -> URL {
         var u = URL(fileURLWithPath: #filePath)
         for _ in 0 ..< 5 { u.deleteLastPathComponent() }                 // …/Tests/TimelineFeatureTests/X.swift → repo root
-        return u.appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature")
+        return u.appendingPathComponent("Packages/ProtonPhotosKit")
+    }
+    private func sourceDirs() -> [URL] {
+        ["TimelineFeature", "GridCore"].map { packageRoot().appendingPathComponent("Sources/\($0)") }
     }
     private func src(_ name: String) -> String {
-        (try? String(contentsOf: sourceDir().appendingPathComponent(name), encoding: .utf8)) ?? ""
+        for dir in sourceDirs() {
+            if let source = try? String(contentsOf: dir.appendingPathComponent(name), encoding: .utf8) { return source }
+        }
+        return ""
     }
     private func allProductionSource() -> String {
-        let dir = sourceDir()
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        let files = sourceDirs().flatMap {
+            (try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil)) ?? []
+        }
         return files.filter { $0.pathExtension == "swift" }
             .compactMap { try? String(contentsOf: $0, encoding: .utf8) }
             .joined(separator: "\n")

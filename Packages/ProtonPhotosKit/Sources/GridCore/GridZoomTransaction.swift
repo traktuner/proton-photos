@@ -144,7 +144,7 @@ public struct GridZoomTransaction: Equatable, Sendable {
     /// The VIEWPORT rect of an arbitrary global index in the transaction lattice at `x` (nil if out of range).
     /// The lattice is infinite, so this is valid even for items currently off-screen — used by the commit
     /// bridge + the commit-delta measurement.
-    func rect(forGlobalIndex g: Int, continuousLevel x: CGFloat, viewportSize: CGSize) -> CGRect? {
+    public func rect(forGlobalIndex g: Int, continuousLevel x: CGFloat, viewportSize: CGSize) -> CGRect? {
         guard g >= 0, g < totalItems else { return nil }
         let l = lattice(continuousLevel: x, width: viewportSize.width)
         let m = (g - anchorGlobalIndex) + l.anchorColumn          // anchor sits at (row 0, col anchorColumn)

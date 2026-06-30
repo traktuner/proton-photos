@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// The continuous run must stay BOTTOM-RIGHT anchored at EVERY zoom level: the newest item (last index) sits

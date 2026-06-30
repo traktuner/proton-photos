@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Pins the zoom anchor model the engine must honour: the anchor identity is the ITEM (section / global

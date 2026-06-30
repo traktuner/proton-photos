@@ -7,6 +7,7 @@
 // and reversing the gesture reverses the presentation immediately.
 
 import CoreGraphics
+import GridCore
 
 enum PinchZoomTransitionScheduler {
     static func makePlan(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,

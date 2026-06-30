@@ -53,6 +53,8 @@ targets:
       - package: ProtonPhotosKit
         product: MediaCache
       - package: ProtonPhotosKit
+        product: GridCore
+      - package: ProtonPhotosKit
         product: TimelineFeature
       - package: ProtonPhotosKit
         product: PhotoViewerFeature

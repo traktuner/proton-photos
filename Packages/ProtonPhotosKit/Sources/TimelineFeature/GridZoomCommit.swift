@@ -1,5 +1,6 @@
 import CoreGraphics
 import PhotosCore
+import GridCore
 
 // MARK: - Zoom anchor mode / trigger
 

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Guards that the legacy grid implementations stay GONE and the canonical MetalGrid path is the only one.

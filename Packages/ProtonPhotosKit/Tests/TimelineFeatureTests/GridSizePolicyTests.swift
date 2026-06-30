@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// STEP 1 (additive foundation for the size-based grid model). Pins the `GridSizePolicy` level→fixed-size map

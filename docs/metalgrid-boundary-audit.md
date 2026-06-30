@@ -179,3 +179,21 @@ Solutions:
 - Do not introduce `#if os(iOS)` stubs to make a target compile. Split the boundary instead.
 - Do not change square-slot geometry, zoom anchoring, resize behavior, or production route selection while
   extracting pure files.
+
+## Phase 3.2 result
+
+The first `GridCore` cut moved only pure, already-tested value math:
+
+- `SquareTileGridEngine.swift`
+- `TileContentFitter.swift`
+- `GridSizePolicy.swift`
+- `GridZoomTransaction.swift`
+- `GridViewportResizeRebase.swift`
+- `GridLiveZoomBounds.swift`
+- `GridScrollRebase.swift`
+- `OverviewLayerDissolve.swift`
+
+The new target has no package dependencies and is covered by the universal Core gate. `TimelineFeature` imports
+it as the macOS grid adapter. Transition controllers, Metal renderer input orchestration, selection controller,
+texture residency policy, renderer code, and platform hosts were deliberately left out of this pass because
+their module boundary still needs a separate API/access audit.

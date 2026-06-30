@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// The live→settled commit seam, MEASURED. The live pinch renders a `GridZoomTransaction` (anchor pinned at the

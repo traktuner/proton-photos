@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Guards that the PRODUCTION timeline geometry stays canonical: MetalGrid-only, square slots from the
@@ -11,15 +12,19 @@ import CoreGraphics
     private let eps: CGFloat = 0.01
 
     // .../Packages/ProtonPhotosKit/Tests/TimelineFeatureTests/<this>.swift  → up 3 → ProtonPhotosKit
-    private var sourcesDir: URL {
+    private var packageRoot: URL {
         var url = URL(fileURLWithPath: #filePath)
         url.deleteLastPathComponent()   // TimelineFeatureTests
         url.deleteLastPathComponent()   // Tests
         url.deleteLastPathComponent()   // ProtonPhotosKit
-        return url.appendingPathComponent("Sources/TimelineFeature")
+        return url
     }
     private func source(_ name: String) -> String {
-        (try? String(contentsOf: sourcesDir.appendingPathComponent(name), encoding: .utf8)) ?? ""
+        for target in ["TimelineFeature", "GridCore"] {
+            let url = packageRoot.appendingPathComponent("Sources/\(target)/\(name)")
+            if let source = try? String(contentsOf: url, encoding: .utf8) { return source }
+        }
+        return ""
     }
 
     private func engine(_ count: Int = 1500) -> SquareTileGridEngine { SquareTileGridEngine(sectionCounts: [count]) }

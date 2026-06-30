@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// The release commit bridge: GEOMETRY-ONLY morph from the `GridZoomTransaction` final frame → the settled

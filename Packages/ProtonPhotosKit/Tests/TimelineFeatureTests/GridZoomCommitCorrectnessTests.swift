@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Commit CORRECTNESS: a thumbnail identity must never visibly fly from one slot to another on release. With the

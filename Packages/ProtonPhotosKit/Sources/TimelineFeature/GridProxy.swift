@@ -1,5 +1,6 @@
 import Foundation
 import PhotosCore
+import GridCore
 
 /// Lets the SwiftUI layer query the grid for a photo's on-screen cell frame (for the shared-element
 /// zoom transition) and scroll a photo into view. The coordinator fills these closures in; they

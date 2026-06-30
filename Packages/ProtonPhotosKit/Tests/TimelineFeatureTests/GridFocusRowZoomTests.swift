@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Focus-row stability for the engine-owned `GridZoomTransaction`, using REAL global indices (the lab's

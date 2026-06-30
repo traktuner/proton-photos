@@ -1,5 +1,6 @@
 import AppKit
 import PhotosCore
+import GridCore
 
 // MARK: - AspectSquareToggleModel — presentation model for the aspect/square toolbar toggle
 //

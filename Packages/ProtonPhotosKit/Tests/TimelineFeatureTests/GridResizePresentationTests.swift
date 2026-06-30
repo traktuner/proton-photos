@@ -4,6 +4,7 @@ import CoreGraphics
 import AppKit
 import MetalKit
 import PhotosCore
+import GridCore
 @testable import TimelineFeature
 
 @MainActor

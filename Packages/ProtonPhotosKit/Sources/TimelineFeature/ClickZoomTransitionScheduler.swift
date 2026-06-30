@@ -4,6 +4,7 @@
 // area-weighted variable windows (V3.6 split), C1 linear-core alpha, host-owned trapezoidal q.
 
 import CoreGraphics
+import GridCore
 
 enum ClickZoomTransitionScheduler {
     /// Build a click transition plan from settled source/target frame plans. Returns nil if the

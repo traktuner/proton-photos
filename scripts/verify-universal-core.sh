@@ -13,6 +13,7 @@ CORE_TARGETS=(
   MediaDecodingCore
   MediaFeedCore
   MediaLocationCore
+  GridCore
 )
 
 PLATFORMS=(

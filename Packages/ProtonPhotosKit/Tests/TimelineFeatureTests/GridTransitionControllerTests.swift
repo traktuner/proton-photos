@@ -8,6 +8,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 @Suite struct GridTransitionControllerTests {

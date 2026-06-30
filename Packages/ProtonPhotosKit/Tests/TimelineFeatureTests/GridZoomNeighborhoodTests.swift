@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Stronger-than-anchor stability guards for the DETENT-ONLY model (Option A): a discrete, anchor-preserved

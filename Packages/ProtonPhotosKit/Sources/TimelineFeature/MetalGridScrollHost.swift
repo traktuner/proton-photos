@@ -1,6 +1,7 @@
 import AppKit
 import MetalKit
 import PhotosCore
+import GridCore
 
 /// A layout-INVARIANT scroll position: the UID of the photo at the top of the viewport plus how far its top sat
 /// below the viewport top. Restoring re-resolves that photo's CURRENT position (whatever the zoom level, width,

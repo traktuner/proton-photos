@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 // The production grid is ONE uniform Apple-like dark-gray surface behind the thumbnails: gaps + aspectFit

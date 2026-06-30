@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Rubber-band over-zoom at the largest grid level (level 0): pinching further in produces a bounded elastic

@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// The edge/corner scroll rebase must be a short, monotonic, no-bounce slide that ends EXACTLY at the legal

@@ -11,6 +11,7 @@
 import Foundation
 import CoreGraphics
 import PhotosCore
+import GridCore
 
 enum GridTransitionFallbackReason: String, Sendable {
     case latticeBuildFailed, selectionRelocates, scheduleDegenerate, none

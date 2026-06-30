@@ -3,6 +3,7 @@ import Foundation
 import CoreGraphics
 import Metal
 import PhotosCore
+import GridCore
 @testable import TimelineFeature
 
 /// Pure-piece tests for the Metal grid's supporting machinery. They run headlessly (no window) so

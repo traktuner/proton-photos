@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import GridCore
 @testable import TimelineFeature
 
 /// Pure, headless tests for the canonical `SquareTileGridEngine` (no Metal, no window). These pin the

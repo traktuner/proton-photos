@@ -15,13 +15,13 @@ import CoreGraphics
 /// This is VISUAL ONLY. The COMMITTED grid level is clamped to valid detents separately
 /// (`finishLiveZoom` + `engine.clampLevel`), so a temporarily-negative visual level never commits a negative
 /// level. The densest end is intentionally NOT rubber-banded (the apparent model clamps there).
-enum GridLiveZoomBounds {
+public enum GridLiveZoomBounds {
     /// Maximum elastic overshoot past the largest detent, in level units (the negative asymptote). This is the
     /// ORIGINAL working rubber-band's `softOver` asymptote (~half a level). Named so the depth is one tunable.
-    static let maxOverZoom: CGFloat = 0.5
+    public static let maxOverZoom: CGFloat = 0.5
 
     /// Map a RAW continuous pinch level to the bounded VISUAL live level — the ORIGINAL `softOver` over-travel.
-    static func visualLevel(rawLevel x: CGFloat, levelCount: Int, maxOverZoom: CGFloat = maxOverZoom) -> CGFloat {
+    public static func visualLevel(rawLevel x: CGFloat, levelCount: Int, maxOverZoom: CGFloat = maxOverZoom) -> CGFloat {
         let densest = CGFloat(max(0, levelCount - 1))
         guard x < 0 else { return min(x, densest) }          // in-band / densest end: unchanged (clamped)
         guard maxOverZoom > 0 else { return 0 }
@@ -32,7 +32,7 @@ enum GridLiveZoomBounds {
 
     /// Clamp an already-resolved visual level to the safe live range `[-maxOverZoom, densest]` (used by the
     /// release spring-back, which works directly in visual-level space rather than raw pinch space).
-    static func clampVisual(_ v: CGFloat, levelCount: Int) -> CGFloat {
+    public static func clampVisual(_ v: CGFloat, levelCount: Int) -> CGFloat {
         let densest = CGFloat(max(0, levelCount - 1))
         return min(max(v, -maxOverZoom), densest)
     }

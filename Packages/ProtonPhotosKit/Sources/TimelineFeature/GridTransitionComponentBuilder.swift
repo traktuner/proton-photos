@@ -7,6 +7,7 @@
 // count changes between levels (its keys form a side == .focus relocation component), as do other rows.
 
 import CoreGraphics
+import GridCore
 
 struct GridTransitionLattice: Sendable {
     let keys: [RelativeSlotKey]
