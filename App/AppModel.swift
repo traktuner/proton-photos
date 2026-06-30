@@ -113,10 +113,16 @@ final class AppModel {
         backend = .idle
         facade = nil
         libraryReady = false
-        // Erase the account's encrypted thumbnail/preview blobs + any legacy cache keys and streamed video
-        // blocks before dropping the session, so nothing decryptable is left for the signed-out account.
+        // FULL PURGE: sign-out must leave nothing tied to the account on disk. Erase the encrypted
+        // thumbnail/preview/originals blobs + their account cache key and the streamed video blocks, the
+        // encrypted account-data cache, AND the SDK metadata SQLite stores (entities + timeline). The
+        // Settings "Delete Offline Cache" button is deliberately NARROWER (cached media only, keeps the key,
+        // stays signed in) — do not converge the two.
         OfflineLibraryManager.shared.purgeOnSignOut()
-        if case .signedIn(let session) = auth { AccountDataCache.clear(uid: session.uid) }
+        if case .signedIn(let session) = auth {
+            AccountDataCache.clear(uid: session.uid)
+            DriveSDKBridge.purgeMetadata(uid: session.uid)
+        }
         store.clear()
         auth = .signedOut(error: nil)
     }

@@ -23,6 +23,21 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     private let crypto: DriveCrypto
     private var streamSource: PhotoVideoStreamSource?
 
+    /// The SDK cache directory (`Caches/ProtonPhotos/sdk`) holding the entity + timeline metadata
+    /// SQLite stores (and the encrypted account-data cache). Single source of truth for the path.
+    static var sdkCacheDirectory: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ProtonPhotos/sdk", isDirectory: true)
+    }
+
+    /// Full sign-out / master-reset: erase the SDK metadata SQLite stores for `uid` (security
+    /// follow-up #2 — non-secret node metadata that must not survive sign-out). The encrypted
+    /// caches, video blocks, and account-data cache are erased by their own paths; this covers the
+    /// remaining account-tied data at rest. Wired from `AppModel.signOut`.
+    static func purgeMetadata(uid: String) {
+        SDKMetadataStore.purgeMetadata(in: sdkCacheDirectory, uid: uid)
+    }
+
     init(session: ProtonSession, store: SessionKeychainStore) async throws {
         let driveSession = DriveSession(session: session, store: store)
         self.driveSession = driveSession
@@ -47,8 +62,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         // derive share/node keys and the per-file content session key on demand.
         self.crypto = DriveCrypto(account: account, keyPassword: session.keyPassword)
 
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ProtonPhotos/sdk", isDirectory: true)
+        let caches = Self.sdkCacheDirectory
         try? FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
         // Purge any plaintext secret cache left by an older build (we now keep secrets in-memory only).
         for name in ["secrets.sqlite", "secrets.sqlite-wal", "secrets.sqlite-shm"] {
