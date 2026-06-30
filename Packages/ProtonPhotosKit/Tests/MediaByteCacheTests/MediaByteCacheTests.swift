@@ -101,6 +101,11 @@ struct MediaByteCacheTests {
         #expect(cache.diskData(for: uid()) == nil)
         #expect(FileManager.default.fileExists(atPath: url.path) == false)
     }
+
+    @Test func configurationSanitizesMemoryBudget() {
+        #expect(ThumbnailCacheConfiguration(dataMemoryBudgetBytes: 0).dataMemoryBudgetBytes == 1)
+        #expect(ThumbnailCacheConfiguration(dataMemoryBudgetBytes: 42).dataMemoryBudgetBytes == 42)
+    }
 }
 
 @Suite("MediaByteCache platform purity")
@@ -134,6 +139,8 @@ struct MediaByteCachePlatformPurityTests {
         "UIApplication",
         "NSApplication",
         "CGImage",
+        "ProcessInfo.processInfo.physicalMemory",
+        "ProcessInfo.processInfo.activeProcessorCount",
     ]
 
     private static let allowedFrameworkImports: Set<String> = [

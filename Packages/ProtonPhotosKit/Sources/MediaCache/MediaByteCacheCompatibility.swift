@@ -5,3 +5,4 @@ public typealias KeychainCacheKeyStore = MediaByteCache.KeychainCacheKeyStore
 public typealias SecureBlobCipher = MediaByteCache.SecureBlobCipher
 public typealias SecureBlobCipherError = MediaByteCache.SecureBlobCipherError
 public typealias ThumbnailCache = MediaByteCache.ThumbnailCache
+public typealias ThumbnailCacheConfiguration = MediaByteCache.ThumbnailCacheConfiguration

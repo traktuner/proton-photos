@@ -2,6 +2,14 @@ import Foundation
 import CryptoKit
 import PhotosCore
 
+public struct ThumbnailCacheConfiguration: Sendable, Equatable {
+    public let dataMemoryBudgetBytes: Int
+
+    public init(dataMemoryBudgetBytes: Int = 128 * 1024 * 1024) {
+        self.dataMemoryBudgetBytes = max(1, dataMemoryBudgetBytes)
+    }
+}
+
 /// Two-tier thumbnail cache: in-memory (NSCache) backed by an ENCRYPTED on-disk store. Keeps decoded
 /// thumbnails resident for smooth scrolling and survives relaunch.
 ///
@@ -31,6 +39,20 @@ public actor ThumbnailCache {
         derivative: String? = nil,
         keyStore: CacheKeyStore = KeychainCacheKeyStore()
     ) {
+        self.init(
+            namespace: namespace,
+            derivative: derivative,
+            keyStore: keyStore,
+            configuration: ThumbnailCacheConfiguration()
+        )
+    }
+
+    public init(
+        namespace: String = "thumbnails",
+        derivative: String? = nil,
+        keyStore: CacheKeyStore = KeychainCacheKeyStore(),
+        configuration: ThumbnailCacheConfiguration = ThumbnailCacheConfiguration()
+    ) {
         let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ProtonPhotos", isDirectory: true)
         self.namespace = namespace
@@ -49,17 +71,7 @@ public actor ThumbnailCache {
                                      derivative: self.derivative),
             account: CryptoBox.ephemeralAccount
         )
-        memory.totalCostLimit = Self.dataRAMBudgetBytes()   // cost-based (decrypted JPEG bytes), scaled to RAM
-    }
-
-    /// RAM budget for the in-memory DECRYPTED-jpeg tier, scaled to physical memory (modest cap — these compressed
-    /// blobs are small vs decoded bitmaps; the decoded cache is the big lever). NSCache also evicts under
-    /// pressure. Platform-agnostic for the universal-binary core.
-    static func dataRAMBudgetBytes() -> Int {
-        let physical = Double(ProcessInfo.processInfo.physicalMemory)
-        let floor = 64.0 * 1024 * 1024
-        let ceiling = 2.0 * 1024 * 1024 * 1024
-        return Int(min(max(physical * 0.02, floor), ceiling))   // ~2 % of RAM
+        memory.totalCostLimit = configuration.dataMemoryBudgetBytes
     }
 
     // MARK: - Account configuration

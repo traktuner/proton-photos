@@ -1,654 +1,162 @@
-import Foundation
 import AppKit
+import Foundation
+import MediaDecodingCore
+import MediaFeedCore
 import PhotosCore
-/// Loads thumbnails for the whole library with a single, bounded worker pool:
-///  • on-screen cells call `requestPriority` + poll `cachedImage`, so what you're looking at is
-///    fetched first (and a scroll jump instantly re-prioritises),
-///  • the same workers fill the rest of the library sequentially in the background.
+
+/// macOS thumbnail feed adapter.
 ///
-/// Crucially there is ONE bounded pool — visible cells do not each fire their own download, which
-/// previously flooded the SDK and triggered rate-limiting/stalls.
+/// `ThumbnailFeedCore` owns the universal feed behavior: priority, prefetch, disk/network decisions, adaptive
+/// concurrency, decoded `CGImage` residency, and diagnostics. This facade preserves the existing macOS `NSImage`
+/// API for Timeline, Viewer, and Filmstrip while keeping AppKit outside the shared feed core.
 public actor ThumbnailFeed {
-    private nonisolated let cache: ThumbnailCache
-    private nonisolated let loader: ThumbnailBatchLoader
-    private nonisolated let aspects: AspectRegistry
-    private nonisolated(unsafe) let decoded = NSCache<NSString, NSImage>()  // NSCache is thread-safe
-    private nonisolated let diskPresence = DiskPresenceCache()
-    private let targetPixels: CGFloat
-    private nonisolated let concurrency: Int
-    private nonisolated let batch: Int
+    public typealias PrefetchStatus = ThumbnailFeedCore.PrefetchStatus
 
-    private var priority: [PhotoUID] = []           // requested by visible cells (newest first)
-    private var priorityByUID: [PhotoUID: ThumbnailPriority] = [:]
-    private var sequential: [PhotoUID] = []         // background fill, in timeline order
-    private var sequentialIndex = 0
-    private var workersRunning = false
-    private var workerTask: Task<Void, Never>?
-    private var interactionActive = false
-    private var decodeInFlight = 0
-    private var downloadInFlight = 0
-    private var lastErrors: [String] = []
-    private var prefetchEnabled = true
-    private var prefetchPaused = false
-    private var checkpointKey: String?
-    private var prefetchCompleted = 0
-    private var prefetchFailed = 0
-    private var prefetchDiskHit = 0
-    private var prefetchDownloadStarted = 0
-    private var prefetchDownloadCompleted = 0
-    private var prefetchDecodeStarted = 0
-    private var prefetchDecodeCompleted = 0
-    private var lastRepassPercent = -1.0   // disk coverage at the last re-pass; stop re-passing once it stops improving
-    // Adaptive concurrency (AIMD): how many batch downloads run at once self-tunes to just under the server's
-    // (undocumented, dynamic) 429 threshold — additive increase on success, multiplicative decrease on a 429,
-    // bounded [2, concurrency]. No magic number; it discovers the ceiling for this account/endpoint.
-    private var targetConcurrency = 2
-    private var activeDownloaders = 0
-    private var aimdSuccessStreak = 0
-
-    // Background-crawl yield (app-level starvation mitigation — see PROTONPHOTOS_… security report). The
-    // sequential crawl shares one rate-limit gate + URLSession with visible thumbnail loads, so a heavy
-    // crawl can trip a 429 that stalls what's on screen. We therefore PAUSE the sequential crawl (never the
-    // priority queue) while there is recent visible demand or just after a rate-limited/empty batch.
-    private let clock: @Sendable () -> Date
-    private var lastDemandAt: Date?            // last non-idle (visible/near-viewport) thumbnail request
-    private var crawlBackoffUntil: Date?       // sequential crawl suspended until this instant after a 429/empty batch
-    private nonisolated let visibleQuietWindow: TimeInterval = 0.25
-    private nonisolated let crawlBackoffSeconds: TimeInterval = 5
+    private nonisolated let core: ThumbnailFeedCore
+    private nonisolated(unsafe) let imageWrappers = NSCache<NSString, NSImage>()
 
     public init(
         cache: ThumbnailCache,
         loader: ThumbnailBatchLoader,
         aspects: AspectRegistry,
         targetPixels: CGFloat = 320,
-        concurrency: Int = 10,   // proven sweet spot: higher just trips MORE 429s (server-side limit) → net slower
+        concurrency: Int = 10,
         batch: Int = 8,
         clock: @escaping @Sendable () -> Date = { Date() }
     ) {
-        self.cache = cache
-        self.loader = loader
-        self.aspects = aspects
-        self.targetPixels = targetPixels
-        self.concurrency = concurrency
-        self.batch = batch
-        self.clock = clock
-        decoded.totalCostLimit = Self.decodedRAMBudgetBytes()   // cost-based, scaled to physical RAM (see helper)
-        targetConcurrency = max(2, concurrency / 2)   // AIMD starts at half the cap, then ramps toward it
+        let configuration = ThumbnailFeedCoreConfiguration(
+            targetPixels: targetPixels,
+            downloadConcurrencyLimit: concurrency,
+            initialDownloadConcurrency: max(2, concurrency / 2),
+            minimumDownloadConcurrency: 2,
+            batchSize: batch,
+            decodedMemoryBudgetBytes: Self.decodedRAMBudgetBytes(),
+            maxConcurrentDecodes: max(1, ProcessInfo.processInfo.activeProcessorCount),
+            priorityQueueLimit: 600,
+            sequentialScanLimit: 128,
+            visibleQuietWindow: 0.25,
+            crawlBackoffSeconds: 5,
+            downloadTimeoutSeconds: 20
+        )
+        self.core = ThumbnailFeedCore(
+            cache: cache,
+            loader: loader,
+            configuration: configuration,
+            clock: clock,
+            onDecoded: { uid, decoded in
+                aspects.record(uid, aspect: decoded.aspectRatio)
+            }
+        )
+        imageWrappers.countLimit = 512
+        imageWrappers.totalCostLimit = Self.wrapperRAMBudgetBytes()
     }
 
-    /// RAM budget for the DECODED thumbnail cache, scaled to the device's physical memory so a big machine keeps
-    /// (nearly) the whole library decoded in RAM — no re-decode on scroll-back or pinch — while a small device
-    /// (iOS) stays bounded. NSCache ALSO evicts under system memory pressure, so this is a ceiling, not a
-    /// reservation. The budget formula itself is Foundation-only; the current feed remains the macOS adapter layer.
     static func decodedRAMBudgetBytes() -> Int {
-        let physical = Double(ProcessInfo.processInfo.physicalMemory)        // bytes
-        let floor = 256.0 * 1024 * 1024                                      // ≥ 256 MB even on tiny devices
-        let ceiling = 20.0 * 1024 * 1024 * 1024                             // ≤ 20 GB (plenty for a full library)
-        return Int(min(max(physical * 0.15, floor), ceiling))               // ~15 % of RAM
+        let physical = Double(ProcessInfo.processInfo.physicalMemory)
+        let floor = 256.0 * 1024 * 1024
+        let ceiling = 20.0 * 1024 * 1024 * 1024
+        return Int(min(max(physical * 0.15, floor), ceiling))
     }
 
-    /// Approximate decoded byte cost (pixels × 4 RGBA) for cost-based NSCache eviction.
+    static func wrapperRAMBudgetBytes() -> Int {
+        let physical = Double(ProcessInfo.processInfo.physicalMemory)
+        let floor = 16.0 * 1024 * 1024
+        let ceiling = 96.0 * 1024 * 1024
+        return Int(min(max(physical * 0.005, floor), ceiling))
+    }
+
     static func decodedCost(_ image: NSImage) -> Int {
         MacThumbnailImageDecoder.decodedCost(image)
     }
 
-    // MARK: - Reads
-
-    /// Cache-only lookup (decoded mem → disk → decode). Never triggers a network load.
-    public func cachedImage(for uid: PhotoUID) -> NSImage? {
-        let key = Self.key(uid)
-        if let img = decoded.object(forKey: key) {
-            PhotoDiagnostics.shared.increment("thumb.ramDecodedHit")
-            return img
-        }
-        PhotoDiagnostics.shared.increment("thumb.ramDecodeMiss")
-        PhotoDiagnostics.shared.recordDiskReadDuringPinch()
-        if let data = cache.diskData(for: uid) {
-            diskPresence.set(uid, present: true)
-            PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
-            guard let img = decode(data, for: uid) else { return nil }
-            decoded.setObject(img, forKey: key, cost: Self.decodedCost(img))
-            aspects.record(uid, aspect: img.size.width / max(img.size.height, 1))
-            return img
-        }
-        diskPresence.set(uid, present: false)
-        PhotoDiagnostics.shared.increment("thumb.diskCacheMiss")
-        return nil
+    public func cachedImage(for uid: PhotoUID) async -> NSImage? {
+        guard let decoded = await core.cachedDecoded(for: uid) else { return nil }
+        return image(for: decoded, uid: uid)
     }
 
-    /// Synchronous in-memory lookup (decoded NSCache only — no actor hop, no disk). Lets a cell show
-    /// an already-decoded thumbnail INSTANTLY without flickering to blank during a live re-justify.
     public nonisolated func memoryImage(for uid: PhotoUID) -> NSImage? {
-        decoded.object(forKey: Self.key(uid))
+        let key = Self.key(uid)
+        if let image = imageWrappers.object(forKey: key) { return image }
+        guard let decoded = core.memoryDecoded(for: uid) else { return nil }
+        let image = MacThumbnailImageDecoder.image(from: decoded)
+        imageWrappers.setObject(image, forKey: key, cost: decoded.decodedCostBytes)
+        return image
     }
 
-    public func cacheState(for request: ThumbnailRequest, gpuTextureResident: Bool = false) -> ThumbnailCacheTierState {
-        let diskThumbnail = cache.has(request.uid)
-        diskPresence.set(request.uid, present: diskThumbnail)
-        return ThumbnailCacheTierState(
-            knownInTimeline: true,
-            diskThumbnail: diskThumbnail,
-            ramDecoded: decoded.object(forKey: Self.key(request.uid)) != nil,
-            gpuTexture: gpuTextureResident
-        )
+    public nonisolated func memoryCGImage(for uid: PhotoUID) -> CGImage? {
+        core.memoryDecoded(for: uid)?.image
     }
 
-    /// Visible cell asks for its thumbnail to be fetched soon. Cheap + idempotent.
-    public func requestPriority(_ uid: PhotoUID, priority requestedPriority: ThumbnailPriority = .visibleNow) {
-        // Any non-idle request is live visible demand: mark it so the sequential crawl yields the shared
-        // rate-limit budget to on-screen work (it resumes `visibleQuietWindow` after demand goes quiet).
-        if requestedPriority != .idleLibraryCrawl { lastDemandAt = clock() }
-        PhotoDiagnostics.shared.recordDiskPresenceCheckDuringPinch()
-        let diskHit = cache.hasUsableDiskData(uid)   // skip the network ONLY for a decryptable blob
-        diskPresence.set(uid, present: diskHit)
-        guard !diskHit else {
-            PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
-            return
-        }
-        PhotoDiagnostics.shared.increment("thumb.diskCacheMiss")
-        if let existing = priorityByUID[uid] {
-            if requestedPriority < existing {
-                priorityByUID[uid] = requestedPriority
-                PhotoDiagnostics.shared.increment("thumb.priorityUpgrade")
-            }
-            return
-        }
-        priority.append(uid)
-        priorityByUID[uid] = requestedPriority
-        if priority.count > 600 {                    // bound; drop oldest requests
-            let dropCount = priority.count - 600
-            for d in priority[0 ..< dropCount] { priorityByUID.removeValue(forKey: d) }
-            priority.removeFirst(dropCount)
-        }
-        startWorkers()
+    public func cacheState(for request: ThumbnailRequest, gpuTextureResident: Bool = false) async -> ThumbnailCacheTierState {
+        await core.cacheState(for: request, gpuTextureResident: gpuTextureResident)
     }
 
-    /// Whether there has been on-screen thumbnail demand within `within` seconds. A LOWER-priority
-    /// background crawl (e.g. the Map GPS crawl) checks this to YIELD the shared rate-limit budget to
-    /// visible work while the user is scrolling — the same mitigation the sequential thumbnail crawl uses —
-    /// so a background crawl can never trip a 429 that stalls on-screen thumbnails.
-    public func hasRecentVisibleDemand(within: TimeInterval = 2.0) -> Bool {
-        guard let last = lastDemandAt else { return false }
-        return clock().timeIntervalSince(last) < within
+    public func requestPriority(_ uid: PhotoUID, priority requestedPriority: ThumbnailPriority = .visibleNow) async {
+        await core.requestPriority(uid, priority: requestedPriority)
     }
 
-    /// Whether the thumbnail crawl still has ANY work — visible requests queued OR the background library
-    /// fill not finished. The Map GPS crawl (P2) yields the WHOLE rate-limit budget while this is true, so
-    /// thumbnails (P1) finish first and the two crawls never flood the backend together (which trips a 429
-    /// that stalls everything on screen). Returns true while `prefetchEnabled` and there is pending work.
-    public func hasPendingThumbnailWork() -> Bool {
-        guard prefetchEnabled else { return false }
-        return !priority.isEmpty || sequentialIndex < sequential.count
+    public func hasRecentVisibleDemand(within: TimeInterval = 2.0) async -> Bool {
+        await core.hasRecentVisibleDemand(within: within)
     }
 
-    /// Force a bounded set of thumbnails into the *decoded* in-memory cache so a synchronous
-    /// `memoryImage(for:)` will hit. `requestPriority`/`cachedImage` are not enough for the zoom
-    /// overlay: a thumbnail can be on disk yet absent from RAM (so the overlay treats it as missing),
-    /// and `requestPriority` deliberately skips anything already on disk (`cache.hasUsableDiskData`) — it only drives
-    /// *network* fetches, never disk→RAM decode. This fills that gap.
-    ///
-    /// For each uid: count it if already decoded; else read+downsample the disk thumbnail into the
-    /// decoded cache; else queue a network priority fetch (non-blocking). The decode runs on the actor
-    /// (like `cachedImage`), never on the main thread, and is bounded by `limit` so it can't stall the
-    /// pinch's priority traffic for long.
+    public func hasPendingThumbnailWork() async -> Bool {
+        await core.hasPendingThumbnailWork()
+    }
+
     public func warmDecoded(
         _ requests: [ThumbnailRequest],
         priority requestedPriority: ThumbnailPriority,
         limit: Int
     ) async -> WarmDecodedResult {
-        let targets = Array(requests.prefix(max(0, limit)))
-        lastDemandAt = clock()   // visible decode IS visible demand → the sequential crawl yields the actor/CPU to it
-        var alreadyDecoded = 0, decodedFromDisk = 0, queuedNetwork = 0, missing = 0, mainThreadDecodeCount = 0
-        // Partition into already-decoded (skip) and needs-decode. The disk-resident misses are then decoded
-        // CONCURRENTLY off the actor — `cache.diskData` (disk read + decrypt) and `Self.downsample` (JPEG →
-        // bitmap) are both nonisolated/pure — so a warm batch saturates all cores instead of decoding one tile
-        // at a time on the actor. This is what collapses the banded pinch fill (a screenful no longer streams in
-        // 48-tile serial waves). Results merge back on-actor (NSCache + counters are actor/thread-safe).
-        var needDecode: [PhotoUID] = []
-        needDecode.reserveCapacity(targets.count)
-        for request in targets {
-            if decoded.object(forKey: Self.key(request.uid)) != nil {
-                PhotoDiagnostics.shared.increment("thumb.ramDecodedHit")
-                alreadyDecoded += 1
-            } else {
-                needDecode.append(request.uid)
-            }
-        }
-        if !needDecode.isEmpty {
-            let cache = self.cache
-            let maxPixels = targetPixels
-            let lanes = max(1, min(needDecode.count, ProcessInfo.processInfo.activeProcessorCount))
-            let outcomes = await withTaskGroup(of: DecodedTile.self) { group -> [DecodedTile] in
-                var it = needDecode.makeIterator()
-                func addNext() {
-                    guard let uid = it.next() else { return }
-                    group.addTask {
-                        guard let data = cache.diskData(for: uid) else { return DecodedTile(uid: uid, decoded: nil, diskHadData: false, durationMs: 0) }
-                        let start = Date()
-                        let decoded = MacThumbnailImageDecoder.decode(data, maxPixelSize: maxPixels)
-                        return DecodedTile(uid: uid, decoded: decoded, diskHadData: true, durationMs: Date().timeIntervalSince(start) * 1000)
-                    }
-                }
-                for _ in 0..<lanes { addNext() }   // keep at most `lanes` decodes in flight (no core over-subscription)
-                var results: [DecodedTile] = []
-                results.reserveCapacity(needDecode.count)
-                for await tile in group { results.append(tile); addNext() }
-                return results
-            }
-            for tile in outcomes {
-                PhotoDiagnostics.shared.increment("thumb.ramDecodeMiss")
-                if tile.diskHadData {
-                    diskPresence.set(tile.uid, present: true)
-                    PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
-                    prefetchDecodeStarted += 1
-                    PhotoDiagnostics.shared.recordDecodeStarted(queueDepth: 0)
-                    if let tileImage = tile.decoded {
-                        decoded.setObject(tileImage.image, forKey: Self.key(tile.uid), cost: tileImage.costBytes)
-                        aspects.record(tile.uid, aspect: tileImage.aspectRatio)
-                        prefetchDecodeCompleted += 1
-                        PhotoDiagnostics.shared.recordDecodeCompleted(durationMs: tile.durationMs, queueDepth: 0)
-                        decodedFromDisk += 1
-                    } else {
-                        missing += 1   // on disk but undecodable (corrupt/partial) — rare
-                        PhotoDiagnostics.shared.increment("thumb.diskDecodeFailed")
-                        PhotoDiagnostics.shared.recordDecodeFailed(queueDepth: 0)
-                        recordError("decode failed for \(Self.key(tile.uid))")
-                    }
-                } else if cache.hasUsableDiskData(tile.uid) {
-                    diskPresence.set(tile.uid, present: true)
-                    PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
-                    missing += 1
-                } else {
-                    diskPresence.set(tile.uid, present: false)
-                    PhotoDiagnostics.shared.increment("thumb.diskCacheMiss")
-                    requestPriority(tile.uid, priority: requestedPriority)   // not on disk yet; queue network
-                    queuedNetwork += 1
-                }
-            }
-        }
-        let result = WarmDecodedResult(
-            requested: targets.count,
-            alreadyDecoded: alreadyDecoded,
-            decodedFromDisk: decodedFromDisk,
-            queuedNetwork: queuedNetwork,
-            missing: missing,
-            mainThreadDecodeCount: mainThreadDecodeCount
-        )
-        return result
+        await core.warmDecoded(requests, priority: requestedPriority, limit: limit)
     }
 
     public func warmDecoded(_ uids: [PhotoUID], limit: Int = 160) async -> WarmDecodedResult {
-        await warmDecoded(
-            uids.map { ThumbnailRequest(uid: $0, pixelSize: Int(targetPixels)) },
-            priority: .zoomAnchorAndFocusRow,
-            limit: limit
-        )
+        await core.warmDecoded(uids, limit: limit)
     }
 
-    /// One-shot load for the viewer (cache-first, then a direct fetch).
     public func image(for uid: PhotoUID) async -> NSImage? {
-        if let img = cachedImage(for: uid) { return img }
-        let box = ByteBox()
-        PhotoDiagnostics.shared.recordNetworkRequestDuringPinch()
-        await loader.loadThumbnails(for: [uid]) { u, data in if u == uid { box.set(data) } }
-        guard let data = box.value else { return nil }
-        cache.storeToDisk(data, for: uid)
-        let img = decode(data, for: uid)
-        if let img { decoded.setObject(img, forKey: Self.key(uid), cost: Self.decodedCost(img)) }
-        return img
+        guard let decoded = await core.decoded(for: uid) else { return nil }
+        return image(for: decoded, uid: uid)
     }
 
-    // MARK: - Prefetch
-
-    public func startPrefetch(_ uids: [PhotoUID]) {
-        guard prefetchEnabled else { return }
-        sequential = uids
-        checkpointKey = Self.checkpointKey(for: uids)
-        sequentialIndex = checkpointKey.flatMap { UserDefaults.standard.object(forKey: $0) as? Int } ?? 0
-        sequentialIndex = min(max(sequentialIndex, 0), sequential.count)
-        startWorkers()
+    public func startPrefetch(_ uids: [PhotoUID]) async {
+        await core.startPrefetch(uids)
     }
 
-    public func stopPrefetch() {
-        workerTask?.cancel()
-        workersRunning = false
-        priority.removeAll(); priorityByUID.removeAll(); sequential.removeAll()
+    public func stopPrefetch() async {
+        await core.stopPrefetch()
     }
 
-    public func setPrefetchEnabled(_ enabled: Bool) {
-        prefetchEnabled = enabled
-        if !enabled { stopPrefetch() }
+    public func setPrefetchEnabled(_ enabled: Bool) async {
+        await core.setPrefetchEnabled(enabled)
     }
 
-    public func pausePrefetch() {
-        prefetchPaused = true
+    public func pausePrefetch() async {
+        await core.pausePrefetch()
     }
 
-    public func resumePrefetch() {
-        prefetchPaused = false
-        startWorkers()
+    public func resumePrefetch() async {
+        await core.resumePrefetch()
     }
 
-    public func setUserInteractionActive(_ active: Bool) {
-        interactionActive = active
+    public func setUserInteractionActive(_ active: Bool) async {
+        await core.setUserInteractionActive(active)
     }
 
-    public struct PrefetchStatus: Sendable, Equatable {
-        public let enabled: Bool
-        public let paused: Bool
-        /// Disk thumbnail coverage as a 0…1 FRACTION (1.0 = fully warm). Not a 0…100 percent.
-        public let diskThumbnailCoverageFraction: Double
-        /// Number of thumbnails the crawl is tracking. 0 ⇒ the crawl isn't seeded yet, so the fraction (which
-        /// defaults to 1.0 for an empty set) is MEANINGLESS — callers must not read "warm" until this is > 0.
-        public let diskThumbnailTotal: Int
-        public let currentQueueLength: Int
-        public let downloadsInFlight: Int
-        public let decodesInFlight: Int
-        public let lastErrors: [String]
-        public let cacheSizeBytes: Int64
-        public let diskFileCount: Int
-        public let activeJobs: Int
-        public let completed: Int
-        public let failed: Int
-        public let diskHit: Int
-        public let downloadStarted: Int
-        public let downloadCompleted: Int
-        public let decodeStarted: Int
-        public let decodeCompleted: Int
-        public let pausedReason: String
+    public func prefetchStatus() async -> PrefetchStatus {
+        await core.prefetchStatus()
     }
 
-    public func prefetchStatus() -> PrefetchStatus {
-        let coverage = cache.diskCoverage(for: sequential)
-        let pausedReason: String
-        if !prefetchEnabled {
-            pausedReason = "disabled"
-        } else if prefetchPaused {
-            pausedReason = "manual"
-        } else if interactionActive {
-            pausedReason = "interaction"
-        } else {
-            pausedReason = "none"
-        }
-        return PrefetchStatus(
-            enabled: prefetchEnabled,
-            paused: prefetchPaused || interactionActive,
-            diskThumbnailCoverageFraction: coverage.percent,
-            diskThumbnailTotal: coverage.total,
-            currentQueueLength: priority.count + max(0, sequential.count - sequentialIndex),
-            downloadsInFlight: downloadInFlight,
-            decodesInFlight: decodeInFlight,
-            lastErrors: lastErrors,
-            cacheSizeBytes: cache.diskSizeBytes(),
-            diskFileCount: cache.diskFileCount(),
-            activeJobs: downloadInFlight + decodeInFlight,
-            completed: prefetchCompleted,
-            failed: prefetchFailed,
-            diskHit: prefetchDiskHit,
-            downloadStarted: prefetchDownloadStarted,
-            downloadCompleted: prefetchDownloadCompleted,
-            decodeStarted: prefetchDecodeStarted,
-            decodeCompleted: prefetchDecodeCompleted,
-            pausedReason: pausedReason
-        )
-    }
-
-    private func startWorkers() {
-        guard !workersRunning else { return }
-        workersRunning = true
-        workerTask = Task { [weak self] in
-            guard let self else { return }
-            await withTaskGroup(of: Void.self) { group in
-                for _ in 0 ..< self.concurrency { group.addTask { await self.worker() } }
-            }
-            await self.workersStopped()
-        }
-    }
-
-    private func workersStopped() {
-        workersRunning = false
-        // Close a lost-wakeup window: `startWorkers()` reaches `workersStopped()` via an `await`
-        // suspension, so a `requestPriority`/`startPrefetch` that enqueued work during the task-group
-        // teardown would have seen `workersRunning == true` and skipped starting a worker. Re-check and
-        // relaunch so the last-requested thumbnail is never stranded. (Workers only return when the queues
-        // are drained, so this restarts strictly when new work arrived in the gap — no spin.)
-        if !priority.isEmpty || sequentialIndex < sequential.count { startWorkers() }
-    }
-
-    private func worker() async {
-        while !Task.isCancelled {
-            let chunk = takeBatch()
-            if chunk.isEmpty {
-                if priority.isEmpty && sequentialIndex >= sequential.count {
-                    // The sequential pass is exhausted. `takeBatch` advances past a failed (429/timeout)
-                    // thumbnail and never re-queues it, so a rate-limit burst leaves permanent gaps —
-                    // "caught up" yet still missing. RE-PASS the library to retry the gaps: `hasUsableDiskData`
-                    // skips the already-cached, so only the missing are refetched. Stop once a full pass no
-                    // longer improves coverage (the rest are genuinely unavailable).
-                    let percent = cache.diskCoverage(for: sequential).percent
-                    if percent < 99.5, percent > lastRepassPercent + 0.01 {
-                        lastRepassPercent = percent
-                        sequentialIndex = 0
-                        try? await Task.sleep(for: .seconds(2))
-                        continue
-                    }
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(150))
-                continue
-            }
-            // AIMD gate: at most `targetConcurrency` workers download at once. Others wait, so the effective
-            // request rate self-tunes to just under the 429 threshold.
-            while activeDownloaders >= targetConcurrency, !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(60))
-            }
-            if Task.isCancelled { return }
-            activeDownloaders += 1
-            downloadInFlight += chunk.count
-            prefetchDownloadStarted += chunk.count
-            PhotoDiagnostics.shared.recordNetworkRequestDuringPinch()
-            let completed = await Self.loadWithTimeout(chunk, loader: loader, cache: cache, diskPresence: diskPresence, seconds: 20)
-            activeDownloaders = max(0, activeDownloaders - 1)
-            downloadInFlight = max(0, downloadInFlight - chunk.count)
-            prefetchCompleted += completed
-            prefetchDownloadCompleted += completed
-            let failed = max(0, chunk.count - completed)
-            prefetchFailed += failed
-            if completed == 0, !chunk.isEmpty {
-                recordError("thumbnail fetch returned 0/\(chunk.count) (network or rate-limit)")
-                // Likely rate-limited: back the sequential crawl off so it stops compounding the 429 and
-                // hurting visible loads. Priority/visible work continues (takeBatch drains it regardless).
-                crawlBackoffUntil = clock().addingTimeInterval(crawlBackoffSeconds)
-                targetConcurrency = max(2, targetConcurrency / 2)   // AIMD: multiplicative decrease on a 429
-                aimdSuccessStreak = 0
-            } else if completed > 0 {
-                aimdSuccessStreak += 1                               // AIMD: additive increase after a success streak
-                if aimdSuccessStreak >= 4 {
-                    aimdSuccessStreak = 0
-                    targetConcurrency = min(concurrency, targetConcurrency + 1)
-                }
-            }
-            if let checkpointKey, sequentialIndex > 0 {
-                UserDefaults.standard.set(sequentialIndex, forKey: checkpointKey)
-            }
-            emitPrefetchSummary()
-        }
-    }
-
-    /// Run a batch download, but never let a slow/hung batch pin a worker: whichever finishes
-    /// first (download or the timeout) wins, then the other is cancelled. Thumbnails that did
-    /// arrive are already persisted via the callback; missing ones get retried later.
-    private nonisolated static func loadWithTimeout(
-        _ chunk: [PhotoUID],
-        loader: ThumbnailBatchLoader,
-        cache: ThumbnailCache,
-        diskPresence: DiskPresenceCache,
-        seconds: Double
-    ) async -> Int {
-        let counter = IntBox()
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                await loader.loadThumbnails(for: chunk) { uid, data in
-                    cache.storeToDisk(data, for: uid)
-                    diskPresence.set(uid, present: true)
-                    counter.increment()
-                }
-            }
-            group.addTask { try? await Task.sleep(for: .seconds(seconds)) }
-            await group.next()
-            group.cancelAll()
-        }
-        return counter.value
-    }
-
-    /// Priority requests first (newest visible wins), then the sequential background fill.
-    private func takeBatch() -> [PhotoUID] {
-        var out: [PhotoUID] = []
-        while out.count < batch, !priority.isEmpty {
-            let bestIndex = priority.indices.min {
-                let lhs = priorityByUID[priority[$0]] ?? .idleLibraryCrawl
-                let rhs = priorityByUID[priority[$1]] ?? .idleLibraryCrawl
-                if lhs != rhs { return lhs < rhs }
-                return $0 > $1
-            } ?? priority.index(before: priority.endIndex)
-            let uid = priority.remove(at: bestIndex)
-            priorityByUID.removeValue(forKey: uid)
-            PhotoDiagnostics.shared.recordDiskPresenceCheckDuringPinch()
-            let diskHit = cache.has(uid)   // cheap existence stat; corrupt blobs refetch lazily on view (a per-uid decrypt here blocked the feed actor ~18 s at cold start, starving the visible decode)
-            diskPresence.set(uid, present: diskHit)
-            if !diskHit { out.append(uid) } else { prefetchDiskHit += 1 }
-        }
-        // Sequential background fill ONLY when the crawl isn't paused/disabled, there's no recent visible
-        // demand, and we're not in a post-429 backoff. The priority queue above is ALWAYS served — visible
-        // fetches are never gated here.
-        let now = clock()
-        let recentDemand = lastDemandAt.map { now.timeIntervalSince($0) < visibleQuietWindow } ?? false
-        let backingOff = crawlBackoffUntil.map { now < $0 } ?? false
-        guard !interactionActive, !prefetchPaused, prefetchEnabled, !recentDemand, !backingOff else { return out }
-        // BOUND the scan: with everything already on disk, this loop would otherwise walk the WHOLE library
-        // (20k+) in one synchronous pass on the feed actor (~900 ms+), starving the visible `warmDecoded` that
-        // shares this actor — the cold-start regression. Cap each call so the actor yields frequently; the worker
-        // simply resumes from `sequentialIndex` on the next call.
-        var scannedThisCall = 0
-        while out.count < batch, sequentialIndex < sequential.count, scannedThisCall < 128 {
-            scannedThisCall += 1
-            let uid = sequential[sequentialIndex]
-            sequentialIndex += 1
-            let diskHit = cache.has(uid)   // cheap existence stat; corrupt blobs refetch lazily on view
-            diskPresence.set(uid, present: diskHit)
-            if !diskHit && !out.contains(uid) {
-                out.append(uid)
-            } else {
-                prefetchDiskHit += 1
-            }
-        }
-        return out
-    }
-
-    // MARK: - Decoding
-
-    private func decode(_ data: Data, for uid: PhotoUID) -> NSImage? {
-        prefetchDecodeStarted += 1
-        decodeInFlight += 1
-        PhotoDiagnostics.shared.recordDecodeStarted(queueDepth: decodeInFlight)
-        let start = Date()
-        let image = MacThumbnailImageDecoder.decode(data, maxPixelSize: targetPixels)
-        let durationMs = Date().timeIntervalSince(start) * 1000
-        decodeInFlight = max(0, decodeInFlight - 1)
-        if let image {
-            prefetchDecodeCompleted += 1
-            PhotoDiagnostics.shared.recordDecodeCompleted(durationMs: durationMs, queueDepth: decodeInFlight)
-            return image.image
-        }
-        PhotoDiagnostics.shared.increment("thumb.diskDecodeFailed")
-        PhotoDiagnostics.shared.recordDecodeFailed(queueDepth: decodeInFlight)
-        recordError("decode failed for \(Self.key(uid))")
-        return nil
-    }
-
-    /// Keeps the most recent cache errors for the Developer/Cache status surface (last one shown).
-    private func recordError(_ message: String) {
-        lastErrors.append(message)
-        if lastErrors.count > 10 { lastErrors.removeFirst(lastErrors.count - 10) }
-    }
-
-    private func emitPrefetchSummary() {
-        let pausedReason: String
-        if !prefetchEnabled {
-            pausedReason = "disabled"
-        } else if prefetchPaused {
-            pausedReason = "manual"
-        } else if interactionActive {
-            pausedReason = "interaction"
-        } else {
-            pausedReason = "none"
-        }
-        PhotoDiagnostics.shared.emit("ThumbPrefetch", [
-            "enabled": "\(prefetchEnabled)",
-            "queueDepth": "\(priority.count + max(0, sequential.count - sequentialIndex))",
-            "activeJobs": "\(downloadInFlight + decodeInFlight)",
-            "completed": "\(prefetchCompleted)",
-            "failed": "\(prefetchFailed)",
-            "diskHit": "\(prefetchDiskHit)",
-            "downloadStarted": "\(prefetchDownloadStarted)",
-            "downloadCompleted": "\(prefetchDownloadCompleted)",
-            "decodeStarted": "\(prefetchDecodeStarted)",
-            "decodeCompleted": "\(prefetchDecodeCompleted)",
-            "pausedReason": pausedReason,
-        ], throttleSeconds: 1.0)
+    private func image(for decoded: DecodedThumbnail, uid: PhotoUID) -> NSImage {
+        let key = Self.key(uid)
+        if let image = imageWrappers.object(forKey: key) { return image }
+        let image = MacThumbnailImageDecoder.image(from: decoded)
+        imageWrappers.setObject(image, forKey: key, cost: decoded.decodedCostBytes)
+        return image
     }
 
     private static func key(_ uid: PhotoUID) -> NSString {
         "\(uid.volumeID)~\(uid.nodeID)" as NSString
-    }
-
-    private static func checkpointKey(for uids: [PhotoUID]) -> String {
-        let first = uids.first.map { "\($0.volumeID)~\($0.nodeID)" } ?? "empty"
-        let last = uids.last.map { "\($0.volumeID)~\($0.nodeID)" } ?? "empty"
-        let raw = "\(uids.count)-\(first)-\(last)"
-        let cleaned = raw.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? String($0) : "_" }.joined()
-        return "ProtonPhotos.thumbnailPrefetch." + String(cleaned.prefix(180))
-    }
-}
-
-/// Carries a decoded thumbnail back from an off-actor decode task. `@unchecked Sendable` because `NSImage`
-/// isn't `Sendable`, yet the image is freshly created inside the decode task and only read after (never shared
-/// mutable state) — the same reason the `decoded` NSCache is `nonisolated(unsafe)`.
-private struct DecodedTile: @unchecked Sendable {
-    let uid: PhotoUID
-    let decoded: MacDecodedThumbnail?
-    let diskHadData: Bool
-    let durationMs: Double
-}
-
-/// Thread-safe holder for collecting a thumbnail from the SDK's `@Sendable` callback.
-private final class ByteBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var bytes: Data?
-    func set(_ data: Data) { lock.withLock { bytes = data } }
-    var value: Data? { lock.withLock { bytes } }
-}
-
-private final class IntBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var count = 0
-    func increment() { lock.withLock { count += 1 } }
-    var value: Int { lock.withLock { count } }
-}
-
-private final class DiskPresenceCache: @unchecked Sendable {
-    private let lock = NSLock()
-    private var values: [String: Bool] = [:]
-
-    func set(_ uid: PhotoUID, present: Bool) {
-        lock.withLock { values[Self.key(uid)] = present }
-    }
-
-    func value(for uid: PhotoUID) -> Bool? {
-        lock.withLock { values[Self.key(uid)] }
-    }
-
-    private static func key(_ uid: PhotoUID) -> String {
-        "\(uid.volumeID)~\(uid.nodeID)"
     }
 }

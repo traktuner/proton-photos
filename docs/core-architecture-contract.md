@@ -146,7 +146,7 @@ Separate the platform-neutral byte-caching layer in `MediaCache` from platform-s
 
 `MediaByteCache` is the universal byte-cache package boundary. It may depend on `PhotosCore`, `Foundation`, `CryptoKit`, and `Security`; it must not import UI, view-hosting, graphics-decoding, or rendering frameworks such as `AppKit`, `UIKit`, `SwiftUI`, `AVKit`, `MetalKit`, or `ImageIO`.
 
-`MediaByteCache` owns encrypted on-disk blob storage, plaintext in-process byte caching, cache-key storage protocols, authenticated blob encryption, cheap disk-presence checks, usable/decryptable disk probes, cache clearing, stats, and byte-cap eviction. It must not expose decoded image types such as `NSImage`, `UIImage`, or `CGImage`.
+`MediaByteCache` owns encrypted on-disk blob storage, plaintext in-process byte caching, cache-key storage protocols, authenticated blob encryption, cheap disk-presence checks, usable/decryptable disk probes, cache clearing, stats, and byte-cap eviction. It must not expose decoded image types such as `NSImage`, `UIImage`, or `CGImage`, and it must not choose platform hardware policy such as RAM or CPU sizing. Platform adapters inject byte-cache budgets through `ThumbnailCacheConfiguration`.
 
 `MediaCache` remains the macOS thumbnail/feed layer for now. It depends on `MediaByteCache` and re-exports the existing byte-cache names as compatibility aliases so current macOS callsites can keep using `ThumbnailCache` through `MediaCache` while future iOS/iPadOS code can import `MediaByteCache` directly.
 
@@ -159,3 +159,13 @@ The performance contract from the existing feed remains unchanged: background co
 `MediaCache` remains the macOS feed/adapter layer. It adapts `DecodedThumbnail` to the current macOS `NSImage` API through `MacThumbnailImageDecoder`, so existing Timeline, Viewer, and Filmstrip callsites remain source-compatible while the actual ImageIO downsample implementation is universal and buildable for iOS/iPadOS.
 
 `ThumbnailFeed` must not own ImageIO primitives directly. It may continue to own queueing, priority, diagnostics, and macOS decoded-image RAM caching until the feed API is split, but decoder implementation changes belong in `MediaDecodingCore` plus thin platform adapters.
+
+#### Phase 2.3 — MediaFeedCore target
+
+`MediaFeedCore` is the universal thumbnail-feed pipeline. It may depend on `PhotosCore`, `MediaByteCache`, `MediaDecodingCore`, and `Foundation`; it must not import platform UI frameworks, expose platform image wrappers, or make direct hardware-policy decisions such as physical-RAM or CPU-count sizing. Platform targets inject those decisions through `ThumbnailFeedCoreConfiguration`.
+
+`MediaFeedCore` owns platform-independent queueing, priority ordering, disk/network decisions, bounded disk-to-RAM decode warmup, background crawl state, adaptive download concurrency, decoded `CGImage` residency, and feed diagnostics. Its decoded image cache stores `DecodedThumbnail`, not `NSImage` or `UIImage`.
+
+`MediaCache.ThumbnailFeed` is now the macOS adapter. It keeps the existing macOS `NSImage` API, records aspect ratios, and chooses macOS-specific RAM/CPU budgets before constructing `ThumbnailFeedCore`. Future iOS/iPadOS adapters must use the same core and provide their own conservative platform budgets, so a feed bug is fixed once in `MediaFeedCore` and platform policy remains outside Core.
+
+The performance contract from the existing Metal grid is preserved and tightened: render/upload paths should read `CGImage` directly from the shared decoded core cache where possible. Platform image wrapper creation (`NSImage`, future `UIImage`) must stay in platform adapters and must not be required for Metal upload eligibility checks.

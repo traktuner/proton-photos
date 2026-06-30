@@ -30,6 +30,7 @@ let package = Package(
         .library(name: "ProtonAuth", targets: ["ProtonAuth"]),
         .library(name: "MediaByteCache", targets: ["MediaByteCache"]),
         .library(name: "MediaDecodingCore", targets: ["MediaDecodingCore"]),
+        .library(name: "MediaFeedCore", targets: ["MediaFeedCore"]),
         .library(name: "MediaCache", targets: ["MediaCache"]),
         .library(name: "TimelineFeature", targets: ["TimelineFeature"]),
         .library(name: "PhotoViewerFeature", targets: ["PhotoViewerFeature"]),
@@ -54,7 +55,9 @@ let package = Package(
         .testTarget(name: "MediaByteCacheTests", dependencies: ["MediaByteCache", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaDecodingCore", swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "MediaDecodingCoreTests", dependencies: ["MediaDecodingCore"], swiftSettings: disableDynamicActorIsolation),
-        .target(name: "MediaCache", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MediaFeedCore", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "MediaFeedCoreTests", dependencies: ["MediaFeedCore", "PhotosCore", "MediaByteCache", "MediaDecodingCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MediaCache", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "MediaCacheTests", dependencies: ["MediaCache", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",

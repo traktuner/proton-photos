@@ -73,11 +73,10 @@ final class RealMetalGridDataSource: MetalGridDataSource {
 
     func isVideo(_ uid: PhotoUID) -> Bool { videoUIDs.contains(uid) }
 
-    func hasImage(for uid: PhotoUID) -> Bool { feed.memoryImage(for: uid) != nil }
+    func hasImage(for uid: PhotoUID) -> Bool { feed.memoryCGImage(for: uid) != nil }
 
     func image(for uid: PhotoUID) -> CGImage? {
-        guard let nsImage = feed.memoryImage(for: uid) else { return nil }
-        return nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        feed.memoryCGImage(for: uid)
     }
 
     /// Anticipatory decode of an entire target set into RAM, independent of the per-frame `warm`/`pumpWarm`
@@ -122,7 +121,7 @@ final class RealMetalGridDataSource: MetalGridDataSource {
                 if self.networkDebouncer.hasPendingUnflushed() { self.scheduleSettleCheck() }
                 return
             }
-            let missing = settled.filter { self.feed.memoryImage(for: $0) == nil }
+            let missing = settled.filter { self.feed.memoryCGImage(for: $0) == nil }
             guard !missing.isEmpty else { return }
             Task { [feed = self.feed] in
                 for uid in missing { await feed.requestPriority(uid, priority: .visibleNow) }

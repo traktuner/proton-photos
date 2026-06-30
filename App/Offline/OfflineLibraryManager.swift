@@ -18,13 +18,25 @@ final class OfflineLibraryManager {
 
     /// Disk thumbnail cache (decoded grid previews) — shared with `MainView`'s `ThumbnailFeed`. Encrypted
     /// per-account (AES-GCM); `configure(session:)` installs a key derived from the restored Proton session.
-    let cache = ThumbnailCache(namespace: "thumbnails", derivative: "thumbnail")
+    let cache = ThumbnailCache(
+        namespace: "thumbnails",
+        derivative: "thumbnail",
+        configuration: MacMediaCachePolicy.thumbnailByteCacheConfiguration()
+    )
     /// Larger display-preview derivatives, persisted when the viewer fetches them. Also encrypted.
-    let previewCache = ThumbnailCache(namespace: "previews", derivative: "preview")
+    let previewCache = ThumbnailCache(
+        namespace: "previews",
+        derivative: "preview",
+        configuration: MacMediaCachePolicy.thumbnailByteCacheConfiguration()
+    )
     /// Full-resolution ORIGINALS viewed in the photo viewer, persisted (encrypted) when the offline library is
     /// ON, bounded by an LRU size cap (see `originalsCapBytes`). Makes reopening a photo instant even after a
     /// relaunch / while offline — the bug this fixes was that originals lived only in a per-process RAM cache.
-    let originalsCache = ThumbnailCache(namespace: "originals", derivative: "original")
+    let originalsCache = ThumbnailCache(
+        namespace: "originals",
+        derivative: "original",
+        configuration: MacMediaCachePolicy.thumbnailByteCacheConfiguration()
+    )
 
     /// Whole-library GPS index for the Map view. GPS is sensitive PII, so it is encrypted at rest
     /// (`PhotoLocationStore`, same per-account key as the media caches) and decrypted only into the in-memory
