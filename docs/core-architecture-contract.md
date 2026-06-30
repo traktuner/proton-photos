@@ -19,7 +19,7 @@ Every agent working on Proton Photos architecture MUST follow this contract befo
 ### Core
 
 - MUST compile for macOS 26+, iOS 26+, and iPadOS 26+.
-- MUST NOT import AppKit, UIKit, SwiftUI, AVKit, MetalKit view-hosting UI, NSImage, UIImage, NSView, UIView, NSWorkspace, NSOpenPanel, UIApplication, or NSApplication.
+- MUST NOT import AppKit, UIKit, SwiftUI, MapKit view-hosting UI, AVKit, MetalKit view-hosting UI, NSImage, UIImage, NSView, UIView, NSWorkspace, NSOpenPanel, UIApplication, or NSApplication.
 - MAY use Foundation, CoreGraphics value types, CryptoKit, Security, ImageIO only when available cross-platform and guarded by tests.
 - Owns domain models, provider protocols, pure algorithms, byte caches, cryptographic storage primitives, metadata models, diagnostics event schemas, and performance-neutral utilities.
 - MUST prefer value types, Sendable protocols, actor-isolated services, dependency injection, clocks, and explicit stores over global mutable state.
@@ -51,6 +51,8 @@ Every agent working on Proton Photos architecture MUST follow this contract befo
 
 The `PhotosCore` target is the universal Core foundation. Its platform purity is enforced by `PhotosCorePlatformPurityTests` in `Packages/ProtonPhotosKit/Tests/PhotosCoreTests/PhotosCorePlatformPurityTests.swift`.
 
+All universal Core targets are additionally covered by the shared `CoreArchitectureGateTests` in `Packages/ProtonPhotosKit/Tests/PhotosCoreTests/CoreArchitectureGateTests.swift`. This shared gate is the source of truth for the current universal Core target list, per-target import allowlists, one-way Core dependency rules, and platform UI / hardware-policy token bans.
+
 ### Allowed Frameworks in Core
 
 | Framework | Status | Notes |
@@ -69,12 +71,13 @@ These imports would drag in platform UI / view-hosting concerns and break the un
 - `AppKit`
 - `UIKit`
 - `SwiftUI`
+- `MapKit`
 - `AVKit`
 - `MetalKit`
 
 ### Forbidden Tokens in Core
 
-These types must not appear anywhere in `Sources/PhotosCore`:
+These types must not appear anywhere in universal Core sources:
 
 - `NSImage`
 - `UIImage`
@@ -87,12 +90,14 @@ These types must not appear anywhere in `Sources/PhotosCore`:
 
 ### Enforcement
 
-The `PhotosCorePlatformPurityTests` scan every `.swift` file under `Sources/PhotosCore/` at test time and fail loudly if:
+The target-local purity tests scan their corresponding source trees at test time. `CoreArchitectureGateTests` repeats the contract centrally for all universal Core targets and fails loudly if:
 1. A forbidden framework is imported.
 2. A forbidden token appears in any source file.
 3. An import outside the allowed-framework allowlist is introduced.
+4. A universal Core target depends on an adapter, feature, or UI target.
+5. A universal Core target is not published as a matching library product.
 
-A new import requires updating `PhotosCorePlatformPurityTests.allowedFrameworkImports` AND confirming the framework compiles on macOS 26+, iOS 26+, and iPadOS 26+.
+A new Core import requires updating the relevant target-local allowlist AND `CoreArchitectureGateTests`, then confirming the framework compiles on macOS 26+, iOS 26+, and iPadOS 26+.
 
 ## Observations
 
@@ -175,3 +180,11 @@ The performance contract from the existing Metal grid is preserved and tightened
 `MediaLocationCore` is the universal location-index boundary. It may depend on `PhotosCore`, `Foundation`, `CryptoKit`, and `Observation`; it must not import platform UI frameworks, MapKit view-hosting code, platform image/view types, or direct hardware-policy sizing.
 
 `MediaLocationCore` owns the encrypted GPS index store, in-memory coordinate index, and low-priority GPS crawl scheduler. Platform map UI belongs outside this target: macOS uses `MapFeature`/MapKit/AppKit today, while future iOS/iPadOS map UI must consume the same `PhotoLocationIndex`, `PhotoLocationStore`, and `LocationCrawl`.
+
+#### Phase 2.5 — Universal Core regression gate
+
+`CoreArchitectureGateTests` is the shared no-regression gate for the current universal Core set: `PhotosCore`, `MediaByteCache`, `MediaDecodingCore`, `MediaFeedCore`, and `MediaLocationCore`. New reusable Core targets must be added to this gate before they are treated as universal Core.
+
+The executable local gate is `scripts/verify-universal-core.sh`. It runs the shared architecture tests and builds every current universal Core target for `generic/platform=iOS` and `generic/platform=macOS`. Because SwiftPM models iPadOS through the iOS platform declaration, this iOS-family build is the package-level iPadOS compatibility check until separate iPad UI targets exist.
+
+Agents MUST run `scripts/verify-universal-core.sh` before committing a change that modifies universal Core boundaries, package target dependencies, Core imports, platform purity rules, or cross-platform cache/feed/location behavior. If the gate cannot run, the final report must name the exact command, failure, and residual risk.
