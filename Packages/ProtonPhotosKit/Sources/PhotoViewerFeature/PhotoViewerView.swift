@@ -126,6 +126,7 @@ public struct PhotoViewerView: View {
     /// body OFF a GeometryReader child value is what avoids the Swift-6 `swift_task_isCurrentExecutor`
     /// false-positive SIGSEGV (#76804) on SwiftUI's `syncMainIfReferences` update path — see PhotoViewerModel.
     @State private var containerWidth: CGFloat = 0
+    private let mediaTransition = ViewerMediaTransitionStyle.standard
 
     /// Measured size of the media (content) area, used to place the LIVE badge on the displayed image's
     /// top-left CORNER — the image is aspect-fit (letterboxed), so a portrait photo in a wide window must show
@@ -243,6 +244,9 @@ public struct PhotoViewerView: View {
             // LIVE badge or force-click the photo to play the motion.
             ZStack {
                 ZoomableImageView(image: image,                      // pinch-zoom + interactive pinch-out-to-dismiss
+                                  itemIdentity: model.current.uid.nodeID,
+                                  isSharp: model.isSharp,
+                                  transitionStyle: mediaTransition,
                                   isDismissing: isDismissing,
                                   onPinchDismissBegan: onPinchDismissBegan,
                                   onPinchDismissChanged: onPinchDismissChanged,
@@ -251,7 +255,7 @@ public struct PhotoViewerView: View {
                 if model.current.isLivePhoto, let motion = model.motionPlayer {
                     MotionPlayerLayerView(player: motion)
                         .opacity(model.isMotionPlaying ? 1 : 0)
-                        .animation(.easeInOut(duration: 0.18), value: model.isMotionPlaying)
+                        .animation(mediaTransition.opacityAnimation, value: model.isMotionPlaying)
                         .allowsHitTesting(false)
                 }
             }
@@ -259,8 +263,8 @@ public struct PhotoViewerView: View {
             // opacity crossfade above, masks the photo→video→photo seam. On the whole ZStack so the still and
             // the motion scale as one (the viewer frame is `.clipped()`, so the tiny overflow is cropped, like
             // Apple). Kept small per the Live Photo feel.
-            .scaleEffect(model.isMotionPlaying ? 1.04 : 1.0)
-            .animation(.easeInOut(duration: 0.3), value: model.isMotionPlaying)
+            .scaleEffect(model.isMotionPlaying ? mediaTransition.liveMotionScale : 1.0)
+            .animation(mediaTransition.scaleAnimation, value: model.isMotionPlaying)
         }
     }
 

@@ -6,6 +6,13 @@ import AppKit
 /// A pinch-OUT while already at fit-scale flies the photo closed (live shrink + fade feedback).
 struct ZoomableImageView: NSViewRepresentable {
     let image: NSImage
+    /// Stable identity of the photo being shown. Image changes for the same identity are quality upgrades
+    /// (thumbnail/preview → original); identity changes are navigation and must not crossfade old/new photos.
+    var itemIdentity: String? = nil
+    /// True once the full original is displayed. A false→true transition for the same `itemIdentity` gets the
+    /// shared viewer media reveal, instead of the old hard swap.
+    var isSharp: Bool = false
+    var transitionStyle: ViewerMediaTransitionStyle = .standard
     /// True while the host's zoom overlay is rendering the live dismiss: hide THIS image so it doesn't double the
     /// overlay's photo, but keep the scroll view itself hit-testable (alpha 1) so the pinch keeps delivering here.
     var isDismissing: Bool = false
@@ -41,6 +48,8 @@ struct ZoomableImageView: NSViewRepresentable {
         scrollView.documentView = imageView
 
         context.coordinator.imageView = imageView
+        context.coordinator.itemIdentity = itemIdentity
+        context.coordinator.isSharp = isSharp
         return scrollView
     }
 
@@ -53,16 +62,62 @@ struct ZoomableImageView: NSViewRepresentable {
         guard let imageView = context.coordinator.imageView else { return }
         imageView.alphaValue = isDismissing ? 0 : 1   // hide only the IMAGE; the scroll view stays hit-testable
         if imageView.image !== image {
-            imageView.image = image
+            let sameItem = context.coordinator.itemIdentity == itemIdentity
+            let revealsOriginal = sameItem && !context.coordinator.isSharp && isSharp && !isDismissing
+            if revealsOriginal {
+                imageView.crossfadeToImage(image, style: transitionStyle)
+            } else {
+                imageView.image = image
+            }
             scrollView.magnification = 1     // reset zoom when the photo changes
             imageView.frame = scrollView.bounds
         }
+        context.coordinator.itemIdentity = itemIdentity
+        context.coordinator.isSharp = isSharp
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     final class Coordinator {
         weak var imageView: NSImageView?
+        var itemIdentity: String?
+        var isSharp = false
+    }
+}
+
+private extension NSImageView {
+    static let revealOverlayIdentifier = NSUserInterfaceItemIdentifier("PhotoViewerHighResolutionRevealOverlay")
+
+    /// Crossfades a same-photo quality upgrade without rebuilding the scroll view, preserving the viewer's
+    /// native pinch/pan surface and keeping the transition tuning shared with the Live Photo motion blend.
+    func crossfadeToImage(_ newImage: NSImage, style: ViewerMediaTransitionStyle) {
+        guard let oldImage = image else {
+            image = newImage
+            return
+        }
+
+        subviews
+            .filter { $0.identifier == Self.revealOverlayIdentifier }
+            .forEach { $0.removeFromSuperview() }
+
+        let outgoing = NSImageView(frame: bounds)
+        outgoing.identifier = Self.revealOverlayIdentifier
+        outgoing.imageScaling = imageScaling
+        outgoing.imageAlignment = imageAlignment
+        outgoing.image = oldImage
+        outgoing.alphaValue = 1
+        outgoing.autoresizingMask = [.width, .height]
+
+        image = newImage
+        addSubview(outgoing)
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = style.opacityDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            outgoing.animator().alphaValue = 0
+        } completionHandler: {
+            Task { @MainActor in outgoing.removeFromSuperview() }
+        }
     }
 }
 
