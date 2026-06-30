@@ -927,7 +927,12 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let plan = engine.framePlan(level: level, viewportSize: CGSize(width: toLayoutW, height: H), scrollOffset: CGPoint(x: 0, y: scroll), overscan: overscan, columnPhase: phase)
         let target = renderTranslate(plan.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) })
         presentationSnapshotSlots = []
-        guard Self.maxIndexedRectDelta(source: source, target: target) > 1.5 else { return (scroll, false) }
+        let startCols = engine.resolvedMetrics(level: level, width: startLayoutW).columns
+        let delta = Self.maxIndexedRectDelta(source: source, target: target)
+        guard plan.columns != startCols, delta > 1.5 else {
+            resizeSettleActive = false
+            return (scroll, false)
+        }
         resizeSettleSource = source
         resizeSettleTarget = target
         resizeSettleProgress = 0

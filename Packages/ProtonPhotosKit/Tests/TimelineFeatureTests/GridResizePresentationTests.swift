@@ -117,6 +117,7 @@ private final class PresentationTestDataSource: MetalGridDataSource {
 
         let result = coordinator.endSidebarResize()
         #expect(result.scroll >= 0)
+        #expect(!result.animating, "fixed-column sidebar width changes must not arm a release morph")
         #expect(!coordinator.isSidebarResizing)
         #expect(coordinator.sidebarObstructionInset == 280)
     }
@@ -308,7 +309,8 @@ private final class PresentationTestDataSource: MetalGridDataSource {
         let coord = src("MetalGridCoordinator.swift")
         #expect(coord.contains("func beginResizeSettle(targetScrollY:")
                 && coord.contains("plan.columns != startCols")
-                && coord.contains("maxIndexedRectDelta(source: source, target: target) > 1.5"),
+                && coord.contains("let delta = Self.maxIndexedRectDelta(source: source, target: target)")
+                && coord.contains("delta > 1.5"),
                 "begin must arm only when the release layout changed columns and source differs from target")
         #expect(coord.contains("if resizeSettleActive {") && coord.contains("drawResizeSettle(in: view"), "draw() must render the settle morph")
         let host = src("MetalGridScrollHost.swift")
@@ -391,8 +393,9 @@ private final class PresentationTestDataSource: MetalGridDataSource {
                 "the sidebar scale must be right-anchored")
         #expect(coord.contains("if presentationSidebarActive {") && coord.contains("drawSidebarResize(in: view"), "draw() renders the sidebar scale")
         #expect(coord.contains("sidebarObstructionInset = presentationSidebarToEventInset"), "commit the sidebar WIDTH (engine re-adds the gap), not the layout inset")
-        #expect(coord.contains("func endSidebarResize()") && coord.contains("maxIndexedRectDelta(source: source, target: target) > 1.5"),
-                "end commits and keeps the reserved release morph guarded by real source/target movement")
+        #expect(coord.contains("func endSidebarResize()") && coord.contains("plan.columns != startCols")
+                && coord.contains("maxIndexedRectDelta(source: source, target: target)"),
+                "end commits and keeps the reserved release morph guarded by a real column-count change")
         #expect(coord.contains("presentationSidebarBottomPinned ? bottomAnchoredScroll() : centerAnchoredScroll()"),
                 "the sidebar settle must bottom-anchor only at newest; middle-of-timeline toggles stay centre-anchored")
         #expect(coord.contains("if presentationSidebarActive { cancelSidebarResize() }"), "a new toggle / window resize supersedes the in-flight sidebar scale")
