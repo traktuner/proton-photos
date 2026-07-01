@@ -1,6 +1,5 @@
 import Foundation
 import AVFoundation
-import SQLite3
 import PhotosCore
 import ProtonAuth
 import ProtonDriveSDK
@@ -17,25 +16,40 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     private let rateLimit = RateLimitGate()
     private var photosRoot: SDKNodeUid?
     private var photosShareID: String?
-    /// SQLite-backed timeline cache (faster cold-start than JSON at 20k+; sets up for windowing).
-    private let timelineStore: PhotoTimelineStore?
+    /// App-owned SQLite timeline metadata store (`library-v1.sqlite`, PhotosCore). The bridge is
+    /// the macOS adapter: it chooses the path + desktop SQLite tuning and injects both; schema and
+    /// save/load logic live in Core.
+    private let timelineStore: TimelineMetadataStore?
     /// Drive key-derivation + block decryption for video streaming (built once at sign-in).
     private let crypto: DriveCrypto
     private var streamSource: PhotoVideoStreamSource?
 
-    /// The SDK cache directory (`Caches/ProtonPhotos/sdk`) holding the entity + timeline metadata
-    /// SQLite stores (and the encrypted account-data cache). Single source of truth for the path.
+    /// The SDK cache directory (`Caches/ProtonPhotos/sdk`) holding the SDK's entity SQLite store
+    /// (and the encrypted account-data cache). The app-owned timeline metadata store lives in
+    /// `LibraryDatabaseLocation` (Application Support) since the DB v1 reset; only its legacy
+    /// `timeline-v3` predecessor is still purged from here. Single source of truth for the path.
     static var sdkCacheDirectory: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("ProtonPhotos/sdk", isDirectory: true)
     }
 
+    /// macOS desktop SQLite tuning for the app-owned library DB — adapter-injected, mirroring the
+    /// `GridTextureBudget` pattern. 256MB mmap + 8MiB page cache are fine on the Mac; iOS/iPadOS
+    /// adapters must build their own conservative policy instead of inheriting these numbers.
+    private static let libraryDatabasePolicy = LibraryDatabasePolicy(
+        mmapBytes: 268_435_456,
+        cacheSizeKiB: 8_192,
+        busyTimeoutMs: 3_000
+    )
+
     /// Full sign-out / master-reset: erase the SDK metadata SQLite stores for `uid` (security
-    /// follow-up #2 — non-secret node metadata that must not survive sign-out). The encrypted
-    /// caches, video blocks, and account-data cache are erased by their own paths; this covers the
-    /// remaining account-tied data at rest. Wired from `AppModel.signOut`.
+    /// follow-up #2 — non-secret node metadata that must not survive sign-out) AND the app-owned
+    /// `library-v1.sqlite` account directory. The encrypted caches, video blocks, and account-data
+    /// cache are erased by their own paths; this covers the remaining account-tied data at rest.
+    /// Wired from `AppModel.signOut`.
     static func purgeMetadata(uid: String) {
         SDKMetadataStore.purgeMetadata(in: sdkCacheDirectory, uid: uid)
+        LibraryDatabaseLocation.purgeAccountData(uid: uid)
     }
 
     init(session: ProtonSession, store: SessionKeychainStore) async throws {
@@ -68,9 +82,16 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         for name in ["secrets.sqlite", "secrets.sqlite-wal", "secrets.sqlite-shm"] {
             try? FileManager.default.removeItem(at: caches.appendingPathComponent(name))
         }
-        // Persisted timeline (per account) for instant startup — now SQLite (v3) for a faster cold
-        // start at 20k+ photos than decoding a multi-MB JSON blob.
-        self.timelineStore = PhotoTimelineStore(url: caches.appendingPathComponent("timeline-v3-\(session.uid).sqlite"))
+        // Persisted timeline (per account) for instant startup. DB v1 reset: the store lives in
+        // PhotosCore at Application Support/ProtonPhotos/<uid>/library-v1.sqlite (backup-excluded,
+        // re-derivable). The superseded Caches-dir timeline-v3 store is deleted best-effort — no
+        // data migration; the next refresh repopulates the new store.
+        let libraryDirectory = LibraryDatabaseLocation.prepareAccountDirectory(uid: session.uid)
+        self.timelineStore = TimelineMetadataStore(
+            url: libraryDirectory.appendingPathComponent(LibraryDatabaseLocation.databaseFileName),
+            policy: Self.libraryDatabasePolicy
+        )
+        SDKMetadataStore.purgeLegacyTimelineStore(in: caches, uid: session.uid)
 
         // SECURITY: the SDK secret cache holds DECRYPTED Proton key material (share/node/content keys). The
         // SDK writes it UNENCRYPTED unless a `secretCacheEncryptionKey` is supplied — and the ProtonPhotos
@@ -165,7 +186,13 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     }
 
     private func writeTimelineCache(_ sections: [TimelineSection]) {
-        timelineStore?.save(sections.flatMap(\.items))
+        guard let store = timelineStore else { return }
+        let result = store.save(sections.flatMap(\.items))
+        if result.skippedUnchanged {
+            DebugLog.log("timeline: cache unchanged — save skipped (digest match)")
+        } else {
+            DebugLog.log("timeline: cache saved gen=\(result.generation) upserts=\(result.upsertedRows) swept=\(result.sweptRows) ok=\(result.succeeded)")
+        }
     }
 
     // MARK: - LibraryStatsProvider
@@ -298,7 +325,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                                      mediaType: isVideo ? "video/quicktime" : "image/jpeg",
                                      tags: isVideo ? [.videos] : [])
                 }
-                .sorted { $0.captureTime < $1.captureTime }
+                .sorted(by: TimelineOrder.areInIncreasingOrder)
             return [TimelineSection(id: "trash", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]
         case .map:
             return []   // the Map route renders the map, not a timeline
@@ -337,7 +364,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             .map { e -> PhotoItem in
                 photoItem(from: e, volumeID: volumeID, burstMemberIDs: burstMemberIDs[e.linkID] ?? [])
             }
-            .sorted { $0.captureTime < $1.captureTime }
+            .sorted(by: TimelineOrder.areInIncreasingOrder)
         return [TimelineSection(id: "filtered", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]
     }
 
@@ -437,8 +464,10 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                                  tags: tags,
                                  burstMemberIDs: burstMembers) }
             // Ascending (oldest first): oldest at the top, newest at the BOTTOM — like Apple Photos.
-            // The grid opens scrolled to the bottom so the newest photos are shown first.
-            .sorted { $0.captureTime < $1.captureTime }
+            // The grid opens scrolled to the bottom so the newest photos are shown first. The
+            // comparator is the canonical (t, vol, node) timeline order, matching the DB index, so
+            // equal-second captures keep a stable position across refreshes and relaunches.
+            .sorted(by: TimelineOrder.areInIncreasingOrder)
 
         // ONE continuous section — no per-day/month breaks. Apple's "All Photos" is a single
         // uninterrupted justified run, which also keeps pinch-zoom smooth (no divider lines to
@@ -492,143 +521,6 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                 )
             }
         return BurstGroupResolver.memberLookup(candidates: candidates)
-    }
-}
-
-/// SQLite-backed timeline cache. One row per photo (the lightweight metadata we already hold);
-/// loading is an indexed ordered scan, which cold-starts faster than decoding a multi-MB JSON blob
-/// and is the foundation for windowed loading later. Single-threaded (owned by the bridge actor).
-final class PhotoTimelineStore {
-    private var db: OpaquePointer?
-    private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)   // SQLITE_TRANSIENT
-
-    init?(url: URL) {
-        let setupStart = Date()
-        guard sqlite3_open(url.path, &db) == SQLITE_OK else { sqlite3_close(db); return nil }
-        sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nil, nil, nil)
-        sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", nil, nil, nil)
-        sqlite3_exec(db, "PRAGMA busy_timeout=3000;", nil, nil, nil)
-        sqlite3_exec(db, "PRAGMA cache_size=-8192;", nil, nil, nil)
-        sqlite3_exec(db, "PRAGMA mmap_size=268435456;", nil, nil, nil)
-        let create = """
-        CREATE TABLE IF NOT EXISTS photos(
-          node TEXT PRIMARY KEY, vol TEXT, t REAL, mime TEXT, live INTEGER, relvid TEXT,
-          tags TEXT DEFAULT '', burst TEXT DEFAULT ''
-        );
-        """
-        guard sqlite3_exec(db, create, nil, nil, nil) == SQLITE_OK else { return nil }
-        if !Self.columnExists(db, table: "photos", column: "tags") {
-            sqlite3_exec(db, "ALTER TABLE photos ADD COLUMN tags TEXT DEFAULT '';", nil, nil, nil)
-        }
-        if !Self.columnExists(db, table: "photos", column: "burst") {
-            sqlite3_exec(db, "ALTER TABLE photos ADD COLUMN burst TEXT DEFAULT '';", nil, nil, nil)
-        }
-        sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_photos_t ON photos(t ASC);", nil, nil, nil)
-        sqlite3_exec(db, "CREATE INDEX IF NOT EXISTS idx_photos_vol_node ON photos(vol, node);", nil, nil, nil)
-        PhotoDiagnostics.shared.recordDBQuery(
-            queryName: "timeline.sqlite.setup",
-            durationMs: Date().timeIntervalSince(setupStart) * 1000,
-            rowsReturned: 0
-        )
-    }
-
-    deinit { sqlite3_close(db) }
-
-    /// Cheap indexed count for the cache-status surface.
-    func count() -> Int {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM photos;", -1, &stmt, nil) == SQLITE_OK else { return 0 }
-        defer { sqlite3_finalize(stmt) }
-        return sqlite3_step(stmt) == SQLITE_ROW ? Int(sqlite3_column_int(stmt, 0)) : 0
-    }
-
-    func load() -> [PhotoItem] {
-        let start = Date()
-        var stmt: OpaquePointer?
-        let sql = "SELECT node, vol, t, mime, live, relvid, tags, burst FROM photos ORDER BY t ASC;"
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [] }
-        defer { sqlite3_finalize(stmt) }
-        var items: [PhotoItem] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let nodeC = sqlite3_column_text(stmt, 0), let volC = sqlite3_column_text(stmt, 1) else { continue }
-            let mime = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? "image/jpeg"
-            let relvid = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
-            let tags = sqlite3_column_text(stmt, 6).map { Self.decodeTags(String(cString: $0)) } ?? []
-            let burst = sqlite3_column_text(stmt, 7).map { Self.decodeStringList(String(cString: $0)) } ?? []
-            items.append(PhotoItem(
-                uid: PhotoUID(volumeID: String(cString: volC), nodeID: String(cString: nodeC)),
-                captureTime: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 2)),
-                mediaType: mime,
-                isLivePhoto: sqlite3_column_int(stmt, 4) != 0,
-                relatedVideoID: relvid,
-                tags: tags,
-                burstMemberIDs: burst
-            ))
-        }
-        PhotoDiagnostics.shared.recordDBQuery(
-            queryName: "timeline.load.orderedByCaptureTime",
-            durationMs: Date().timeIntervalSince(start) * 1000,
-            rowsReturned: items.count
-        )
-        return items
-    }
-
-    func save(_ items: [PhotoItem]) {
-        let start = Date()
-        sqlite3_exec(db, "BEGIN;", nil, nil, nil)
-        sqlite3_exec(db, "DELETE FROM photos;", nil, nil, nil)
-        var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO photos(node,vol,t,mime,live,relvid,tags,burst) VALUES(?,?,?,?,?,?,?,?);", -1, &stmt, nil) == SQLITE_OK {
-            for item in items {
-                sqlite3_reset(stmt)
-                sqlite3_bind_text(stmt, 1, item.uid.nodeID, -1, transient)
-                sqlite3_bind_text(stmt, 2, item.uid.volumeID, -1, transient)
-                sqlite3_bind_double(stmt, 3, item.captureTime.timeIntervalSince1970)
-                sqlite3_bind_text(stmt, 4, item.mediaType, -1, transient)
-                sqlite3_bind_int(stmt, 5, item.isLivePhoto ? 1 : 0)
-                if let rel = item.relatedVideoID { sqlite3_bind_text(stmt, 6, rel, -1, transient) }
-                else { sqlite3_bind_null(stmt, 6) }
-                sqlite3_bind_text(stmt, 7, Self.encodeTags(item.tags), -1, transient)
-                sqlite3_bind_text(stmt, 8, Self.encodeStringList(item.burstMemberIDs), -1, transient)
-                sqlite3_step(stmt)
-            }
-            sqlite3_finalize(stmt)
-        }
-        sqlite3_exec(db, "COMMIT;", nil, nil, nil)
-        PhotoDiagnostics.shared.recordDBQuery(
-            queryName: "timeline.save.replaceAll",
-            durationMs: Date().timeIntervalSince(start) * 1000,
-            rowsReturned: items.count
-        )
-    }
-
-    private static func encodeTags(_ tags: Set<PhotoTag>) -> String {
-        tags.map(\.rawValue).sorted().map(String.init).joined(separator: ",")
-    }
-
-    private static func decodeTags(_ raw: String) -> Set<PhotoTag> {
-        Set(raw.split(separator: ",").compactMap { Int($0).flatMap(PhotoTag.init(rawValue:)) })
-    }
-
-    private static func encodeStringList(_ values: [String]) -> String {
-        values.joined(separator: "\n")
-    }
-
-    private static func decodeStringList(_ raw: String) -> [String] {
-        raw.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-    }
-
-    private static func columnExists(_ db: OpaquePointer?, table: String, column: String) -> Bool {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(table));", -1, &stmt, nil) == SQLITE_OK else {
-            return false
-        }
-        defer { sqlite3_finalize(stmt) }
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            guard let name = sqlite3_column_text(stmt, 1) else { continue }
-            if String(cString: name) == column { return true }
-        }
-        return false
     }
 }
 

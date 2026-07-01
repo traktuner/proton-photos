@@ -90,7 +90,8 @@ final class PhotosCorePlatformPurityTests: XCTestCase {
             \(violations.joined(separator: "\n"))
 
             Allowed imports: Foundation, CoreGraphics (value types), AVFoundation \
-            (cross-platform media). UI frameworks belong in Platform UI targets, not Core.
+            (cross-platform media), CryptoKit, SQLite3 (system SQLite C API). \
+            UI frameworks belong in Platform UI targets, not Core.
             """
         )
     }
@@ -146,12 +147,14 @@ final class PhotosCorePlatformPurityTests: XCTestCase {
     // MARK: Allowed-import sanity (positive signal, not a purity check)
 
     /// Confirms the only frameworks imported by PhotosCore are the cross-platform
-    /// allowlist: Foundation, CoreGraphics, AVFoundation. A new import here is a
-    /// review trigger — the change should be intentional and documented.
+    /// allowlist: Foundation, CoreGraphics, AVFoundation, CryptoKit, SQLite3. A new
+    /// import here is a review trigger — the change should be intentional and documented.
     private static let allowedFrameworkImports: Set<String> = [
         "Foundation",
         "CoreGraphics",
         "AVFoundation",
+        "CryptoKit",   // timeline save-skip digest (TimelineMetadataStore)
+        "SQLite3",     // system SQLite C API backing library-v1.sqlite (TimelineMetadataStore)
     ]
 
     func testImportedFrameworksAreOnAllowlist() throws {
@@ -178,9 +181,9 @@ final class PhotosCorePlatformPurityTests: XCTestCase {
             PhotosCore imports frameworks outside the cross-platform allowlist:
             \(unexpected.sorted().joined(separator: ", "))
 
-            Allowed: Foundation, CoreGraphics, AVFoundation. Adding a new import \
-            requires updating PhotosCorePlatformPurityTests.allowList AND confirming \
-            the framework compiles on macOS 26+, iOS 26+, and iPadOS 26+.
+            Allowed: Foundation, CoreGraphics, AVFoundation, CryptoKit, SQLite3. \
+            Adding a new import requires updating PhotosCorePlatformPurityTests.allowList \
+            AND confirming the framework compiles on macOS 26+, iOS 26+, and iPadOS 26+.
             """
         )
     }

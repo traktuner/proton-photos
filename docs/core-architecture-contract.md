@@ -185,6 +185,7 @@ All universal Core targets are additionally covered by the shared `CoreArchitect
 | `CryptoKit` | Permitted | Cross-platform. Use when needed. |
 | `Security` | Permitted | Cross-platform. Use when needed. |
 | `ImageIO` | Permitted | Cross-platform. Use when needed. |
+| `SQLite3` | Permitted | System SQLite C API — public, supported on macOS/iOS/iPadOS (Apple QA1809), not a UI framework. Used by `PhotosCore/TimelineMetadataStore.swift` (`library-v1.sqlite`). Platform tuning (mmap/cache PRAGMAs) must be injected via `LibraryDatabasePolicy`, never hard-coded desktop values. |
 
 ### Forbidden Imports in Core
 

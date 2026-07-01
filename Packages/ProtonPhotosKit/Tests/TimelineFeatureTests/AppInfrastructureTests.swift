@@ -1,6 +1,5 @@
 import Foundation
 import CoreGraphics
-import SQLite3
 import Testing
 import PhotosCore
 import MediaCache
@@ -201,31 +200,11 @@ struct AppInfrastructureTests {
     }
 
     // MARK: Deliverable (DB) — timeline query plan
-
-    /// Mirrors the schema + indexes of `DriveSDKBridge.PhotoTimelineStore`. Asserts the ordered
-    /// timeline scan rides the `t` index (no temp b-tree sort) and the UID lookup is an index search,
-    /// not a full table scan.
-    @Test func timelineQueryPlanUsesIndexes() throws {
-        var db: OpaquePointer?
-        #expect(sqlite3_open(":memory:", &db) == SQLITE_OK)
-        defer { sqlite3_close(db) }
-        exec(db, """
-        CREATE TABLE photos(
-          node TEXT PRIMARY KEY, vol TEXT, t REAL, mime TEXT, live INTEGER, relvid TEXT,
-          tags TEXT DEFAULT '', burst TEXT DEFAULT ''
-        );
-        """)
-        exec(db, "CREATE INDEX idx_photos_t ON photos(t ASC);")
-        exec(db, "CREATE INDEX idx_photos_vol_node ON photos(vol, node);")
-
-        let orderPlan = queryPlan(db, "SELECT node, vol, t, mime, live, relvid, tags, burst FROM photos ORDER BY t ASC;")
-        #expect(orderPlan.contains("idx_photos_t"))
-        #expect(!orderPlan.uppercased().contains("TEMP B-TREE"))   // index satisfies the ORDER BY
-
-        let lookupPlan = queryPlan(db, "SELECT t FROM photos WHERE vol = 'x' AND node = 'y';")
-        #expect(lookupPlan.uppercased().contains("SEARCH"))        // index search, not full SCAN
-        #expect(!lookupPlan.uppercased().contains("SCAN PHOTOS"))
-    }
+    //
+    // The timeline query-plan guard moved to PhotosCoreTests/TimelineMetadataStoreTests: the DB v1
+    // reset moved the store into PhotosCore (`TimelineMetadataStore`), and the guard there runs
+    // EXPLAIN QUERY PLAN against the REAL store's schema + load statement, so the schema mirror
+    // that used to live here (and could drift from production) is gone for good.
 
     @Test func aspectRegistryUsesInjectedRootAndPersistsThere() async throws {
         let namespace = "tests-aspects-\(UUID().uuidString)"
@@ -284,22 +263,6 @@ struct AppInfrastructureTests {
         #expect(stats.gpuDrawMs == 0.75)
     }
 
-    // MARK: - SQLite helpers
-
-    private func exec(_ db: OpaquePointer?, _ sql: String) {
-        #expect(sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK)
-    }
-
-    private func queryPlan(_ db: OpaquePointer?, _ sql: String) -> String {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "EXPLAIN QUERY PLAN " + sql, -1, &stmt, nil) == SQLITE_OK else { return "" }
-        defer { sqlite3_finalize(stmt) }
-        var lines: [String] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let detail = sqlite3_column_text(stmt, 3) { lines.append(String(cString: detail)) }
-        }
-        return lines.joined(separator: " | ")
-    }
 }
 
 private actor StubThumbnailLoader: ThumbnailBatchLoader {

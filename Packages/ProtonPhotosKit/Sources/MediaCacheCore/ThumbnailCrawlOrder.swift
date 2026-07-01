@@ -3,8 +3,8 @@ import PhotosCore
 
 /// The order in which the background thumbnail crawl walks the library.
 ///
-/// The timeline store delivers photos oldest-first (`PhotoTimelineStore.load()` is
-/// `ORDER BY t ASC`), and the grid bottom-pins to the newest photo — so the array the UI holds is
+/// The timeline store delivers photos oldest-first (`TimelineMetadataStore.load()` is
+/// `ORDER BY t, vol, node`), and the grid bottom-pins to the newest photo — so the array the UI holds is
 /// oldest → newest. Apple Photos (and this app) open scrolled to the BOTTOM, i.e. the newest photos,
 /// so the crawl should fetch newest → oldest: the photos the user is most likely to look at first are
 /// cached first.

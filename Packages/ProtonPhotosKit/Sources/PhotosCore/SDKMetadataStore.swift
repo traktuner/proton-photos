@@ -10,11 +10,35 @@ import Foundation
 public enum SDKMetadataStore {
     /// File names of the metadata stores for `uid`, including the SQLite `-wal` / `-shm` sidecars
     /// (WAL mode leaves them next to the main file): the account-shared `entities.sqlite` and the
-    /// per-account `timeline-v3-<uid>.sqlite`.
+    /// LEGACY per-account `timeline-v3-<uid>.sqlite` (superseded by the app-owned
+    /// `library-v1.sqlite` under `LibraryDatabaseLocation`, which sign-out purges separately via
+    /// `LibraryDatabaseLocation.purgeAccountData`; the legacy names stay listed here so stores
+    /// written by older builds keep being erased).
     public static func metadataFileNames(uid: String) -> [String] {
         ["entities.sqlite", "timeline-v3-\(uid).sqlite"].flatMap { base in
             [base, base + "-wal", base + "-shm"]
         }
+    }
+
+    /// File names of ONLY the legacy `timeline-v3-<uid>.sqlite` store (+ WAL sidecars) — used for
+    /// the best-effort cleanup at sign-in after the v1 reset, which must NOT touch the SDK's
+    /// `entities.sqlite` in the same directory.
+    public static func legacyTimelineFileNames(uid: String) -> [String] {
+        let base = "timeline-v3-\(uid).sqlite"
+        return [base, base + "-wal", base + "-shm"]
+    }
+
+    /// Best-effort delete of the superseded timeline-v3 store for `uid` under `directory`.
+    /// Returns the number of files actually removed.
+    @discardableResult
+    public static func purgeLegacyTimelineStore(in directory: URL, uid: String) -> Int {
+        let fm = FileManager.default
+        var removed = 0
+        for name in legacyTimelineFileNames(uid: uid) {
+            let url = directory.appendingPathComponent(name)
+            if (try? fm.removeItem(at: url)) != nil { removed += 1 }
+        }
+        return removed
     }
 
     /// Best-effort delete of every metadata file for `uid` under `directory`. Returns the number of
