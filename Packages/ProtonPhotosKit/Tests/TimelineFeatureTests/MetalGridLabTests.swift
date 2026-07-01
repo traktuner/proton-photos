@@ -4,6 +4,7 @@ import CoreGraphics
 import Metal
 import MetalRenderingCore
 import MetalGridTextureCore
+import MetalGridTextureAppKitAdapter
 import PhotosCore
 import GridCore
 @testable import TimelineFeature

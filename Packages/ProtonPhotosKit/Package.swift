@@ -69,7 +69,7 @@ let package = Package(
         .testTarget(name: "GridCoreTests", dependencies: ["GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalRenderingCore", swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalGridTextureCore", dependencies: ["GridCore"], swiftSettings: disableDynamicActorIsolation),
-        .target(name: "MetalGridTextureAppKitAdapter", dependencies: ["MetalGridTextureCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MetalGridTextureAppKitAdapter", dependencies: ["MetalGridTextureCore", "GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalGridTextureUIKitAdapter", dependencies: ["MetalGridTextureCore", "GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCache", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
@@ -86,7 +86,7 @@ let package = Package(
         .testTarget(name: "PhotoViewerFeatureTests", dependencies: ["PhotoViewerFeature"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(
             name: "TimelineFeatureTests",
-            dependencies: ["TimelineFeature", "GridCore", "MetalRenderingCore", "MetalGridTextureCore", "MediaCache", "PhotosCore"],
+            dependencies: ["TimelineFeature", "GridCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter", "MediaCache", "PhotosCore"],
             swiftSettings: disableDynamicActorIsolation
         ),
         // Albums: management protocols + repository over an injected backend (SDK has no album APIs,

@@ -593,10 +593,11 @@ Small policy-boundary split with no intended behavior change.
 per-frame upload count, resident-texture capacity, and overscan fraction. It contains no Metal resource,
 platform UI, media feed, hardware query, default value, or photo-domain identity.
 
-`TimelineFeature` keeps the concrete macOS defaults as `MetalGridBudget.default`, now a compatibility alias over
-`GridTextureBudget`. This preserves current macOS behavior while preventing aggressive desktop RAM/GPU
-assumptions from becoming Universal Core policy. Future iOS/iPadOS adapters must construct their own measured
-`GridTextureBudget` values and inject them into the same coordinator/cache seam.
+The concrete macOS defaults started as a `TimelineFeature` compatibility alias over `GridTextureBudget`. Phase
+5.6 later moved that alias into `MetalGridTextureAppKitAdapter`, preserving current macOS behavior while
+preventing aggressive desktop RAM/GPU assumptions from becoming Universal Core or feature policy. Future
+iOS/iPadOS adapters must construct their own measured `GridTextureBudget` values and inject them into the same
+coordinator/cache seam.
 
 #### Phase 4.7 — Metal grid glyph rasterizer seam
 
@@ -655,9 +656,10 @@ Platform adapters own native rasterization implementations. The macOS adapter in
 `AppKitMetalGridGlyphRasterizer`; iOS/iPadOS adapters must inject `UIKitMetalGridGlyphRasterizer` or a renderer
 native badge path without forking the shared cache.
 
-`TimelineFeature` remains the macOS adapter boundary for `PhotoUID` specialization
-(`MetalGridTextureCache<PhotoUID>`), decoded-image feed access, `MetalGridBudget.default`, `MTKView`, AppKit
-scroll/gesture hosting, accessibility, headers, and palette conversion.
+`TimelineFeature` remains the macOS host boundary for `PhotoUID` specialization
+(`MetalGridTextureCache<PhotoUID>`), decoded-image feed access, `MTKView`, AppKit scroll/gesture hosting,
+accessibility, headers, and palette conversion. `MetalGridTextureAppKitAdapter` owns the concrete macOS texture
+policy default.
 
 #### Phase 5.2 — UIKit glyph adapter proof
 
@@ -700,10 +702,24 @@ ID type, and receive the same shared texture cache implementation used by macOS.
 
 Small platform-adapter extraction with no intended visual behavior change on macOS.
 
-`MetalGridTextureAppKitAdapter` is now a dedicated target/product that depends only on `MetalGridTextureCore`.
+`MetalGridTextureAppKitAdapter` is now a dedicated target/product that depends on `MetalGridTextureCore` and
+`GridCore`.
 `AppKitMetalGridGlyphRasterizer` moved there from `TimelineFeature`, keeping the same AppKit SF Symbol rendering
 path and `NSColor` to `MetalGridGlyphColor` conversion. `TimelineFeature` now imports the adapter and still
 injects `AppKitMetalGridGlyphRasterizer()` into `MetalGridTextureCache<PhotoUID>`.
 
 This makes macOS and iOS/iPadOS symmetric at the texture-adapter boundary: platform glyph rasterizers live in
 platform texture adapter targets; `MetalGridTextureCore` owns only the shared cache and glyph request contract.
+
+#### Phase 5.6 — AppKit texture budget policy split
+
+Small platform-adapter policy move with no intended macOS runtime behavior change.
+
+`MetalGridTextureAppKitAdapter` now owns `AppKitMetalGridTexturePolicy` and
+`AppKitMetalGridTexturePolicies.default`: the existing macOS texture budget (`96` uploads/frame, `4096` resident
+textures, `1.2` overscan) plus the current `320` pixel texture cap. The compatibility member
+`GridTextureBudget.default` lives in the AppKit adapter module, not in `TimelineFeature` or `GridCore`.
+
+This keeps the aggressive desktop policy at the macOS adapter edge while leaving `GridCore` with only the
+portable budget shape. iOS/iPadOS continue to use `UIKitMetalGridTexturePolicies` and must not inherit macOS
+cache/upload defaults.

@@ -65,8 +65,8 @@ viewport-anchor (`anchorFractionY`, 0.5) rebase · bottom-pinned preservation ·
 
 **`GridTextureBudget` owns:** the portable shape of texture streaming policy: upload burst, resident texture
 capacity, and overscan fraction. Concrete defaults are platform-adapter policy, not Core behavior.
-macOS keeps `MetalGridBudget.default`; iOS/iPadOS starts from `UIKitMetalGridTexturePolicies` until measured
-real-device tuning replaces or refines those values.
+macOS keeps `MetalGridBudget.default` via `MetalGridTextureAppKitAdapter`; iOS/iPadOS starts from
+`UIKitMetalGridTexturePolicies` until measured real-device tuning replaces or refines those values.
 
 **`MetalGridTextureCache<ID>` owns:** real GPU texture residency, bounded per-frame upload from decoded `CGImage`,
 placeholder texture lifetime, badge glyph texture caching, and byte/upload counters. It is generic over item

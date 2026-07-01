@@ -163,8 +163,9 @@ budget and must not become an iPhone/iPad default.
 Solutions:
 
 1. Keep `GridTextureBudget` injected by platform adapters. macOS keeps the current `MetalGridBudget.default`
-   compatibility alias; Phase 5.3 adds conservative viewport-surface policies in `MetalGridTextureUIKitAdapter`
-   as the iOS/iPadOS starting point, to be tuned with Instruments on real devices.
+   compatibility alias from `MetalGridTextureAppKitAdapter`; Phase 5.3 adds conservative viewport-surface
+   policies in `MetalGridTextureUIKitAdapter` as the iOS/iPadOS starting point, to be tuned with Instruments on
+   real devices.
 2. Replace fixed texture capacity with a viewport-derived budget: visible cells plus overscan plus a small
    hysteresis window. Derive `maxTexturePixels` from rendered slot size and screen scale, capped per platform.
 
@@ -427,9 +428,9 @@ Texture budget policy split. No production behavior changed.
 
 - `GridTextureBudget.swift` was added to `GridCore` as the portable shape for per-frame upload count,
   resident-texture capacity, and overscan fraction.
-- `TimelineFeature` keeps the concrete aggressive macOS defaults through the existing `MetalGridBudget.default`
-  compatibility alias. iOS/iPadOS adapters must inject their own measured `GridTextureBudget` values instead of
-  inheriting macOS RAM/GPU assumptions.
+- The concrete aggressive macOS defaults started here as the existing `MetalGridBudget.default` compatibility
+  alias. Phase 5.6 later moved that alias into `MetalGridTextureAppKitAdapter`; iOS/iPadOS adapters must inject
+  their own measured `GridTextureBudget` values instead of inheriting macOS RAM/GPU assumptions.
 - `MetalGridTypes.swift` no longer imports `PhotosCore`; its diagnostics count helper is generic over item ID.
 - `CoreArchitectureGateTests` now guards that the budget shape stays universal while concrete default values
   remain adapter-owned.
@@ -479,9 +480,9 @@ Generic Metal texture cache extraction. No production behavior changed.
   `GridTextureResidencyPolicy<ID>` plus the platform-injected `GridTextureBudget`.
 - `MetalGridTextureCore` now owns the platform-neutral glyph request contract:
   `MetalGridGlyphRequest`, `MetalGridGlyphWeight`, `MetalGridGlyphColor`, and `MetalGridGlyphRasterizing`.
-- `TimelineFeature` keeps the `PhotoUID` binding (`MetalGridTextureCache<PhotoUID>`), `MetalGridBudget.default`,
-  decoded-image feed access, and all `MTKView`/AppKit host behavior. Phase 5.5 moves
-  `AppKitMetalGridGlyphRasterizer` out to `MetalGridTextureAppKitAdapter`.
+- `TimelineFeature` keeps the `PhotoUID` binding (`MetalGridTextureCache<PhotoUID>`), decoded-image feed access,
+  and all `MTKView`/AppKit host behavior. Phase 5.5 moves `AppKitMetalGridGlyphRasterizer` out to
+  `MetalGridTextureAppKitAdapter`; Phase 5.6 moves the concrete macOS texture budget default there too.
 - `CoreArchitectureGateTests` now guards that the generic cache and glyph contract stay in
   `MetalGridTextureCore`, while AppKit glyph rasterization and photo-domain specialization stay in the macOS
   adapter.
@@ -533,5 +534,19 @@ AppKit glyph adapter split. macOS production behavior should remain visually unc
 - `TimelineFeature` now imports `MetalGridTextureAppKitAdapter` and still injects
   `AppKitMetalGridGlyphRasterizer()` into `MetalGridTextureCache<PhotoUID>`.
 - `TimelineFeature` no longer owns native SF Symbol rasterization code; it owns only the macOS grid host,
-  data-source binding, budget default, and injection point.
+  data-source binding, budget consumption, and injection point.
 - `scripts/verify-universal-core.sh` now builds the AppKit adapter for macOS and the UIKit adapter for iOS.
+
+## Phase 5.6 result
+
+AppKit texture budget policy split. macOS production behavior should remain unchanged.
+
+- `MetalGridTextureAppKitAdapter` now owns `AppKitMetalGridTexturePolicy` and
+  `AppKitMetalGridTexturePolicies.default`.
+- The existing aggressive macOS values are preserved: `96` uploads/frame, `4096` resident textures, `1.2`
+  overscan, and `320` maximum texture pixels.
+- The `GridTextureBudget.default` compatibility member moved from `TimelineFeature` into the AppKit adapter
+  module, so the default remains usable by macOS host code without making it a Core or feature-level default.
+- `TimelineFeature/MetalGridTypes.swift` now keeps only the `MetalGridBudget` compatibility typealias.
+- `CoreArchitectureGateTests` now guards that macOS defaults stay adapter-owned and do not leak into `GridCore`
+  or back into `TimelineFeature`.

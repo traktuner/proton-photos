@@ -77,12 +77,3 @@ struct MetalGridHUD: Equatable, Sendable {
 }
 
 typealias MetalGridBudget = GridTextureBudget
-
-extension GridTextureBudget {
-    /// macOS adapter default. Other adapters must inject their own measured policy.
-    static let `default` = GridTextureBudget(
-        maxUploadsPerFrame: 96,
-        maxCachedTextures: 4096,
-        overscanFraction: 1.2
-    )
-}

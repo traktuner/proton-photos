@@ -699,8 +699,10 @@ final class CoreArchitectureGateTests: XCTestCase {
     func testGridTextureBudgetShapeIsUniversalButDefaultsStayInAdapter() throws {
         let gridCoreRoot = sourcesRoot.appendingPathComponent("GridCore")
         let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
+        let appKitAdapterRoot = sourcesRoot.appendingPathComponent("MetalGridTextureAppKitAdapter")
         let budgetFile = gridCoreRoot.appendingPathComponent("GridTextureBudget.swift")
         let timelineTypesFile = timelineRoot.appendingPathComponent("MetalGridTypes.swift")
+        let appKitPolicyFile = appKitAdapterRoot.appendingPathComponent("AppKitMetalGridTexturePolicy.swift")
         var violations: [String] = []
 
         guard FileManager.default.fileExists(atPath: budgetFile.path) else {
@@ -735,8 +737,22 @@ final class CoreArchitectureGateTests: XCTestCase {
         if !timelineSource.contains("typealias MetalGridBudget = GridTextureBudget") {
             violations.append("TimelineFeature/MetalGridTypes.swift: missing adapter compatibility typealias")
         }
-        if !timelineSource.contains("static let `default` = GridTextureBudget(") {
-            violations.append("TimelineFeature/MetalGridTypes.swift: macOS default budget must remain adapter-owned")
+        for forbidden in ["static let `default`", "GridTextureBudget(maxUploadsPerFrame:", "maxCachedTextures: 4096"] where timelineSource.contains(forbidden) {
+            violations.append("TimelineFeature/MetalGridTypes.swift: platform texture budget default must stay in an adapter, found \(forbidden)")
+        }
+
+        if FileManager.default.fileExists(atPath: appKitPolicyFile.path) {
+            let appKitSource = try String(contentsOf: appKitPolicyFile, encoding: .utf8)
+            for symbol in [
+                "AppKitMetalGridTexturePolicies",
+                "GridTextureBudget(maxUploadsPerFrame: 96, maxCachedTextures: 4096, overscanFraction: 1.2)",
+                "package extension GridTextureBudget",
+                "static let `default` = AppKitMetalGridTexturePolicies.default.budget"
+            ] where !appKitSource.contains(symbol) {
+                violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTexturePolicy.swift: missing adapter-owned macOS default \(symbol)")
+            }
+        } else {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTexturePolicy.swift: missing adapter-owned macOS default")
         }
 
         XCTAssertTrue(
@@ -845,8 +861,8 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if let targetLine = manifestLine(forTarget: "MetalGridTextureAppKitAdapter", in: manifest) {
             let dependencies = Set(dependencies(inTargetLine: targetLine))
-            if dependencies != ["MetalGridTextureCore"] {
-                violations.append("MetalGridTextureAppKitAdapter: dependencies \(dependencies.sorted()) != [MetalGridTextureCore]")
+            if dependencies != ["GridCore", "MetalGridTextureCore"] {
+                violations.append("MetalGridTextureAppKitAdapter: dependencies \(dependencies.sorted()) != [GridCore, MetalGridTextureCore]")
             }
         } else {
             violations.append("MetalGridTextureAppKitAdapter: missing Package.swift target declaration")
@@ -900,6 +916,68 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             macOS SF Symbol rasterization belongs in its AppKit texture adapter target; TimelineFeature may
             inject it but must not own the implementation.
+            """
+        )
+    }
+
+    func testAppKitTextureBudgetsStayAdapterOwned() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let adapterRoot = sourcesRoot.appendingPathComponent("MetalGridTextureAppKitAdapter")
+        let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
+        let policyFile = adapterRoot.appendingPathComponent("AppKitMetalGridTexturePolicy.swift")
+        let timelineTypesFile = timelineRoot.appendingPathComponent("MetalGridTypes.swift")
+        var violations: [String] = []
+
+        if let targetLine = manifestLine(forTarget: "MetalGridTextureAppKitAdapter", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            if dependencies != ["GridCore", "MetalGridTextureCore"] {
+                violations.append("MetalGridTextureAppKitAdapter: dependencies \(dependencies.sorted()) != [GridCore, MetalGridTextureCore]")
+            }
+        } else {
+            violations.append("MetalGridTextureAppKitAdapter: missing Package.swift target declaration")
+        }
+
+        guard FileManager.default.fileExists(atPath: policyFile.path) else {
+            XCTFail("MetalGridTextureAppKitAdapter/AppKitMetalGridTexturePolicy.swift: missing AppKit texture budget policy")
+            return
+        }
+
+        let imports = try importedModules(in: policyFile)
+        if imports != ["CoreGraphics", "GridCore"] {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTexturePolicy.swift: imports \(imports.sorted()) != [CoreGraphics, GridCore]")
+        }
+
+        let source = try String(contentsOf: policyFile, encoding: .utf8)
+        let code = stripCommentsAndStringLiterals(from: source)
+        for symbol in [
+            "AppKitMetalGridTexturePolicy",
+            "AppKitMetalGridTexturePolicies",
+            "defaultMaxTexturePixels",
+            "maxTexturePixels",
+            "GridTextureBudget(maxUploadsPerFrame: 96, maxCachedTextures: 4096, overscanFraction: 1.2)",
+            "maxTexturePixels: defaultMaxTexturePixels",
+            "package extension GridTextureBudget",
+            "static let `default` = AppKitMetalGridTexturePolicies.default.budget"
+        ] where !source.contains(symbol) {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTexturePolicy.swift: missing \(symbol)")
+        }
+        for forbidden in ["ProcessInfo.processInfo.physicalMemory", "activeProcessorCount", "UIDevice", "userInterfaceIdiom", "PhotoUID", "PhotoItem", "TimelineFeature"] where contains(forbidden, in: code) {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTexturePolicy.swift: platform policy must not bind hardware probes or photo-domain types, found \(forbidden)")
+        }
+
+        let timelineSource = try String(contentsOf: timelineTypesFile, encoding: .utf8)
+        for forbidden in ["static let `default`", "GridTextureBudget(maxUploadsPerFrame:", "maxCachedTextures: 4096"] where timelineSource.contains(forbidden) {
+            violations.append("TimelineFeature/MetalGridTypes.swift: AppKit texture policy must stay adapter-owned, found \(forbidden)")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 5.6 AppKit texture budget boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            macOS can keep aggressive desktop texture budgets, but those defaults belong to the AppKit texture
+            adapter. GridCore may define only the portable shape and TimelineFeature may only consume it.
             """
         )
     }
@@ -1024,8 +1102,8 @@ final class CoreArchitectureGateTests: XCTestCase {
         }
 
         let timelineSource = try String(contentsOf: timelineTypesFile, encoding: .utf8)
-        if !timelineSource.contains("static let `default` = GridTextureBudget(") {
-            violations.append("TimelineFeature/MetalGridTypes.swift: macOS default budget must remain adapter-owned")
+        if timelineSource.contains("static let `default` = GridTextureBudget(") {
+            violations.append("TimelineFeature/MetalGridTypes.swift: macOS default budget belongs in MetalGridTextureAppKitAdapter")
         }
 
         XCTAssertTrue(

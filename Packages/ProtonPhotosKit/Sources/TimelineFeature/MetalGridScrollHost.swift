@@ -2,6 +2,7 @@ import AppKit
 import MetalKit
 import PhotosCore
 import GridCore
+import MetalGridTextureAppKitAdapter
 
 /// The one-shot viewport policy a data-source / route switch hands the host, consumed by the host's
 /// layout/content-size path only after layout geometry is valid — never as an immediate scroll from SwiftUI.
