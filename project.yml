@@ -103,6 +103,8 @@ targets:
       - package: ProtonPhotosKit
         product: PhotosCore
       - package: ProtonPhotosKit
+        product: ProtonAuth
+      - package: ProtonPhotosKit
         product: DesignSystemCore
       - package: ProtonPhotosKit
         product: GridCore

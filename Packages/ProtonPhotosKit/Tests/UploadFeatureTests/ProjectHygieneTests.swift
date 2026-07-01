@@ -85,6 +85,7 @@ final class ProjectHygieneTests: XCTestCase {
             "deploymentTarget: \"26.0\"",
             "TARGETED_DEVICE_FAMILY: \"1,2\"",
             "product: PhotosCore",
+            "product: ProtonAuth",
             "product: TimelineUIKitAdapter",
             "product: MediaCacheUIKitAdapter",
             "product: MetalGridTextureUIKitAdapter",
