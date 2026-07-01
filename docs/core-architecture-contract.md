@@ -289,7 +289,7 @@ Agents MUST run `scripts/verify-universal-core.sh` before committing a change th
 
 The Phase 3.1 audit is recorded in `docs/metalgrid-boundary-audit.md`. It is audit-only: no production grid behavior changes, no file moves, and no renderer rewrites.
 
-Future MetalGrid extraction work MUST use that audit as input. Pure geometry/zoom/transition/value-policy code may move toward a future `GridCore`; `MTKView`, `NSView`/`UIView`, scroll physics, gesture intake, accessibility hosts, platform glyph rasterization, `MediaCache` feed adapters, and platform texture budgets must remain in platform adapters until explicitly split.
+Future MetalGrid extraction work MUST use that audit as input. Pure geometry/zoom/transition/value-policy code may move toward a future `GridCore`; `MTKView`, `NSView`/`UIView`, scroll physics, gesture intake, accessibility hosts, platform glyph rasterization, `MediaCache` feed adapters, and concrete platform texture-budget defaults must remain in platform adapters. Portable budget shapes may live in Core only when the adapter still injects the actual values.
 
 #### Phase 3.2 — Initial universal GridCore extraction
 
@@ -422,9 +422,9 @@ still imports no `PhotosCore` and no concrete telemetry backend, per the Telemet
 
 `GridCore` also owns the pure `GridSelectionController<ID>` selection state and the pure
 `GridTextureResidencyPolicy` (residency, formerly `MetalGridTextureLRU`) and `GridTextureStreamingPolicy`
-(per-frame upload budget). `TimelineFeature` keeps `MetalGridSelectionController` and `MetalGridTextureCache` as
-thin macOS/`PhotoUID` adapters over those Core types; platform texture budgets and glyph rasterization remain
-adapter-owned.
+(per-frame upload selection). `TimelineFeature` keeps `MetalGridSelectionController` and `MetalGridTextureCache`
+as thin macOS/`PhotoUID` adapters over those Core types; concrete platform texture-budget defaults and glyph
+rasterization remain adapter-owned.
 
 Gate hardening (the deliverable): the shared gate previously banned `MetalKit` and `MTKView` but not the base
 `Metal` import, the QuartzCore-sourced Metal surface types, or `MTL*` resource types. Because `QuartzCore` was an
@@ -462,10 +462,10 @@ paths.
 
 Performance remains part of the architecture contract. Universal Core and Photos-dependent Core must be viable
 on the lowest supported iPhone/iPad class, not merely buildable. Platform-specific performance policy belongs in
-adapters and is injected into Core-facing policy types. macOS may choose higher budgets and different renderer
-strategies, but those choices must not become Universal Core defaults. Actual renderer optimization, draw-call
-strategy, texture arrays, argument buffers, and device-specific budget tuning are future measured tasks after the
-boundaries and gates exist.
+adapters and is injected into Core-facing policy types such as `GridTextureBudget`. macOS may choose higher
+budgets and different renderer strategies, but those choices must not become Universal Core defaults. Actual
+renderer optimization, draw-call strategy, texture arrays, argument buffers, and device-specific budget tuning
+are future measured tasks after the boundaries and gates exist.
 
 #### Phase 4.1 — Small pure GridCore extraction
 
@@ -540,3 +540,16 @@ PhotosCore, MediaCache, `PhotoUID`, or platform glyph rasterization.
 state into `MetalGridDrawableTarget` and delegates to the rendering core. Production also injects
 `MetalGridPalette.clearColor` when constructing the renderer, keeping surface-color policy at the adapter edge
 while the shared renderer stores only the `MTLClearColor` value it receives.
+
+#### Phase 4.6 — Grid texture budget shape into GridCore
+
+Small policy-boundary split with no intended behavior change.
+
+`GridTextureBudget.swift` was added to `GridCore` because the budget shape itself is a portable value type:
+per-frame upload count, resident-texture capacity, and overscan fraction. It contains no Metal resource,
+platform UI, media feed, hardware query, default value, or photo-domain identity.
+
+`TimelineFeature` keeps the concrete macOS defaults as `MetalGridBudget.default`, now a compatibility alias over
+`GridTextureBudget`. This preserves current macOS behavior while preventing aggressive desktop RAM/GPU
+assumptions from becoming Universal Core policy. Future iOS/iPadOS adapters must construct their own measured
+`GridTextureBudget` values and inject them into the same coordinator/cache seam.

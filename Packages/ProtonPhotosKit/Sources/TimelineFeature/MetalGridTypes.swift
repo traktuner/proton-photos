@@ -1,5 +1,6 @@
+import Foundation
 import CoreGraphics
-import PhotosCore
+import GridCore
 
 // MARK: - Metal grid — shared value types (diagnostics + HUD)
 //
@@ -40,13 +41,13 @@ struct MetalGridStats: Equatable, Sendable {
     private func fmt(_ v: Double) -> String { String(format: "%.2f", v) }
 
     /// Pure derivation of the visible/real/placeholder counts from a frame's draw list — unit-testable
-    /// without Metal (DiagnosticsCounterTest). `realResident(uid)` reports whether a real GPU texture is
-    /// resident for that photo (placeholder otherwise).
-    static func counts(
+    /// without Metal (DiagnosticsCounterTest). `realResident(id)` reports whether a real GPU texture is
+    /// resident for that item (placeholder otherwise).
+    static func counts<ID>(
         visibleCount: Int,
         overscanCount: Int,
-        drawnUIDs: [PhotoUID],
-        realResident: (PhotoUID) -> Bool
+        drawnUIDs: [ID],
+        realResident: (ID) -> Bool
     ) -> (real: Int, placeholder: Int) {
         var real = 0
         for uid in drawnUIDs where realResident(uid) { real += 1 }
@@ -75,17 +76,13 @@ struct MetalGridHUD: Equatable, Sendable {
     var dataSource = "—"   // "real" / "synthetic"
 }
 
-/// Tunable streaming/overscan budgets (kept liberal; tune against real-device profiling if needed).
-struct MetalGridBudget: Sendable {
-    /// Max texture uploads pushed to the GPU per frame (visible-first). macOS can afford a larger burst here:
-    /// the decoded CGImages are already in RAM, and this prevents dense-grid direction changes from repainting
-    /// visible thumbnails over many frames.
-    var maxUploadsPerFrame = 96
-    /// Max resident textures before LRU eviction kicks in. This is a macOS adapter budget, not a Core rule;
-    /// future iOS/iPadOS adapters should inject their own lower memory policy.
-    var maxCachedTextures = 4096
-    /// Vertical overscan (fraction of viewport height) queried above & below the visible rect.
-    var overscanFraction: CGFloat = 1.2
+typealias MetalGridBudget = GridTextureBudget
 
-    static let `default` = MetalGridBudget()
+extension GridTextureBudget {
+    /// macOS adapter default. Other adapters must inject their own measured policy.
+    static let `default` = GridTextureBudget(
+        maxUploadsPerFrame: 96,
+        maxCachedTextures: 4096,
+        overscanFraction: 1.2
+    )
 }

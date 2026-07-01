@@ -32,6 +32,7 @@ overlaid transparent `NSScrollView` document spacer provides physics + pointer e
 | `OverviewLayerDissolve` | `OverviewLayerDissolve.swift` | L3↔L4 / L4↔L5 offscreen two-layer cross-dissolve. |
 | `GridViewportResizeRebase` | `GridViewportResizeRebase.swift` | Resize/sidebar scroll rebase (pure) — the **settle/fallback** path under the presentation layer. |
 | `TileContentFitter` | `TileContentFitter.swift` | How media fits **inside** a square slot (content only). |
+| `GridTextureBudget` | `GridCore/GridTextureBudget.swift` | Portable texture budget shape; platform adapters inject concrete values. |
 | `MetalGridCoordinator` | `MetalGridCoordinator.swift` | Composes engine geometry + textures + fitting; owns camera state (level, committed phase) **and the live resize/sidebar presentation layer** (snapshot-scale). |
 | `MetalGridRenderer` | `MetalRenderingCore/MetalGridRenderer.swift` | Draws the quads it is handed. No layout math; `TimelineFeature` owns only the `MTKView` adapter extension. |
 | `MetalGridScrollHost` | `MetalGridScrollHost.swift` | AppKit host: scroll physics, gesture intake, resize entry, calls the engine helpers. |
@@ -55,6 +56,9 @@ viewport-anchor (`anchorFractionY`, 0.5) rebase · bottom-pinned preservation ·
 
 **`TileContentFitter` owns:** `aspectFitInsideSquare` · `squareFillCrop` · `contentRect` (always inside
 `slotRect`) · the UV/crop window / letterbox. It **never** produces or alters `slotRect`.
+
+**`GridTextureBudget` owns:** the portable shape of texture streaming policy: upload burst, resident texture
+capacity, and overscan fraction. Concrete defaults are platform-adapter policy, not Core behavior.
 
 **`MetalGridRenderer` owns:** drawing supplied quads · the clear/background colour · placeholders · overlays.
 It performs **no** layout math and never sees media aspect ratio.

@@ -70,6 +70,7 @@ by the shared `CoreArchitectureGateTests`. They use only portable value framewor
 - `GridSelectionController.swift` (pure selection state; split out of the macOS `MetalGridSelectionController` adapter)
 - `GridTextureResidencyPolicy.swift` (formerly `MetalGridTextureLRU`; pure residency policy, no `Metal`)
 - `GridTextureStreamingPolicy.swift` (pure per-frame upload budget)
+- `GridTextureBudget.swift` (Phase 4.6 portable budget shape only; concrete defaults stay adapter-owned)
 - `CoreTelemetry.swift` (Phase 3.9 platform-neutral telemetry seam)
 - `GridProxy.swift` (Phase 4.3 generic shell/grid command seam)
 - `GridScrollAnchor.swift` (Phase 4.3 generic route-scroll anchor)
@@ -138,14 +139,16 @@ Phase 3.1 made no production code changes, so runtime performance is unchanged.
 
 ### iOS/iPadOS risk 1: fixed texture budgets copied unchanged
 
-Current defaults are `maxUploadsPerFrame = 48`, `maxCachedTextures = 1200`, and `maxTexturePixels = 320`.
-Worst-case residency for 1200 square RGBA textures at 320px is roughly 491 MB before driver overhead. This is
-acceptable as a macOS product budget only if profiling says so; it must not become universal Core policy.
+Current macOS adapter defaults are `maxUploadsPerFrame = 96`, `maxCachedTextures = 4096`, and
+`maxTexturePixels = 320`. Worst-case residency for 4096 square RGBA textures at 320px is roughly 1.6 GB before
+driver overhead, though the real cache only uploads items that become resident. This is an aggressive macOS
+budget and must not become an iPhone/iPad default.
 
 Solutions:
 
-1. Keep `MetalGridBudget` injected by platform adapters. macOS can keep the current budget; iPhone/iPad should
-   start with conservative budgets and tune with Instruments on real devices.
+1. Keep `GridTextureBudget` injected by platform adapters. macOS can keep the current `MetalGridBudget.default`
+   compatibility alias; iPhone/iPad should start with conservative budgets and tune with Instruments on real
+   devices.
 2. Replace fixed texture capacity with a viewport-derived budget: visible cells plus overscan plus a small
    hysteresis window. Derive `maxTexturePixels` from rendered slot size and screen scale, capped per platform.
 
@@ -177,8 +180,9 @@ Solutions:
 
 ## Recommended next extraction order
 
-1. `GridCore` target: pure geometry, zoom, resize, transition plans, selection, texture LRU policy, and renderer
-   input value types that do not import `Metal`, `MetalKit`, `AppKit`, `UIKit`, `SwiftUI`, or `MediaCache`.
+1. `GridCore` target: pure geometry, zoom, resize, transition plans, selection, texture LRU/streaming policy,
+   portable texture-budget shapes, and renderer input value types that do not import `Metal`, `MetalKit`,
+   `AppKit`, `UIKit`, `SwiftUI`, or `MediaCache`.
 2. `GridCore` layout profiles must stay viewport-scoped (`regularTimeline`, `compactTimeline`, etc.). Platform
    adapters map scene size, safe areas, traits, and hardware capability to a profile; the renderer just draws
    the resulting `GridFramePlan`.
@@ -189,7 +193,7 @@ Solutions:
 5. `MetalRenderingCore` now owns shared renderer/shader code behind its separate gate. Keep `MTKView`/AppKit
    adapters in `TimelineFeature`, and prove rendering-core changes build on macOS, iOS, and iPadOS.
 6. iOS/iPadOS adapter: `UIViewRepresentable`/`UIView`, `UIScrollView` or SwiftUI scroll host, platform
-   safe-area/input policy, platform `MetalGridBudget`, and platform glyph rasterizer.
+   safe-area/input policy, platform `GridTextureBudget` values, and platform glyph rasterizer.
 
 ## Stop conditions for Phase 3.2
 
@@ -394,3 +398,16 @@ Renderer/shader split into `MetalRenderingCore`. No production behavior changed.
   stores only an `MTLClearColor` value and does not import the AppKit palette.
 - `CoreArchitectureGateTests` now guards that the renderer stays behind the rendering-core gate and that the
   `MTKView` adapter seam remains in `TimelineFeature`.
+
+## Phase 4.6 result
+
+Texture budget policy split. No production behavior changed.
+
+- `GridTextureBudget.swift` was added to `GridCore` as the portable shape for per-frame upload count,
+  resident-texture capacity, and overscan fraction.
+- `TimelineFeature` keeps the concrete aggressive macOS defaults through the existing `MetalGridBudget.default`
+  compatibility alias. iOS/iPadOS adapters must inject their own measured `GridTextureBudget` values instead of
+  inheriting macOS RAM/GPU assumptions.
+- `MetalGridTypes.swift` no longer imports `PhotosCore`; its diagnostics count helper is generic over item ID.
+- `CoreArchitectureGateTests` now guards that the budget shape stays universal while concrete default values
+  remain adapter-owned.

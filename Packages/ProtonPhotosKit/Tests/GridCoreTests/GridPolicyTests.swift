@@ -68,6 +68,16 @@ import GridCore
     }
 }
 
+@Suite struct GridTextureBudgetTests {
+    @Test func budgetShapePreservesInjectedAdapterValues() {
+        let budget = GridTextureBudget(maxUploadsPerFrame: 5, maxCachedTextures: 17, overscanFraction: 0.75)
+
+        #expect(budget.maxUploadsPerFrame == 5)
+        #expect(budget.maxCachedTextures == 17)
+        #expect(budget.overscanFraction == 0.75)
+    }
+}
+
 @Suite struct GridSelectionControllerTests {
     @Test func replaceToggleRangeAndClearMutateFlatSelection() {
         let ids = Array(0 ..< 10)

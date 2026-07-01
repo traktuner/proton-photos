@@ -549,6 +549,60 @@ final class CoreArchitectureGateTests: XCTestCase {
         )
     }
 
+    func testGridTextureBudgetShapeIsUniversalButDefaultsStayInAdapter() throws {
+        let gridCoreRoot = sourcesRoot.appendingPathComponent("GridCore")
+        let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
+        let budgetFile = gridCoreRoot.appendingPathComponent("GridTextureBudget.swift")
+        let timelineTypesFile = timelineRoot.appendingPathComponent("MetalGridTypes.swift")
+        var violations: [String] = []
+
+        guard FileManager.default.fileExists(atPath: budgetFile.path) else {
+            XCTFail("GridCore/GridTextureBudget.swift: missing platform-injected texture budget shape")
+            return
+        }
+
+        let budgetImports = try importedModules(in: budgetFile)
+        if budgetImports != ["CoreGraphics"] {
+            violations.append("GridCore/GridTextureBudget.swift: imports \(budgetImports.sorted()) != [CoreGraphics]")
+        }
+
+        let budgetSource = try String(contentsOf: budgetFile, encoding: .utf8)
+        let budgetCode = stripCommentsAndStringLiterals(from: budgetSource)
+        for symbol in ["GridTextureBudget", "maxUploadsPerFrame", "maxCachedTextures", "overscanFraction"] {
+            if !budgetCode.contains(symbol) {
+                violations.append("GridCore/GridTextureBudget.swift: missing \(symbol)")
+            }
+        }
+        for forbidden in ["PhotosCore", "PhotoUID", "MTLTexture", "MetalGridBudget", "static let `default`"] where budgetCode.contains(forbidden) {
+            violations.append("GridCore/GridTextureBudget.swift: universal budget shape must not contain \(forbidden)")
+        }
+
+        let timelineImports = try importedModules(in: timelineTypesFile)
+        if timelineImports.contains("PhotosCore") {
+            violations.append("TimelineFeature/MetalGridTypes.swift: budget/stats value types must not import PhotosCore")
+        }
+        let timelineSource = try String(contentsOf: timelineTypesFile, encoding: .utf8)
+        if timelineSource.contains("struct MetalGridBudget") {
+            violations.append("TimelineFeature/MetalGridTypes.swift: MetalGridBudget must stay a typealias to GridTextureBudget")
+        }
+        if !timelineSource.contains("typealias MetalGridBudget = GridTextureBudget") {
+            violations.append("TimelineFeature/MetalGridTypes.swift: missing adapter compatibility typealias")
+        }
+        if !timelineSource.contains("static let `default` = GridTextureBudget(") {
+            violations.append("TimelineFeature/MetalGridTypes.swift: macOS default budget must remain adapter-owned")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 4.6 grid texture budget boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            Universal Core owns the portable budget shape; platform adapters own concrete default values.
+            """
+        )
+    }
+
     private func swiftFiles(in directory: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: directory,
