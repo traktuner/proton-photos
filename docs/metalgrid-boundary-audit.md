@@ -1,4 +1,4 @@
-# MetalGrid Boundary Audit - Phase 3.1
+# MetalGrid Boundary Audit (Phase 3.1 origin; results through Phase 3.9)
 
 Status: audit only. No production behavior changes.
 
@@ -40,10 +40,10 @@ TimelineView
 
 ## Boundary inventory
 
-### Ready for a future pure `GridCore`
+### Now in `GridCore` (extracted)
 
-These files already use only cross-platform value frameworks such as `Foundation`, `CoreGraphics`, or
-`PhotosCore`, and are the safest first extraction candidates:
+These files have been extracted into the universal `GridCore` target (zero package dependencies) and are covered
+by the shared `CoreArchitectureGateTests`. They use only portable value frameworks (`CoreGraphics`, `simd`):
 
 - `SquareTileGridEngine.swift`
 - `GridSizePolicy.swift`
@@ -51,7 +51,7 @@ These files already use only cross-platform value frameworks such as `Foundation
 - `GridScrollRebase.swift`
 - `GridViewportResizeRebase.swift`
 - `GridZoomTransaction.swift`
-- `GridZoomCommit.swift`
+- `GridProfileRebase.swift` (Phase 3.5)
 - `GridTransitionComponent.swift`
 - `GridTransitionComponentBuilder.swift`
 - `GridTransitionController.swift`
@@ -66,11 +66,21 @@ These files already use only cross-platform value frameworks such as `Foundation
 - `OverviewLayerDissolve.swift`
 - `TileContentFitter.swift`
 - `LocalAlphaCurve.swift`
+- `GridSelectionController.swift` (pure selection state; split out of the macOS `MetalGridSelectionController` adapter)
+- `GridTextureResidencyPolicy.swift` (formerly `MetalGridTextureLRU`; pure residency policy, no `Metal`)
+- `GridTextureStreamingPolicy.swift` (pure per-frame upload budget)
+- `CoreTelemetry.swift` (Phase 3.9 platform-neutral telemetry seam)
+
+### Remaining pure candidates still in `TimelineFeature`
+
+Not yet moved. `GridVisualConstants.swift` and `MetalGridGeometry.swift` import only `CoreGraphics`, so they
+could join `GridCore` directly. `GridZoomCommit.swift` and `GridProxy.swift` also import `PhotosCore`, so they
+belong in a `PhotosCore`-dependent Core target rather than the zero-dependency `GridCore`:
+
 - `GridVisualConstants.swift`
 - `MetalGridGeometry.swift` (despite the name, currently only coordinate math)
-- `MetalGridTextureLRU.swift` (pure residency policy, no `Metal`)
-- `MetalGridSelectionController.swift`
-- `GridProxy.swift`
+- `GridZoomCommit.swift` (imports `PhotosCore`)
+- `GridProxy.swift` (imports `PhotosCore`)
 
 Extraction rule: move only pure value types and algorithms first. Do not move `TimelineFeature` view hosts,
 `MediaCache` adapters, AppKit event code, or `MTKView` delegates with them.
@@ -83,9 +93,13 @@ These are cross-platform Metal candidates only after view-hosting is split away:
 - `MetalGridTypes.swift`
 - shader source embedded in `MetalGridRenderer`
 
-Current blocker: `MetalGridRenderer.render(in: MTKView, ...)` and `renderLayerDissolve(in: MTKView, ...)`
-accept `MTKView`, which is view-hosting. A reusable renderer should instead accept a drawable/pass descriptor
-or a narrow render-target abstraction, while macOS/iOS adapters own their `MTKView`.
+Entry-point blocker RESOLVED (Phase 3.9, commit 4259c6e): `MetalGridRenderer` now exposes a narrow
+`MetalGridDrawableTarget` (a `CAMetalDrawable`, an `MTLRenderPassDescriptor`, and a `presentsWithTransaction`
+flag) plus `render(to:)` / `renderLayerDissolve(to:)` overloads that take it. The `MTKView`-taking methods are
+now thin edge adapters that build the target via `MetalGridDrawableTarget(view:)` — the single `MTKView` → draw
+seam — and delegate to the `to:` overloads, which never reference `MTKView`. The remaining `MetalRenderingCore`
+prerequisite is packaging, not the render entry point: the renderer file still lives in `TimelineFeature` and
+still imports `Metal`/`MetalKit`, so split it into a Metal-only target with the `MTKView` adapter left behind.
 
 ### Must remain platform adapter until split
 
@@ -115,7 +129,7 @@ Phase 3.1 made no production code changes, so runtime performance is unchanged.
 
 - `MetalGridRenderer` already pools steady-frame vertex buffers with a three-frame ring and a semaphore.
 - Offscreen overview dissolve uses private render targets.
-- `MetalGridTextureLRU` is pure and unit-testable.
+- `GridTextureResidencyPolicy` (formerly `MetalGridTextureLRU`, now in `GridCore`) is pure and unit-testable.
 - `RealMetalGridDataSource` reads decoded `CGImage` directly from the feed (`memoryCGImage`) rather than
   creating platform image wrappers for upload eligibility.
 - The display link is demand-driven and idles when no scroll, transition, thumbnail streaming, or resize work is
@@ -201,8 +215,11 @@ The first `GridCore` cut moved only pure, already-tested value math:
 The new target has no package dependencies and is covered by the universal Core gate. `TimelineFeature` imports
 it as the macOS grid adapter. Transition controllers, Metal renderer input orchestration, selection controller,
 texture residency policy, renderer code, and platform hosts were deliberately left out of this pass because
-their module boundary still needed a separate API/access audit. The pure transition stack was moved in Phase 3.8;
-selection controller, texture residency, renderer code, and platform hosts remain adapter-owned.
+their module boundary still needed a separate API/access audit. The pure transition stack was moved in Phase 3.8.
+The pure selection state (`GridSelectionController<ID>`) and the pure texture residency/streaming policy
+(`GridTextureResidencyPolicy`, `GridTextureStreamingPolicy`) were moved in Phase 3.9; the Metal renderer code and
+platform hosts remain adapter-owned. `TimelineFeature` keeps `MetalGridSelectionController` and
+`MetalGridTextureCache` as thin macOS adapters over those Core types.
 
 ## Phase 3.5 result
 
@@ -257,3 +274,32 @@ so `GridCore` remains free of `PhotosCore`.
 Performance impact should be neutral: files moved across targets, but plan construction and per-frame draw-intent
 logic are unchanged. The only additional runtime work is one optional closure call for transition diagnostics at
 plan/fallback/settle events, not per rendered thumbnail.
+
+## Phase 3.9 result
+
+Render-boundary / adapter-boundary hardening. Audit + guards + doc sync only; no production behavior changed.
+
+- Renderer drawable boundary (commit 4259c6e): `MetalGridRenderer` now renders through `MetalGridDrawableTarget`
+  (a `CAMetalDrawable`, an `MTLRenderPassDescriptor`, and a `presentsWithTransaction` flag). `render(to:)` /
+  `renderLayerDissolve(to:)` take the target; the `MTKView` methods are thin edge adapters. This removes the
+  `MTKView` entry-point blocker for a future `MetalRenderingCore`, but the renderer file still imports
+  `Metal`/`MetalKit` and stays in `TimelineFeature`, so the remaining split work is packaging.
+- Core telemetry seam (commit 3f58dbc): `GridCore` owns `CoreTelemetry.swift` — `CoreTelemetryEvent` (name +
+  `[String: String]` fields, `Sendable`) and `CoreTelemetrySink = (CoreTelemetryEvent) -> Void`.
+  `GridTransitionController` emits string-keyed events through an injected optional sink; `MetalGridCoordinator`
+  wires the platform diagnostics backend. `GridCore` stays free of `PhotosCore`.
+- Selection + texture policy now in `GridCore`: pure `GridSelectionController<ID>`, `GridTextureResidencyPolicy`
+  (formerly `MetalGridTextureLRU`), and `GridTextureStreamingPolicy`. `TimelineFeature` keeps
+  `MetalGridSelectionController` and `MetalGridTextureCache` as thin macOS/`PhotoUID` adapters over them.
+- Latent boundary hole CLOSED: the shared gate banned `MetalKit` but not the base `Metal` import, the
+  QuartzCore-sourced Metal surface types (`CAMetalDrawable`, `CAMetalLayer`, `CAMetalDisplayLink`), the
+  presentation types (`CADisplayLink`, `CALayer`), or the `MTL*` resource objects. Because `QuartzCore` was an
+  allowed `GridCore` import, such a surface type could have entered `GridCore` undetected by both the import
+  allowlist and the token gate. `CoreArchitectureGateTests` now bans the `Metal` import and those tokens
+  (word-boundary matched), GridCore-scopes a ban on CoreGraphics drawing types
+  (`CGContext`/`CGImage`/`CGColorSpace`/`CGLayer` — `CGImage` stays legal in the decode Cores), and drops
+  `QuartzCore` from GridCore's import allowlist to close the hole structurally. A negative-control file confirmed
+  every added guard fires; all current Core targets still pass the gate and build for iOS and macOS.
+- Dead import removed: `GridCore/GridScrollRebase.swift` imported `QuartzCore` but used only `CFTimeInterval`
+  (resolved via `CoreGraphics`); it was the only QuartzCore importer in `GridCore`. Removing it enabled dropping
+  `QuartzCore` from the GridCore allowlist.

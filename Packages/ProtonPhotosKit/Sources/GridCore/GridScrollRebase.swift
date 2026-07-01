@@ -1,5 +1,4 @@
 import CoreGraphics
-import QuartzCore
 
 /// A short, subtle, deterministic SCROLL-REBASE bridge.
 ///

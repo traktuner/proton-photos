@@ -61,9 +61,19 @@ final class CoreArchitectureGateTests: XCTestCase {
         ),
         CoreTargetRule(
             name: "GridCore",
-            allowedImports: ["CoreGraphics", "QuartzCore", "simd"],
+            // QuartzCore intentionally NOT allowed (tightened in Phase 3.9): GridCore is pure value geometry
+            // that takes injected clocks (never `CACurrentMediaTime`) and uses simd/`CGAffineTransform` (never
+            // `CATransform3D`), so it needs no QuartzCore symbol. Excluding QuartzCore structurally closes the
+            // render-surface hole where a QuartzCore-sourced `CAMetalDrawable`/`CAMetalLayer`/`CADisplayLink`
+            // could otherwise enter Core past BOTH the import allowlist and the token gate. Re-add consciously
+            // (with a value-math justification) if a legitimate need ever appears.
+            allowedImports: ["CoreGraphics", "simd"],
             expectedDependencies: [],
-            extraForbiddenTokens: []
+            // CoreGraphics DRAWING/surface types — as opposed to the `CGRect`/`CGSize`/`CGPoint`/`CGFloat`
+            // value types GridCore legitimately relies on — have no place in pure grid geometry. Scoped to
+            // GridCore (not global) because `CGImage` IS a legitimate decoded-image type in MediaDecodingCore
+            // and MediaFeedCore, so a global ban would wrongly fail those Core targets.
+            extraForbiddenTokens: ["CGContext", "CGImage", "CGColorSpace", "CGLayer"]
         ),
     ]
 
@@ -73,6 +83,10 @@ final class CoreArchitectureGateTests: XCTestCase {
         "SwiftUI",
         "MapKit",
         "AVKit",
+        // `Metal` (not just `MetalKit`): the renderer/drawable boundary (`MetalGridDrawableTarget`,
+        // `MTLRenderPassDescriptor`, `MTLCommandBuffer`) is platform-adapter concern and must not be imported
+        // by any universal Core target. See docs/metalgrid-boundary-audit.md Phase 3.9.
+        "Metal",
         "MetalKit",
     ]
 
@@ -86,6 +100,23 @@ final class CoreArchitectureGateTests: XCTestCase {
         "UIApplication",
         "NSApplication",
         "MTKView",
+        // Render/GPU-surface + presentation types (Phase 3.9). None is ever a legitimate universal-Core type;
+        // they belong in platform adapters. `CAMetal*`/`CADisplayLink`/`CALayer` are QuartzCore-sourced (so a
+        // ban is meaningful even if QuartzCore were re-allowed), and `MTL*` are Metal resource objects — banning
+        // the concrete type names catches a fully-qualified reference or a re-exporting shim even if the `Metal`
+        // import ban were bypassed.
+        "CAMetalDrawable",
+        "CAMetalLayer",
+        "CAMetalDisplayLink",
+        "CADisplayLink",
+        "CALayer",
+        "MTLDevice",
+        "MTLTexture",
+        "MTLBuffer",
+        "MTLCommandQueue",
+        "MTLCommandBuffer",
+        "MTLRenderPassDescriptor",
+        "MTLRenderCommandEncoder",
         "ProcessInfo.processInfo.physicalMemory",
         "ProcessInfo.processInfo.activeProcessorCount",
     ]

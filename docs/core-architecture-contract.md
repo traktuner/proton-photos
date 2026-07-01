@@ -73,6 +73,7 @@ These imports would drag in platform UI / view-hosting concerns and break the un
 - `SwiftUI`
 - `MapKit`
 - `AVKit`
+- `Metal`
 - `MetalKit`
 
 ### Forbidden Tokens in Core
@@ -87,6 +88,21 @@ These types must not appear anywhere in universal Core sources:
 - `NSOpenPanel`
 - `UIApplication`
 - `NSApplication`
+- `MTKView`
+- `ProcessInfo.processInfo.physicalMemory` (hardware sizing is platform-adapter policy)
+- `ProcessInfo.processInfo.activeProcessorCount` (hardware sizing is platform-adapter policy)
+
+Render/GPU-surface + presentation types (added in Phase 3.9 — kept out of Core even though the `CoreGraphics`
+value types and, where allowlisted, `QuartzCore` value math are permitted):
+
+- `CAMetalDrawable`, `CAMetalLayer`, `CAMetalDisplayLink` (QuartzCore-sourced Metal surfaces)
+- `CADisplayLink`, `CALayer` (QuartzCore presentation/timer types)
+- `MTLDevice`, `MTLTexture`, `MTLBuffer`, `MTLCommandQueue`, `MTLCommandBuffer`, `MTLRenderPassDescriptor`, `MTLRenderCommandEncoder` (Metal resource objects)
+
+GridCore-scoped only (the pure grid-geometry target additionally bans CoreGraphics *drawing* types; these stay
+legitimate in the image-decoding Core targets, so the ban is not global):
+
+- `CGContext`, `CGImage`, `CGColorSpace`, `CGLayer`
 
 ### Enforcement
 
@@ -202,7 +218,9 @@ Future MetalGrid extraction work MUST use that audit as input. Pure geometry/zoo
 `GridCore` is the universal, UI-free grid model boundary. It owns square-slot geometry, zoom transaction math,
 viewport resize rebase math, scroll rebase easing, tile-content fitting, size-policy scaffolding, and the
 overview layer dissolve plan. It intentionally has no package dependencies and may import only portable Apple
-frameworks needed for value math (`CoreGraphics`, `QuartzCore`, `simd`).
+frameworks needed for value math (`CoreGraphics`, `simd`). (`QuartzCore` was dropped from the allowlist in
+Phase 3.9 — GridCore uses injected clocks rather than `CACurrentMediaTime`, so it needs no QuartzCore symbol,
+and excluding it removes the QuartzCore-sourced Metal-surface entry path into Core.)
 
 `TimelineFeature` now depends on `GridCore` and remains the macOS adapter around it. The adapter owns
 `MTKView`, AppKit scroll/gesture hosting, renderer composition, real `MediaCache` feed access, header and
@@ -305,3 +323,35 @@ string-keyed transition telemetry through an injected event sink. It must not im
 real UID lookup, platform diagnostics wiring, and conversion of `GridTransitionDraw` into Metal quads. Future
 iOS/iPadOS adapters must use the same `GridCore` transition plan and provide their own host/renderer plumbing
 instead of forking transition math.
+
+#### Phase 3.9 — Render-boundary / adapter-boundary hardening
+
+Audit + guard hardening only; no production grid behavior changed.
+
+`MetalGridRenderer` now draws through a narrow `MetalGridDrawableTarget` (a `CAMetalDrawable`, an
+`MTLRenderPassDescriptor`, and a `presentsWithTransaction` flag). `render(to:)` / `renderLayerDissolve(to:)`
+take the target; the `MTKView`-taking methods are thin edge adapters that build it via
+`MetalGridDrawableTarget(view:)` — the single `MTKView` → draw seam. This removes the `MTKView` entry-point that
+previously blocked a future `MetalRenderingCore`. The renderer stays in `TimelineFeature` for now because it
+still imports `Metal`/`MetalKit`; the remaining split work is packaging, not draw-path redesign.
+
+`GridCore` gains a platform-neutral telemetry seam in `CoreTelemetry.swift`: the value type
+`CoreTelemetryEvent` (a name plus `[String: String]` fields, `Sendable`) and
+`CoreTelemetrySink = (CoreTelemetryEvent) -> Void`. `GridTransitionController` emits string-keyed transition
+events through an injected optional sink; the macOS adapter binds the concrete diagnostics backend. `GridCore`
+still imports no `PhotosCore` and no concrete telemetry backend, per the Telemetry layer rule above.
+
+`GridCore` also owns the pure `GridSelectionController<ID>` selection state and the pure
+`GridTextureResidencyPolicy` (residency, formerly `MetalGridTextureLRU`) and `GridTextureStreamingPolicy`
+(per-frame upload budget). `TimelineFeature` keeps `MetalGridSelectionController` and `MetalGridTextureCache` as
+thin macOS/`PhotoUID` adapters over those Core types; platform texture budgets and glyph rasterization remain
+adapter-owned.
+
+Gate hardening (the deliverable): the shared gate previously banned `MetalKit` and `MTKView` but not the base
+`Metal` import, the QuartzCore-sourced Metal surface types, or `MTL*` resource types. Because `QuartzCore` was an
+allowed `GridCore` import, a `CAMetalDrawable`/`CAMetalLayer`/`CADisplayLink` could have entered Core past both
+the import allowlist and the token gate. Phase 3.9 closes this: `CoreArchitectureGateTests` now bans the `Metal`
+import, bans the render/GPU-surface + presentation token set listed under "Forbidden Tokens in Core" above,
+GridCore-scopes a ban on CoreGraphics drawing types (`CGContext`/`CGImage`/`CGColorSpace`/`CGLayer`), and drops
+`QuartzCore` from GridCore's import allowlist (its one dead `import QuartzCore` was removed). Every current Core
+target still passes the gate and builds for iOS and macOS.
