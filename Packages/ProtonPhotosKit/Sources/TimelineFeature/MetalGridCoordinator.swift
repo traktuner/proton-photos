@@ -207,7 +207,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
           gridProfile: GridLevelProfile) {
-        guard let renderer = MetalGridRenderer(device: device),
+        guard let renderer = MetalGridRenderer(device: device, clearColor: MetalGridPalette.clearColor),
               let cache = MetalGridTextureCache(device: device, budget: budget) else { return nil }
         self.renderer = renderer
         self.cache = cache

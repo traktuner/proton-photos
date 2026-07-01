@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import CoreGraphics
 import GridCore
+import MetalRenderingCore
 @testable import TimelineFeature
 
 // The production grid is ONE uniform Apple-like dark-gray surface behind the thumbnails: gaps + aspectFit
@@ -11,7 +12,11 @@ import GridCore
     private let eps: CGFloat = 0.5
     private func repoRoot() -> URL { var u = URL(fileURLWithPath: #filePath); for _ in 0 ..< 5 { u.deleteLastPathComponent() }; return u }
     private func src(_ name: String) -> String {
-        (try? String(contentsOf: repoRoot().appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/\(name)"), encoding: .utf8)) ?? ""
+        for target in ["TimelineFeature", "MetalRenderingCore"] {
+            let rel = "Packages/ProtonPhotosKit/Sources/\(target)/\(name)"
+            if let source = try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8) { return source }
+        }
+        return ""
     }
 
     // 1 — a single named background color is the source of truth, a neutral dark gray, used for the clear color.
@@ -20,8 +25,12 @@ import GridCore
         #expect(abs(c.r - c.g) < 0.01 && abs(c.g - c.b) < 0.01, "background must be a NEUTRAL gray")
         #expect(c.r > 0.07 && c.r < 0.20, "background must be a dark gray ~#1f1f1f, not black/light: \(c.r)")
         #expect(c.a == 1.0, "opaque surface")
-        // The renderer + host clear to the palette (no scattered hardcoded clear colors).
-        #expect(src("MetalGridRenderer.swift").contains("MetalGridPalette.clearColor"))
+        #expect(MetalGridRenderPalette.backgroundRGBA == MetalGridPalette.backgroundRGBA)
+        // Production injects the palette into the shared renderer; the renderer itself clears with that value.
+        #expect(src("MetalGridCoordinator.swift").contains("MetalGridRenderer(device: device, clearColor: MetalGridPalette.clearColor)"))
+        let renderer = src("MetalGridRenderer.swift")
+        #expect(renderer.contains("private let clearColor"))
+        #expect(renderer.contains("pass.colorAttachments[0].clearColor = clearColor"))
         let host = src("MetalGridScrollHost.swift")
         #expect(host.contains("MetalGridPalette.clearColor") && host.contains("MetalGridPalette.background"))
         #expect(!host.contains("red: 0.043"), "no leftover hardcoded warm-brown clear color")

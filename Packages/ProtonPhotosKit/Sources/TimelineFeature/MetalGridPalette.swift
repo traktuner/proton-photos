@@ -1,5 +1,6 @@
 import AppKit
 import Metal
+import MetalRenderingCore
 
 // MARK: - MetalGridPalette — the single source of truth for the production grid surface color
 //
@@ -9,16 +10,16 @@ import Metal
 // Do not scatter hardcoded colors — use these constants everywhere.
 enum MetalGridPalette {
     /// Neutral dark surface, ~#1f1f1f. Dark-appearance friendly (sampled near Apple Photos' dark grid surface).
-    static let backgroundRGBA: (r: Double, g: Double, b: Double, a: Double) = (0.122, 0.122, 0.122, 1.0)
+    static let backgroundRGBA = MetalGridRenderPalette.backgroundRGBA
 
     static var background: NSColor {
         NSColor(srgbRed: backgroundRGBA.r, green: backgroundRGBA.g, blue: backgroundRGBA.b, alpha: backgroundRGBA.a)
     }
     static var clearColor: MTLClearColor {
-        MTLClearColor(red: backgroundRGBA.r, green: backgroundRGBA.g, blue: backgroundRGBA.b, alpha: backgroundRGBA.a)
+        MetalGridRenderPalette.clearColor
     }
     /// The same color as a premultiplied float vector (for any quad that needs to paint the surface explicitly).
     static var backgroundVector: SIMD4<Float> {
-        SIMD4(Float(backgroundRGBA.r), Float(backgroundRGBA.g), Float(backgroundRGBA.b), Float(backgroundRGBA.a))
+        MetalGridRenderPalette.backgroundVector
     }
 }

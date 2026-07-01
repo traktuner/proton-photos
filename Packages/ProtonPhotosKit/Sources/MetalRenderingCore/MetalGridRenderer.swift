@@ -1,34 +1,18 @@
 import Metal
-import MetalKit
 import QuartzCore
 import CoreGraphics
-import MetalRenderingCore
 import simd
-
-extension MetalGridDrawableTarget {
-    @MainActor
-    init?(view: MTKView) {
-        guard let drawable = view.currentDrawable,
-              let pass = view.currentRenderPassDescriptor else { return nil }
-        self.init(
-            drawable: drawable,
-            renderPassDescriptor: pass,
-            presentsWithTransaction: view.presentsWithTransaction
-        )
-    }
-}
 
 /// The persistent Metal renderer for the grid. Draws one quad per visible cell (rounded-corner SDF +
 /// premultiplied alpha), plus solid/border/glyph quads for selection outlines and badges.
 ///
-/// The shader (rounded-corner signed-distance mask + premultiplied alpha + V-up sampling) and the overall
-/// architecture (MTKView, one quad per cell, GPU textures, O(1) LRU cache, CGImageSource downsampling)
-/// follow the Pixe reference design.
-final class MetalGridRenderer {
+/// Platform adapters own view hosting and convert their drawable surface into `MetalGridDrawableTarget`.
+package final class MetalGridRenderer {
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let sampler: MTLSamplerState
+    private let clearColor: MTLClearColor
     /// Opaque 2-texture linear-mix pipeline for the OVERVIEW LAYER DISSOLVE (offscreen compositing). nil if the
     /// composite functions failed to build ⇒ `renderLayerDissolve` falls back to the target settled render.
     private let compositePipeline: MTLRenderPipelineState?
@@ -37,9 +21,9 @@ final class MetalGridRenderer {
     private var layerA: MTLTexture?
     private var layerB: MTLTexture?
 
-    private(set) var lastDrawMs: Double = 0
-    private(set) var lastDrawCalls = 0
-    private(set) var lastInstanceCount = 0
+    package private(set) var lastDrawMs: Double = 0
+    package private(set) var lastDrawCalls = 0
+    package private(set) var lastInstanceCount = 0
 
     /// Triple-buffered vertex pool for the steady `render(...)` path: instead of allocating a fresh
     /// `MTLBuffer` per group every frame, each frame packs all groups' vertices into one growable,
@@ -64,8 +48,9 @@ final class MetalGridRenderer {
     }
     private struct Uniforms { var viewportSize: SIMD2<Float> }
 
-    init?(device: MTLDevice) {
+    package init?(device: MTLDevice, clearColor: MTLClearColor = MetalGridRenderPalette.clearColor) {
         self.device = device
+        self.clearColor = clearColor
         guard let queue = device.makeCommandQueue() else { return nil }
         self.commandQueue = queue
         do {
@@ -108,21 +93,13 @@ final class MetalGridRenderer {
         }
     }
 
-    /// Draw the frame: each group is drawn in order (back → front). `sharedTexture` groups draw all their
-    /// quads in one call; `perQuadTexture` groups draw one call per quad.
     @MainActor
-    func render(in view: MTKView, viewportSize: CGSize, groups: [MetalGridRenderGroup]) {
-        guard let target = MetalGridDrawableTarget(view: view) else { return }
-        render(to: target, viewportSize: viewportSize, groups: groups)
-    }
-
-    @MainActor
-    func render(to target: MetalGridDrawableTarget, viewportSize: CGSize, groups: [MetalGridRenderGroup]) {
+    package func render(to target: MetalGridDrawableTarget, viewportSize: CGSize, groups: [MetalGridRenderGroup]) {
         let start = CFAbsoluteTimeGetCurrent()
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
         let pass = target.renderPassDescriptor
         pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].clearColor = MetalGridPalette.clearColor   // uniform Apple-like dark surface
+        pass.colorAttachments[0].clearColor = clearColor
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
             commandBuffer.commit(); return
         }
@@ -249,7 +226,7 @@ final class MetalGridRenderer {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = texture
         pass.colorAttachments[0].loadAction = .clear
-        pass.colorAttachments[0].clearColor = MetalGridPalette.clearColor   // each layer is composited over the SAME bg
+        pass.colorAttachments[0].clearColor = clearColor
         pass.colorAttachments[0].storeAction = .store
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
         configure(enc, viewportSize: viewportSize)
@@ -264,15 +241,8 @@ final class MetalGridRenderer {
     /// `t` is the (already-eased) progress 0…1. Falls back to the target settled render if compositing is
     /// unavailable. The normal `render(...)` path is untouched.
     @MainActor
-    func renderLayerDissolve(in view: MTKView, viewportSize: CGSize,
-                             sourceGroups: [MetalGridRenderGroup], targetGroups: [MetalGridRenderGroup], t: Float) {
-        guard let target = MetalGridDrawableTarget(view: view) else { return }
-        renderLayerDissolve(to: target, viewportSize: viewportSize, sourceGroups: sourceGroups, targetGroups: targetGroups, t: t)
-    }
-
-    @MainActor
-    func renderLayerDissolve(to target: MetalGridDrawableTarget, viewportSize: CGSize,
-                             sourceGroups: [MetalGridRenderGroup], targetGroups: [MetalGridRenderGroup], t: Float) {
+    package func renderLayerDissolve(to target: MetalGridDrawableTarget, viewportSize: CGSize,
+                                     sourceGroups: [MetalGridRenderGroup], targetGroups: [MetalGridRenderGroup], t: Float) {
         let start = CFAbsoluteTimeGetCurrent()
         guard let composite = compositePipeline,
               let cmd = commandQueue.makeCommandBuffer() else {
@@ -287,7 +257,7 @@ final class MetalGridRenderer {
         encodeLayerPass(into: cmd, texture: texB, groups: targetGroups, viewportSize: viewportSize)
         let drawablePass = target.renderPassDescriptor
         drawablePass.colorAttachments[0].loadAction = .clear
-        drawablePass.colorAttachments[0].clearColor = MetalGridPalette.clearColor
+        drawablePass.colorAttachments[0].clearColor = clearColor
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: drawablePass) else { cmd.commit(); return }
         enc.setRenderPipelineState(composite)
         enc.setFragmentTexture(texA, index: 0)

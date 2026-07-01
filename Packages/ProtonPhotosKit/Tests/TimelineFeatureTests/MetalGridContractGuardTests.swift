@@ -19,7 +19,7 @@ import GridCore
         return u.appendingPathComponent("Packages/ProtonPhotosKit")
     }
     private func sourceDirs() -> [URL] {
-        ["TimelineFeature", "GridCore"].map { packageRoot().appendingPathComponent("Sources/\($0)") }
+        ["TimelineFeature", "GridCore", "MetalRenderingCore"].map { packageRoot().appendingPathComponent("Sources/\($0)") }
     }
     private func src(_ name: String) -> String {
         for dir in sourceDirs() {

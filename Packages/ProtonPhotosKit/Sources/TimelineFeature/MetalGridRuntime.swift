@@ -1,5 +1,6 @@
 import Foundation
 import Metal
+import MetalRenderingCore
 import PhotosCore
 
 /// Runtime probe for the Metal-backed library grid. The production timeline is MetalGrid-ONLY (the canonical
@@ -10,7 +11,7 @@ enum MetalGridRuntime {
     /// One-time probe: a Metal device exists AND the production renderer/shader builds. Cached.
     static let isMetalRenderable: Bool = {
         guard let device = MTLCreateSystemDefaultDevice() else { return false }
-        return MetalGridRenderer(device: device) != nil
+        return MetalGridRenderer(device: device, clearColor: MetalGridPalette.clearColor) != nil
     }()
 
     @MainActor private static var didLogResolution = false

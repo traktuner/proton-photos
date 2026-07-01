@@ -77,8 +77,10 @@ import GridCore
     @Test func rendererUsesDrawableTargetBoundary() {
         let r = src("MetalGridRenderer.swift")
         let renderingCore = src("MetalGridRenderPrimitives.swift")
+        let adapter = src("MetalGridRenderer+MTKView.swift")
         #expect(renderingCore.contains("struct MetalGridDrawableTarget"))
-        #expect(r.contains("guard let target = MetalGridDrawableTarget(view: view) else { return }"))
+        #expect(adapter.contains("guard let target = MetalGridDrawableTarget(view: view) else { return }"))
+        #expect(adapter.contains("init?(view: MTKView)"))
         #expect(r.contains("func render(to target: MetalGridDrawableTarget"))
         #expect(r.contains("func renderLayerDissolve(to target: MetalGridDrawableTarget"))
 
@@ -91,6 +93,7 @@ import GridCore
         #expect(!renderBody.contains("MTKView"))
         #expect(!renderBody.contains("currentDrawable"))
         #expect(!renderBody.contains("currentRenderPassDescriptor"))
+        #expect(!r.contains("import MetalKit"), "shared renderer must not import the view-hosting MetalKit layer")
     }
 
     // 5 — resize/perf diagnostics are throttled (a live drag fires per frame; DEBUG emit prints synchronously).

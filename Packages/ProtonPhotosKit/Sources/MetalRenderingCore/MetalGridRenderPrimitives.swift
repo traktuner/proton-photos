@@ -78,3 +78,26 @@ package struct MetalGridDrawableTarget {
         self.presentsWithTransaction = presentsWithTransaction
     }
 }
+
+/// Shared render-surface palette values. Platform adapters may expose these through native color wrappers.
+package enum MetalGridRenderPalette {
+    package static let backgroundRGBA: (r: Double, g: Double, b: Double, a: Double) = (0.122, 0.122, 0.122, 1.0)
+
+    package static var clearColor: MTLClearColor {
+        MTLClearColor(
+            red: backgroundRGBA.r,
+            green: backgroundRGBA.g,
+            blue: backgroundRGBA.b,
+            alpha: backgroundRGBA.a
+        )
+    }
+
+    package static var backgroundVector: SIMD4<Float> {
+        SIMD4(
+            Float(backgroundRGBA.r),
+            Float(backgroundRGBA.g),
+            Float(backgroundRGBA.b),
+            Float(backgroundRGBA.a)
+        )
+    }
+}

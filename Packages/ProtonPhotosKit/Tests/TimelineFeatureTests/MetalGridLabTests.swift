@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import CoreGraphics
 import Metal
+import MetalRenderingCore
 import PhotosCore
 import GridCore
 @testable import TimelineFeature

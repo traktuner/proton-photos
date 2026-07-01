@@ -39,7 +39,7 @@ The mandatory layers are:
 1. Universal Core: deterministic data, algorithms, policies, storage primitives, and render/transition plans.
 2. Photos-dependent Core: reusable app-domain logic that may depend on `PhotosCore` but still has no UI,
    rendering, platform-hosting, or concrete backend dependency.
-3. MetalRenderingCore: future shared Metal renderer/shader layer with its own gate, separate from Universal Core.
+3. MetalRenderingCore: shared Metal renderer/shader layer with its own gate, separate from Universal Core.
 4. Shared UI/UX: SwiftUI only where genuinely adaptive across Mac, iPhone, and iPad.
 5. Platform Adapters: AppKit/UIKit/SwiftUI hosts, scroll, gestures, safe areas, traits, accessibility, budgets,
    native controls, platform glyph rasterization, and concrete telemetry/export backends.
@@ -90,10 +90,10 @@ Every new module must declare which layer it belongs to before code moves.
 - Metal renderer/shaders may be shared if they compile on all target platforms.
 - Metal view hosting, scroll physics, gesture intake, pointer behavior, and accessibility host objects are platform UI.
 
-### MetalRenderingCore (Future, Separate Gate)
+### MetalRenderingCore (Separate Gate)
 
-`MetalRenderingCore` is not Universal Core. It is a future shared rendering target for Apple platforms where Metal
-is available. It must have its own purity gate before any renderer file moves.
+`MetalRenderingCore` is not Universal Core. It is the shared rendering target for Apple platforms where Metal is
+available. It has its own purity gate, separate from the Universal Core gate.
 
 Allowed:
 - `Metal`, portable shader source, `CoreGraphics` value types, `simd`, and minimal `QuartzCore` drawable value
@@ -410,9 +410,9 @@ Audit + guard hardening only; no production grid behavior changed.
 `MTLRenderPassDescriptor`, and a `presentsWithTransaction` flag). `render(to:)` / `renderLayerDissolve(to:)`
 take the target; the `MTKView`-taking methods are thin edge adapters that build it via
 `MetalGridDrawableTarget(view:)` — the single `MTKView` → draw seam. This removes the `MTKView` entry-point that
-previously blocked a future `MetalRenderingCore`. The renderer stays in `TimelineFeature` for now because it
-still imports `Metal`/`MetalKit`; after Phase 4.4 the package gate exists, so the remaining split work is moving
-renderer/shader code behind that gate, not draw-path redesign.
+previously blocked `MetalRenderingCore`. Phase 4.4 created the package gate and moved draw primitives; Phase 4.5
+moved the renderer/shader implementation behind that gate. The `MTKView` conversion remains adapter-owned in
+`TimelineFeature`.
 
 `GridCore` gains a platform-neutral telemetry seam in `CoreTelemetry.swift`: the value type
 `CoreTelemetryEvent` (a name plus `[String: String]` fields, `Sendable`) and
@@ -444,7 +444,7 @@ Contract-only pass. No production behavior changed.
 Core-native is now defined as a layered architecture, not as a mandate to move all implementation into
 Universal Core. Universal Core remains the lowest shared boundary and is deliberately `Metal`-free. Reusable
 photo-domain logic that depends on `PhotosCore` may move into Photos-dependent Core. Shared Metal rendering may
-move only into a future `MetalRenderingCore` with its own gate. Platform adapters remain responsible for native
+move only into `MetalRenderingCore` with its own gate. Platform adapters remain responsible for native
 Apple behavior: scene/window/view hosting, safe areas, traits, scroll physics, gestures, accessibility, native
 controls, concrete telemetry/export backends, platform texture budgets, and glyph rasterization.
 
@@ -478,7 +478,7 @@ name is historical and does not imply a renderer dependency.
 
 This pass deliberately did not move `MetalGridCoordinator`, `MetalGridScrollHost`, `MetalGridRenderer`,
 `MetalGridTextureCache`, AppKit accessibility/header code, gesture routing, texture budgets, or data-source/feed
-adapters. Those remain platform adapter or future `MetalRenderingCore` work under the Phase 4.0 layer rules.
+adapters. Those remain platform adapter or `MetalRenderingCore` work under the Phase 4.0 layer rules.
 
 #### Phase 4.2 — Pure zoom commit bridge extraction
 
@@ -525,3 +525,18 @@ conversion remains in `TimelineFeature` as an adapter extension, so shared rende
 descriptor while platform adapters continue to own view hosting. `MetalGridRenderer` still lives in
 `TimelineFeature`; moving it is a later measured step after this gate proves the package boundary on macOS and
 iOS.
+
+#### Phase 4.5 — MetalGridRenderer into MetalRenderingCore
+
+Small renderer-boundary move with no intended behavior change.
+
+`MetalGridRenderer.swift` moved from `TimelineFeature` into `MetalRenderingCore`. The shared target now owns
+shader compilation, Metal pipeline creation, command encoding, vertex-buffer pooling, steady-frame draw encoding,
+and overview layer-dissolve compositing. The renderer exposes only drawable-target entry points based on
+`MetalGridDrawableTarget`; it does not import `MetalKit` and does not reference `MTKView`, AppKit, UIKit,
+PhotosCore, MediaCache, `PhotoUID`, or platform glyph rasterization.
+
+`TimelineFeature` keeps `MetalGridRenderer+MTKView.swift`, the thin adapter extension that converts `MTKView`
+state into `MetalGridDrawableTarget` and delegates to the rendering core. Production also injects
+`MetalGridPalette.clearColor` when constructing the renderer, keeping surface-color policy at the adapter edge
+while the shared renderer stores only the `MTLClearColor` value it receives.

@@ -364,6 +364,62 @@ final class CoreArchitectureGateTests: XCTestCase {
         )
     }
 
+    func testMetalGridRendererLivesBehindRenderingCoreGate() throws {
+        let renderingRoot = sourcesRoot.appendingPathComponent("MetalRenderingCore")
+        let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
+        let rendererFile = renderingRoot.appendingPathComponent("MetalGridRenderer.swift")
+        let oldRendererFile = timelineRoot.appendingPathComponent("MetalGridRenderer.swift")
+        let adapterFile = timelineRoot.appendingPathComponent("MetalGridRenderer+MTKView.swift")
+        var violations: [String] = []
+
+        if !FileManager.default.fileExists(atPath: rendererFile.path) {
+            violations.append("MetalRenderingCore/MetalGridRenderer.swift: missing shared renderer")
+        }
+        if FileManager.default.fileExists(atPath: oldRendererFile.path) {
+            violations.append("TimelineFeature/MetalGridRenderer.swift: renderer must stay out of the platform adapter")
+        }
+        if !FileManager.default.fileExists(atPath: adapterFile.path) {
+            violations.append("TimelineFeature/MetalGridRenderer+MTKView.swift: missing MTKView adapter seam")
+        }
+
+        if FileManager.default.fileExists(atPath: rendererFile.path) {
+            let imports = try importedModules(in: rendererFile)
+            if imports.contains("MetalKit") {
+                violations.append("MetalRenderingCore/MetalGridRenderer.swift: must not import MetalKit")
+            }
+
+            let source = try String(contentsOf: rendererFile, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: source)
+            for forbidden in ["MTKView", "MetalGridPalette", "PhotosCore", "MediaCache", "PhotoUID"] where contains(forbidden, in: code) {
+                violations.append("MetalRenderingCore/MetalGridRenderer.swift: forbidden adapter/domain reference \(forbidden)")
+            }
+            if !source.contains("package final class MetalGridRenderer") {
+                violations.append("MetalRenderingCore/MetalGridRenderer.swift: renderer must be package-visible to adapters")
+            }
+            if !source.contains("package func render(to target: MetalGridDrawableTarget") {
+                violations.append("MetalRenderingCore/MetalGridRenderer.swift: renderer must expose drawable-target render entry")
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: adapterFile.path) {
+            let source = try String(contentsOf: adapterFile, encoding: .utf8)
+            if !source.contains("import MetalKit") || !source.contains("init?(view: MTKView)") {
+                violations.append("TimelineFeature/MetalGridRenderer+MTKView.swift: MTKView conversion belongs only in adapter")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 4.5 MetalGridRenderer split regressed:
+            \(violations.joined(separator: "\n"))
+
+            Shared shader/pipeline/command encoding belongs in MetalRenderingCore; MTKView conversion remains
+            in the TimelineFeature adapter.
+            """
+        )
+    }
+
     func testSmallPureGridHelpersStayInUniversalGridCore() throws {
         let helperNames = ["GridVisualConstants.swift", "MetalGridGeometry.swift"]
         let gridCoreRoot = sourcesRoot.appendingPathComponent("GridCore")

@@ -33,7 +33,7 @@ overlaid transparent `NSScrollView` document spacer provides physics + pointer e
 | `GridViewportResizeRebase` | `GridViewportResizeRebase.swift` | Resize/sidebar scroll rebase (pure) — the **settle/fallback** path under the presentation layer. |
 | `TileContentFitter` | `TileContentFitter.swift` | How media fits **inside** a square slot (content only). |
 | `MetalGridCoordinator` | `MetalGridCoordinator.swift` | Composes engine geometry + textures + fitting; owns camera state (level, committed phase) **and the live resize/sidebar presentation layer** (snapshot-scale). |
-| `MetalGridRenderer` | `MetalGridRenderer.swift` | Draws the quads it is handed. No layout math. |
+| `MetalGridRenderer` | `MetalRenderingCore/MetalGridRenderer.swift` | Draws the quads it is handed. No layout math; `TimelineFeature` owns only the `MTKView` adapter extension. |
 | `MetalGridScrollHost` | `MetalGridScrollHost.swift` | AppKit host: scroll physics, gesture intake, resize entry, calls the engine helpers. |
 | `MetalGridPalette` | `MetalGridPalette.swift` | The single uniform grid surface colour. |
 

@@ -26,7 +26,7 @@ import GridCore
         return u
     }
     private func source(_ name: String) -> String {
-        for target in ["TimelineFeature", "GridCore"] {
+        for target in ["TimelineFeature", "GridCore", "MetalRenderingCore"] {
             let rel = "Packages/ProtonPhotosKit/Sources/\(target)/\(name)"
             if let source = try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8) { return source }
         }
