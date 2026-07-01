@@ -246,6 +246,42 @@ final class CoreArchitectureGateTests: XCTestCase {
         )
     }
 
+    func testSmallPureGridHelpersStayInUniversalGridCore() throws {
+        let helperNames = ["GridVisualConstants.swift", "MetalGridGeometry.swift"]
+        let gridCoreRoot = sourcesRoot.appendingPathComponent("GridCore")
+        let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
+        var violations: [String] = []
+
+        for helperName in helperNames {
+            let coreFile = gridCoreRoot.appendingPathComponent(helperName)
+            let timelineFile = timelineRoot.appendingPathComponent(helperName)
+
+            if !FileManager.default.fileExists(atPath: coreFile.path) {
+                violations.append("GridCore/\(helperName): missing pure helper")
+                continue
+            }
+
+            if FileManager.default.fileExists(atPath: timelineFile.path) {
+                violations.append("TimelineFeature/\(helperName): pure helper must stay out of the macOS adapter target")
+            }
+
+            let imports = try importedModules(in: coreFile)
+            if imports != ["CoreGraphics"] {
+                violations.append("GridCore/\(helperName): imports \(imports.sorted()) != [CoreGraphics]")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 4.1 GridCore extraction regressed:
+            \(violations.joined(separator: "\n"))
+
+            Pure grid constants and coordinate math belong in universal Core.
+            """
+        )
+    }
+
     private func swiftFiles(in directory: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: directory,

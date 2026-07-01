@@ -1,5 +1,6 @@
 import AppKit
 import PhotosCore
+import GridCore
 
 /// Minimal accessibility for the Metal grid. Because the Metal renderer has no per-cell `NSView`, this
 /// synthesizes `NSAccessibilityElement`s for the currently-visible items (role image, a date/kind label,

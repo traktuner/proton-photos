@@ -465,3 +465,16 @@ adapters and is injected into Core-facing policy types. macOS may choose higher 
 strategies, but those choices must not become Universal Core defaults. Actual renderer optimization, draw-call
 strategy, texture arrays, argument buffers, and device-specific budget tuning are future measured tasks after the
 boundaries and gates exist.
+
+#### Phase 4.1 — Small pure GridCore extraction
+
+Small production-code move with no behavior change.
+
+`GridVisualConstants.swift` and `MetalGridGeometry.swift` moved from `TimelineFeature` into `GridCore` because
+both are pure `CoreGraphics` helpers. `GridVisualConstants` owns the package-visible thumbnail corner radius used
+by the Metal grid adapter. `MetalGridGeometry` owns package-visible content-to-viewport rectangle conversion; the
+name is historical and does not imply a renderer dependency.
+
+This pass deliberately did not move `MetalGridCoordinator`, `MetalGridScrollHost`, `MetalGridRenderer`,
+`MetalGridTextureCache`, AppKit accessibility/header code, gesture routing, texture budgets, or data-source/feed
+adapters. Those remain platform adapter or future `MetalRenderingCore` work under the Phase 4.0 layer rules.

@@ -73,12 +73,9 @@ by the shared `CoreArchitectureGateTests`. They use only portable value framewor
 
 ### Remaining pure candidates still in `TimelineFeature`
 
-Not yet moved. `GridVisualConstants.swift` and `MetalGridGeometry.swift` import only `CoreGraphics`, so they
-could join `GridCore` directly. `GridZoomCommit.swift` and `GridProxy.swift` also import `PhotosCore`, so they
-belong in a `PhotosCore`-dependent Core target rather than the zero-dependency `GridCore`:
+Not yet moved. `GridZoomCommit.swift` and `GridProxy.swift` import `PhotosCore`, so they belong in a
+`PhotosCore`-dependent Core target rather than the zero-dependency `GridCore`:
 
-- `GridVisualConstants.swift`
-- `MetalGridGeometry.swift` (despite the name, currently only coordinate math)
 - `GridZoomCommit.swift` (imports `PhotosCore`)
 - `GridProxy.swift` (imports `PhotosCore`)
 
@@ -323,3 +320,16 @@ Core-native contract. Documentation only; no production behavior changed.
 - Performance policy remains adapter-injected. macOS can keep aggressive budgets; iPhone/iPad profiles must use
   their own measured budgets. Renderer optimization strategies are future measured tasks after the split/gate is
   in place.
+
+## Phase 4.1 result
+
+Small pure GridCore extraction. No behavior changed.
+
+- `GridVisualConstants.swift` moved from `TimelineFeature` to `GridCore`. It remains a `CoreGraphics`-only,
+  package-visible constant source for thumbnail corner radius.
+- `MetalGridGeometry.swift` moved from `TimelineFeature` to `GridCore`. Despite the historical Metal-prefixed
+  name, it contains only content-to-viewport `CGRect`/`CGPoint` coordinate conversion and imports no rendering,
+  view-hosting, AppKit, UIKit, or Metal frameworks.
+- `TimelineFeature` continues to consume both helpers as the macOS adapter. The extraction does not move
+  `MetalGridCoordinator`, `MetalGridScrollHost`, renderer code, texture cache, AppKit accessibility, or gesture
+  handling into Core.
