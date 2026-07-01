@@ -142,6 +142,23 @@ import GridCore
         #expect(r.contains("render(to: target, viewportSize: viewportSize, groups: targetGroups)"))
     }
 
+    // GUARD: toolbar/keyboard +/- must use the same whole-grid overview dissolve as pinch at L3↔L4 / L4↔L5.
+    @Test func plusMinusOverviewBoundaryUsesLayerDissolveNotSnap() {
+        let coord = source("MetalGridCoordinator.swift")
+        let host = source("MetalGridScrollHost.swift")
+        #expect(coord.contains("func tryBeginClickOverviewDissolve"))
+        #expect(coord.contains("engine.overviewLayerDissolvePlan("))
+        #expect(coord.contains("overviewClickDissolveDuration"))
+        #expect(host.contains("tryBeginClickOverviewDissolve"))
+        #expect(host.contains("coordinator.isOverviewClickDissolving"))
+        if let overview = host.range(of: "tryBeginClickOverviewDissolve"),
+           let snap = host.range(of: "settleScrollOffsetY") {
+            #expect(overview.lowerBound < snap.lowerBound, "+/- overview dissolve must run before snap settle")
+        } else {
+            Issue.record("missing +/- overview dissolve or snap fallback source")
+        }
+    }
+
     // GUARD: the overview layer dissolve must NOT touch the relocation lattice / transition controller — that
     // reuse is exactly what was rejected. (Source-scan guard, matching the suite's existing guard-test style.)
     @Test func dissolveModelDoesNotUseRelocationMachinery() {

@@ -820,6 +820,7 @@ final class MetalGridScrollHost: NSView {
             || coordinator.isResizeSettling
             || coordinator.isScrollRebasing
             || coordinator.gridTransition.activeKind == .click
+            || coordinator.isOverviewClickDissolving
             || coordinator.hasPendingVisibleThumbnails
             || pendingResolvedGridProfile != nil
             || (pinchMode == .lattice && pinchDriver.isSelfAdvancing)
@@ -940,6 +941,7 @@ final class MetalGridScrollHost: NSView {
         if coordinator.isSidebarResizing { advanceSidebarResize() }    // sidebar open/close scales the grid
         if coordinator.isResizeSettling { advanceResizeSettle() }      // drives the release-time column-reflow morph (window resize or sidebar settle); armed only when the column count actually changes (rare under fixed columns)
         if coordinator.gridTransition.activeKind == .click { requestFrame() }   // toolbar/keyboard +/- click plans need display-link-paced frames
+        if coordinator.isOverviewClickDissolving { requestFrame() }     // overview +/- clicks use the same whole-grid dissolve as pinch
         // Live-pinch post-release settle. Gated on lattice mode so the driver never drives the reflow fallback;
         // reset the tick dt whenever it isn't running.
         if pinchMode == .lattice, pinchDriver.isSelfAdvancing { advanceLivePinch() } else { pinchAdvancePrevTime = 0 }
@@ -1231,6 +1233,17 @@ final class MetalGridScrollHost: NSView {
         if let tY = coordinator.tryBeginClickTransition(toLevel: newLevel, anchorContentPoint: anchorPoint,
                                                         viewportPoint: viewportPoint, viewportSize: metalView.bounds.size) {
             stickToBottom = false                          // an anchored zoom ends bottom-pinning (like a scroll)
+            applyContentSize(coordinator.contentSize())
+            let maxY = max(0, spacer.frame.height - vh)
+            scrollView.contentView.scroll(to: CGPoint(x: 0, y: min(max(0, tY), maxY)))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            coordinator.logPostCommitAnchor()
+            requestFrame()
+            return
+        }
+        if let tY = coordinator.tryBeginClickOverviewDissolve(toLevel: newLevel, anchorContentPoint: anchorPoint,
+                                                              viewportPoint: viewportPoint, viewportSize: metalView.bounds.size) {
+            stickToBottom = false
             applyContentSize(coordinator.contentSize())
             let maxY = max(0, spacer.frame.height - vh)
             scrollView.contentView.scroll(to: CGPoint(x: 0, y: min(max(0, tY), maxY)))

@@ -84,10 +84,14 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private(set) var pinchSegmentTarget: Int?
 
     // OVERVIEW LAYER DISSOLVE (replaces the rejected warp): two COMPLETE settled grids blended by opacity via
-    // the offscreen compositor. Active only during an L3↔L4 / L4↔L5 gesture. Separate from
+    // the offscreen compositor. Active during L3↔L4 / L4↔L5 gestures and discrete +/- clicks. Separate from
     // `gridTransition` — it NEVER uses the relocation lattice. nil ⇒ inactive.
     private(set) var overviewDissolve: OverviewLayerDissolvePlan?
     var isOverviewDissolving: Bool { overviewDissolve != nil }
+    var isOverviewClickDissolving: Bool { overviewClickDissolveActive }
+    private var overviewClickDissolveActive = false
+    private var overviewClickDissolveStart: CFTimeInterval = 0
+    private let overviewClickDissolveDuration: CFTimeInterval = 0.18
 
     // The settled grid is always BOTTOM-RIGHT anchored (newest in the corner, the only partial row is the
     // OLDEST at the top-left). A cursor-aligned "column phase" was tried for a seamless live-zoom commit but
@@ -1178,10 +1182,22 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             drawResizeSettle(in: view, viewportSize: viewportSize, now: now)
             return
         }
-        // OVERVIEW LAYER DISSOLVE (offscreen two-layer mix) — active only during an L3↔L4 / L4↔L5 gesture.
+        // OVERVIEW LAYER DISSOLVE (offscreen two-layer mix) — active during L3↔L4 / L4↔L5 gestures and the
+        // discrete +/- overview click fade.
         if let plan = overviewDissolve {
-            drawOverviewDissolve(in: view, plan: plan, viewportSize: viewportSize, now: now)
-            return
+            if overviewClickDissolveActive {
+                let q = advanceClickOverviewDissolve(now: now)
+                if q >= 1 {
+                    finishClickOverviewDissolve()
+                } else if let updated = overviewDissolve {
+                    drawOverviewDissolve(in: view, plan: updated, viewportSize: viewportSize, now: now)
+                    view.setNeedsDisplay(view.bounds)
+                    return
+                }
+            } else {
+                drawOverviewDissolve(in: view, plan: plan, viewportSize: viewportSize, now: now)
+                return
+            }
         }
         // Single-lattice transition. q is HOST-owned: advanced by this display tick's wall-clock delta
         // (the same host-clock model the commit bridge uses), NOT a component-local timer; component
@@ -1246,6 +1262,48 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         transitionPrevNow = 0
         metalView?.setNeedsDisplay(metalView?.bounds ?? .zero)
         return tgtScroll.y
+    }
+
+    /// Discrete +/- transition for overview boundaries (L3↔L4 / L4↔L5): a fast dissolve between two complete
+    /// grid layers. This intentionally does NOT use the per-photo relocation lattice.
+    func tryBeginClickOverviewDissolve(toLevel newLevel: Int, anchorContentPoint: CGPoint,
+                                       viewportPoint: CGPoint, viewportSize: CGSize) -> CGFloat? {
+        let sourceLevel = level
+        let targetLevel = engine.clampLevel(newLevel)
+        guard abs(sourceLevel - targetLevel) == 1,
+              engine.isOverviewBoundary(sourceLevel, targetLevel) else { return nil }
+        let sourceScrollY = clipView?.bounds.origin.y ?? 0
+        let overscan = budget.overscanFraction * viewportSize.height
+        let targetViewportSize = CGSize(width: layoutWidth(forLevel: targetLevel), height: layoutViewportSize.height)
+        guard let plan = engine.overviewLayerDissolvePlan(
+            from: sourceLevel, to: targetLevel,
+            viewportSize: layoutViewportSize, targetViewportSize: targetViewportSize,
+            sourceScrollY: sourceScrollY, sourceColumnPhase: currentPhase(),
+            preferredNormalMode: preferredNormalLevelContentMode,
+            anchorContentPoint: anchorContentPoint, anchorViewportPoint: viewportPoint, overscan: overscan)
+        else { return nil }
+        overviewDissolve = plan
+        overviewClickDissolveActive = true
+        overviewClickDissolveStart = 0
+        committedPhase = plan.targetColumnPhase
+        level = targetLevel
+        requestRedraw()
+        return plan.targetScrollY
+    }
+
+    private func advanceClickOverviewDissolve(now: CFTimeInterval) -> Double {
+        if overviewClickDissolveStart == 0 { overviewClickDissolveStart = now }
+        let elapsed = max(0, now - overviewClickDissolveStart)
+        let q = overviewClickDissolveDuration > 0 ? min(1, elapsed / overviewClickDissolveDuration) : 1
+        if let plan = overviewDissolve { overviewDissolve = plan.withProgress(q) }
+        return q
+    }
+
+    private func finishClickOverviewDissolve() {
+        overviewDissolve = nil
+        overviewClickDissolveActive = false
+        overviewClickDissolveStart = 0
+        requestRedraw()
     }
 
     // MARK: - Live pinch single-lattice transition (V3.9, host scrub-driven, continuous multi-level)
@@ -1402,6 +1460,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             scrollY = srcScrollY
         }
         overviewDissolve = nil
+        overviewClickDissolveActive = false
+        overviewClickDissolveStart = 0
         zoomTransaction = nil
         requestRedraw()
         return scrollY
