@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import DesignSystemCore
 
 // MARK: - Loading veil building blocks
 //

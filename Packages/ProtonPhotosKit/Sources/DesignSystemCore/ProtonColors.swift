@@ -1,5 +1,10 @@
 import SwiftUI
+
+#if os(macOS)
 import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 
 /// Proton design tokens.
 ///
@@ -13,12 +18,20 @@ public enum ProtonColor {
 
     // Backgrounds → semantic, appearance-adaptive. Prefer letting native materials/window background show;
     // these are for the few chrome surfaces that need an explicit fill.
+    #if os(macOS)
     public static let backgroundNorm = Color(nsColor: .windowBackgroundColor)
+    #elseif os(iOS)
+    public static let backgroundNorm = Color(uiColor: .systemBackground)
+    #endif
 
     // Text → semantic label roles (Dynamic-Type + vibrancy aware).
     public static let textNorm = Color.primary
     public static let textWeak = Color.secondary
+    #if os(macOS)
     public static let textHint = Color(nsColor: .tertiaryLabelColor)
+    #elseif os(iOS)
+    public static let textHint = Color(uiColor: .tertiaryLabel)
+    #endif
 
     // Signal — brand-tuned, readable in both appearances.
     public static let danger = Color(hex: 0xDC3251)

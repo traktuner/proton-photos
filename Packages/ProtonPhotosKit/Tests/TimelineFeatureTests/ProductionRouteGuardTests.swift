@@ -168,11 +168,11 @@ struct ProductionRouteGuardTests {
         #expect(!mainView.contains("gridToolbarGlassFade"), "old hand-painted toolbar gradient must not return")
         #expect(!mainView.contains("SidebarResizeHandle"), "the custom sidebar resize handle must not return")
 
-        let colors = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/DesignSystem/ProtonColors.swift"), encoding: .utf8)
+        let colors = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/DesignSystemCore/ProtonColors.swift"), encoding: .utf8)
         #expect(colors.contains("Color(nsColor: .windowBackgroundColor)"), "neutral backgrounds should stay semantic")
         #expect(colors.contains("public static let textNorm = Color.primary"), "foreground neutrals should stay semantic")
 
-        let components = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/DesignSystem/ProtonComponents.swift"), encoding: .utf8)
+        let components = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/DesignSystemCore/ProtonComponents.swift"), encoding: .utf8)
         #expect(!components.contains("struct ProtonPrimaryButtonStyle"), "dead custom button style must not return")
         #expect(!components.contains("struct ProtonSpinner"), "dead custom spinner must not return")
 

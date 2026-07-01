@@ -26,6 +26,8 @@ let package = Package(
     platforms: [.macOS("26.0"), .iOS("26.0")],
     products: [
         .library(name: "PhotosCore", targets: ["PhotosCore"]),
+        .library(name: "DesignSystemCore", targets: ["DesignSystemCore"]),
+        .library(name: "DesignSystemAppKitAdapter", targets: ["DesignSystemAppKitAdapter"]),
         .library(name: "DesignSystem", targets: ["DesignSystem"]),
         .library(name: "ProtonAuth", targets: ["ProtonAuth"]),
         .library(name: "MediaByteCache", targets: ["MediaByteCache"]),
@@ -55,7 +57,9 @@ let package = Package(
         // the single source of truth for package strings.
         .target(name: "PhotosCore", resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "PhotosCoreTests", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
-        .target(name: "DesignSystem", dependencies: ["PhotosCore"], resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "DesignSystemCore", swiftSettings: disableDynamicActorIsolation),
+        .target(name: "DesignSystemAppKitAdapter", dependencies: ["DesignSystemCore"], resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "DesignSystem", dependencies: ["DesignSystemCore", "DesignSystemAppKitAdapter"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "ProtonAuth", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "ProtonAuthTests", dependencies: ["ProtonAuth"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaByteCache", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),

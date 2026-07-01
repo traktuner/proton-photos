@@ -75,6 +75,12 @@ final class CoreArchitectureGateTests: XCTestCase {
             // and MediaFeedCore, so a global ban would wrongly fail those Core targets.
             extraForbiddenTokens: ["CGContext", "CGImage", "CGColorSpace", "CGLayer"]
         ),
+        CoreTargetRule(
+            name: "UploadCore",
+            allowedImports: ["Foundation", "Observation", "PhotosCore"],
+            expectedDependencies: ["PhotosCore"],
+            extraForbiddenTokens: []
+        ),
     ]
 
     private static let forbiddenFrameworkImports: Set<String> = [
@@ -124,6 +130,8 @@ final class CoreArchitectureGateTests: XCTestCase {
     private static let adapterAndFeatureModules: Set<String> = [
         "AlbumsFeature",
         "DesignSystem",
+        "DesignSystemAppKitAdapter",
+        "DesignSystemCore",
         "MapFeature",
         "MediaCache",
         "MetalGridTextureAppKitAdapter",
@@ -351,6 +359,71 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             missing.isEmpty,
             "Universal Core targets must be published as matching library products: \(missing.sorted())"
+        )
+    }
+
+    func testDesignSystemKeepsSharedAndAppKitBoundariesSeparate() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let coreRoot = sourcesRoot.appendingPathComponent("DesignSystemCore")
+        let appKitRoot = sourcesRoot.appendingPathComponent("DesignSystemAppKitAdapter")
+        let compatRoot = sourcesRoot.appendingPathComponent("DesignSystem")
+        var violations: [String] = []
+
+        for product in ["DesignSystemCore", "DesignSystemAppKitAdapter", "DesignSystem"] {
+            if !manifest.contains(".library(name: \"\(product)\", targets: [\"\(product)\"])") {
+                violations.append("\(product): missing matching product")
+            }
+        }
+
+        for file in ["ProtonComponents.swift", "ProtonColors.swift"] {
+            if !FileManager.default.fileExists(atPath: coreRoot.appendingPathComponent(file).path) {
+                violations.append("DesignSystemCore/\(file): missing shared SwiftUI file")
+            }
+        }
+        if !FileManager.default.fileExists(atPath: appKitRoot.appendingPathComponent("LoadingVeil.swift").path) {
+            violations.append("DesignSystemAppKitAdapter/LoadingVeil.swift: missing AppKit launch-veil adapter")
+        }
+        if !FileManager.default.fileExists(atPath: appKitRoot.appendingPathComponent("Resources").path) {
+            violations.append("DesignSystemAppKitAdapter/Resources: branding assets must live with the adapter that uses them")
+        }
+
+        let coreFiles = try swiftFiles(in: coreRoot)
+        for file in coreFiles {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: source)
+            for token in ["NSViewRepresentable", "NSVisualEffectView", "NSView", "FrostedGlassBackground", "LoadingMark"] where contains(token, in: code) {
+                violations.append("DesignSystemCore/\(file.lastPathComponent): AppKit launch-veil symbol leaked into shared UI core (\(token))")
+            }
+        }
+
+        let adapterFile = appKitRoot.appendingPathComponent("LoadingVeil.swift")
+        if FileManager.default.fileExists(atPath: adapterFile.path) {
+            let adapterSource = try String(contentsOf: adapterFile, encoding: .utf8)
+            for required in ["import AppKit", "NSViewRepresentable", "NSVisualEffectView", "import DesignSystemCore"] where !adapterSource.contains(required) {
+                violations.append("DesignSystemAppKitAdapter/LoadingVeil.swift: missing \(required)")
+            }
+        }
+
+        let exportsFile = compatRoot.appendingPathComponent("DesignSystemExports.swift")
+        if FileManager.default.fileExists(atPath: exportsFile.path) {
+            let exports = try String(contentsOf: exportsFile, encoding: .utf8)
+            for required in ["@_exported import DesignSystemCore", "@_exported import DesignSystemAppKitAdapter"] where !exports.contains(required) {
+                violations.append("DesignSystem/DesignSystemExports.swift: missing \(required)")
+            }
+        } else {
+            violations.append("DesignSystem/DesignSystemExports.swift: missing compatibility exports")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            DesignSystem shared/AppKit split regressed:
+            \(violations.joined(separator: "\n"))
+
+            Cross-platform SwiftUI tokens/components belong in DesignSystemCore. Behind-window AppKit
+            material and branding resources belong in DesignSystemAppKitAdapter. The legacy DesignSystem
+            target is only a compatibility facade for macOS import sites.
+            """
         )
     }
 
