@@ -584,10 +584,11 @@ assumptions from becoming Universal Core policy. Future iOS/iPadOS adapters must
 
 Small adapter-boundary split with no intended behavior change.
 
-`MetalGridTextureCache` still belongs to the macOS `TimelineFeature` adapter because it owns real `MTLTexture`
-objects. It no longer owns native SF Symbol rasterization. Instead it takes a
-`MetalGridGlyphRasterizing` dependency, asks it for a `CGImage`, then uploads that image through the same texture
-path used before.
+At this phase, `MetalGridTextureCache` still belonged to the macOS `TimelineFeature` adapter because it owned
+real `MTLTexture` objects. It no longer owned native SF Symbol rasterization. Instead it took a
+`MetalGridGlyphRasterizing` dependency, asked it for a `CGImage`, then uploaded that image through the same
+texture path used before. Phase 5.1 later moved the generic cache and glyph contract into
+`MetalGridTextureCore`.
 
 `AppKitMetalGridGlyphRasterizer` is the current macOS implementation. It is the only Metal-grid glyph file that
 may use `NSImage`, `NSColor`, and `NSFont`. Future iOS/iPadOS adapters should add a UIKit implementation that
@@ -618,8 +619,25 @@ Boundary-only split. No production behavior changed.
 photo-domain IDs, media-feed/cache APIs, platform views, glyph rasterization implementations, draw targets, and
 render command encoding.
 
-This phase intentionally moves no production cache code. `MetalGridTextureCache<ID>` and
-`MetalGridGlyphRasterizing` remain in `TimelineFeature` until the new target gate is proven on macOS and iOS.
-The next extraction may move the generic cache and glyph request contract into this target while keeping
-`AppKitMetalGridGlyphRasterizer`, `PhotoUID` binding, platform budgets, `MTKView`, and scroll/gesture hosts in
-the macOS adapter.
+This phase intentionally moved no production cache code. It existed to prove the package boundary before moving
+runtime code.
+
+#### Phase 5.1 — Generic texture cache into MetalGridTextureCore
+
+Small target-boundary extraction with no intended behavior change.
+
+`MetalGridTextureCore` now owns `MetalGridTextureCache<ID: Hashable & Sendable>`, the shared real Metal texture
+cache over `GridTextureResidencyPolicy<ID>`. The cache imports `Metal`, `CoreGraphics`, and `GridCore`; it does
+not import `PhotosCore`, `MediaCache`, `MetalKit`, AppKit, UIKit, or SwiftUI. It still owns `MTLTexture`
+residency, thumbnail upload from decoded `CGImage`, placeholder texture lifetime, resident glyph texture caching,
+and upload/byte counters.
+
+`MetalGridTextureCore` also owns the platform-neutral glyph request contract:
+`MetalGridGlyphRequest`, `MetalGridGlyphWeight`, `MetalGridGlyphColor`, and `MetalGridGlyphRasterizing`.
+Platform adapters own native rasterization implementations. The macOS adapter injects
+`AppKitMetalGridGlyphRasterizer`; future iOS/iPadOS adapters must inject a UIKit implementation or a renderer
+native badge path without forking the shared cache.
+
+`TimelineFeature` remains the macOS adapter boundary for `PhotoUID` specialization
+(`MetalGridTextureCache<PhotoUID>`), decoded-image feed access, `MetalGridBudget.default`, `MTKView`, AppKit
+scroll/gesture hosting, accessibility, headers, and palette conversion.

@@ -2,6 +2,7 @@ import AppKit
 import MetalKit
 import CoreGraphics
 import MetalRenderingCore
+import MetalGridTextureCore
 import simd
 import PhotosCore
 import GridCore

@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import MetalGridTextureCore
 
 @MainActor
 final class AppKitMetalGridGlyphRasterizer: MetalGridGlyphRasterizing {

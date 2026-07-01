@@ -7,29 +7,29 @@ import GridCore
 /// offscreen items are evicted LRU once the budget is exceeded. A neutral placeholder texture is always
 /// resident so a missing thumbnail draws a stable card, never a transparent hole or black rectangle.
 ///
-/// All texture uploads happen on the render (main) thread from already-decoded RAM images — there is no
-/// disk/network decode in here (that is `ThumbnailFeed`'s job, off-main). Uploads are bounded per frame.
+/// All texture uploads happen on the render (main) thread from already-decoded RAM images. Disk/network decode
+/// belongs to the caller's feed layer, off-main. Uploads are bounded per frame.
 @MainActor
-final class MetalGridTextureCache<ID: Hashable & Sendable> {
+package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     private let device: MTLDevice
     private let glyphRasterizer: any MetalGridGlyphRasterizing
     private var lru: GridTextureResidencyPolicy<ID>
     private var textures: [ID: MTLTexture] = [:]
-    private(set) var placeholderTexture: MTLTexture
+    package private(set) var placeholderTexture: MTLTexture
 
     /// Rolling per-frame accounting (reset each `beginFrame`).
-    private(set) var uploadsThisFrame = 0
-    private(set) var uploadBytesThisFrame = 0
-    private(set) var uploadMsThisFrame: Double = 0
-    private(set) var evictionsThisFrame = 0
-    private(set) var residentBytes = 0
+    package private(set) var uploadsThisFrame = 0
+    package private(set) var uploadBytesThisFrame = 0
+    package private(set) var uploadMsThisFrame: Double = 0
+    package private(set) var evictionsThisFrame = 0
+    package private(set) var residentBytes = 0
 
     /// Max pixel side a thumbnail is uploaded at (Retina-aware crispness without wasting VRAM).
-    let maxTexturePixels: Int
+    package let maxTexturePixels: Int
 
-    init?(
+    package init?(
         device: MTLDevice,
-        budget: MetalGridBudget,
+        budget: GridTextureBudget,
         maxTexturePixels: Int = 320,
         glyphRasterizer: any MetalGridGlyphRasterizing
     ) {
@@ -46,7 +46,7 @@ final class MetalGridTextureCache<ID: Hashable & Sendable> {
 
     // MARK: - Per-frame lifecycle
 
-    func beginFrame(pinned: Set<ID>) {
+    package func beginFrame(pinned: Set<ID>) {
         lru.beginFrame(pinned: pinned)
         uploadsThisFrame = 0
         uploadBytesThisFrame = 0
@@ -54,20 +54,20 @@ final class MetalGridTextureCache<ID: Hashable & Sendable> {
         evictionsThisFrame = 0
     }
 
-    func noteUsed(_ id: ID) { lru.noteUsed(id) }
+    package func noteUsed(_ id: ID) { lru.noteUsed(id) }
 
-    func isResident(_ id: ID) -> Bool { lru.isResident(id) }
-    func isInFlight(_ id: ID) -> Bool { lru.isInFlight(id) }
+    package func isResident(_ id: ID) -> Bool { lru.isResident(id) }
+    package func isInFlight(_ id: ID) -> Bool { lru.isInFlight(id) }
 
     /// The texture to draw for `id` — real if resident, else the shared placeholder.
-    func texture(for id: ID) -> MTLTexture {
+    package func texture(for id: ID) -> MTLTexture {
         textures[id] ?? placeholderTexture
     }
 
     /// Upload the chosen subset of `wanted` (visible-first priority order) from the supplied RAM images.
     /// Honours the per-frame budget + in-flight dedup via the LRU policy: `provideImage` is only called
     /// for the IDs actually selected this frame, and never for an already-resident/in-flight ID.
-    func uploadVisible(wanted: [ID], provideImage: (ID) -> CGImage?) {
+    package func uploadVisible(wanted: [ID], provideImage: (ID) -> CGImage?) {
         let chosen = lru.selectUploads(wanted: wanted)
         for id in chosen {
             guard let image = provideImage(id) else {
@@ -90,7 +90,7 @@ final class MetalGridTextureCache<ID: Hashable & Sendable> {
     }
 
     /// Evict offscreen LRU textures down to the budget and release their GPU memory.
-    func evictToBudget() {
+    package func evictToBudget() {
         let evicted = lru.evictToBudget()
         for id in evicted {
             if let tex = textures.removeValue(forKey: id) {
@@ -142,7 +142,7 @@ final class MetalGridTextureCache<ID: Hashable & Sendable> {
 
     /// A cached, tinted SF-Symbol texture for a badge glyph (favorite/checked/video). Resident for the
     /// session (a handful of small textures), so badge rendering is a cheap textured quad.
-    func glyphTexture(
+    package func glyphTexture(
         symbol: String,
         pixelSize: Int = 44,
         weight: MetalGridGlyphWeight = .bold,

@@ -70,7 +70,7 @@ let package = Package(
         .target(name: "MediaCache", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",
-            dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "GridCore", "MetalRenderingCore"],
+            dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "GridCore", "MetalRenderingCore", "MetalGridTextureCore"],
             resources: [.process("Resources")],
             swiftSettings: disableDynamicActorIsolation
         ),
@@ -82,7 +82,7 @@ let package = Package(
         .testTarget(name: "PhotoViewerFeatureTests", dependencies: ["PhotoViewerFeature"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(
             name: "TimelineFeatureTests",
-            dependencies: ["TimelineFeature", "GridCore", "MetalRenderingCore", "MediaCache", "PhotosCore"],
+            dependencies: ["TimelineFeature", "GridCore", "MetalRenderingCore", "MetalGridTextureCore", "MediaCache", "PhotosCore"],
             swiftSettings: disableDynamicActorIsolation
         ),
         // Albums: management protocols + repository over an injected backend (SDK has no album APIs,

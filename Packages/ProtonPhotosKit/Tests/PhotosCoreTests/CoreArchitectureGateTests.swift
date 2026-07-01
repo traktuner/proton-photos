@@ -532,13 +532,23 @@ final class CoreArchitectureGateTests: XCTestCase {
             }
         }
 
-        let boundaryFile = sourceRoot.appendingPathComponent("MetalGridTextureCoreBoundary.swift")
-        if !FileManager.default.fileExists(atPath: boundaryFile.path) {
-            violations.append("MetalGridTextureCore/MetalGridTextureCoreBoundary.swift: missing boundary marker")
-        } else {
-            let source = try String(contentsOf: boundaryFile, encoding: .utf8)
-            for symbol in ["MetalGridTextureCoreBoundary", "GridTextureBudget", "CGImage", "MTLTexture"] where !source.contains(symbol) {
-                violations.append("MetalGridTextureCore/MetalGridTextureCoreBoundary.swift: missing \(symbol)")
+        let cacheFile = sourceRoot.appendingPathComponent("MetalGridTextureCache.swift")
+        let glyphFile = sourceRoot.appendingPathComponent("MetalGridGlyphRasterizer.swift")
+        for file in [cacheFile, glyphFile] where !FileManager.default.fileExists(atPath: file.path) {
+            violations.append("MetalGridTextureCore/\(file.lastPathComponent): missing shared texture-core file")
+        }
+
+        if FileManager.default.fileExists(atPath: cacheFile.path) {
+            let source = try String(contentsOf: cacheFile, encoding: .utf8)
+            for symbol in ["package final class MetalGridTextureCache", "GridTextureResidencyPolicy<ID>", "GridTextureBudget", "uploadVisible(wanted: [ID]"] where !source.contains(symbol) {
+                violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: missing \(symbol)")
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: glyphFile.path) {
+            let source = try String(contentsOf: glyphFile, encoding: .utf8)
+            for symbol in ["package struct MetalGridGlyphRequest", "package struct MetalGridGlyphColor", "package protocol MetalGridGlyphRasterizing"] where !source.contains(symbol) {
+                violations.append("MetalGridTextureCore/MetalGridGlyphRasterizer.swift: missing \(symbol)")
             }
         }
 
@@ -739,49 +749,50 @@ final class CoreArchitectureGateTests: XCTestCase {
     }
 
     func testMetalGridTextureCacheUsesInjectedGlyphRasterizer() throws {
+        let textureRoot = sourcesRoot.appendingPathComponent("MetalGridTextureCore")
         let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
-        let cacheFile = timelineRoot.appendingPathComponent("MetalGridTextureCache.swift")
-        let glyphContractFile = timelineRoot.appendingPathComponent("MetalGridGlyphRasterizer.swift")
+        let cacheFile = textureRoot.appendingPathComponent("MetalGridTextureCache.swift")
+        let glyphContractFile = textureRoot.appendingPathComponent("MetalGridGlyphRasterizer.swift")
         let appKitRasterizerFile = timelineRoot.appendingPathComponent("AppKitMetalGridGlyphRasterizer.swift")
         let coordinatorFile = timelineRoot.appendingPathComponent("MetalGridCoordinator.swift")
         var violations: [String] = []
 
         for file in [cacheFile, glyphContractFile, appKitRasterizerFile] where !FileManager.default.fileExists(atPath: file.path) {
-            violations.append("TimelineFeature/\(file.lastPathComponent): missing glyph boundary file")
+            violations.append("\(file.deletingLastPathComponent().lastPathComponent)/\(file.lastPathComponent): missing glyph/cache boundary file")
         }
 
         if FileManager.default.fileExists(atPath: cacheFile.path) {
             let imports = try importedModules(in: cacheFile)
             if imports.contains("AppKit") {
-                violations.append("TimelineFeature/MetalGridTextureCache.swift: texture cache must not import AppKit")
+                violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: texture cache must not import AppKit")
             }
             let source = try String(contentsOf: cacheFile, encoding: .utf8)
             let code = stripCommentsAndStringLiterals(from: source)
             for forbidden in ["NSImage", "NSColor", "NSFont", "lockFocus", "systemSymbolName", "renderGlyph"] where contains(forbidden, in: code) {
-                violations.append("TimelineFeature/MetalGridTextureCache.swift: glyph rasterization leaked into cache via \(forbidden)")
+                violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: glyph rasterization leaked into cache via \(forbidden)")
             }
             if !source.contains("glyphRasterizer: any MetalGridGlyphRasterizing") {
-                violations.append("TimelineFeature/MetalGridTextureCache.swift: missing injected glyph rasterizer dependency")
+                violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: missing injected glyph rasterizer dependency")
             }
             if !source.contains("glyphRasterizer.image(for: request)") {
-                violations.append("TimelineFeature/MetalGridTextureCache.swift: glyph image must come from injected rasterizer")
+                violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: glyph image must come from injected rasterizer")
             }
         }
 
         if FileManager.default.fileExists(atPath: glyphContractFile.path) {
             let imports = try importedModules(in: glyphContractFile)
             if imports != ["CoreGraphics"] {
-                violations.append("TimelineFeature/MetalGridGlyphRasterizer.swift: imports \(imports.sorted()) != [CoreGraphics]")
+                violations.append("MetalGridTextureCore/MetalGridGlyphRasterizer.swift: imports \(imports.sorted()) != [CoreGraphics]")
             }
             let source = try String(contentsOf: glyphContractFile, encoding: .utf8)
             for symbol in ["MetalGridGlyphRequest", "MetalGridGlyphColor", "MetalGridGlyphRasterizing"] where !source.contains(symbol) {
-                violations.append("TimelineFeature/MetalGridGlyphRasterizer.swift: missing \(symbol)")
+                violations.append("MetalGridTextureCore/MetalGridGlyphRasterizer.swift: missing \(symbol)")
             }
         }
 
         if FileManager.default.fileExists(atPath: appKitRasterizerFile.path) {
             let source = try String(contentsOf: appKitRasterizerFile, encoding: .utf8)
-            if !source.contains("import AppKit") || !source.contains("final class AppKitMetalGridGlyphRasterizer") {
+            if !source.contains("import AppKit") || !source.contains("import MetalGridTextureCore") || !source.contains("final class AppKitMetalGridGlyphRasterizer") {
                 violations.append("TimelineFeature/AppKitMetalGridGlyphRasterizer.swift: AppKit implementation must own native glyph rasterization")
             }
             if !source.contains("NSImage(systemSymbolName:") || !source.contains("NSImage.SymbolConfiguration") {
@@ -791,6 +802,9 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if FileManager.default.fileExists(atPath: coordinatorFile.path) {
             let source = try String(contentsOf: coordinatorFile, encoding: .utf8)
+            if !source.contains("import MetalGridTextureCore") {
+                violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS adapter must import the texture core explicitly")
+            }
             if !source.contains("glyphRasterizer: AppKitMetalGridGlyphRasterizer()") {
                 violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS adapter must inject AppKit rasterizer explicitly")
             }
@@ -812,34 +826,41 @@ final class CoreArchitectureGateTests: XCTestCase {
     }
 
     func testMetalGridTextureCacheStaysItemIDGeneric() throws {
+        let textureRoot = sourcesRoot.appendingPathComponent("MetalGridTextureCore")
         let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
-        let cacheFile = timelineRoot.appendingPathComponent("MetalGridTextureCache.swift")
+        let cacheFile = textureRoot.appendingPathComponent("MetalGridTextureCache.swift")
         let coordinatorFile = timelineRoot.appendingPathComponent("MetalGridCoordinator.swift")
         var violations: [String] = []
 
         guard FileManager.default.fileExists(atPath: cacheFile.path) else {
-            XCTFail("TimelineFeature/MetalGridTextureCache.swift: missing texture cache")
+            XCTFail("MetalGridTextureCore/MetalGridTextureCache.swift: missing texture cache")
             return
         }
 
         let imports = try importedModules(in: cacheFile)
         for forbidden in ["PhotosCore", "AppKit", "UIKit", "SwiftUI", "MetalKit"] where imports.contains(forbidden) {
-            violations.append("TimelineFeature/MetalGridTextureCache.swift: cache must not import \(forbidden)")
+            violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: cache must not import \(forbidden)")
         }
 
         let source = try String(contentsOf: cacheFile, encoding: .utf8)
         let code = stripCommentsAndStringLiterals(from: source)
         for forbidden in ["PhotoUID", "PhotoItem", "PhotosCore"] where contains(forbidden, in: code) {
-            violations.append("TimelineFeature/MetalGridTextureCache.swift: cache must stay item-ID generic; found \(forbidden)")
+            violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: cache must stay item-ID generic; found \(forbidden)")
         }
-        if !source.contains("final class MetalGridTextureCache<ID: Hashable & Sendable>") {
-            violations.append("TimelineFeature/MetalGridTextureCache.swift: cache must be generic over a sendable hashable item ID")
+        if !source.contains("package final class MetalGridTextureCache<ID: Hashable & Sendable>") {
+            violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: cache must be package-visible and generic over a sendable hashable item ID")
         }
         if !source.contains("GridTextureResidencyPolicy<ID>") || !source.contains("[ID: MTLTexture]") {
-            violations.append("TimelineFeature/MetalGridTextureCache.swift: cache storage and residency policy must use the generic ID")
+            violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: cache storage and residency policy must use the generic ID")
         }
         if !source.contains("func uploadVisible(wanted: [ID], provideImage: (ID) -> CGImage?)") {
-            violations.append("TimelineFeature/MetalGridTextureCache.swift: upload seam must not re-specialize to a photo-domain ID")
+            violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: upload seam must not re-specialize to a photo-domain ID")
+        }
+        if FileManager.default.fileExists(atPath: timelineRoot.appendingPathComponent("MetalGridTextureCache.swift").path) {
+            violations.append("TimelineFeature/MetalGridTextureCache.swift: shared generic cache belongs in MetalGridTextureCore")
+        }
+        if FileManager.default.fileExists(atPath: timelineRoot.appendingPathComponent("MetalGridGlyphRasterizer.swift").path) {
+            violations.append("TimelineFeature/MetalGridGlyphRasterizer.swift: shared glyph contract belongs in MetalGridTextureCore")
         }
 
         guard FileManager.default.fileExists(atPath: coordinatorFile.path) else {

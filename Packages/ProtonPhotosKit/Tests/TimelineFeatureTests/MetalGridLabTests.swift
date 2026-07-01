@@ -3,6 +3,7 @@ import Foundation
 import CoreGraphics
 import Metal
 import MetalRenderingCore
+import MetalGridTextureCore
 import PhotosCore
 import GridCore
 @testable import TimelineFeature
