@@ -90,6 +90,7 @@ final class ProjectHygieneTests: XCTestCase {
             "product: MetalGridTextureUIKitAdapter",
             "product: PhotoViewerCore",
             "product: PhotoViewerUIKitAdapter",
+            "product: MapUIKitAdapter",
             "product: UploadCore"
         ] {
             XCTAssertTrue(mobileTarget.contains(required), "ProtonPhotosMobile target missing \(required)")

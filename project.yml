@@ -134,6 +134,8 @@ targets:
         product: PhotoViewerUIKitAdapter
       - package: ProtonPhotosKit
         product: MediaLocationCore
+      - package: ProtonPhotosKit
+        product: MapUIKitAdapter
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.protonphotos.ios

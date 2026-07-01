@@ -56,6 +56,7 @@ let package = Package(
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
         // Library map: MapKit (native Apple Maps) view over the shared encrypted location index.
         // Platform UI layer — macOS now; an iOS/iPad UIKit variant reuses the same MediaLocationCore.
+        .library(name: "MapUIKitAdapter", targets: ["MapUIKitAdapter"]),
         .library(name: "MapFeature", targets: ["MapFeature"]),
     ],
     targets: [
@@ -117,7 +118,8 @@ let package = Package(
         // presentation chrome stays owned by the host platform.
         .target(name: "UploadFeature", dependencies: ["UploadCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "UploadFeatureTests", dependencies: ["UploadCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
-        // Map: MapKit view + clustering over PhotoLocationIndex (MediaLocationCore). UI layer (AppKit/MapKit).
+        // Map: UIKit/AppKit MapKit views + clustering over PhotoLocationIndex (MediaLocationCore).
+        .target(name: "MapUIKitAdapter", dependencies: ["PhotosCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MapFeature", dependencies: ["PhotosCore", "MediaLocationCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
     ]
 )
