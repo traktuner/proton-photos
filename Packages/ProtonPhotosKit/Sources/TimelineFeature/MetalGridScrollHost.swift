@@ -3,20 +3,6 @@ import MetalKit
 import PhotosCore
 import GridCore
 
-/// A layout-INVARIANT scroll position: the UID of the photo at the top of the viewport plus how far its top sat
-/// below the viewport top. Restoring re-resolves that photo's CURRENT position (whatever the zoom level, width,
-/// or column phase now is) and re-pins it at the same sub-offset — so a remembered route reopens exactly where
-/// the user was, even if they changed zoom or resized the window while on another route. (A raw scroll-Y would
-/// land in the wrong place after any such change; the photo anchor does not.)
-public struct GridScrollAnchor: Equatable {
-    public let uid: PhotoUID
-    public let topOffset: CGFloat
-    public init(uid: PhotoUID, topOffset: CGFloat) {
-        self.uid = uid
-        self.topOffset = topOffset
-    }
-}
-
 /// The one-shot viewport policy a data-source / route switch hands the host, consumed by the host's
 /// layout/content-size path only after layout geometry is valid — never as an immediate scroll from SwiftUI.
 ///   - `.preserve`: keep the current scroll position (the default for incremental data updates).
@@ -27,7 +13,7 @@ public struct GridScrollAnchor: Equatable {
 enum GridInitialViewport: Equatable {
     case preserve
     case newest
-    case restore(GridScrollAnchor)
+    case restore(GridScrollAnchor<PhotoUID>)
 }
 
 /// Option-A scroll architecture: a native `NSScrollView` owns scroll physics (scrollbars, trackpad
@@ -1172,7 +1158,7 @@ final class MetalGridScrollHost: NSView {
         case .newest:
             targetY = maxY
         case .restore(let anchor):
-            if let rect = coordinator.cellContentRect(forUID: anchor.uid) {
+            if let rect = coordinator.cellContentRect(forUID: anchor.itemID) {
                 targetY = min(max(0, rect.minY - anchor.topOffset), maxY)
             } else {
                 targetY = maxY                 // the remembered photo no longer exists in this route → newest
@@ -1203,11 +1189,11 @@ final class MetalGridScrollHost: NSView {
     /// reopen the route EXACTLY here later (`.restore`), robust to any zoom/width/phase change while away.
     /// Derived from the existing visible-cell query (NOT the zoom anchor): this is route-scroll memory, not a
     /// zoom anchor — the live pinch / +- path still anchors on the cursor item.
-    func currentScrollAnchor() -> GridScrollAnchor? {
+    func currentScrollAnchor() -> GridScrollAnchor<PhotoUID>? {
         let originY = scrollView.contentView.bounds.origin.y
         guard let top = coordinator.visibleCells().min(by: { $0.rect.minY < $1.rect.minY }),
               let uid = coordinator.uid(atFlatIndex: top.flatIndex) else { return nil }
-        return GridScrollAnchor(uid: uid, topOffset: top.rect.minY - originY)
+        return GridScrollAnchor(itemID: uid, topOffset: top.rect.minY - originY)
     }
 
     // MARK: - Public controls

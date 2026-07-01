@@ -32,16 +32,16 @@ struct MainView: View {
     /// Per-route scroll-position memory: leaving a route stores a layout-invariant photo anchor here; returning
     /// re-pins it (so the route reopens exactly where the user was, even across zoom/resize). `nil` for a route
     /// never visited → opens at newest.
-    @State private var routeScrollPositions: [PhotoFilter: GridScrollAnchor] = [:]
+    @State private var routeScrollPositions: [PhotoFilter: GridScrollAnchor<PhotoUID>] = [:]
     /// The placement target for the CURRENT route generation: a remembered photo anchor (restore) or nil
     /// (newest). Set synchronously when the route changes, BEFORE the async load, so the grid host has the
     /// correct target by the time the new sections arrive.
-    @State private var routeInitialScrollAnchor: GridScrollAnchor? = nil
+    @State private var routeInitialScrollAnchor: GridScrollAnchor<PhotoUID>? = nil
     @State private var searchText = ""
     @State private var committedSearchText = ""
     @State private var searchDebounceTask: Task<Void, Never>?
     // Shared-element zoom transition (photo ↔ its grid cell).
-    @State private var gridProxy = GridProxy()
+    @State private var gridProxy = GridProxy<PhotoUID>()
     @State private var veilTimeout: Task<Void, Never>?
     @State private var zoom: ZoomTransition?
     // Real height of the native window toolbar (its top safe-area inset). The viewer lays its media out
@@ -472,7 +472,7 @@ struct MainView: View {
 
     private func openPhoto(_ item: PhotoItem, _ items: [PhotoItem]) {
         // Need the cell's on-screen frame and a thumbnail to fly; otherwise just open directly.
-        guard let cell = gridProxy.windowFrameForItem?(item), let img = feed.memoryImage(for: item.uid) else {
+        guard let cell = gridProxy.windowFrameForItem?(item.uid), let img = feed.memoryImage(for: item.uid) else {
             viewerModel = makeViewer(item, items)
             logViewerToolbar(mode: "viewer")
             return
@@ -548,7 +548,7 @@ struct MainView: View {
 
     private func viewerReturnTarget(for vm: PhotoViewerModel) -> (item: PhotoItem, cell: CGRect)? {
         for item in vm.gridReturnCandidates {
-            if let cell = gridProxy.windowFrameForItem?(item) { return (item, cell) }
+            if let cell = gridProxy.windowFrameForItem?(item.uid) { return (item, cell) }
         }
         return nil
     }
@@ -691,7 +691,7 @@ struct MainView: View {
                 uploadRefreshBusy = false
                 uploadRefreshSuccess = true
                 uploadRefreshMessage = String(localized: "upload.uploaded")
-                gridProxy.scrollToItem?(found)
+                gridProxy.scrollToItem?(found.uid)
                 clearUploadRefreshMessage(after: .seconds(2))
                 return
             }

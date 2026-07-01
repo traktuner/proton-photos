@@ -265,17 +265,20 @@ struct ProductionRouteGuardTests {
 
         let host = Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/MetalGridScrollHost.swift")
         let hostText = try String(contentsOf: host, encoding: .utf8)
+        let anchor = Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/GridCore/GridScrollAnchor.swift")
+        let anchorText = try String(contentsOf: anchor, encoding: .utf8)
         // The host owns the pending initial-viewport state + the policy type (incl. `.restore`), `setDataSource`
         // takes the policy, and it exposes the read-only scroll offset the shell remembers per route.
         #expect(hostText.contains("enum GridInitialViewport"))
-        #expect(hostText.contains("case restore(GridScrollAnchor)"))
-        #expect(hostText.contains("struct GridScrollAnchor"))          // layout-invariant photo anchor (exact restore)
+        #expect(hostText.contains("case restore(GridScrollAnchor<PhotoUID>)"))
+        #expect(anchorText.contains("struct GridScrollAnchor<ItemID")) // layout-invariant generic item anchor
+        #expect(!hostText.contains("struct GridScrollAnchor"))
         #expect(hostText.contains("pendingInitialViewport"))
         #expect(hostText.contains("func setDataSource(_ source: MetalGridDataSource, initialViewport: GridInitialViewport"))
         #expect(hostText.contains("func currentScrollAnchor()"))
         #expect(hostText.contains("func scrollToFlatIndex(_ index: Int)"))
         #expect(hostText.contains("coordinator.cellContentRect(forFlatIndex: index)"))
-        #expect(hostText.contains("coordinator.cellContentRect(forUID: anchor.uid)"))   // restore re-resolves the photo's current position
+        #expect(hostText.contains("coordinator.cellContentRect(forUID: anchor.itemID)")) // restore re-resolves the photo's current position
         #expect(!hostText.contains("func showNewestOnceForRouteChange"))
         // Unrelated hit-test inset invariants (kept stable by this change).
         #expect(hostText.contains("if point.x < eventLeadingInset"))

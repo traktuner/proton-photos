@@ -490,6 +490,21 @@ no platform view state.
 
 `TimelineFeature/GridZoomCommit.swift` remains the macOS timeline diagnostics adapter. It keeps
 `GridZoomAnchorLog`, `GridLevelSyncLog`, `GridResizeLog`, `MetalGridPerfLog`, and `GridZoomCommitLog` because
-those write through `PhotoDiagnostics`. `GridProxy` remains adapter/shell seam code until it is separately
-classified. This pass deliberately did not move coordinators, hosts, renderer, cache, gesture intake, AppKit
+those write through `PhotoDiagnostics`. This pass left `GridProxy` as adapter/shell seam code until separate
+classification. It deliberately did not move coordinators, hosts, renderer, cache, gesture intake, AppKit
 accessibility, or data-source/feed adapters into Core.
+
+#### Phase 4.3 — Generic shell/grid seam extraction
+
+Small API split with no intended behavior change.
+
+`GridProxy.swift` moved from `TimelineFeature` to `GridCore` as `GridProxy<ItemID>`. The proxy is the
+platform-neutral command/event seam between the app shell and a grid host: window/cell-frame query by item ID,
+scroll commands, zoom commands, content-mode commands, and first-content-ready notification. It deliberately
+owns no renderer, host view, image/cache object, platform framework, or photo-domain model.
+
+`GridScrollAnchor.swift` moved to `GridCore` as `GridScrollAnchor<ItemID>`. `TimelineFeature` now uses
+`GridProxy<PhotoUID>` and `GridScrollAnchor<PhotoUID>`, keeping photo identity binding at the adapter edge while
+leaving the Core seam generic and reusable for iOS/iPadOS. `TimelineFeature` still owns `GridInitialViewport`,
+native host placement, AppKit coordinate conversion, `MetalGridScrollHost`, data-source wiring, renderer/cache
+integration, diagnostics, gestures, and accessibility.

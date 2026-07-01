@@ -323,6 +323,58 @@ final class CoreArchitectureGateTests: XCTestCase {
         )
     }
 
+    func testGridProxySeamStaysGenericAndUniversal() throws {
+        let gridCoreRoot = sourcesRoot.appendingPathComponent("GridCore")
+        let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
+        let proxyFile = gridCoreRoot.appendingPathComponent("GridProxy.swift")
+        let anchorFile = gridCoreRoot.appendingPathComponent("GridScrollAnchor.swift")
+        var violations: [String] = []
+
+        for file in [proxyFile, anchorFile] {
+            if !FileManager.default.fileExists(atPath: file.path) {
+                violations.append("GridCore/\(file.lastPathComponent): missing universal shell/grid seam")
+                continue
+            }
+
+            let imports = try importedModules(in: file)
+            if imports != ["CoreGraphics"] {
+                violations.append("GridCore/\(file.lastPathComponent): imports \(imports.sorted()) != [CoreGraphics]")
+            }
+
+            let source = try String(contentsOf: file, encoding: .utf8)
+            for forbidden in ["PhotosCore", "PhotoItem", "PhotoUID", "TimelineFeature"] where source.contains(forbidden) {
+                violations.append("GridCore/\(file.lastPathComponent): must stay item-ID generic; found \(forbidden)")
+            }
+        }
+
+        let proxySource = try String(contentsOf: proxyFile, encoding: .utf8)
+        if !proxySource.contains("final class GridProxy<ItemID") {
+            violations.append("GridCore/GridProxy.swift: GridProxy must stay generic over item ID")
+        }
+        if !proxySource.contains("GridScrollAnchor<ItemID>") {
+            violations.append("GridCore/GridProxy.swift: currentScrollAnchor must use the generic GridScrollAnchor")
+        }
+
+        let anchorSource = try String(contentsOf: anchorFile, encoding: .utf8)
+        if !anchorSource.contains("struct GridScrollAnchor<ItemID") || !anchorSource.contains("let itemID: ItemID") {
+            violations.append("GridCore/GridScrollAnchor.swift: anchor must stay generic over item ID")
+        }
+
+        if FileManager.default.fileExists(atPath: timelineRoot.appendingPathComponent("GridProxy.swift").path) {
+            violations.append("TimelineFeature/GridProxy.swift: generic proxy seam belongs in universal GridCore")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 4.3 GridProxy seam extraction regressed:
+            \(violations.joined(separator: "\n"))
+
+            The shell/grid command seam must stay generic and platform-neutral in GridCore.
+            """
+        )
+    }
+
     private func swiftFiles(in directory: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: directory,

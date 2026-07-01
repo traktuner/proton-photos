@@ -71,13 +71,13 @@ by the shared `CoreArchitectureGateTests`. They use only portable value framewor
 - `GridTextureResidencyPolicy.swift` (formerly `MetalGridTextureLRU`; pure residency policy, no `Metal`)
 - `GridTextureStreamingPolicy.swift` (pure per-frame upload budget)
 - `CoreTelemetry.swift` (Phase 3.9 platform-neutral telemetry seam)
+- `GridProxy.swift` (Phase 4.3 generic shell/grid command seam)
+- `GridScrollAnchor.swift` (Phase 4.3 generic route-scroll anchor)
 
 ### Remaining pure candidates still in `TimelineFeature`
 
-Not yet moved. `GridProxy.swift` imports `PhotosCore` and is a shell/grid command seam with window-frame and
-route-restoration semantics. It needs a separate classification before any Core extraction:
-
-- `GridProxy.swift` (imports `PhotosCore`)
+No currently classified pure candidates remain here. `TimelineFeature` still owns adapter code: view hosts,
+AppKit event handling, data source wiring, diagnostics, renderer/cache integration, and platform accessibility.
 
 Extraction rule: move only pure value types and algorithms first. Do not move `TimelineFeature` view hosts,
 `MediaCache` adapters, AppKit event code, or `MTKView` delegates with them.
@@ -347,3 +347,16 @@ Pure commit-bridge extraction. No behavior changed.
   texture cache, gesture intake, AppKit accessibility, or data-source/feed adapters into Core.
 - `CoreArchitectureGateTests` now guards that the pure commit bridge stays in `GridCore` with only a
   `CoreGraphics` import.
+
+## Phase 4.3 result
+
+Generic shell/grid seam extraction. Behavior change intentionally avoided.
+
+- `GridProxy.swift` moved from `TimelineFeature` to `GridCore` and is now generic over `ItemID`.
+  `GridCore` does not import `PhotosCore`, and the proxy no longer accepts full `PhotoItem` values.
+- `GridScrollAnchor.swift` moved to `GridCore` as `GridScrollAnchor<ItemID>`, with `itemID` plus top-offset
+  route-memory state. The macOS timeline uses `GridScrollAnchor<PhotoUID>`.
+- `TimelineFeature` still owns `GridInitialViewport`, host placement, AppKit coordinate conversion,
+  `MetalGridScrollHost`, `MetalProductionGridView`, renderer/cache integration, and data-source wiring.
+- `CoreArchitectureGateTests` now guards that the proxy seam stays generic and universal, with no `PhotosCore`,
+  `PhotoItem`, `PhotoUID`, or `TimelineFeature` references inside `GridCore`.

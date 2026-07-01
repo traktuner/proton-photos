@@ -12,9 +12,9 @@ public struct TimelineView: View {
     /// center over the FULL detail width (which runs under the sidebar) and read as shifted too far left.
     @Environment(\.gridLeadingEventInset) private var leadingInset: CGFloat
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
-    private let proxy: GridProxy?
+    private let proxy: GridProxy<PhotoUID>?
     private let routeScrollGeneration: Int
-    private let routeInitialScrollAnchor: GridScrollAnchor?
+    private let routeInitialScrollAnchor: GridScrollAnchor<PhotoUID>?
     private let searchText: String
     private let selectionMode: Bool
     private let onSelectionChange: (Set<PhotoUID>) -> Void
@@ -28,9 +28,9 @@ public struct TimelineView: View {
         model: TimelineViewModel,
         level: Binding<Int>? = nil,
         gridProfile: GridLevelProfile = TimelineGridProfiles.productionDefaultProfile,
-        proxy: GridProxy? = nil,
+        proxy: GridProxy<PhotoUID>? = nil,
         routeScrollGeneration: Int = 0,
-        routeInitialScrollAnchor: GridScrollAnchor? = nil,
+        routeInitialScrollAnchor: GridScrollAnchor<PhotoUID>? = nil,
         searchText: String = "",
         selectionMode: Bool = false,
         media: FullMediaProvider? = nil,

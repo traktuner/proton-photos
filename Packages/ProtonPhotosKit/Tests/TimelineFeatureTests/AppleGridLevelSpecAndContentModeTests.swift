@@ -315,6 +315,8 @@ import GridCore
         #expect(mv.contains("gridProxy.setContentMode") || mv.contains("AspectSquareToggleModel"), "button must drive the content mode")
         let proxy = source("GridProxy.swift")
         #expect(proxy.contains("setContentMode") && proxy.contains("toggleContentMode") && proxy.contains("contentModeState"))
+        #expect(proxy.contains("final class GridProxy<ItemID"), "GridProxy must stay generic in GridCore")
+        #expect(!proxy.contains("PhotoItem"), "GridProxy must not require full timeline items for content-mode commands")
     }
 
     // 23

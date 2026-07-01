@@ -47,11 +47,11 @@ struct MetalProductionGridView: NSViewRepresentable {
     /// The target the next route placement should open at: a remembered photo anchor (returning to a
     /// previously-visited route), or `nil` to open at the newest end (first visit / launch). Set by the shell
     /// alongside `routeScrollGeneration`; consumed once per generation as the host's initial-viewport policy.
-    var routeInitialScrollAnchor: GridScrollAnchor? = nil
+    var routeInitialScrollAnchor: GridScrollAnchor<PhotoUID>? = nil
     let gridProfile: GridLevelProfile
     let gridProfileResolver: TimelineGridProfileResolver?
     let onOpen: (PhotoItem, [PhotoItem]) -> Void
-    var proxy: GridProxy?
+    var proxy: GridProxy<PhotoUID>?
     var selectionMode: Bool = false
     var onSelectionChange: (Set<PhotoUID>) -> Void = { _ in }
     var favoriteUIDs: Set<PhotoUID> = []
@@ -208,8 +208,8 @@ struct MetalProductionGridView: NSViewRepresentable {
         // The live trackpad pinch reports the settled level on release → keep the SwiftUI `level` in sync.
         host.onZoomCommit = { settled in levelBinding.wrappedValue = settled }
         guard let proxy else { return }
-        proxy.windowFrameForItem = { [weak host] item in host?.windowFrame(forUID: item.uid) }
-        proxy.scrollToItem = { [weak host] item in host?.scrollToItem(item.uid) }
+        proxy.windowFrameForItem = { [weak host] uid in host?.windowFrame(forUID: uid) }
+        proxy.scrollToItem = { [weak host] uid in host?.scrollToItem(uid) }
         proxy.scrollToFlatIndex = { [weak host] index in host?.scrollToFlatIndex(index) }
         proxy.scrollToLatest = { [weak host] in host?.scrollToBottom() }
         proxy.currentScrollAnchor = { [weak host] in host?.currentScrollAnchor() }   // read-only; shell remembers it per route
