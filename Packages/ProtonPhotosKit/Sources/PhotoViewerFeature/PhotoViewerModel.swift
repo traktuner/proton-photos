@@ -77,11 +77,12 @@ public final class PhotoViewerModel {
     private var metadataTask: Task<Void, Never>?
     private var placeTask: Task<Void, Never>?
     private var burstTask: Task<Void, Never>?
+    private var burstSelection = BurstSelectionModel()
 
-    public private(set) var burstItems: [PhotoItem] = []
-    public private(set) var burstIndex: Int?
-    public private(set) var isLoadingBurst = false
-    public private(set) var burstLoadFailed = false
+    public var burstItems: [PhotoItem] { burstSelection.items }
+    public var burstIndex: Int? { burstSelection.selectedIndex }
+    public var isLoadingBurst: Bool { burstSelection.isLoading }
+    public var burstLoadFailed: Bool { burstSelection.loadFailed }
 
     public init(items: [PhotoItem], index: Int, feed: ThumbnailFeed, media: FullMediaProvider,
                 streamer: VideoStreamProvider? = nil, metadataProvider: PhotoMetadataProvider? = nil,
@@ -148,29 +149,26 @@ public final class PhotoViewerModel {
 
     public var baseCurrent: PhotoItem { items[index] }
     public var current: PhotoItem {
-        if let burstIndex, burstItems.indices.contains(burstIndex) { return burstItems[burstIndex] }
-        return baseCurrent
+        burstSelection.current(fallback: baseCurrent)
     }
     public var canGoNext: Bool { index < items.count - 1 }
     public var canGoPrevious: Bool { index > 0 }
     public var canNavigateNext: Bool {
-        if hasBurstFilmstrip, let burstIndex, burstIndex < burstItems.count - 1 { return true }
-        return canGoNext
+        burstSelection.canMoveNext || canGoNext
     }
     public var canNavigatePrevious: Bool {
-        if hasBurstFilmstrip, let burstIndex, burstIndex > 0 { return true }
-        return canGoPrevious
+        burstSelection.canMovePrevious || canGoPrevious
     }
     public var thumbnailFeed: ThumbnailFeed { feed }
-    public var hasBurstFilmstrip: Bool { burstItems.count > 1 }
+    public var hasBurstFilmstrip: Bool { burstSelection.hasFilmstrip }
     public var exportItemsForDownload: [PhotoItem] {
-        hasBurstFilmstrip ? burstItems : [current]
+        burstSelection.exportItems(current: current)
     }
     public var canDownloadCurrentSelection: Bool {
         !isLoadingBurst && !exportItemsForDownload.isEmpty
     }
     public var gridReturnCandidates: [PhotoItem] {
-        current.uid == baseCurrent.uid ? [baseCurrent] : [current, baseCurrent]
+        burstSelection.gridReturnCandidates(current: current, base: baseCurrent)
     }
     private func isDisplaying(_ item: PhotoItem) -> Bool { current.uid == item.uid }
     private func isBaseCurrent(_ item: PhotoItem) -> Bool { baseCurrent.uid == item.uid }
@@ -287,25 +285,24 @@ public final class PhotoViewerModel {
     /// left/right first move through series members; at the series edges they fall through to the adjacent
     /// library item, matching keyboard accessibility expectations for an active sub-selection.
     public func nextInContext() {
-        if hasBurstFilmstrip, let burstIndex, burstIndex < burstItems.count - 1 {
-            selectBurstIndex(burstIndex + 1)
+        if let selected = burstSelection.selectNext() {
+            loadDisplayedItem(selected)
             return
         }
         next()
     }
 
     public func previousInContext() {
-        if hasBurstFilmstrip, let burstIndex, burstIndex > 0 {
-            selectBurstIndex(burstIndex - 1)
+        if let selected = burstSelection.selectPrevious() {
+            loadDisplayedItem(selected)
             return
         }
         previous()
     }
 
     public func selectBurstIndex(_ newIndex: Int) {
-        guard burstItems.indices.contains(newIndex), burstIndex != newIndex else { return }
-        burstIndex = newIndex
-        loadDisplayedItem(burstItems[newIndex])
+        guard let selected = burstSelection.selectIndex(newIndex) else { return }
+        loadDisplayedItem(selected)
     }
 
     /// In-memory cache of already-loaded full-resolution images (shared across viewer instances) so
@@ -341,24 +338,11 @@ public final class PhotoViewerModel {
 
     private func loadCurrent() {
         burstTask?.cancel()
-        burstItems = []
-        burstIndex = nil
-        isLoadingBurst = false
-        burstLoadFailed = false
+        burstSelection.reset()
         let item = baseCurrent
-        seedKnownBurstGroup(for: item)
+        burstSelection.seedKnownGroup(for: item, libraryItems: items)
         loadDisplayedItem(item)
         loadBurstGroupIfNeeded(for: item)
-    }
-
-    private func seedKnownBurstGroup(for item: PhotoItem) {
-        let memberIDs = item.burstMemberIDs
-        guard memberIDs.count > 1 else { return }
-        let itemByNodeID = Dictionary(uniqueKeysWithValues: items.map { ($0.uid.nodeID, $0) })
-        let known = memberIDs.compactMap { itemByNodeID[$0] }
-        guard known.count > 1 else { return }
-        burstItems = known
-        burstIndex = known.firstIndex(where: { $0.uid == item.uid }) ?? 0
     }
 
     private func loadDisplayedItem(_ item: PhotoItem) {
@@ -417,28 +401,15 @@ public final class PhotoViewerModel {
     }
 
     private func loadBurstGroupIfNeeded(for item: PhotoItem) {
-        guard item.isBurstCandidate, let burstProvider else { return }
-        isLoadingBurst = true
-        burstLoadFailed = false
+        guard let burstProvider, burstSelection.beginLoadingIfCandidate(item) else { return }
         burstTask = Task { [burstProvider] in
             do {
                 let group = try await burstProvider.burstGroup(containing: item.uid)
                 guard !Task.isCancelled, self.isBaseCurrent(item) else { return }
-                self.isLoadingBurst = false
-                guard group.count > 1 else {
-                    if self.hasBurstFilmstrip { return }
-                    self.burstItems = []
-                    self.burstIndex = nil
-                    return
-                }
-                self.burstItems = group
-                self.burstIndex = group.firstIndex(where: { $0.uid == item.uid }) ?? 0
+                self.burstSelection.applyLoadedGroup(group, containing: item)
             } catch {
                 guard !Task.isCancelled, self.isBaseCurrent(item) else { return }
-                self.isLoadingBurst = false
-                self.burstLoadFailed = true
-                self.burstItems = []
-                self.burstIndex = nil
+                self.burstSelection.failLoading()
             }
         }
     }
