@@ -422,9 +422,9 @@ still imports no `PhotosCore` and no concrete telemetry backend, per the Telemet
 
 `GridCore` also owns the pure `GridSelectionController<ID>` selection state and the pure
 `GridTextureResidencyPolicy` (residency, formerly `MetalGridTextureLRU`) and `GridTextureStreamingPolicy`
-(per-frame upload selection). `TimelineFeature` keeps `MetalGridSelectionController` and `MetalGridTextureCache`
-as thin macOS/`PhotoUID` adapters over those Core types; concrete platform texture-budget defaults and glyph
-rasterization remain adapter-owned.
+(per-frame upload selection). `TimelineFeature` keeps `MetalGridSelectionController` as the macOS/`PhotoUID`
+selection adapter and keeps `MetalGridTextureCache<ID>` as the adapter-owned real Metal texture cache over those
+Core policies; concrete platform texture-budget defaults and glyph rasterization remain adapter-owned.
 
 Gate hardening (the deliverable): the shared gate previously banned `MetalKit` and `MTKView` but not the base
 `Metal` import, the QuartzCore-sourced Metal surface types, or `MTL*` resource types. Because `QuartzCore` was an
@@ -559,7 +559,7 @@ assumptions from becoming Universal Core policy. Future iOS/iPadOS adapters must
 Small adapter-boundary split with no intended behavior change.
 
 `MetalGridTextureCache` still belongs to the macOS `TimelineFeature` adapter because it owns real `MTLTexture`
-objects and `PhotoUID` residency. It no longer owns native SF Symbol rasterization. Instead it takes a
+objects. It no longer owns native SF Symbol rasterization. Instead it takes a
 `MetalGridGlyphRasterizing` dependency, asks it for a `CGImage`, then uploads that image through the same texture
 path used before.
 
@@ -567,3 +567,18 @@ path used before.
 may use `NSImage`, `NSColor`, and `NSFont`. Future iOS/iPadOS adapters should add a UIKit implementation that
 conforms to the same protocol and inject it at their platform edge, without forking the texture-cache upload or
 residency policy.
+
+#### Phase 4.8 — Generic texture-cache item identity
+
+Small cache-boundary split with no intended behavior change.
+
+`MetalGridTextureCache` is now generic over `ID: Hashable & Sendable` and no longer imports `PhotosCore` or
+mentions photo-domain models. The cache still owns real `MTLTexture` objects, GPU upload accounting, placeholder
+textures, glyph texture caching, and the adapter-injected glyph rasterizer. Its residency bookkeeping continues
+to use `GridTextureResidencyPolicy<ID>`.
+
+The macOS timeline adapter binds the generic cache as `MetalGridTextureCache<PhotoUID>` inside
+`MetalGridCoordinator`. Future iOS/iPadOS adapters must bind the same cache implementation to their item ID type,
+inject platform-appropriate `GridTextureBudget` values, and provide a UIKit glyph rasterizer. This keeps one
+Metal cache implementation shared across Apple platforms while leaving concrete photo-domain identity and native
+policy at the adapter edge.

@@ -676,6 +676,58 @@ final class CoreArchitectureGateTests: XCTestCase {
         )
     }
 
+    func testMetalGridTextureCacheStaysItemIDGeneric() throws {
+        let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
+        let cacheFile = timelineRoot.appendingPathComponent("MetalGridTextureCache.swift")
+        let coordinatorFile = timelineRoot.appendingPathComponent("MetalGridCoordinator.swift")
+        var violations: [String] = []
+
+        guard FileManager.default.fileExists(atPath: cacheFile.path) else {
+            XCTFail("TimelineFeature/MetalGridTextureCache.swift: missing texture cache")
+            return
+        }
+
+        let imports = try importedModules(in: cacheFile)
+        for forbidden in ["PhotosCore", "AppKit", "UIKit", "SwiftUI", "MetalKit"] where imports.contains(forbidden) {
+            violations.append("TimelineFeature/MetalGridTextureCache.swift: cache must not import \(forbidden)")
+        }
+
+        let source = try String(contentsOf: cacheFile, encoding: .utf8)
+        let code = stripCommentsAndStringLiterals(from: source)
+        for forbidden in ["PhotoUID", "PhotoItem", "PhotosCore"] where contains(forbidden, in: code) {
+            violations.append("TimelineFeature/MetalGridTextureCache.swift: cache must stay item-ID generic; found \(forbidden)")
+        }
+        if !source.contains("final class MetalGridTextureCache<ID: Hashable & Sendable>") {
+            violations.append("TimelineFeature/MetalGridTextureCache.swift: cache must be generic over a sendable hashable item ID")
+        }
+        if !source.contains("GridTextureResidencyPolicy<ID>") || !source.contains("[ID: MTLTexture]") {
+            violations.append("TimelineFeature/MetalGridTextureCache.swift: cache storage and residency policy must use the generic ID")
+        }
+        if !source.contains("func uploadVisible(wanted: [ID], provideImage: (ID) -> CGImage?)") {
+            violations.append("TimelineFeature/MetalGridTextureCache.swift: upload seam must not re-specialize to a photo-domain ID")
+        }
+
+        guard FileManager.default.fileExists(atPath: coordinatorFile.path) else {
+            violations.append("TimelineFeature/MetalGridCoordinator.swift: missing macOS cache binding")
+            return
+        }
+        let coordinator = try String(contentsOf: coordinatorFile, encoding: .utf8)
+        if !coordinator.contains("MetalGridTextureCache<PhotoUID>") {
+            violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS adapter must bind the generic cache to PhotoUID explicitly")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 4.8 texture-cache ID boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            Real Metal texture caching may remain adapter-owned, but item identity must be generic so the
+            same cache implementation can be reused by iOS/iPadOS adapters with their own platform bindings.
+            """
+        )
+    }
+
     private func swiftFiles(in directory: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: directory,

@@ -1,6 +1,5 @@
 import Metal
 import CoreGraphics
-import PhotosCore
 import GridCore
 
 /// One-`MTLTexture`-per-image GPU cache (Pixe-style, Option A) sitting on top of the pure
@@ -11,11 +10,11 @@ import GridCore
 /// All texture uploads happen on the render (main) thread from already-decoded RAM images — there is no
 /// disk/network decode in here (that is `ThumbnailFeed`'s job, off-main). Uploads are bounded per frame.
 @MainActor
-final class MetalGridTextureCache {
+final class MetalGridTextureCache<ID: Hashable & Sendable> {
     private let device: MTLDevice
     private let glyphRasterizer: any MetalGridGlyphRasterizing
-    private var lru: GridTextureResidencyPolicy<PhotoUID>
-    private var textures: [PhotoUID: MTLTexture] = [:]
+    private var lru: GridTextureResidencyPolicy<ID>
+    private var textures: [ID: MTLTexture] = [:]
     private(set) var placeholderTexture: MTLTexture
 
     /// Rolling per-frame accounting (reset each `beginFrame`).
@@ -47,7 +46,7 @@ final class MetalGridTextureCache {
 
     // MARK: - Per-frame lifecycle
 
-    func beginFrame(pinned: Set<PhotoUID>) {
+    func beginFrame(pinned: Set<ID>) {
         lru.beginFrame(pinned: pinned)
         uploadsThisFrame = 0
         uploadBytesThisFrame = 0
@@ -55,46 +54,46 @@ final class MetalGridTextureCache {
         evictionsThisFrame = 0
     }
 
-    func noteUsed(_ uid: PhotoUID) { lru.noteUsed(uid) }
+    func noteUsed(_ id: ID) { lru.noteUsed(id) }
 
-    func isResident(_ uid: PhotoUID) -> Bool { lru.isResident(uid) }
-    func isInFlight(_ uid: PhotoUID) -> Bool { lru.isInFlight(uid) }
+    func isResident(_ id: ID) -> Bool { lru.isResident(id) }
+    func isInFlight(_ id: ID) -> Bool { lru.isInFlight(id) }
 
-    /// The texture to draw for `uid` — real if resident, else the shared placeholder.
-    func texture(for uid: PhotoUID) -> MTLTexture {
-        textures[uid] ?? placeholderTexture
+    /// The texture to draw for `id` — real if resident, else the shared placeholder.
+    func texture(for id: ID) -> MTLTexture {
+        textures[id] ?? placeholderTexture
     }
 
     /// Upload the chosen subset of `wanted` (visible-first priority order) from the supplied RAM images.
     /// Honours the per-frame budget + in-flight dedup via the LRU policy: `provideImage` is only called
-    /// for the UIDs actually selected this frame, and never for an already-resident/in-flight UID.
-    func uploadVisible(wanted: [PhotoUID], provideImage: (PhotoUID) -> CGImage?) {
+    /// for the IDs actually selected this frame, and never for an already-resident/in-flight ID.
+    func uploadVisible(wanted: [ID], provideImage: (ID) -> CGImage?) {
         let chosen = lru.selectUploads(wanted: wanted)
-        for uid in chosen {
-            guard let image = provideImage(uid) else {
-                lru.abandonUpload(uid)   // image vanished between selection and upload — retry later
+        for id in chosen {
+            guard let image = provideImage(id) else {
+                lru.abandonUpload(id)   // image vanished between selection and upload — retry later
                 continue
             }
             let start = CFAbsoluteTimeGetCurrent()
             guard let texture = makeTexture(from: image) else {
-                lru.abandonUpload(uid)
+                lru.abandonUpload(id)
                 continue
             }
             uploadMsThisFrame += (CFAbsoluteTimeGetCurrent() - start) * 1000
             let bytes = texture.width * texture.height * 4
-            textures[uid] = texture
+            textures[id] = texture
             residentBytes += bytes
             uploadBytesThisFrame += bytes
             uploadsThisFrame += 1
-            lru.completeUpload(uid)
+            lru.completeUpload(id)
         }
     }
 
     /// Evict offscreen LRU textures down to the budget and release their GPU memory.
     func evictToBudget() {
         let evicted = lru.evictToBudget()
-        for uid in evicted {
-            if let tex = textures.removeValue(forKey: uid) {
+        for id in evicted {
+            if let tex = textures.removeValue(forKey: id) {
                 residentBytes -= tex.width * tex.height * 4
             }
         }

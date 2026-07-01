@@ -14,7 +14,7 @@ import GridCore
 @MainActor
 final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private let renderer: MetalGridRenderer
-    private let cache: MetalGridTextureCache
+    private let cache: MetalGridTextureCache<PhotoUID>
     private var dataSource: MetalGridDataSource
     private let budget: MetalGridBudget
     private(set) var gridProfile: GridLevelProfile
@@ -208,7 +208,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
           gridProfile: GridLevelProfile) {
         guard let renderer = MetalGridRenderer(device: device, clearColor: MetalGridPalette.clearColor),
-              let cache = MetalGridTextureCache(
+              let cache = MetalGridTextureCache<PhotoUID>(
                   device: device,
                   budget: budget,
                   glyphRasterizer: AppKitMetalGridGlyphRasterizer()

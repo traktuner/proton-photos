@@ -117,7 +117,7 @@ These files are macOS-specific today:
 - `GridHeaderViews.swift`: AppKit headers.
 - `AspectSquareToggleModel.swift`: AppKit state/input layer.
 - `MetalGridDataSource.swift`: `MediaCache.ThumbnailFeed` adapter and main-actor macOS production feed bridge.
-- `MetalGridTextureCache.swift`: real `MTLTexture` cache, thumbnail upload, and resident glyph texture cache.
+- `MetalGridTextureCache.swift`: generic real `MTLTexture` cache, thumbnail upload, and resident glyph texture cache.
 - `AppKitMetalGridGlyphRasterizer.swift`: AppKit-only SF Symbol rasterization through `NSImage`, `NSColor`,
   and `NSFont`, injected into the texture cache by the macOS coordinator.
 - `MetalGridPalette.swift`: shared RGBA values are portable, but the current file exposes `NSColor`.
@@ -301,7 +301,8 @@ Render-boundary / adapter-boundary hardening. Audit + guards + doc sync only; no
   wires the platform diagnostics backend. `GridCore` stays free of `PhotosCore`.
 - Selection + texture policy now in `GridCore`: pure `GridSelectionController<ID>`, `GridTextureResidencyPolicy`
   (formerly `MetalGridTextureLRU`), and `GridTextureStreamingPolicy`. `TimelineFeature` keeps
-  `MetalGridSelectionController` and `MetalGridTextureCache` as thin macOS/`PhotoUID` adapters over them.
+  `MetalGridSelectionController` as the macOS/`PhotoUID` selection adapter and `MetalGridTextureCache<ID>` as
+  the adapter-owned real Metal texture cache over the pure residency/streaming policies.
 - Latent boundary hole CLOSED: the shared gate banned `MetalKit` but not the base `Metal` import, the
   QuartzCore-sourced Metal surface types (`CAMetalDrawable`, `CAMetalLayer`, `CAMetalDisplayLink`), the
   presentation types (`CADisplayLink`, `CALayer`), or the `MTL*` resource objects. Because `QuartzCore` was an
@@ -429,3 +430,14 @@ Glyph rasterizer boundary split. No production behavior changed.
   macOS adapter edge.
 - `CoreArchitectureGateTests` now guards the glyph boundary so iOS/iPadOS can add a UIKit rasterizer without
   forking texture-cache logic.
+
+## Phase 4.8 result
+
+Generic texture-cache item identity. No production behavior changed.
+
+- `MetalGridTextureCache.swift` is now `MetalGridTextureCache<ID: Hashable & Sendable>`.
+- The cache no longer imports `PhotosCore` and no longer references photo-domain models; it stores
+  `[ID: MTLTexture]` and uses `GridTextureResidencyPolicy<ID>`.
+- `MetalGridCoordinator` is the macOS adapter edge that binds the generic cache to `PhotoUID`.
+- `CoreArchitectureGateTests` now guards that the cache stays ID-generic and that `PhotoUID` specialization
+  remains explicit at the adapter edge.
