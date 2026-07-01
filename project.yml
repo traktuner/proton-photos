@@ -92,3 +92,48 @@ targets:
         LIBRARY_SEARCH_PATHS:
           - $(inherited)
           - $(SRCROOT)/Vendor/sdk-swift/Resources
+
+  ProtonPhotosMobile:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - iOSApp
+    dependencies:
+      - package: ProtonPhotosKit
+        product: PhotosCore
+      - package: ProtonPhotosKit
+        product: DesignSystemCore
+      - package: ProtonPhotosKit
+        product: GridCore
+      - package: ProtonPhotosKit
+        product: TimelineCore
+      - package: ProtonPhotosKit
+        product: TimelineUIKitAdapter
+      - package: ProtonPhotosKit
+        product: MediaByteCache
+      - package: ProtonPhotosKit
+        product: MediaDecodingCore
+      - package: ProtonPhotosKit
+        product: MediaFeedCore
+      - package: ProtonPhotosKit
+        product: MediaCacheCore
+      - package: ProtonPhotosKit
+        product: MetalRenderingCore
+      - package: ProtonPhotosKit
+        product: MetalGridTextureCore
+      - package: ProtonPhotosKit
+        product: MetalGridTextureUIKitAdapter
+      - package: ProtonPhotosKit
+        product: UploadCore
+      - package: ProtonPhotosKit
+        product: PhotoViewerCore
+      - package: ProtonPhotosKit
+        product: MediaLocationCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.protonphotos.ios
+        PRODUCT_NAME: ProtonPhotosMobile
+        INFOPLIST_FILE: iOSApp/Info.plist
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO

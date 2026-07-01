@@ -19,6 +19,12 @@ find "$HOME/Library/Developer/Xcode/DerivedData" \
 PROJECT="ProtonPhotos.xcodeproj"
 SCHEME="ProtonPhotos"
 
+echo "Preflight: generating Xcode project"
+xcodegen generate >/dev/null
+
+echo "Preflight: building ProtonPhotosMobile shell for generic iOS"
+SKIP_XCODEGEN=1 ./scripts/verify-ios-app-shell.sh
+
 SIGNING_IDENTITY_HASH="${PROTONPHOTOS_CODE_SIGN_IDENTITY:-}"
 SIGNING_IDENTITY_NAME=""
 if [[ -z "$SIGNING_IDENTITY_HASH" ]]; then

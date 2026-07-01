@@ -14,12 +14,31 @@ final class ProjectHygieneTests: XCTestCase {
     }
 
     private var appDir: URL { repoRoot.appendingPathComponent("App") }
+    private var mobileAppDir: URL { repoRoot.appendingPathComponent("iOSApp") }
 
     private func appSourceFiles() -> [URL] {
+        sourceFiles(in: appDir)
+    }
+
+    private func mobileAppSourceFiles() -> [URL] {
+        sourceFiles(in: mobileAppDir)
+    }
+
+    private func sourceFiles(in directory: URL) -> [URL] {
         let fm = FileManager.default
-        guard let e = fm.enumerator(at: appDir, includingPropertiesForKeys: nil) else { return [] }
+        guard let e = fm.enumerator(at: directory, includingPropertiesForKeys: nil) else { return [] }
         return e.compactMap { $0 as? URL }
             .filter { ["swift", "m", "h", "mm"].contains($0.pathExtension.lowercased()) }
+    }
+
+    private func targetBlock(named target: String, in projectYML: String) -> String {
+        guard let start = projectYML.range(of: "  \(target):")?.lowerBound else { return "" }
+        let tail = projectYML[start...]
+        guard let next = tail.range(of: "\n  [A-Za-z0-9_]+:", options: .regularExpression)?.lowerBound,
+              next != tail.startIndex else {
+            return String(tail)
+        }
+        return String(tail[..<next])
     }
 
     // 11. CleanupSafetyTest — the excluded/deleted experiment is gone and unreferenced.
@@ -54,5 +73,56 @@ final class ProjectHygieneTests: XCTestCase {
                                "\(url.lastPathComponent) contains private-API marker “\(marker)”")
             }
         }
+    }
+
+    func testMobileShellTargetStaysUniversalAndUIKitOnly() {
+        let projectYML = (try? String(contentsOf: repoRoot.appendingPathComponent("project.yml"), encoding: .utf8)) ?? ""
+        let mobileTarget = targetBlock(named: "ProtonPhotosMobile", in: projectYML)
+        XCTAssertFalse(mobileTarget.isEmpty, "project.yml must define the ProtonPhotosMobile iOS shell target")
+
+        for required in [
+            "platform: iOS",
+            "deploymentTarget: \"26.0\"",
+            "TARGETED_DEVICE_FAMILY: \"1,2\"",
+            "product: PhotosCore",
+            "product: TimelineUIKitAdapter",
+            "product: MetalGridTextureUIKitAdapter",
+            "product: PhotoViewerCore",
+            "product: UploadCore"
+        ] {
+            XCTAssertTrue(mobileTarget.contains(required), "ProtonPhotosMobile target missing \(required)")
+        }
+
+        for forbidden in [
+            "product: DesignSystem\n",
+            "product: MediaCache\n",
+            "product: TimelineFeature",
+            "product: PhotoViewerFeature",
+            "product: MapFeature",
+            "product: ProtonDriveSDK"
+        ] {
+            XCTAssertFalse(mobileTarget.contains(forbidden), "iOS shell must not depend on \(forbidden)")
+        }
+
+        for url in mobileAppSourceFiles() {
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            for forbidden in [
+                "import AppKit",
+                "import TimelineFeature",
+                "import PhotoViewerFeature",
+                "import MapFeature",
+                "import MediaCache",
+                "NSView",
+                "NSImage",
+                "NSScrollView"
+            ] {
+                XCTAssertFalse(text.contains(forbidden), "\(url.lastPathComponent) leaks macOS feature/API \(forbidden)")
+            }
+        }
+
+        let verifyScript = repoRoot.appendingPathComponent("scripts/verify-ios-app-shell.sh")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: verifyScript.path), "iOS app shell build gate script is required")
+        let rebuild = (try? String(contentsOf: repoRoot.appendingPathComponent("scripts/rebuild.sh"), encoding: .utf8)) ?? ""
+        XCTAssertTrue(rebuild.contains("verify-ios-app-shell.sh"), "rebuild.sh must run the iOS app shell gate")
     }
 }
