@@ -126,6 +126,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         "DesignSystem",
         "MapFeature",
         "MediaCache",
+        "MetalGridTextureAppKitAdapter",
         "MetalGridTextureUIKitAdapter",
         "PhotoViewerFeature",
         "ProtonAuth",
@@ -750,11 +751,12 @@ final class CoreArchitectureGateTests: XCTestCase {
     }
 
     func testMetalGridTextureCacheUsesInjectedGlyphRasterizer() throws {
+        let appKitAdapterRoot = sourcesRoot.appendingPathComponent("MetalGridTextureAppKitAdapter")
         let textureRoot = sourcesRoot.appendingPathComponent("MetalGridTextureCore")
         let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
         let cacheFile = textureRoot.appendingPathComponent("MetalGridTextureCache.swift")
         let glyphContractFile = textureRoot.appendingPathComponent("MetalGridGlyphRasterizer.swift")
-        let appKitRasterizerFile = timelineRoot.appendingPathComponent("AppKitMetalGridGlyphRasterizer.swift")
+        let appKitRasterizerFile = appKitAdapterRoot.appendingPathComponent("AppKitMetalGridGlyphRasterizer.swift")
         let coordinatorFile = timelineRoot.appendingPathComponent("MetalGridCoordinator.swift")
         var violations: [String] = []
 
@@ -793,11 +795,11 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if FileManager.default.fileExists(atPath: appKitRasterizerFile.path) {
             let source = try String(contentsOf: appKitRasterizerFile, encoding: .utf8)
-            if !source.contains("import AppKit") || !source.contains("import MetalGridTextureCore") || !source.contains("final class AppKitMetalGridGlyphRasterizer") {
-                violations.append("TimelineFeature/AppKitMetalGridGlyphRasterizer.swift: AppKit implementation must own native glyph rasterization")
+            if !source.contains("import AppKit") || !source.contains("import MetalGridTextureCore") || !source.contains("package final class AppKitMetalGridGlyphRasterizer") {
+                violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridGlyphRasterizer.swift: AppKit implementation must own native glyph rasterization")
             }
             if !source.contains("NSImage(systemSymbolName:") || !source.contains("NSImage.SymbolConfiguration") {
-                violations.append("TimelineFeature/AppKitMetalGridGlyphRasterizer.swift: expected AppKit SF Symbol path")
+                violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridGlyphRasterizer.swift: expected AppKit SF Symbol path")
             }
         }
 
@@ -805,6 +807,9 @@ final class CoreArchitectureGateTests: XCTestCase {
             let source = try String(contentsOf: coordinatorFile, encoding: .utf8)
             if !source.contains("import MetalGridTextureCore") {
                 violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS adapter must import the texture core explicitly")
+            }
+            if !source.contains("import MetalGridTextureAppKitAdapter") {
+                violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS adapter must import the AppKit texture adapter explicitly")
             }
             if !source.contains("glyphRasterizer: AppKitMetalGridGlyphRasterizer()") {
                 violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS adapter must inject AppKit rasterizer explicitly")
@@ -822,6 +827,79 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             Texture upload/cache code may own Metal texture residency; native SF Symbol rasterization belongs
             behind an injected platform adapter so iOS/iPadOS can provide UIKit glyphs later.
+            """
+        )
+    }
+
+    func testAppKitGlyphRasterizerStaysInPlatformAdapter() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let adapterRoot = sourcesRoot.appendingPathComponent("MetalGridTextureAppKitAdapter")
+        let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
+        let adapterFile = adapterRoot.appendingPathComponent("AppKitMetalGridGlyphRasterizer.swift")
+        let coordinatorFile = timelineRoot.appendingPathComponent("MetalGridCoordinator.swift")
+        var violations: [String] = []
+
+        if !manifest.contains(".library(name: \"MetalGridTextureAppKitAdapter\", targets: [\"MetalGridTextureAppKitAdapter\"])") {
+            violations.append("MetalGridTextureAppKitAdapter: missing matching library product")
+        }
+
+        if let targetLine = manifestLine(forTarget: "MetalGridTextureAppKitAdapter", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            if dependencies != ["MetalGridTextureCore"] {
+                violations.append("MetalGridTextureAppKitAdapter: dependencies \(dependencies.sorted()) != [MetalGridTextureCore]")
+            }
+        } else {
+            violations.append("MetalGridTextureAppKitAdapter: missing Package.swift target declaration")
+        }
+
+        guard FileManager.default.fileExists(atPath: adapterFile.path) else {
+            XCTFail("MetalGridTextureAppKitAdapter/AppKitMetalGridGlyphRasterizer.swift: missing AppKit glyph adapter")
+            return
+        }
+
+        let imports = try importedModules(in: adapterFile)
+        let expectedImports: Set<String> = ["AppKit", "CoreGraphics", "MetalGridTextureCore"]
+        if imports != expectedImports {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridGlyphRasterizer.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+        }
+        for forbidden in ["UIKit", "SwiftUI", "MetalKit", "PhotosCore", "MediaCache", "TimelineFeature"] where imports.contains(forbidden) {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridGlyphRasterizer.swift: must not import \(forbidden)")
+        }
+
+        let source = try String(contentsOf: adapterFile, encoding: .utf8)
+        for symbol in [
+            "package final class AppKitMetalGridGlyphRasterizer",
+            "MetalGridGlyphRasterizing",
+            "NSImage.SymbolConfiguration",
+            "NSImage(systemSymbolName:",
+            "NSRect(x: 0, y: 0, width: pixelSize, height: pixelSize).fill(using: .sourceAtop)",
+            "package extension MetalGridGlyphColor"
+        ] where !source.contains(symbol) {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridGlyphRasterizer.swift: missing \(symbol)")
+        }
+
+        if FileManager.default.fileExists(atPath: timelineRoot.appendingPathComponent("AppKitMetalGridGlyphRasterizer.swift").path) {
+            violations.append("TimelineFeature/AppKitMetalGridGlyphRasterizer.swift: AppKit glyph rasterization belongs in MetalGridTextureAppKitAdapter")
+        }
+
+        if FileManager.default.fileExists(atPath: coordinatorFile.path) {
+            let coordinator = try String(contentsOf: coordinatorFile, encoding: .utf8)
+            if !coordinator.contains("import MetalGridTextureAppKitAdapter") {
+                violations.append("TimelineFeature/MetalGridCoordinator.swift: missing AppKit texture adapter import")
+            }
+            if !coordinator.contains("glyphRasterizer: AppKitMetalGridGlyphRasterizer()") {
+                violations.append("TimelineFeature/MetalGridCoordinator.swift: must still inject the AppKit rasterizer")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 5.5 AppKit glyph adapter boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            macOS SF Symbol rasterization belongs in its AppKit texture adapter target; TimelineFeature may
+            inject it but must not own the implementation.
             """
         )
     }

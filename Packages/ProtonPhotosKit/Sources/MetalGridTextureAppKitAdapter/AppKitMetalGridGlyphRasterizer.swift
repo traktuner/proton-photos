@@ -3,8 +3,10 @@ import CoreGraphics
 import MetalGridTextureCore
 
 @MainActor
-final class AppKitMetalGridGlyphRasterizer: MetalGridGlyphRasterizing {
-    func image(for request: MetalGridGlyphRequest) -> CGImage? {
+package final class AppKitMetalGridGlyphRasterizer: MetalGridGlyphRasterizing {
+    package init() {}
+
+    package func image(for request: MetalGridGlyphRequest) -> CGImage? {
         guard request.pixelSize > 0 else { return nil }
         let pixelSize = request.pixelSize
         let cfg = NSImage.SymbolConfiguration(pointSize: CGFloat(pixelSize) * 0.72, weight: request.weight.nsFontWeight)
@@ -29,7 +31,7 @@ final class AppKitMetalGridGlyphRasterizer: MetalGridGlyphRasterizing {
     }
 }
 
-extension MetalGridGlyphColor {
+package extension MetalGridGlyphColor {
     init(_ color: NSColor) {
         let rgba = color.usingColorSpace(.sRGB) ?? color
         self.init(

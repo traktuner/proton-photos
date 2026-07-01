@@ -130,9 +130,12 @@ These files are macOS-specific today:
 - `GridHeaderViews.swift`: AppKit headers.
 - `AspectSquareToggleModel.swift`: AppKit state/input layer.
 - `MetalGridDataSource.swift`: `MediaCache.ThumbnailFeed` adapter and main-actor macOS production feed bridge.
-- `AppKitMetalGridGlyphRasterizer.swift`: AppKit-only SF Symbol rasterization through `NSImage`, `NSColor`,
-  and `NSFont`, injected into the texture cache by the macOS coordinator.
 - `MetalGridPalette.swift`: shared RGBA values are portable, but the current file exposes `NSColor`.
+
+The macOS texture adapter is now split out:
+
+- `MetalGridTextureAppKitAdapter/AppKitMetalGridGlyphRasterizer.swift`: AppKit-only SF Symbol rasterization
+  through `NSImage`, `NSColor`, and `NSFont`, injected into the texture cache by the macOS coordinator.
 
 ## Performance findings
 
@@ -182,10 +185,10 @@ Solutions:
 ### iOS/iPadOS risk 3: AppKit glyph rasterization
 
 Phase 4.7 removed direct AppKit rasterization from `MetalGridTextureCache`. The cache now takes a
-`MetalGridGlyphRasterizing` adapter and uploads the returned `CGImage` as before. macOS injects
-`AppKitMetalGridGlyphRasterizer`, which still renders SF Symbol badges through `NSImage`, `NSColor`, and
-`NSFont`. Phase 5.2 adds `MetalGridTextureUIKitAdapter` with a UIKit implementation for iOS/iPadOS, but no
-production iOS grid host injects it yet.
+`MetalGridGlyphRasterizing` adapter and uploads the returned `CGImage` as before. Phase 5.5 moves the macOS
+implementation to `MetalGridTextureAppKitAdapter`, where it still renders SF Symbol badges through `NSImage`,
+`NSColor`, and `NSFont`. Phase 5.2 adds `MetalGridTextureUIKitAdapter` with a UIKit implementation for
+iOS/iPadOS, but no production iOS grid host injects it yet.
 
 Solutions:
 
@@ -437,7 +440,8 @@ Glyph rasterizer boundary split. No production behavior changed.
 
 - `MetalGridGlyphRasterizer.swift` defines the platform-neutral glyph request, color/weight values, and
   `MetalGridGlyphRasterizing` protocol.
-- `AppKitMetalGridGlyphRasterizer.swift` owns the macOS SF Symbol rendering path using AppKit.
+- At this phase, `TimelineFeature/AppKitMetalGridGlyphRasterizer.swift` owned the macOS SF Symbol rendering path
+  using AppKit. Phase 5.5 later moved it into `MetalGridTextureAppKitAdapter`.
 - `MetalGridTextureCache.swift` no longer imports AppKit and no longer references `NSImage`, `NSColor`, or
   `NSFont`; it caches resident glyph textures from an injected rasterizer and uses the same `CGImage` to
   `MTLTexture` upload path as before.
@@ -475,9 +479,9 @@ Generic Metal texture cache extraction. No production behavior changed.
   `GridTextureResidencyPolicy<ID>` plus the platform-injected `GridTextureBudget`.
 - `MetalGridTextureCore` now owns the platform-neutral glyph request contract:
   `MetalGridGlyphRequest`, `MetalGridGlyphWeight`, `MetalGridGlyphColor`, and `MetalGridGlyphRasterizing`.
-- `TimelineFeature` keeps `AppKitMetalGridGlyphRasterizer`, the `PhotoUID` binding
-  (`MetalGridTextureCache<PhotoUID>`), `MetalGridBudget.default`, decoded-image feed access, and all
-  `MTKView`/AppKit host behavior.
+- `TimelineFeature` keeps the `PhotoUID` binding (`MetalGridTextureCache<PhotoUID>`), `MetalGridBudget.default`,
+  decoded-image feed access, and all `MTKView`/AppKit host behavior. Phase 5.5 moves
+  `AppKitMetalGridGlyphRasterizer` out to `MetalGridTextureAppKitAdapter`.
 - `CoreArchitectureGateTests` now guards that the generic cache and glyph contract stay in
   `MetalGridTextureCore`, while AppKit glyph rasterization and photo-domain specialization stay in the macOS
   adapter.
@@ -519,3 +523,15 @@ UIKit texture cache factory proof. No macOS production behavior changed.
   and then calls the same shared cache initializer.
 - `CoreArchitectureGateTests` now guards that the factory uses the shared `MetalGridTextureCore` cache rather
   than forking upload/residency logic or embedding new budget constants.
+
+## Phase 5.5 result
+
+AppKit glyph adapter split. macOS production behavior should remain visually unchanged.
+
+- `MetalGridTextureAppKitAdapter` is now a SwiftPM product/target.
+- `AppKitMetalGridGlyphRasterizer` moved from `TimelineFeature` into `MetalGridTextureAppKitAdapter`.
+- `TimelineFeature` now imports `MetalGridTextureAppKitAdapter` and still injects
+  `AppKitMetalGridGlyphRasterizer()` into `MetalGridTextureCache<PhotoUID>`.
+- `TimelineFeature` no longer owns native SF Symbol rasterization code; it owns only the macOS grid host,
+  data-source binding, budget default, and injection point.
+- `scripts/verify-universal-core.sh` now builds the AppKit adapter for macOS and the UIKit adapter for iOS.

@@ -145,7 +145,7 @@ Platform texture adapters own native rasterization or platform policy needed by 
 injected protocols. They are not Universal Core.
 
 Allowed examples:
-- `AppKitMetalGridGlyphRasterizer` in the macOS timeline adapter.
+- `MetalGridTextureAppKitAdapter`, which provides `AppKitMetalGridGlyphRasterizer` for macOS.
 - `MetalGridTextureUIKitAdapter`, which provides `UIKitMetalGridGlyphRasterizer` for iOS/iPadOS.
 
 Rules:
@@ -608,10 +608,9 @@ real `MTLTexture` objects. It no longer owned native SF Symbol rasterization. In
 texture path used before. Phase 5.1 later moved the generic cache and glyph contract into
 `MetalGridTextureCore`.
 
-`AppKitMetalGridGlyphRasterizer` is the current macOS implementation. It is the only Metal-grid glyph file that
-may use `NSImage`, `NSColor`, and `NSFont`. Future iOS/iPadOS adapters should add a UIKit implementation that
-conforms to the same protocol and inject it at their platform edge, without forking the texture-cache upload or
-residency policy.
+At this phase, `AppKitMetalGridGlyphRasterizer` was the current macOS implementation inside `TimelineFeature`.
+It was the only Metal-grid glyph file that could use `NSImage`, `NSColor`, and `NSFont`. Phase 5.5 later moved
+that implementation into `MetalGridTextureAppKitAdapter`.
 
 #### Phase 4.8 — Generic texture-cache item identity
 
@@ -653,7 +652,7 @@ and upload/byte counters.
 `MetalGridTextureCore` also owns the platform-neutral glyph request contract:
 `MetalGridGlyphRequest`, `MetalGridGlyphWeight`, `MetalGridGlyphColor`, and `MetalGridGlyphRasterizing`.
 Platform adapters own native rasterization implementations. The macOS adapter injects
-`AppKitMetalGridGlyphRasterizer`; future iOS/iPadOS adapters must inject a UIKit implementation or a renderer
+`AppKitMetalGridGlyphRasterizer`; iOS/iPadOS adapters must inject `UIKitMetalGridGlyphRasterizer` or a renderer
 native badge path without forking the shared cache.
 
 `TimelineFeature` remains the macOS adapter boundary for `PhotoUID` specialization
@@ -696,3 +695,15 @@ is still generic over item identity and does not reference `PhotoUID`, media fee
 
 This is the injection proof for a future iOS/iPadOS grid host: the host can choose viewport policy, pass its item
 ID type, and receive the same shared texture cache implementation used by macOS.
+
+#### Phase 5.5 — AppKit glyph adapter split
+
+Small platform-adapter extraction with no intended visual behavior change on macOS.
+
+`MetalGridTextureAppKitAdapter` is now a dedicated target/product that depends only on `MetalGridTextureCore`.
+`AppKitMetalGridGlyphRasterizer` moved there from `TimelineFeature`, keeping the same AppKit SF Symbol rendering
+path and `NSColor` to `MetalGridGlyphColor` conversion. `TimelineFeature` now imports the adapter and still
+injects `AppKitMetalGridGlyphRasterizer()` into `MetalGridTextureCache<PhotoUID>`.
+
+This makes macOS and iOS/iPadOS symmetric at the texture-adapter boundary: platform glyph rasterizers live in
+platform texture adapter targets; `MetalGridTextureCore` owns only the shared cache and glyph request contract.

@@ -35,7 +35,7 @@ overlaid transparent `NSScrollView` document spacer provides physics + pointer e
 | `GridTextureBudget` | `GridCore/GridTextureBudget.swift` | Portable texture budget shape; platform adapters inject concrete values. |
 | `MetalGridCoordinator` | `MetalGridCoordinator.swift` | Composes engine geometry + textures + fitting; owns camera state (level, committed phase) **and the live resize/sidebar presentation layer** (snapshot-scale). |
 | `MetalGridGlyphRasterizing` | `MetalGridTextureCore/MetalGridGlyphRasterizer.swift` | Platform-neutral badge glyph request contract; platform adapters inject native rasterizers. |
-| `AppKitMetalGridGlyphRasterizer` | `AppKitMetalGridGlyphRasterizer.swift` | macOS SF Symbol → `CGImage` badge rasterization injected into the texture cache. |
+| `AppKitMetalGridGlyphRasterizer` | `MetalGridTextureAppKitAdapter/AppKitMetalGridGlyphRasterizer.swift` | macOS SF Symbol → `CGImage` badge rasterization injected into the texture cache. |
 | `UIKitMetalGridGlyphRasterizer` | `MetalGridTextureUIKitAdapter/UIKitMetalGridGlyphRasterizer.swift` | iOS/iPadOS SF Symbol → `CGImage` badge rasterization adapter; not used by the macOS production host. |
 | `UIKitMetalGridTexturePolicies` | `MetalGridTextureUIKitAdapter/UIKitMetalGridTexturePolicy.swift` | Conservative iOS-family texture-budget presets resolved from viewport surface class. |
 | `UIKitMetalGridTextureCacheFactory` | `MetalGridTextureUIKitAdapter/UIKitMetalGridTextureCacheFactory.swift` | iOS/iPadOS cache assembly over the shared generic `MetalGridTextureCache<ID>`. |
@@ -79,9 +79,9 @@ contract. It may depend on `GridCore` policy and use `Metal`/`CoreGraphics`, but
 encoding, MetalKit views, platform glyph implementations, photo IDs, media feeds, or platform budget defaults.
 
 **`MetalGridGlyphRasterizing` owns:** the platform-specific conversion from a glyph request to a `CGImage`.
-macOS uses `AppKitMetalGridGlyphRasterizer`; iOS/iPadOS can use `UIKitMetalGridGlyphRasterizer` from
-`MetalGridTextureUIKitAdapter`. `NSImage`/`UIImage` logic must stay in platform adapters, not in the texture cache
-or renderer.
+macOS uses `AppKitMetalGridGlyphRasterizer` from `MetalGridTextureAppKitAdapter`; iOS/iPadOS can use
+`UIKitMetalGridGlyphRasterizer` from `MetalGridTextureUIKitAdapter`. `NSImage`/`UIImage` logic must stay in
+platform adapters, not in the texture cache or renderer.
 
 **`MetalGridRenderer` owns:** drawing supplied quads · the clear/background colour · placeholders · overlays.
 It performs **no** layout math and never sees media aspect ratio.
