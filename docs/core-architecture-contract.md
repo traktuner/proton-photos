@@ -16,7 +16,9 @@ Every agent working on Proton Photos architecture MUST follow this contract befo
 - [UITraitCollection](https://developer.apple.com/documentation/uikit/uitraitcollection)
 - [UIView.safeAreaLayoutGuide](https://developer.apple.com/documentation/uikit/uiview/safearealayoutguide)
 - [Metal](https://developer.apple.com/documentation/metal)
+- [MTLTexture](https://developer.apple.com/documentation/metal/mtltexture)
 - [MTKView](https://developer.apple.com/documentation/metalkit/mtkview)
+- [CGImage](https://developer.apple.com/documentation/coregraphics/cgimage)
 - [Using Metal to draw a view's contents](https://developer.apple.com/documentation/metal/using-metal-to-draw-a-view%27s-contents)
 
 Agents must re-check official Apple documentation before changing architecture, UI adaptation, rendering
@@ -40,8 +42,9 @@ The mandatory layers are:
 2. Photos-dependent Core: reusable app-domain logic that may depend on `PhotosCore` but still has no UI,
    rendering, platform-hosting, or concrete backend dependency.
 3. MetalRenderingCore: shared Metal renderer/shader layer with its own gate, separate from Universal Core.
-4. Shared UI/UX: SwiftUI only where genuinely adaptive across Mac, iPhone, and iPad.
-5. Platform Adapters: AppKit/UIKit/SwiftUI hosts, scroll, gestures, safe areas, traits, accessibility, budgets,
+4. MetalGridTextureCore: shared Metal texture upload/cache layer with its own gate, dependent only on GridCore.
+5. Shared UI/UX: SwiftUI only where genuinely adaptive across Mac, iPhone, and iPad.
+6. Platform Adapters: AppKit/UIKit/SwiftUI hosts, scroll, gestures, safe areas, traits, accessibility, budgets,
    native controls, platform glyph rasterization, and concrete telemetry/export backends.
 
 Every new module must declare which layer it belongs to before code moves.
@@ -110,6 +113,29 @@ Forbidden:
 Renderer strategy may vary by adapter policy (simple per-texture path, argument-buffer path, texture-array path),
 but strategy choice must be explicit, test-covered, and measurable. Do not hide macOS-only fast paths in shared
 renderer code.
+
+### MetalGridTextureCore (Separate Gate)
+
+`MetalGridTextureCore` is not Universal Core and is not the renderer. It is the shared texture-resource target
+for Apple platforms where Metal is available. It may own reusable `MTLTexture` resources, decoded-`CGImage` upload
+mechanics, generic per-item texture cache state, glyph request value types, and cache accounting. It may depend
+on `GridCore` for portable residency/streaming policy.
+
+Allowed:
+- `Metal`, `CoreGraphics`, and `GridCore`.
+- Generic item identity (`ID: Hashable & Sendable`) and Core-injected policy values such as
+  `GridTextureBudget`.
+
+Forbidden:
+- `MetalKit`, `MTKView`, AppKit, UIKit, SwiftUI, platform view/scroll/gesture/accessibility objects, concrete
+  glyph rasterization implementations, `PhotosCore`, `PhotoUID`, `PhotoItem`, `MediaCache`, and
+  `ThumbnailFeed`.
+- Render command encoding, draw targets, `CAMetalDrawable`, `MTLRenderPassDescriptor`, or renderer strategy
+  selection. Those belong to `MetalRenderingCore` or adapters.
+
+Platform adapters bind item IDs, supply decoded images, inject measured budgets, and provide native glyph
+rasterizers. macOS may bind `PhotoUID`; iOS/iPadOS may bind the same cache to its adapter ID without forking
+texture upload or residency logic.
 
 ### Telemetry
 
@@ -582,3 +608,18 @@ The macOS timeline adapter binds the generic cache as `MetalGridTextureCache<Pho
 inject platform-appropriate `GridTextureBudget` values, and provide a UIKit glyph rasterizer. This keeps one
 Metal cache implementation shared across Apple platforms while leaving concrete photo-domain identity and native
 policy at the adapter edge.
+
+#### Phase 5.0 — MetalGridTextureCore package gate
+
+Boundary-only split. No production behavior changed.
+
+`MetalGridTextureCore` is now a dedicated SwiftPM target/product, distinct from `GridCore` and
+`MetalRenderingCore`. It depends only on `GridCore` and is guarded against `MetalKit`, AppKit, UIKit, SwiftUI,
+photo-domain IDs, media-feed/cache APIs, platform views, glyph rasterization implementations, draw targets, and
+render command encoding.
+
+This phase intentionally moves no production cache code. `MetalGridTextureCache<ID>` and
+`MetalGridGlyphRasterizing` remain in `TimelineFeature` until the new target gate is proven on macOS and iOS.
+The next extraction may move the generic cache and glyph request contract into this target while keeping
+`AppKitMetalGridGlyphRasterizer`, `PhotoUID` binding, platform budgets, `MTKView`, and scroll/gesture hosts in
+the macOS adapter.

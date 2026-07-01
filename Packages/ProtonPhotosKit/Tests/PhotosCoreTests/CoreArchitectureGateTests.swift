@@ -182,6 +182,62 @@ final class CoreArchitectureGateTests: XCTestCase {
         "ProcessInfo.processInfo.activeProcessorCount",
     ]
 
+    private static let textureCoreAllowedImports: Set<String> = [
+        "CoreGraphics",
+        "GridCore",
+        "Metal",
+    ]
+
+    private static let textureCoreForbiddenImports: Set<String> = [
+        "AppKit",
+        "UIKit",
+        "SwiftUI",
+        "MapKit",
+        "AVKit",
+        "MetalKit",
+        "PhotosCore",
+        "MediaCache",
+        "TimelineFeature",
+        "MetalRenderingCore",
+        "DesignSystem",
+    ]
+
+    private static let textureCoreForbiddenTokens: [String] = [
+        "MTKView",
+        "NSView",
+        "UIView",
+        "NSImage",
+        "UIImage",
+        "NSScrollView",
+        "UIScrollView",
+        "NSEvent",
+        "UIEvent",
+        "NSGestureRecognizer",
+        "UIGestureRecognizer",
+        "NSAccessibility",
+        "NSColor",
+        "UIColor",
+        "NSFont",
+        "UIFont",
+        "PhotoUID",
+        "PhotoItem",
+        "ThumbnailFeed",
+        "MediaCache",
+        "MetalGridRenderer",
+        "MetalGridDrawableTarget",
+        "CAMetalDrawable",
+        "CAMetalLayer",
+        "CAMetalDisplayLink",
+        "CADisplayLink",
+        "CALayer",
+        "MTLCommandQueue",
+        "MTLCommandBuffer",
+        "MTLRenderPassDescriptor",
+        "MTLRenderCommandEncoder",
+        "ProcessInfo.processInfo.physicalMemory",
+        "ProcessInfo.processInfo.activeProcessorCount",
+    ]
+
     func testUniversalCoreImportsStayOnTargetAllowlists() throws {
         var violations: [String] = []
 
@@ -416,6 +472,85 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             Shared shader/pipeline/command encoding belongs in MetalRenderingCore; MTKView conversion remains
             in the TimelineFeature adapter.
+            """
+        )
+    }
+
+    func testMetalGridTextureCoreHasSeparatePackageBoundary() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        var violations: [String] = []
+
+        if !manifest.contains(".library(name: \"MetalGridTextureCore\", targets: [\"MetalGridTextureCore\"])") {
+            violations.append("MetalGridTextureCore: missing matching library product")
+        }
+
+        guard let targetLine = manifestLine(forTarget: "MetalGridTextureCore", in: manifest) else {
+            XCTFail("MetalGridTextureCore: missing Package.swift target declaration")
+            return
+        }
+
+        let dependencies = Set(dependencies(inTargetLine: targetLine))
+        if dependencies != ["GridCore"] {
+            violations.append("MetalGridTextureCore: dependencies \(dependencies.sorted()) != [GridCore]")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            MetalGridTextureCore package boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            Shared Metal texture caching is separate from render command encoding and may depend only on
+            GridCore's portable texture policies.
+            """
+        )
+    }
+
+    func testMetalGridTextureCoreStaysTextureOnly() throws {
+        let sourceRoot = sourcesRoot.appendingPathComponent("MetalGridTextureCore")
+        let files = try swiftFiles(in: sourceRoot)
+        XCTAssertFalse(files.isEmpty, "Expected source files for MetalGridTextureCore")
+
+        var violations: [String] = []
+
+        for file in files {
+            let imports = try importedModules(in: file)
+            let unexpected = imports.subtracting(Self.textureCoreAllowedImports)
+            if !unexpected.isEmpty {
+                violations.append("MetalGridTextureCore/\(file.lastPathComponent): unexpected imports \(unexpected.sorted())")
+            }
+
+            let forbiddenImports = imports.intersection(Self.textureCoreForbiddenImports)
+            if !forbiddenImports.isEmpty {
+                violations.append("MetalGridTextureCore/\(file.lastPathComponent): forbidden imports \(forbiddenImports.sorted())")
+            }
+
+            let source = try String(contentsOf: file, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: source)
+            for token in Self.textureCoreForbiddenTokens where contains(token, in: code) {
+                violations.append("MetalGridTextureCore/\(file.lastPathComponent): forbidden token \(token)")
+            }
+        }
+
+        let boundaryFile = sourceRoot.appendingPathComponent("MetalGridTextureCoreBoundary.swift")
+        if !FileManager.default.fileExists(atPath: boundaryFile.path) {
+            violations.append("MetalGridTextureCore/MetalGridTextureCoreBoundary.swift: missing boundary marker")
+        } else {
+            let source = try String(contentsOf: boundaryFile, encoding: .utf8)
+            for symbol in ["MetalGridTextureCoreBoundary", "GridTextureBudget", "CGImage", "MTLTexture"] where !source.contains(symbol) {
+                violations.append("MetalGridTextureCore/MetalGridTextureCoreBoundary.swift: missing \(symbol)")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            MetalGridTextureCore texture-only gate failed:
+            \(violations.joined(separator: "\n"))
+
+            This target may own reusable Metal texture resources and upload/cache mechanics. Platform views,
+            glyph rasterization implementations, render command encoding, photo-domain IDs, media feeds, and
+            hardware-budget defaults remain outside this target.
             """
         )
     }

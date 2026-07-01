@@ -18,6 +18,7 @@ CORE_TARGETS=(
 
 RENDERING_CORE_TARGETS=(
   MetalRenderingCore
+  MetalGridTextureCore
 )
 
 PLATFORMS=(
@@ -65,4 +66,4 @@ for target in "${RENDERING_CORE_TARGETS[@]}"; do
   done
 done
 
-echo "[core-gate] universal Core + rendering Core gate passed"
+echo "[core-gate] universal Core + Metal Core gate passed"

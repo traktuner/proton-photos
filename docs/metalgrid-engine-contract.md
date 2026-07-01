@@ -34,6 +34,7 @@ overlaid transparent `NSScrollView` document spacer provides physics + pointer e
 | `TileContentFitter` | `TileContentFitter.swift` | How media fits **inside** a square slot (content only). |
 | `GridTextureBudget` | `GridCore/GridTextureBudget.swift` | Portable texture budget shape; platform adapters inject concrete values. |
 | `MetalGridCoordinator` | `MetalGridCoordinator.swift` | Composes engine geometry + textures + fitting; owns camera state (level, committed phase) **and the live resize/sidebar presentation layer** (snapshot-scale). |
+| `MetalGridTextureCoreBoundary` | `MetalGridTextureCore/MetalGridTextureCoreBoundary.swift` | Target boundary marker for future shared Metal texture upload/cache code; no production behavior yet. |
 | `AppKitMetalGridGlyphRasterizer` | `AppKitMetalGridGlyphRasterizer.swift` | macOS SF Symbol → `CGImage` badge rasterization injected into the texture cache. |
 | `MetalGridTextureCache<ID>` | `MetalGridTextureCache.swift` | Generic per-item `MTLTexture` cache over `GridTextureResidencyPolicy<ID>`; the macOS coordinator binds `ID == PhotoUID`. |
 | `MetalGridRenderer` | `MetalRenderingCore/MetalGridRenderer.swift` | Draws the quads it is handed. No layout math; `TimelineFeature` owns only the `MTKView` adapter extension. |
@@ -66,6 +67,10 @@ capacity, and overscan fraction. Concrete defaults are platform-adapter policy, 
 placeholder texture lifetime, badge glyph texture caching, and byte/upload counters. It is generic over item
 identity and must not import photo-domain packages. Platform adapters bind the ID type, provide decoded images,
 inject concrete budgets, and inject glyph rasterizers.
+
+**`MetalGridTextureCore` owns:** the future shared target boundary for reusable Metal texture upload/cache code.
+It may depend on `GridCore` policy and use `Metal`/`CoreGraphics`, but it must not own render command encoding,
+MetalKit views, platform glyph implementations, photo IDs, media feeds, or platform budget defaults.
 
 **`MetalGridGlyphRasterizing` owns:** the platform-specific conversion from a glyph request to a `CGImage`.
 macOS uses `AppKitMetalGridGlyphRasterizer`; future iOS/iPadOS adapters must provide a UIKit equivalent rather

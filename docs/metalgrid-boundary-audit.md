@@ -103,6 +103,22 @@ flag) plus `render(to:)` / `renderLayerDissolve(to:)` overloads that take it. `T
 `MetalGridRenderer+MTKView.swift` adapter extension that builds the target from `MTKView` and delegates to the
 drawable-target overloads. `MetalRenderingCore` never imports `MetalKit`.
 
+### In `MetalGridTextureCore`, not general Core
+
+Phase 5.0 created the target/product boundary for shared Apple-platform Metal texture code. The target depends
+only on `GridCore` and may import `Metal` and `CoreGraphics`, but it is not a place for view hosting, render
+command encoding, platform glyph rasterization, media feeds, or photo-domain IDs.
+
+Currently in the target:
+
+- `MetalGridTextureCoreBoundary.swift` (boundary marker only; no production behavior)
+
+Still pending move after the gate proves out:
+
+- generic `MetalGridTextureCache<ID>`
+- glyph request/color/weight values
+- `MetalGridGlyphRasterizing` protocol
+
 ### Must remain platform adapter until split
 
 These files are macOS-specific today:
@@ -195,7 +211,9 @@ Solutions:
    real data source, and AppKit symbol rasterization.
 5. `MetalRenderingCore` now owns shared renderer/shader code behind its separate gate. Keep `MTKView`/AppKit
    adapters in `TimelineFeature`, and prove rendering-core changes build on macOS, iOS, and iPadOS.
-6. iOS/iPadOS adapter: `UIViewRepresentable`/`UIView`, `UIScrollView` or SwiftUI scroll host, platform
+6. `MetalGridTextureCore` owns only the shared Metal texture-cache boundary. Keep platform glyph implementations,
+   real item-ID binding, and concrete texture budgets in adapters.
+7. iOS/iPadOS adapter: `UIViewRepresentable`/`UIView`, `UIScrollView` or SwiftUI scroll host, platform
    safe-area/input policy, platform `GridTextureBudget` values, and platform glyph rasterizer.
 
 ## Stop conditions for Phase 3.2
@@ -441,3 +459,13 @@ Generic texture-cache item identity. No production behavior changed.
 - `MetalGridCoordinator` is the macOS adapter edge that binds the generic cache to `PhotoUID`.
 - `CoreArchitectureGateTests` now guards that the cache stays ID-generic and that `PhotoUID` specialization
   remains explicit at the adapter edge.
+
+## Phase 5.0 result
+
+MetalGridTextureCore package gate. No production behavior changed.
+
+- `MetalGridTextureCore` is now a SwiftPM product/target.
+- The target depends only on `GridCore` and is included in `scripts/verify-universal-core.sh` for iOS/macOS
+  builds.
+- `CoreArchitectureGateTests` now guards the texture-core package boundary and texture-only import/token rules.
+- No cache, glyph, coordinator, renderer, or adapter production code moved in this phase.
