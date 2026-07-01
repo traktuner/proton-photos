@@ -7,6 +7,7 @@ import MediaCache
 import GridCore
 import TimelineFeature
 import PhotoViewerFeature
+import UploadCore
 import UploadFeature
 import MapFeature
 

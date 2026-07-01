@@ -4,7 +4,7 @@ import SQLite3
 import PhotosCore
 import ProtonAuth
 import ProtonDriveSDK
-import UploadFeature
+import UploadCore
 
 /// Bridges the feature modules to the Proton Drive SDK. Owns the `ProtonPhotosClient`, wires in
 /// our HTTP + account clients, resolves the photos root, and adapts SDK types to `PhotosCore`.

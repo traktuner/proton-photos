@@ -1,10 +1,10 @@
 import Foundation
 import PhotosCore
 import AlbumsFeature
-import UploadFeature
+import UploadCore
 
-/// Bridges `AlbumsFeature.AlbumManaging` to `UploadFeature.AlbumAttaching`, so the upload queue can do
-/// "create-then-add-then-cover" without `UploadFeature` ever depending on `AlbumsFeature`. Each feature
+/// Bridges `AlbumsFeature.AlbumManaging` to `UploadCore.AlbumAttaching`, so the upload queue can do
+/// "create-then-add-then-cover" without `UploadCore` ever depending on `AlbumsFeature`. Each feature
 /// stays independently removable; this small app-side shim is the only thing that knows about both.
 struct AlbumAttachingAdapter: AlbumAttaching {
     let albums: any AlbumManaging

@@ -43,6 +43,7 @@ let package = Package(
         // Modular feature foundation: album management + the upload queue/state-machine. Both are
         // pure (no SDK/HTTP) and drive injected backend protocols the app implements.
         .library(name: "AlbumsFeature", targets: ["AlbumsFeature"]),
+        .library(name: "UploadCore", targets: ["UploadCore"]),
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
         // Library map: MapKit (native Apple Maps) view over the shared encrypted location index.
         // Platform UI layer — macOS now; an iOS/iPad UIKit variant reuses the same MediaLocationCore.
@@ -93,9 +94,12 @@ let package = Package(
         // so the app's backend routes reads via direct HTTP and reports writes as unsupported).
         .target(name: "AlbumsFeature", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "AlbumsFeatureTests", dependencies: ["AlbumsFeature", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
-        // Upload: pure queue + state machine + folder enumeration over an injected upload backend.
-        .target(name: "UploadFeature", dependencies: ["PhotosCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
-        .testTarget(name: "UploadFeatureTests", dependencies: ["UploadFeature", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        // UploadCore: pure queue + state machine + folder enumeration over an injected upload backend.
+        .target(name: "UploadCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        // UploadFeature: SwiftUI adapter over UploadCore. No DesignSystem dependency; the native
+        // presentation chrome stays owned by the host platform.
+        .target(name: "UploadFeature", dependencies: ["UploadCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "UploadFeatureTests", dependencies: ["UploadCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         // Map: MapKit view + clustering over PhotoLocationIndex (MediaLocationCore). UI layer (AppKit/MapKit).
         .target(name: "MapFeature", dependencies: ["PhotosCore", "MediaLocationCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
     ]

@@ -1,6 +1,6 @@
 import Foundation
 import AlbumsFeature
-import UploadFeature
+import UploadCore
 
 /// Central, honest record of what the wired Proton SDK / HTTP layer can actually do. Logged once at
 /// sign-in for diagnostics — nothing here currently gates UI.

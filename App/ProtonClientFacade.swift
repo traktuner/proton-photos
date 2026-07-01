@@ -1,6 +1,7 @@
 import Foundation
 import PhotosCore
 import AlbumsFeature
+import UploadCore
 import UploadFeature
 
 /// High-level, app-facing composition of the Proton clients. Built once the SDK bridge is ready and

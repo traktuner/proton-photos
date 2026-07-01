@@ -1,6 +1,6 @@
 import XCTest
 import PhotosCore
-@testable import UploadFeature
+@testable import UploadCore
 
 private func isOrderedSubsequence(_ sub: [UploadItemState], of seq: [UploadItemState]) -> Bool {
     var i = 0

@@ -1,5 +1,5 @@
 import XCTest
-@testable import UploadFeature
+@testable import UploadCore
 
 final class FolderEnumerationTests: XCTestCase {
 

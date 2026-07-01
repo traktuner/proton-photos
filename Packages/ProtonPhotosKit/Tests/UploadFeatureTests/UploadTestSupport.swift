@@ -1,7 +1,7 @@
 import Foundation
 import XCTest
 import PhotosCore
-@testable import UploadFeature
+@testable import UploadCore
 
 func testUID(_ name: String) -> PhotoUID { PhotoUID(volumeID: "vol", nodeID: "node-\(name)") }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosCore
+import UploadCore
 
 /// Lets the user pick where a queued batch lands: the library, an existing album, or a new album,
 /// with an optional "use first uploaded photo as cover". Album options are disabled (with an honest
@@ -30,7 +31,11 @@ public struct UploadDestinationSheet: View {
                         Text(L10n.string("upload.destination_new_album")).tag(Mode.newAlbum)
                             .disabled(!coordinator.canCreateAlbum)
                     }
+                    #if os(macOS)
                     .pickerStyle(.radioGroup)
+                    #else
+                    .pickerStyle(.inline)
+                    #endif
 
                     destinationDetails
                 }
@@ -38,7 +43,9 @@ public struct UploadDestinationSheet: View {
                 if mode != .library, coordinator.canSetAlbumCover {
                     Section {
                         Toggle(L10n.string("upload.use_first_as_cover"), isOn: $useFirstAsCover)
+                            #if os(macOS)
                             .toggleStyle(.checkbox)
+                            #endif
                     }
                 }
 
@@ -62,7 +69,9 @@ public struct UploadDestinationSheet: View {
                 }
             }
         }
+        #if os(macOS)
         .frame(width: 420, height: 360)
+        #endif
     }
 
     @ViewBuilder private var destinationDetails: some View {

@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosCore
+import UploadCore
 
 /// Compact upload-queue panel: total progress, per-item status, and per-item retry/cancel/pause.
 public struct UploadQueuePanel: View {
