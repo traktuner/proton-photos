@@ -95,7 +95,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         ),
         CoreTargetRule(
             name: "PhotoViewerCore",
-            allowedImports: ["AVFoundation", "CoreGraphics", "Foundation", "Observation", "PhotosCore"],
+            allowedImports: ["AVFoundation", "CoreGraphics", "Foundation", "ImageIO", "Observation", "PhotosCore"],
             expectedDependencies: ["PhotosCore"],
             extraForbiddenTokens: ["PhotoDiagnostics"]
         ),
