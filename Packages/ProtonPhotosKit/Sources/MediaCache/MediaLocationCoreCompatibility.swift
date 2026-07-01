@@ -1,4 +1,4 @@
-import MediaLocationCore
+@_exported import MediaLocationCore
 
 public typealias LocationCrawl = MediaLocationCore.LocationCrawl
 public typealias PhotoLocationIndex = MediaLocationCore.PhotoLocationIndex

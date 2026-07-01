@@ -1,4 +1,4 @@
-import MediaByteCache
+@_exported import MediaByteCache
 
 public typealias CacheKeyStore = MediaByteCache.CacheKeyStore
 public typealias KeychainCacheKeyStore = MediaByteCache.KeychainCacheKeyStore

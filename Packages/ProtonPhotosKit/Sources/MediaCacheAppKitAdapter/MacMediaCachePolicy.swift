@@ -1,4 +1,5 @@
 import Foundation
+import MediaByteCache
 
 public enum MacMediaCachePolicy {
     public static func thumbnailByteCacheConfiguration() -> ThumbnailCacheConfiguration {

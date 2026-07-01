@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import PhotosCore
 
 /// Stores per-photo aspect ratios (width / height) so the timeline can lay out a justified,

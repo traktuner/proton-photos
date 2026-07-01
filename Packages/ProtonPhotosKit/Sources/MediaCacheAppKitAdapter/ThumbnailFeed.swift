@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import MediaByteCache
+import MediaCacheCore
 import MediaDecodingCore
 import MediaFeedCore
 import PhotosCore

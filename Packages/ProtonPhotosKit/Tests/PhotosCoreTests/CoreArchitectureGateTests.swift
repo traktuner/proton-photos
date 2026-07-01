@@ -60,6 +60,12 @@ final class CoreArchitectureGateTests: XCTestCase {
             extraForbiddenTokens: []
         ),
         CoreTargetRule(
+            name: "MediaCacheCore",
+            allowedImports: ["Foundation", "Observation", "PhotosCore"],
+            expectedDependencies: ["PhotosCore"],
+            extraForbiddenTokens: []
+        ),
+        CoreTargetRule(
             name: "GridCore",
             // QuartzCore intentionally NOT allowed (tightened in Phase 3.9): GridCore is pure value geometry
             // that takes injected clocks (never `CACurrentMediaTime`) and uses simd/`CGAffineTransform` (never
@@ -140,6 +146,8 @@ final class CoreArchitectureGateTests: XCTestCase {
         "DesignSystemCore",
         "MapFeature",
         "MediaCache",
+        "MediaCacheAppKitAdapter",
+        "MediaCacheCore",
         "MetalGridTextureAppKitAdapter",
         "MetalGridTextureUIKitAdapter",
         "PhotoViewerFeature",
