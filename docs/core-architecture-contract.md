@@ -478,3 +478,18 @@ name is historical and does not imply a renderer dependency.
 This pass deliberately did not move `MetalGridCoordinator`, `MetalGridScrollHost`, `MetalGridRenderer`,
 `MetalGridTextureCache`, AppKit accessibility/header code, gesture routing, texture budgets, or data-source/feed
 adapters. Those remain platform adapter or future `MetalRenderingCore` work under the Phase 4.0 layer rules.
+
+#### Phase 4.2 — Pure zoom commit bridge extraction
+
+Small production-code split with no behavior change.
+
+`GridZoomCommitBridge.swift` was added to `GridCore` because the zoom trigger semantics, release-commit bridge,
+commit delta measurement, and `SquareTileGridEngine.commitDelta(...)` extension are pure `CoreGraphics`/grid
+geometry. The implementation owns no renderer, no texture cache, no photo loading, no diagnostics backend, and
+no platform view state.
+
+`TimelineFeature/GridZoomCommit.swift` remains the macOS timeline diagnostics adapter. It keeps
+`GridZoomAnchorLog`, `GridLevelSyncLog`, `GridResizeLog`, `MetalGridPerfLog`, and `GridZoomCommitLog` because
+those write through `PhotoDiagnostics`. `GridProxy` remains adapter/shell seam code until it is separately
+classified. This pass deliberately did not move coordinators, hosts, renderer, cache, gesture intake, AppKit
+accessibility, or data-source/feed adapters into Core.

@@ -51,6 +51,7 @@ by the shared `CoreArchitectureGateTests`. They use only portable value framewor
 - `GridScrollRebase.swift`
 - `GridViewportResizeRebase.swift`
 - `GridZoomTransaction.swift`
+- `GridZoomCommitBridge.swift` (Phase 4.2 pure zoom trigger + release-commit geometry)
 - `GridProfileRebase.swift` (Phase 3.5)
 - `GridTransitionComponent.swift`
 - `GridTransitionComponentBuilder.swift`
@@ -73,10 +74,9 @@ by the shared `CoreArchitectureGateTests`. They use only portable value framewor
 
 ### Remaining pure candidates still in `TimelineFeature`
 
-Not yet moved. `GridZoomCommit.swift` and `GridProxy.swift` import `PhotosCore`, so they belong in a
-`PhotosCore`-dependent Core target rather than the zero-dependency `GridCore`:
+Not yet moved. `GridProxy.swift` imports `PhotosCore` and is a shell/grid command seam with window-frame and
+route-restoration semantics. It needs a separate classification before any Core extraction:
 
-- `GridZoomCommit.swift` (imports `PhotosCore`)
 - `GridProxy.swift` (imports `PhotosCore`)
 
 Extraction rule: move only pure value types and algorithms first. Do not move `TimelineFeature` view hosts,
@@ -333,3 +333,17 @@ Small pure GridCore extraction. No behavior changed.
 - `TimelineFeature` continues to consume both helpers as the macOS adapter. The extraction does not move
   `MetalGridCoordinator`, `MetalGridScrollHost`, renderer code, texture cache, AppKit accessibility, or gesture
   handling into Core.
+
+## Phase 4.2 result
+
+Pure commit-bridge extraction. No behavior changed.
+
+- `GridZoomCommitBridge.swift` was added to `GridCore`. It owns `GridZoomAnchorMode`, `GridZoomTrigger`,
+  `GridZoomCommitBridge`, `GridZoomCommitDelta`, and the `SquareTileGridEngine.commitDelta(...)` pure geometry
+  extension.
+- `TimelineFeature/GridZoomCommit.swift` now keeps only timeline diagnostics/logging over `PhotoDiagnostics`.
+  It still imports `PhotosCore` by design and remains adapter-owned.
+- The extraction does not move `GridProxy`, `MetalGridCoordinator`, `MetalGridScrollHost`, renderer code,
+  texture cache, gesture intake, AppKit accessibility, or data-source/feed adapters into Core.
+- `CoreArchitectureGateTests` now guards that the pure commit bridge stays in `GridCore` with only a
+  `CoreGraphics` import.

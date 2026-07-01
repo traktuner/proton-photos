@@ -282,6 +282,47 @@ final class CoreArchitectureGateTests: XCTestCase {
         )
     }
 
+    func testGridZoomCommitBridgeStaysInUniversalGridCore() throws {
+        let coreFile = sourcesRoot
+            .appendingPathComponent("GridCore")
+            .appendingPathComponent("GridZoomCommitBridge.swift")
+        let timelineFile = sourcesRoot
+            .appendingPathComponent("TimelineFeature")
+            .appendingPathComponent("GridZoomCommit.swift")
+        var violations: [String] = []
+
+        guard FileManager.default.fileExists(atPath: coreFile.path) else {
+            XCTFail("GridCore/GridZoomCommitBridge.swift: missing pure commit bridge")
+            return
+        }
+
+        let imports = try importedModules(in: coreFile)
+        if imports != ["CoreGraphics"] {
+            violations.append("GridCore/GridZoomCommitBridge.swift: imports \(imports.sorted()) != [CoreGraphics]")
+        }
+
+        let coreSource = try String(contentsOf: coreFile, encoding: .utf8)
+        let timelineSource = try String(contentsOf: timelineFile, encoding: .utf8)
+        for symbol in ["GridZoomTrigger", "GridZoomCommitBridge", "GridZoomCommitDelta"] {
+            if !coreSource.contains(symbol) {
+                violations.append("GridCore/GridZoomCommitBridge.swift: missing \(symbol)")
+            }
+            if timelineSource.contains("public enum \(symbol)") || timelineSource.contains("public struct \(symbol)") {
+                violations.append("TimelineFeature/GridZoomCommit.swift: \(symbol) must stay in universal Core")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 4.2 GridCore commit-bridge extraction regressed:
+            \(violations.joined(separator: "\n"))
+
+            Pure zoom-trigger semantics and commit bridge geometry belong in universal Core.
+            """
+        )
+    }
+
     private func swiftFiles(in directory: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: directory,
