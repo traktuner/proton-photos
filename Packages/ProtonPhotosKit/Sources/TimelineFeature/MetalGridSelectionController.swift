@@ -1,5 +1,6 @@
 import PhotosCore
 import GridCore
+import TimelineCore
 
 /// Production selection adapter for the Metal grid: maps Apple-Photos pointer semantics (single click
 /// replaces, ⌘ toggles, ⇧ range-selects from the anchor) into the platform-neutral GridCore selection

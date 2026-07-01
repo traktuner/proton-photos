@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import CoreGraphics
 import GridCore
+import TimelineCore
 @testable import TimelineFeature
 
 /// THE canonical guard suite for the frozen MetalGrid engine contract — see `docs/metalgrid-engine-contract.md`.

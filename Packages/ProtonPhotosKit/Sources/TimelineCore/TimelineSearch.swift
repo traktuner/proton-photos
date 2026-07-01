@@ -1,19 +1,19 @@
 import Foundation
 import PhotosCore
 
-struct TimelineSearchContext: Equatable, Sendable {
-    var activeFilter: PhotoFilter?
-    var favoriteUIDs: Set<PhotoUID>
+package struct TimelineSearchContext: Equatable, Sendable {
+    package var activeFilter: PhotoFilter?
+    package var favoriteUIDs: Set<PhotoUID>
 
-    init(activeFilter: PhotoFilter? = nil, favoriteUIDs: Set<PhotoUID> = []) {
+    package init(activeFilter: PhotoFilter? = nil, favoriteUIDs: Set<PhotoUID> = []) {
         self.activeFilter = activeFilter
         self.favoriteUIDs = favoriteUIDs
     }
 }
 
-enum TimelineSearch {
-    static func filter(_ sections: [TimelineSection], query rawQuery: String,
-                       context: TimelineSearchContext = TimelineSearchContext()) -> [TimelineSection] {
+package enum TimelineSearch {
+    package static func filter(_ sections: [TimelineSection], query rawQuery: String,
+                               context: TimelineSearchContext = TimelineSearchContext()) -> [TimelineSection] {
         let query = TimelineSearchQuery(rawQuery)
         guard !query.isEmpty else { return sections }
 
@@ -25,7 +25,7 @@ enum TimelineSearch {
     }
 }
 
-struct TimelineSearchQuery: Equatable, Sendable {
+package struct TimelineSearchQuery: Equatable, Sendable {
     private enum Term: Equatable, Sendable {
         case text(String)
         case smart(SmartKind)
@@ -51,7 +51,7 @@ struct TimelineSearchQuery: Equatable, Sendable {
 
     private let terms: [Term]
 
-    init(_ raw: String) {
+    package init(_ raw: String) {
         terms = Self.tokens(from: raw).map { token in
             if let smart = Self.smartKind(for: token) {
                 .smart(smart)
@@ -61,7 +61,7 @@ struct TimelineSearchQuery: Equatable, Sendable {
         }
     }
 
-    var isEmpty: Bool { terms.isEmpty }
+    package var isEmpty: Bool { terms.isEmpty }
 
     func matches(item: PhotoItem, in section: TimelineSection, context: TimelineSearchContext) -> Bool {
         let haystack = Self.searchText(for: item, in: section)
@@ -123,7 +123,7 @@ struct TimelineSearchQuery: Equatable, Sendable {
         ]
 
         fields.append(contentsOf: dateFields(for: item.captureTime))
-        if Calendar(identifier: .gregorian).isDate(item.captureTime, inSameDayAs: section.date) == false {
+        if gregorianUTC.isDate(item.captureTime, inSameDayAs: section.date) == false {
             fields.append(contentsOf: dateFields(for: section.date))
         }
         fields.append(contentsOf: item.tags.map(\.title))
@@ -132,22 +132,12 @@ struct TimelineSearchQuery: Equatable, Sendable {
     }
 
     private static func dateFields(for date: Date) -> [String] {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
-        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        let components = gregorianUTC.dateComponents([.year, .month, .day], from: date)
         guard let year = components.year, let month = components.month, let day = components.day else { return [] }
 
-        let monthNamesEN = [
-            "january", "february", "march", "april", "may", "june",
-            "july", "august", "september", "october", "november", "december"
-        ]
-        let monthNamesDE = [
-            "januar", "februar", "maerz", "april", "mai", "juni",
-            "juli", "august", "september", "oktober", "november", "dezember"
-        ]
         let monthIndex = max(0, min(11, month - 1))
-        let twoMonth = String(format: "%02d", month)
-        let twoDay = String(format: "%02d", day)
+        let twoMonth = twoDigits(month)
+        let twoDay = twoDigits(day)
 
         return [
             "\(year)",
@@ -183,7 +173,29 @@ struct TimelineSearchQuery: Equatable, Sendable {
     }
 
     private static func normalize(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: normalizeLocale)
             .lowercased()
+    }
+
+    private static let gregorianUTC: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        return calendar
+    }()
+
+    private static let normalizeLocale = Locale(identifier: "en_US_POSIX")
+
+    private static let monthNamesEN = [
+        "january", "february", "march", "april", "may", "june",
+        "july", "august", "september", "october", "november", "december"
+    ]
+
+    private static let monthNamesDE = [
+        "januar", "februar", "maerz", "april", "mai", "juni",
+        "juli", "august", "september", "oktober", "november", "dezember"
+    ]
+
+    private static func twoDigits(_ value: Int) -> String {
+        value < 10 ? "0\(value)" : "\(value)"
     }
 }

@@ -4,6 +4,7 @@ import Metal
 import PhotosCore
 import MediaCache
 import GridCore
+import TimelineCore
 
 /// Leading event-inset (in points) for the grid: while a translucent sidebar overlays the grid's leading
 /// edge, the host declines hit-testing for `x < inset` so those events reach the sidebar. The grid still

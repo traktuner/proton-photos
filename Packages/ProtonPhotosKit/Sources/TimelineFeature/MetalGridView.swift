@@ -1,5 +1,6 @@
 import AppKit
 import MetalKit
+import TimelineCore
 
 /// The viewport-sized `MTKView` that draws the visible grid. It sits BEHIND a fully transparent
 /// `NSScrollView` (see `MetalGridScrollHost`), so the scroll view owns all physics while this view just

@@ -21,8 +21,8 @@ import Foundation
 // with the host (`binding == hostLevel`), clear the latch. Any OTHER binding value is a genuine external
 // (+/- / keyboard / programmatic) change and is honoured immediately — which also clears the latch, so a
 // legitimate change can never be swallowed for more than the single stale value, and the latch can never stick.
-enum LevelBindingReconciler {
-    enum Action: Equatable {
+package enum LevelBindingReconciler {
+    package enum Action: Equatable {
         case ignore            // already in sync, or a stale post-commit echo — do nothing
         case clearLatch        // the binding caught up to the host level — clear the echo guard, do nothing else
         case reDrive(Int)      // a genuine external level change — drive `animateToLevel(_)` (and clear the guard)
@@ -33,7 +33,7 @@ enum LevelBindingReconciler {
     ///   - binding:   the SwiftUI `@Binding level` value delivered to this pass.
     ///   - hostLevel: the host's authoritative `coordinator.level`.
     ///   - staleEcho: the pre-commit level whose lingering binding echo must be ignored (nil = none armed).
-    static func decide(binding: Int, hostLevel: Int, staleEcho: Int?) -> Action {
+    package static func decide(binding: Int, hostLevel: Int, staleEcho: Int?) -> Action {
         if binding == hostLevel { return .clearLatch }                  // binding consistent with the host
         if let staleEcho, binding == staleEcho { return .ignore }       // stale pre-commit echo → ignore (keep armed)
         return .reDrive(binding)                                        // genuine external change → honour + clear

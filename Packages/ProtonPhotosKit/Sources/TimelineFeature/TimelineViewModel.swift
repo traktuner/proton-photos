@@ -1,6 +1,7 @@
 import Foundation
 import PhotosCore
 import MediaCache
+import TimelineCore
 
 public struct TimelineRefreshResult: Sendable, Equatable {
     public let uploadedUID: PhotoUID?

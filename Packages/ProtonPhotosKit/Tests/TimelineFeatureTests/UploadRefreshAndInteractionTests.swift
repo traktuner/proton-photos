@@ -1,6 +1,7 @@
 import XCTest
 import PhotosCore
 import MediaCache
+import TimelineCore
 @testable import TimelineFeature
 
 final class UploadRefreshAndInteractionTests: XCTestCase {

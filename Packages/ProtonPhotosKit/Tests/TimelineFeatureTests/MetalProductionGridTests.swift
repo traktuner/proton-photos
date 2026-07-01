@@ -3,6 +3,7 @@ import Foundation
 import CoreGraphics
 import PhotosCore
 import GridCore
+import TimelineCore
 @testable import TimelineFeature
 
 /// Production-integration tests for the Metal grid's kept components: selection model, interaction

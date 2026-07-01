@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import CoreGraphics
 import GridCore
+import TimelineCore
 @testable import TimelineFeature
 
 // The six Apple-like zoom levels + the aspect/square content-mode toggle. The toggle changes ONLY how media

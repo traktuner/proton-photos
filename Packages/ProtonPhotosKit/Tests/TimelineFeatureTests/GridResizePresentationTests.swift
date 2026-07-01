@@ -5,6 +5,7 @@ import AppKit
 import MetalKit
 import PhotosCore
 import GridCore
+import TimelineCore
 @testable import TimelineFeature
 
 @MainActor

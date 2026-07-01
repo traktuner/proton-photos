@@ -1,5 +1,6 @@
 import AppKit
 import PhotosCore
+import TimelineCore
 
 /// Routes raw pointer events from the Metal grid into selection ops + viewer opens. A single click
 /// selects (never opens); a double click opens the viewer. Hit testing is delegated to the coordinator

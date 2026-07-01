@@ -2,7 +2,7 @@ import Foundation
 import CoreGraphics
 import GridCore
 
-enum TimelineGridProfileConfigurationError: Error, CustomStringConvertible {
+package enum TimelineGridProfileConfigurationError: Error, CustomStringConvertible {
     case missingBundledResource(String)
     case emptyProfiles
     case duplicateProfileID(String)
@@ -25,7 +25,7 @@ enum TimelineGridProfileConfigurationError: Error, CustomStringConvertible {
     case invalidSelectionWidth(profileID: String, field: String, value: CGFloat)
     case invalidSelectionRange(profileID: String, min: CGFloat, max: CGFloat)
 
-    var description: String {
+    package var description: String {
         switch self {
         case let .missingBundledResource(name):
             return "missing bundled grid profile resource \(name)"
@@ -73,27 +73,27 @@ enum TimelineGridProfileConfigurationError: Error, CustomStringConvertible {
     }
 }
 
-struct TimelineGridProfileConfiguration: Equatable {
-    let defaultProfileID: String
-    let profiles: [GridLevelProfile]
-    let selectionRules: [TimelineGridProfileSelectionRule]
+package struct TimelineGridProfileConfiguration: Equatable {
+    package let defaultProfileID: String
+    package let profiles: [GridLevelProfile]
+    package let selectionRules: [TimelineGridProfileSelectionRule]
 
-    var defaultProfile: GridLevelProfile {
+    package var defaultProfile: GridLevelProfile {
         guard let profile = profile(id: defaultProfileID) else {
             preconditionFailure("validated grid profile configuration lost its default profile")
         }
         return profile
     }
 
-    func profile(id: String) -> GridLevelProfile? {
+    package func profile(id: String) -> GridLevelProfile? {
         profiles.first { $0.id == id }
     }
 
-    var resolver: TimelineGridProfileResolver {
+    package var resolver: TimelineGridProfileResolver {
         TimelineGridProfileResolver(defaultProfileID: defaultProfileID, profiles: profiles, rules: selectionRules)
     }
 
-    static let production: TimelineGridProfileConfiguration = {
+    package static let production: TimelineGridProfileConfiguration = {
         do {
             return try bundled()
         } catch {
@@ -101,14 +101,14 @@ struct TimelineGridProfileConfiguration: Equatable {
         }
     }()
 
-    static func bundled(resourceName: String = "GridProfiles", bundle: Bundle = .module) throws -> TimelineGridProfileConfiguration {
+    package static func bundled(resourceName: String = "GridProfiles", bundle: Bundle = .module) throws -> TimelineGridProfileConfiguration {
         guard let url = bundle.url(forResource: resourceName, withExtension: "plist") else {
             throw TimelineGridProfileConfigurationError.missingBundledResource("\(resourceName).plist")
         }
         return try load(data: Data(contentsOf: url))
     }
 
-    static func load(data: Data) throws -> TimelineGridProfileConfiguration {
+    package static func load(data: Data) throws -> TimelineGridProfileConfiguration {
         let decoded = try PropertyListDecoder().decode(ConfigurationDTO.self, from: data)
         guard !decoded.profiles.isEmpty else { throw TimelineGridProfileConfigurationError.emptyProfiles }
 

@@ -3,6 +3,7 @@ import AppKit
 import PhotosCore
 import DesignSystem
 import GridCore
+import TimelineCore
 
 public struct TimelineView: View {
     @State private var model: TimelineViewModel

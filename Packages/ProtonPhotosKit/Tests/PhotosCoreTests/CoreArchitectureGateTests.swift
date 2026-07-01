@@ -81,6 +81,12 @@ final class CoreArchitectureGateTests: XCTestCase {
             expectedDependencies: ["PhotosCore"],
             extraForbiddenTokens: []
         ),
+        CoreTargetRule(
+            name: "TimelineCore",
+            allowedImports: ["CoreGraphics", "Foundation", "GridCore", "PhotosCore"],
+            expectedDependencies: ["GridCore", "PhotosCore"],
+            extraForbiddenTokens: []
+        ),
     ]
 
     private static let forbiddenFrameworkImports: Set<String> = [

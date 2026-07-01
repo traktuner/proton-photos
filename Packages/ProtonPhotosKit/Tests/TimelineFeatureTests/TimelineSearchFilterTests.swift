@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import PhotosCore
+import TimelineCore
 @testable import TimelineFeature
 
 @Suite struct TimelineSearchFilterTests {

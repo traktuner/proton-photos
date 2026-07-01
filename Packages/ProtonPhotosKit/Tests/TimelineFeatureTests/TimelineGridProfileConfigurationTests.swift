@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import GridCore
+import TimelineCore
 @testable import TimelineFeature
 
 @Suite struct TimelineGridProfileConfigurationTests {

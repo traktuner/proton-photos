@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import TimelineCore
 @testable import TimelineFeature
 
 /// GUARANTEE 1 — Binding-echo guard. After a host-led pinch commit advances `coordinator.level` to N and pushes

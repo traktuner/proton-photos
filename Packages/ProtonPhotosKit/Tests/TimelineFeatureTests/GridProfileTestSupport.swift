@@ -1,4 +1,5 @@
 import GridCore
+import TimelineCore
 @testable import TimelineFeature
 
 extension GridLevelProfile {
