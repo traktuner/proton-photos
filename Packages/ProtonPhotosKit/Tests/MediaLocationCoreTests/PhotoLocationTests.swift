@@ -92,6 +92,58 @@ private func tempDir() -> URL {
         let hits = index.coordinates(in: box)
         #expect(hits.map(\.uid) == [uid("inside")])
     }
+
+    @Test func viewportPolicyMatchesVisibleMapRectMarginFormula() {
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1.6, maxCoordinates: 3000)
+        let viewport = PhotoLocationViewport(
+            centerLatitude: 47.5,
+            centerLongitude: 13.0,
+            latitudeDelta: 0.5,
+            longitudeDelta: 1.25
+        )
+
+        let box = policy.boundingBox(for: viewport)
+        #expect(box == GeoBoundingBox(
+            minLatitude: 46.7,
+            maxLatitude: 48.3,
+            minLongitude: 11.0,
+            maxLongitude: 15.0
+        ))
+    }
+
+    @Test func viewportPolicyFiltersAndCapsInInputOrder() {
+        let index = PhotoLocationIndex()
+        index.merge([
+            coord("a", 47.8, 13.0),
+            coord("b", 47.7, 13.1),
+            coord("outside", 10.0, 10.0),
+            coord("c", 47.6, 13.2),
+        ])
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1, maxCoordinates: 2)
+        let viewport = PhotoLocationViewport(
+            centerLatitude: 47.7,
+            centerLongitude: 13.1,
+            latitudeDelta: 0.5,
+            longitudeDelta: 0.5
+        )
+
+        let hits = index.coordinates(in: viewport, policy: policy)
+        #expect(hits.map(\.uid) == [uid("a"), uid("b")])
+    }
+
+    @Test func viewportPolicyRejectsInvalidInputsWithoutLeakingAllCoordinates() {
+        let index = PhotoLocationIndex()
+        index.merge([coord("a", 47.8, 13.0)])
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: .infinity, maxCoordinates: 3000)
+        let viewport = PhotoLocationViewport(
+            centerLatitude: 47.7,
+            centerLongitude: 13.1,
+            latitudeDelta: 0.5,
+            longitudeDelta: 0.5
+        )
+
+        #expect(index.coordinates(in: viewport, policy: policy).isEmpty)
+    }
 }
 
 @Suite("MediaLocationCore platform purity")

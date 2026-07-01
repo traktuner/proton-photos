@@ -55,6 +55,10 @@ public struct LibraryMapView: NSViewRepresentable {
         private var shownUIDs = Set<PhotoUID>()
         private var lastRevision = Int.min
         private var didFrame = false
+        private let visibleCoordinatePolicy = PhotoLocationVisibleCoordinatePolicy(
+            marginMultiplier: 1.6,
+            maxCoordinates: 3000
+        )
 
         init(index: PhotoLocationIndex,
              thumbnail: @escaping (PhotoUID) -> NSImage?,
@@ -92,15 +96,13 @@ public struct LibraryMapView: NSViewRepresentable {
         private func reloadVisible() {
             guard let map else { return }
             let r = map.region
-            let m = 1.6   // load a bit beyond the edges so panning is seamless
-            let box = GeoBoundingBox(
-                minLatitude: r.center.latitude - r.span.latitudeDelta * m,
-                maxLatitude: r.center.latitude + r.span.latitudeDelta * m,
-                minLongitude: r.center.longitude - r.span.longitudeDelta * m,
-                maxLongitude: r.center.longitude + r.span.longitudeDelta * m)
-            let visible = index.coordinates(in: box)
-            // Cap so the clusterer stays fast on dense regions; the cap only drops far-from-centre points.
-            let capped = visible.count > 3000 ? Array(visible.prefix(3000)) : visible
+            let viewport = PhotoLocationViewport(
+                centerLatitude: r.center.latitude,
+                centerLongitude: r.center.longitude,
+                latitudeDelta: r.span.latitudeDelta,
+                longitudeDelta: r.span.longitudeDelta
+            )
+            let capped = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
             let wanted = Set(capped.map(\.uid))
 
             let stale = map.annotations.compactMap { $0 as? PhotoMapAnnotation }.filter { !wanted.contains($0.uid) }

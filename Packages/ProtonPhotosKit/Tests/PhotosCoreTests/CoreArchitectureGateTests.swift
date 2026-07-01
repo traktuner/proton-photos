@@ -57,7 +57,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             name: "MediaLocationCore",
             allowedImports: ["CryptoKit", "Foundation", "Observation", "PhotosCore"],
             expectedDependencies: ["PhotosCore"],
-            extraForbiddenTokens: []
+            extraForbiddenTokens: ["MapKit"]
         ),
         CoreTargetRule(
             name: "MediaCacheCore",
