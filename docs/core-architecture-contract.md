@@ -1,4 +1,4 @@
-# Proton Photos Universal Core Contract v0.1
+# Proton Photos Universal Core Contract v0.2
 
 ## Authority
 
@@ -11,29 +11,78 @@ Every agent working on Proton Photos architecture MUST follow this contract befo
 - [HIG — Layout](https://developer.apple.com/design/human-interface-guidelines/layout)
 - [TN3192: Migrating your app from the deprecated UIRequiresFullScreen key](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key)
 - [Adopting Liquid Glass](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass)
+- [UIKit and AppKit apps](https://developer.apple.com/documentation/technologyoverviews/uikit-appkit)
+- [UIWindowScene](https://developer.apple.com/documentation/uikit/uiwindowscene)
+- [UITraitCollection](https://developer.apple.com/documentation/uikit/uitraitcollection)
+- [UIView.safeAreaLayoutGuide](https://developer.apple.com/documentation/uikit/uiview/safearealayoutguide)
 - [Metal](https://developer.apple.com/documentation/metal)
 - [MTKView](https://developer.apple.com/documentation/metalkit/mtkview)
+- [Using Metal to draw a view's contents](https://developer.apple.com/documentation/metal/using-metal-to-draw-a-view%27s-contents)
+
+Agents must re-check official Apple documentation before changing architecture, UI adaptation, rendering
+boundaries, or platform availability. Rumors or assumed future hardware do not become product requirements.
+Future devices are handled by the same rule Apple already requires for modern Apple platforms: adapters supply
+current scene size, safe area, traits, input mode, scale, and capability facts; Core consumes facts, never device
+rumors or platform-name branches.
 
 ## Architectural Layers
 
-### Core
+### Core-Native Principle
+
+Core-native means shared where it is truly portable and native where Apple platform behavior matters. It does
+not mean moving every file into one Core target. The app must be decomposed so features can be added, removed, or
+disabled by changing adapters, injected providers, profile configuration, or feature availability policy rather
+than by forking Core behavior.
+
+The mandatory layers are:
+
+1. Universal Core: deterministic data, algorithms, policies, storage primitives, and render/transition plans.
+2. Photos-dependent Core: reusable app-domain logic that may depend on `PhotosCore` but still has no UI,
+   rendering, platform-hosting, or concrete backend dependency.
+3. MetalRenderingCore: future shared Metal renderer/shader layer with its own gate, separate from Universal Core.
+4. Shared UI/UX: SwiftUI only where genuinely adaptive across Mac, iPhone, and iPad.
+5. Platform Adapters: AppKit/UIKit/SwiftUI hosts, scroll, gestures, safe areas, traits, accessibility, budgets,
+   native controls, platform glyph rasterization, and concrete telemetry/export backends.
+
+Every new module must declare which layer it belongs to before code moves.
+
+### Universal Core
 
 - MUST compile for macOS 26+, iOS 26+, and iPadOS 26+.
-- MUST NOT import AppKit, UIKit, SwiftUI, MapKit view-hosting UI, AVKit, MetalKit view-hosting UI, NSImage, UIImage, NSView, UIView, NSWorkspace, NSOpenPanel, UIApplication, or NSApplication.
+- MUST NOT import AppKit, UIKit, SwiftUI, MapKit view-hosting UI, AVKit, Metal, MetalKit view-hosting UI,
+  NSImage, UIImage, NSView, UIView, NSWorkspace, NSOpenPanel, UIApplication, or NSApplication.
 - MAY use Foundation, CoreGraphics value types, CryptoKit, Security, ImageIO only when available cross-platform and guarded by tests.
 - Owns domain models, provider protocols, pure algorithms, byte caches, cryptographic storage primitives, metadata models, diagnostics event schemas, and performance-neutral utilities.
 - MUST prefer value types, Sendable protocols, actor-isolated services, dependency injection, clocks, and explicit stores over global mutable state.
+- MUST be performant on the lowest supported iPhone/iPad class, not merely buildable. Mac-only CPU/RAM/GPU
+  assumptions are forbidden here.
+
+### Photos-Dependent Core
+
+- MAY depend on `PhotosCore` plus lower-level universal Core targets.
+- MUST obey the same UI/import/token bans as Universal Core.
+- Owns reusable photo-domain state machines, ID-based coordination, app-domain routing models, and provider
+  contracts that are not specific to macOS, iOS, or iPadOS hosts.
+- MUST keep SDK, network, file picker, platform image wrapper, and concrete persistence backends behind injected
+  protocols or adapter targets.
 
 ### Shared UI/UX
 
 - MAY use SwiftUI only when the code is truly platform-adaptive and compiles on Mac, iPhone, and iPad.
 - MUST use standard Apple components where possible so Liquid Glass and platform behavior are inherited from the system.
 - MUST avoid hard-coded desktop assumptions, fixed window-only layouts, and custom glass/chrome unless a platform-specific reason is documented.
+- MUST adapt from scene/container facts, not device-name assumptions. A narrow Mac window, iPad split view,
+  external display, future foldable surface, and iPhone portrait surface must all be expressible by the same
+  viewport/trait/capability model.
 
 ### Platform UI
 
 - Owns AppKit/UIKit bridges, NSViewRepresentable/UIViewRepresentable, NSScrollView/UIScrollView, NSOpenPanel, PhotosPicker, window commands, menu commands, platform file pickers, platform accessibility bridges, and platform-specific Liquid Glass/chrome.
 - MUST adapt to safe areas, scene size changes, orientation, keyboard/pointer/trackpad, iPad multitasking, and dynamic resizing.
+- MUST map platform facts into Core-neutral profiles and policies: layout viewport, safe-area insets, display
+  scale, input mode, size traits, memory/GPU budget tier, motion policy, and feature availability.
+- MAY choose platform-specific budgets and strategy defaults, but MUST inject them into Core-facing policy types
+  rather than hard-coding them in Core.
 
 ### Rendering
 
@@ -41,11 +90,40 @@ Every agent working on Proton Photos architecture MUST follow this contract befo
 - Metal renderer/shaders may be shared if they compile on all target platforms.
 - Metal view hosting, scroll physics, gesture intake, pointer behavior, and accessibility host objects are platform UI.
 
+### MetalRenderingCore (Future, Separate Gate)
+
+`MetalRenderingCore` is not Universal Core. It is a future shared rendering target for Apple platforms where Metal
+is available. It must have its own purity gate before any renderer file moves.
+
+Allowed:
+- `Metal`, portable shader source, `CoreGraphics` value types, `simd`, and minimal `QuartzCore` drawable value
+  types only when they compile on macOS, iOS, and iPadOS.
+- A narrow render-target abstraction supplied by platform adapters. It may wrap `CAMetalDrawable` and
+  `MTLRenderPassDescriptor`, but it must not know about scenes, windows, scroll views, gestures, or accessibility.
+
+Forbidden:
+- `MetalKit`, `MTKView`, AppKit, UIKit, SwiftUI, `NSView`, `UIView`, `NSImage`, `UIImage`, platform scroll hosts,
+  gesture/event routing, accessibility hosts, platform glyph rasterization, and concrete `PhotoUID` or
+  `MediaCache` feed lookups.
+- Creating or owning `CAMetalLayer`/`MTKView`; adapters create surfaces and pass draw targets in.
+
+Renderer strategy may vary by adapter policy (simple per-texture path, argument-buffer path, texture-array path),
+but strategy choice must be explicit, test-covered, and measurable. Do not hide macOS-only fast paths in shared
+renderer code.
+
 ### Telemetry
 
 - Core MAY define platform-neutral telemetry event types and a `TelemetrySink` protocol.
 - Core MUST NOT depend on a concrete telemetry backend, OSLog-only implementation, network exporter, or platform UI lifecycle.
 - Telemetry implementation is a separate task.
+
+### Feature Modularity
+
+- Core features must be enabled through explicit capability/configuration objects, provider availability, or
+  profile selection. No hidden singleton state may decide whether a Core feature exists.
+- Removing a feature should remove an adapter, provider, profile, or feature policy without requiring unrelated
+  Core rewrites.
+- Optional features must fail closed with typed unsupported states, not silently fall back to desktop defaults.
 
 ## Purity Rules — Enforced Boundary
 
@@ -355,3 +433,35 @@ import, bans the render/GPU-surface + presentation token set listed under "Forbi
 GridCore-scopes a ban on CoreGraphics drawing types (`CGContext`/`CGImage`/`CGColorSpace`/`CGLayer`), and drops
 `QuartzCore` from GridCore's import allowlist (its one dead `import QuartzCore` was removed). Every current Core
 target still passes the gate and builds for iOS and macOS.
+
+### Phase 4 — Core-native architecture
+
+#### Phase 4.0 — Core-native contract
+
+Contract-only pass. No production behavior changed.
+
+Core-native is now defined as a layered architecture, not as a mandate to move all implementation into
+Universal Core. Universal Core remains the lowest shared boundary and is deliberately `Metal`-free. Reusable
+photo-domain logic that depends on `PhotosCore` may move into Photos-dependent Core. Shared Metal rendering may
+move only into a future `MetalRenderingCore` with its own gate. Platform adapters remain responsible for native
+Apple behavior: scene/window/view hosting, safe areas, traits, scroll physics, gestures, accessibility, native
+controls, concrete telemetry/export backends, platform texture budgets, and glyph rasterization.
+
+Future Apple form factors are handled generically. The contract does not encode rumors or device names. Any Mac,
+iPhone, iPad, external display, split view, Stage Manager surface, resized window, or future foldable-like scene
+must be described by facts the adapter can observe: layout size, safe-area insets, display scale, size traits,
+input mode, pointer precision, memory/GPU budget tier, motion policy, and feature availability. Core consumes
+those facts through profile selection, injected policies, and capability objects. Core must not branch on
+`if macOS`, `if iPad`, or device marketing names to choose behavior.
+
+Modularity is explicit: features are enabled by provider availability, capability/configuration objects, adapter
+wiring, or validated profile configuration. Optional features fail closed with typed unsupported states. Removing
+a feature must not require unrelated Core rewrites, duplicated algorithms, or parallel platform-specific Core
+paths.
+
+Performance remains part of the architecture contract. Universal Core and Photos-dependent Core must be viable
+on the lowest supported iPhone/iPad class, not merely buildable. Platform-specific performance policy belongs in
+adapters and is injected into Core-facing policy types. macOS may choose higher budgets and different renderer
+strategies, but those choices must not become Universal Core defaults. Actual renderer optimization, draw-call
+strategy, texture arrays, argument buffers, and device-specific budget tuning are future measured tasks after the
+boundaries and gates exist.

@@ -185,7 +185,9 @@ Solutions:
    defaults. Invalid profile data must fail validation rather than silently falling back to a desktop profile.
 4. macOS `TimelineFeature` adapter keeps `MetalProductionGridView`, `MetalGridScrollHost`, header/accessibility,
    real data source, and AppKit symbol rasterization.
-5. `MetalRenderingCore` target only after `MetalGridRenderer` no longer accepts `MTKView` directly.
+5. `MetalRenderingCore` target only after the Phase 4.0 separate rendering gate exists. The `MTKView` entry-point
+   blocker is resolved; the remaining work is to split the Metal-only renderer/shader package from the
+   `MTKView`/AppKit adapter and prove it builds on macOS, iOS, and iPadOS.
 6. iOS/iPadOS adapter: `UIViewRepresentable`/`UIView`, `UIScrollView` or SwiftUI scroll host, platform
    safe-area/input policy, platform `MetalGridBudget`, and platform glyph rasterizer.
 
@@ -303,3 +305,21 @@ Render-boundary / adapter-boundary hardening. Audit + guards + doc sync only; no
 - Dead import removed: `GridCore/GridScrollRebase.swift` imported `QuartzCore` but used only `CFTimeInterval`
   (resolved via `CoreGraphics`); it was the only QuartzCore importer in `GridCore`. Removing it enabled dropping
   `QuartzCore` from the GridCore allowlist.
+
+## Phase 4.0 result
+
+Core-native contract. Documentation only; no production behavior changed.
+
+- "Core-native" now means layered native architecture, not "put everything in Universal Core." `GridCore` stays
+  pure and `Metal`-free. Photo-domain reusable logic that needs `PhotosCore` belongs in Photos-dependent Core.
+  Shared Metal rendering belongs in a future `MetalRenderingCore` with its own gate.
+- `MetalRenderingCore` is explicitly separate from the Universal Core gate. It may use `Metal` and narrow
+  drawable/pass-descriptor targets, but it must not import `MetalKit`, AppKit, UIKit, SwiftUI, `MTKView`,
+  `NSView`, `UIView`, platform scroll/gesture/accessibility hosts, platform glyph rasterization, `PhotoUID`, or
+  `MediaCache`.
+- Platform adapters map current Apple scene facts into Core-neutral policy: layout size, safe areas, display
+  scale, traits, input mode, pointer precision, memory/GPU budget tier, motion policy, and feature availability.
+  Future dynamic surfaces must be handled by those facts, never by hard-coded device or platform branches in Core.
+- Performance policy remains adapter-injected. macOS can keep aggressive budgets; iPhone/iPad profiles must use
+  their own measured budgets. Renderer optimization strategies are future measured tasks after the split/gate is
+  in place.
