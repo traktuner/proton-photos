@@ -127,7 +127,11 @@ targets:
       - package: ProtonPhotosKit
         product: MetalGridTextureUIKitAdapter
       - package: ProtonPhotosKit
+        product: AlbumsFeature
+      - package: ProtonPhotosKit
         product: UploadCore
+      - package: ProtonPhotosKit
+        product: UploadFeature
       - package: ProtonPhotosKit
         product: PhotoViewerCore
       - package: ProtonPhotosKit

@@ -88,10 +88,12 @@ final class ProjectHygieneTests: XCTestCase {
             "product: TimelineUIKitAdapter",
             "product: MediaCacheUIKitAdapter",
             "product: MetalGridTextureUIKitAdapter",
+            "product: AlbumsFeature",
             "product: PhotoViewerCore",
             "product: PhotoViewerUIKitAdapter",
             "product: MapUIKitAdapter",
-            "product: UploadCore"
+            "product: UploadCore",
+            "product: UploadFeature"
         ] {
             XCTAssertTrue(mobileTarget.contains(required), "ProtonPhotosMobile target missing \(required)")
         }

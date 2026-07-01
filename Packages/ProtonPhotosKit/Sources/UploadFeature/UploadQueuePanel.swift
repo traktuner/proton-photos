@@ -26,7 +26,11 @@ public struct UploadQueuePanel: View {
                 .scrollContentBackground(.hidden)
             }
         }
+        #if os(macOS)
         .frame(width: 380, height: coordinator.items.isEmpty ? 220 : 360)
+        #else
+        .frame(maxWidth: .infinity, maxHeight: coordinator.items.isEmpty ? 220 : 360)
+        #endif
         // No .presentationBackground override → the popover keeps its native Liquid Glass chrome.
     }
 
