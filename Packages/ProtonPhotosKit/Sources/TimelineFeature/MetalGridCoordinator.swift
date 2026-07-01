@@ -209,12 +209,12 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
           gridProfile: GridLevelProfile) {
+        let texturePolicy = AppKitMetalGridTexturePolicies.policy(budget: budget)
         guard let renderer = MetalGridRenderer(device: device, clearColor: MetalGridPalette.clearColor),
-              let cache = MetalGridTextureCache<PhotoUID>(
+              let cache = AppKitMetalGridTextureCacheFactory.makeCache(
                   device: device,
-                  budget: budget,
-                  glyphRasterizer: AppKitMetalGridGlyphRasterizer()
-              ) else { return nil }
+                  policy: texturePolicy
+              ) as MetalGridTextureCache<PhotoUID>? else { return nil }
         self.renderer = renderer
         self.cache = cache
         self.dataSource = dataSource

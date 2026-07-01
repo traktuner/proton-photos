@@ -531,8 +531,9 @@ AppKit glyph adapter split. macOS production behavior should remain visually unc
 
 - `MetalGridTextureAppKitAdapter` is now a SwiftPM product/target.
 - `AppKitMetalGridGlyphRasterizer` moved from `TimelineFeature` into `MetalGridTextureAppKitAdapter`.
-- `TimelineFeature` now imports `MetalGridTextureAppKitAdapter` and still injects
-  `AppKitMetalGridGlyphRasterizer()` into `MetalGridTextureCache<PhotoUID>`.
+- At this phase, `TimelineFeature` imported `MetalGridTextureAppKitAdapter` and still injected
+  `AppKitMetalGridGlyphRasterizer()` into `MetalGridTextureCache<PhotoUID>` directly. Phase 5.7 later moved that
+  assembly into `AppKitMetalGridTextureCacheFactory`.
 - `TimelineFeature` no longer owns native SF Symbol rasterization code; it owns only the macOS grid host,
   data-source binding, budget consumption, and injection point.
 - `scripts/verify-universal-core.sh` now builds the AppKit adapter for macOS and the UIKit adapter for iOS.
@@ -550,3 +551,19 @@ AppKit texture budget policy split. macOS production behavior should remain unch
 - `TimelineFeature/MetalGridTypes.swift` now keeps only the `MetalGridBudget` compatibility typealias.
 - `CoreArchitectureGateTests` now guards that macOS defaults stay adapter-owned and do not leak into `GridCore`
   or back into `TimelineFeature`.
+
+## Phase 5.7 result
+
+AppKit texture cache factory wiring. macOS production behavior should remain unchanged.
+
+- `AppKitMetalGridTextureCacheFactory` now assembles `MetalGridTextureCache<ID>` from an `MTLDevice`,
+  `AppKitMetalGridTexturePolicy`, and `AppKitMetalGridGlyphRasterizer`.
+- The factory stays generic over `ID: Hashable & Sendable`; it does not bind `PhotoUID`, media-feed types, or
+  timeline host types.
+- `MetalGridCoordinator` now wraps its injected `MetalGridBudget` in
+  `AppKitMetalGridTexturePolicies.policy(budget:)` and requests the cache from the AppKit factory instead of
+  calling `MetalGridTextureCache<PhotoUID>(...)` directly.
+- The runtime values are preserved: the existing macOS budget is still injected, and
+  `AppKitMetalGridTexturePolicies.defaultMaxTexturePixels` keeps the `320` cap used by the direct initializer.
+- `CoreArchitectureGateTests` now guards that AppKit cache assembly remains in the AppKit adapter factory and
+  that the macOS host only binds `PhotoUID` at the edge.

@@ -773,10 +773,11 @@ final class CoreArchitectureGateTests: XCTestCase {
         let cacheFile = textureRoot.appendingPathComponent("MetalGridTextureCache.swift")
         let glyphContractFile = textureRoot.appendingPathComponent("MetalGridGlyphRasterizer.swift")
         let appKitRasterizerFile = appKitAdapterRoot.appendingPathComponent("AppKitMetalGridGlyphRasterizer.swift")
+        let appKitFactoryFile = appKitAdapterRoot.appendingPathComponent("AppKitMetalGridTextureCacheFactory.swift")
         let coordinatorFile = timelineRoot.appendingPathComponent("MetalGridCoordinator.swift")
         var violations: [String] = []
 
-        for file in [cacheFile, glyphContractFile, appKitRasterizerFile] where !FileManager.default.fileExists(atPath: file.path) {
+        for file in [cacheFile, glyphContractFile, appKitRasterizerFile, appKitFactoryFile] where !FileManager.default.fileExists(atPath: file.path) {
             violations.append("\(file.deletingLastPathComponent().lastPathComponent)/\(file.lastPathComponent): missing glyph/cache boundary file")
         }
 
@@ -819,6 +820,16 @@ final class CoreArchitectureGateTests: XCTestCase {
             }
         }
 
+        if FileManager.default.fileExists(atPath: appKitFactoryFile.path) {
+            let source = try String(contentsOf: appKitFactoryFile, encoding: .utf8)
+            if !source.contains("glyphRasterizer: any MetalGridGlyphRasterizing = AppKitMetalGridGlyphRasterizer()") {
+                violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTextureCacheFactory.swift: AppKit cache factory must inject the default AppKit rasterizer")
+            }
+            if !source.contains("MetalGridTextureCache(") || !source.contains("glyphRasterizer: glyphRasterizer") {
+                violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTextureCacheFactory.swift: factory must pass the injected rasterizer into the shared cache")
+            }
+        }
+
         if FileManager.default.fileExists(atPath: coordinatorFile.path) {
             let source = try String(contentsOf: coordinatorFile, encoding: .utf8)
             if !source.contains("import MetalGridTextureCore") {
@@ -827,8 +838,11 @@ final class CoreArchitectureGateTests: XCTestCase {
             if !source.contains("import MetalGridTextureAppKitAdapter") {
                 violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS adapter must import the AppKit texture adapter explicitly")
             }
-            if !source.contains("glyphRasterizer: AppKitMetalGridGlyphRasterizer()") {
-                violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS adapter must inject AppKit rasterizer explicitly")
+            if !source.contains("AppKitMetalGridTextureCacheFactory.makeCache") {
+                violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS adapter must assemble the texture cache through the AppKit factory")
+            }
+            if source.contains("glyphRasterizer: AppKitMetalGridGlyphRasterizer()") {
+                violations.append("TimelineFeature/MetalGridCoordinator.swift: direct glyph injection belongs in the AppKit cache factory")
             }
             if !source.contains("MetalGridGlyphColor(.controlAccentColor)") {
                 violations.append("TimelineFeature/MetalGridCoordinator.swift: AppKit colors must convert at adapter edge")
@@ -903,8 +917,8 @@ final class CoreArchitectureGateTests: XCTestCase {
             if !coordinator.contains("import MetalGridTextureAppKitAdapter") {
                 violations.append("TimelineFeature/MetalGridCoordinator.swift: missing AppKit texture adapter import")
             }
-            if !coordinator.contains("glyphRasterizer: AppKitMetalGridGlyphRasterizer()") {
-                violations.append("TimelineFeature/MetalGridCoordinator.swift: must still inject the AppKit rasterizer")
+            if !coordinator.contains("AppKitMetalGridTextureCacheFactory.makeCache") {
+                violations.append("TimelineFeature/MetalGridCoordinator.swift: must use the AppKit texture cache factory")
             }
         }
 
@@ -978,6 +992,71 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             macOS can keep aggressive desktop texture budgets, but those defaults belong to the AppKit texture
             adapter. GridCore may define only the portable shape and TimelineFeature may only consume it.
+            """
+        )
+    }
+
+    func testAppKitTextureCacheFactoryUsesSharedTextureCore() throws {
+        let adapterRoot = sourcesRoot.appendingPathComponent("MetalGridTextureAppKitAdapter")
+        let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
+        let factoryFile = adapterRoot.appendingPathComponent("AppKitMetalGridTextureCacheFactory.swift")
+        let coordinatorFile = timelineRoot.appendingPathComponent("MetalGridCoordinator.swift")
+        var violations: [String] = []
+
+        guard FileManager.default.fileExists(atPath: factoryFile.path) else {
+            XCTFail("MetalGridTextureAppKitAdapter/AppKitMetalGridTextureCacheFactory.swift: missing AppKit cache factory")
+            return
+        }
+
+        let imports = try importedModules(in: factoryFile)
+        let expectedImports: Set<String> = ["Metal", "MetalGridTextureCore"]
+        if imports != expectedImports {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTextureCacheFactory.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+        }
+        for forbidden in ["UIKit", "SwiftUI", "MetalKit", "PhotosCore", "MediaCache", "TimelineFeature"] where imports.contains(forbidden) {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTextureCacheFactory.swift: must not import \(forbidden)")
+        }
+
+        let source = try String(contentsOf: factoryFile, encoding: .utf8)
+        let code = stripCommentsAndStringLiterals(from: source)
+        for symbol in [
+            "#if canImport(AppKit)",
+            "AppKitMetalGridTextureCacheFactory",
+            "makeCache<ID: Hashable & Sendable>",
+            "MetalGridTextureCache<ID>",
+            "AppKitMetalGridTexturePolicy",
+            "AppKitMetalGridGlyphRasterizer()",
+            "budget: policy.budget",
+            "maxTexturePixels: policy.maxTexturePixels",
+            "glyphRasterizer: glyphRasterizer"
+        ] where !source.contains(symbol) {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTextureCacheFactory.swift: missing \(symbol)")
+        }
+        for forbidden in ["PhotoUID", "PhotoItem", "MetalGridBudget.default", "GridTextureBudget(", "maxUploadsPerFrame:", "maxCachedTextures:"] where contains(forbidden, in: code) {
+            violations.append("MetalGridTextureAppKitAdapter/AppKitMetalGridTextureCacheFactory.swift: factory must use injected AppKit policy and generic IDs, found \(forbidden)")
+        }
+
+        if FileManager.default.fileExists(atPath: coordinatorFile.path) {
+            let coordinator = try String(contentsOf: coordinatorFile, encoding: .utf8)
+            if !coordinator.contains("AppKitMetalGridTexturePolicies.policy(budget: budget)") {
+                violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS coordinator must wrap its budget in an AppKit texture policy")
+            }
+            if !coordinator.contains("AppKitMetalGridTextureCacheFactory.makeCache") {
+                violations.append("TimelineFeature/MetalGridCoordinator.swift: macOS coordinator must use the AppKit texture cache factory")
+            }
+            if coordinator.contains("MetalGridTextureCache<PhotoUID>(") {
+                violations.append("TimelineFeature/MetalGridCoordinator.swift: direct cache construction should stay behind the AppKit factory")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 5.7 AppKit texture cache factory boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            The macOS host may bind the shared cache to `PhotoUID`, but platform glyph/default-policy assembly
+            belongs in the AppKit texture adapter factory.
             """
         )
     }

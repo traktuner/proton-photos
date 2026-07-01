@@ -72,7 +72,7 @@ macOS keeps `MetalGridBudget.default` via `MetalGridTextureAppKitAdapter`; iOS/i
 placeholder texture lifetime, badge glyph texture caching, and byte/upload counters. It is generic over item
 identity and must not import photo-domain packages. Platform adapters bind the ID type, provide decoded images,
 inject concrete budgets, and inject glyph rasterizers.
-The UIKit adapter's factory proves this assembly path without introducing an iOS grid host yet.
+The AppKit and UIKit adapter factories prove this assembly path without duplicating texture-cache logic.
 
 **`MetalGridTextureCore` owns:** reusable Metal texture upload/cache code and the platform-neutral glyph request
 contract. It may depend on `GridCore` policy and use `Metal`/`CoreGraphics`, but it must not own render command

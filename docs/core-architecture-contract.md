@@ -705,8 +705,9 @@ Small platform-adapter extraction with no intended visual behavior change on mac
 `MetalGridTextureAppKitAdapter` is now a dedicated target/product that depends on `MetalGridTextureCore` and
 `GridCore`.
 `AppKitMetalGridGlyphRasterizer` moved there from `TimelineFeature`, keeping the same AppKit SF Symbol rendering
-path and `NSColor` to `MetalGridGlyphColor` conversion. `TimelineFeature` now imports the adapter and still
-injects `AppKitMetalGridGlyphRasterizer()` into `MetalGridTextureCache<PhotoUID>`.
+path and `NSColor` to `MetalGridGlyphColor` conversion. At this phase, `TimelineFeature` still imported the
+adapter and injected `AppKitMetalGridGlyphRasterizer()` into `MetalGridTextureCache<PhotoUID>` directly. Phase
+5.7 later moved that assembly into `AppKitMetalGridTextureCacheFactory`.
 
 This makes macOS and iOS/iPadOS symmetric at the texture-adapter boundary: platform glyph rasterizers live in
 platform texture adapter targets; `MetalGridTextureCore` owns only the shared cache and glyph request contract.
@@ -723,3 +724,17 @@ textures, `1.2` overscan) plus the current `320` pixel texture cap. The compatib
 This keeps the aggressive desktop policy at the macOS adapter edge while leaving `GridCore` with only the
 portable budget shape. iOS/iPadOS continue to use `UIKitMetalGridTexturePolicies` and must not inherit macOS
 cache/upload defaults.
+
+#### Phase 5.7 — AppKit texture cache factory wiring
+
+Small macOS construction-seam move with no intended cache, visual, or scroll behavior change.
+
+`MetalGridTextureAppKitAdapter` now provides `AppKitMetalGridTextureCacheFactory`, the macOS counterpart to the
+UIKit factory. It assembles `MetalGridTextureCache<ID>` from an `MTLDevice`, an `AppKitMetalGridTexturePolicy`,
+and an AppKit glyph rasterizer. The factory stays generic over item identity and does not reference `PhotoUID`,
+media feeds, or timeline host types.
+
+`MetalGridCoordinator` still binds the shared cache to `PhotoUID`, but it now wraps the injected
+`MetalGridBudget` in `AppKitMetalGridTexturePolicies.policy(budget:)` and asks the AppKit factory to construct
+the cache. This preserves the same macOS budget values and `320` max texture-pixel cap while keeping platform
+policy/rasterizer assembly out of the timeline host.
