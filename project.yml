@@ -131,6 +131,8 @@ targets:
       - package: ProtonPhotosKit
         product: PhotoViewerCore
       - package: ProtonPhotosKit
+        product: PhotoViewerUIKitAdapter
+      - package: ProtonPhotosKit
         product: MediaLocationCore
     settings:
       base:

@@ -159,6 +159,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         "MetalGridTextureUIKitAdapter",
         "PhotoViewerFeature",
         "PhotoViewerCore",
+        "PhotoViewerUIKitAdapter",
         "ProtonAuth",
         "TimelineFeature",
         "TimelineUIKitAdapter",
@@ -1454,6 +1455,107 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             iOS/iPadOS may adapt decoded Core `CGImage` thumbnails to `UIImage` and own conservative mobile
             RAM/concurrency policy, but feed/cache logic must remain in MediaFeedCore and MediaCacheCore.
+            """
+        )
+    }
+
+    func testPhotoViewerUIKitAdapterStaysPlatformOnlyAndCoreBacked() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let adapterRoot = sourcesRoot.appendingPathComponent("PhotoViewerUIKitAdapter")
+        let imageFile = adapterRoot.appendingPathComponent("UIKitViewerImageAdapter.swift")
+        let playerFile = adapterRoot.appendingPathComponent("UIKitPlayerLayerHostView.swift")
+        let transitionFile = adapterRoot.appendingPathComponent("UIKitViewerTransitionTiming.swift")
+        var violations: [String] = []
+
+        if !manifest.contains(".library(name: \"PhotoViewerUIKitAdapter\", targets: [\"PhotoViewerUIKitAdapter\"])") {
+            violations.append("PhotoViewerUIKitAdapter: missing matching library product")
+        }
+
+        if let targetLine = manifestLine(forTarget: "PhotoViewerUIKitAdapter", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            if dependencies != ["PhotoViewerCore"] {
+                violations.append("PhotoViewerUIKitAdapter: dependencies \(dependencies.sorted()) != [PhotoViewerCore]")
+            }
+        } else {
+            violations.append("PhotoViewerUIKitAdapter: missing Package.swift target declaration")
+        }
+
+        for file in [imageFile, playerFile, transitionFile] where !FileManager.default.fileExists(atPath: file.path) {
+            violations.append("PhotoViewerUIKitAdapter/\(file.lastPathComponent): missing UIKit viewer adapter file")
+        }
+
+        if FileManager.default.fileExists(atPath: imageFile.path) {
+            let imports = try importedModules(in: imageFile)
+            let expectedImports: Set<String> = ["CoreGraphics", "Foundation", "PhotoViewerCore", "UIKit"]
+            if imports != expectedImports {
+                violations.append("PhotoViewerUIKitAdapter/UIKitViewerImageAdapter.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+            }
+            let source = try String(contentsOf: imageFile, encoding: .utf8)
+            for symbol in [
+                "#if canImport(UIKit)",
+                "public enum UIKitViewerImageAdapter",
+                "UIImage(cgImage: cgImage",
+                "ViewerFullImageDecoder.decodeCGImage(data)"
+            ] where !source.contains(symbol) {
+                violations.append("PhotoViewerUIKitAdapter/UIKitViewerImageAdapter.swift: missing \(symbol)")
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: playerFile.path) {
+            let imports = try importedModules(in: playerFile)
+            let expectedImports: Set<String> = ["AVFoundation", "UIKit"]
+            if imports != expectedImports {
+                violations.append("PhotoViewerUIKitAdapter/UIKitPlayerLayerHostView.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+            }
+            let source = try String(contentsOf: playerFile, encoding: .utf8)
+            for symbol in [
+                "#if canImport(UIKit)",
+                "public final class UIKitPlayerLayerHostView: UIView",
+                "override class var layerClass: AnyClass { AVPlayerLayer.self }",
+                "public var player: AVPlayer?",
+                "configure(player: AVPlayer?, videoGravity: AVLayerVideoGravity = .resizeAspect)"
+            ] where !source.contains(symbol) {
+                violations.append("PhotoViewerUIKitAdapter/UIKitPlayerLayerHostView.swift: missing \(symbol)")
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: transitionFile.path) {
+            let imports = try importedModules(in: transitionFile)
+            let expectedImports: Set<String> = ["CoreGraphics", "PhotoViewerCore"]
+            if imports != expectedImports {
+                violations.append("PhotoViewerUIKitAdapter/UIKitViewerTransitionTiming.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+            }
+            let source = try String(contentsOf: transitionFile, encoding: .utf8)
+            for symbol in [
+                "#if canImport(UIKit)",
+                "UIKitViewerTransitionTiming",
+                "ViewerMediaTransitionStyle",
+                "liveMotionTransform"
+            ] where !source.contains(symbol) {
+                violations.append("PhotoViewerUIKitAdapter/UIKitViewerTransitionTiming.swift: missing \(symbol)")
+            }
+        }
+
+        for file in try swiftFiles(in: adapterRoot) {
+            let imports = try importedModules(in: file)
+            for forbidden in ["AppKit", "SwiftUI", "AVKit", "MediaCache", "PhotoViewerFeature", "TimelineFeature", "MapFeature", "ProtonDriveSDK"] where imports.contains(forbidden) {
+                violations.append("PhotoViewerUIKitAdapter/\(file.lastPathComponent): must not import \(forbidden)")
+            }
+            let source = try String(contentsOf: file, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: source)
+            for forbidden in ["NSImage", "NSView", "AVPlayerView", "NSViewRepresentable", "ThumbnailFeed", "PhotoViewerModel"] where contains(forbidden, in: code) {
+                violations.append("PhotoViewerUIKitAdapter/\(file.lastPathComponent): forbidden macOS/feature reference \(forbidden)")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            PhotoViewer UIKit adapter boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            iOS/iPadOS viewer adapters may translate PhotoViewerCore decoded images, transition timing, and
+            AVPlayer layers into UIKit types, but macOS viewer state/UI and MediaCache stay outside this target.
             """
         )
     }

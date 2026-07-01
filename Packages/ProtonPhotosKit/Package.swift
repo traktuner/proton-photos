@@ -47,6 +47,7 @@ let package = Package(
         .library(name: "TimelineUIKitAdapter", targets: ["TimelineUIKitAdapter"]),
         .library(name: "TimelineFeature", targets: ["TimelineFeature"]),
         .library(name: "PhotoViewerCore", targets: ["PhotoViewerCore"]),
+        .library(name: "PhotoViewerUIKitAdapter", targets: ["PhotoViewerUIKitAdapter"]),
         .library(name: "PhotoViewerFeature", targets: ["PhotoViewerFeature"]),
         // Modular feature foundation: album management + the upload queue/state-machine. Both are
         // pure (no SDK/HTTP) and drive injected backend protocols the app implements.
@@ -94,6 +95,7 @@ let package = Package(
             swiftSettings: disableDynamicActorIsolation
         ),
         .target(name: "PhotoViewerCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "PhotoViewerUIKitAdapter", dependencies: ["PhotoViewerCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "PhotoViewerFeature",
             dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "PhotoViewerCore"],
