@@ -207,11 +207,16 @@ struct AppInfrastructureTests {
         var db: OpaquePointer?
         #expect(sqlite3_open(":memory:", &db) == SQLITE_OK)
         defer { sqlite3_close(db) }
-        exec(db, "CREATE TABLE photos(node TEXT PRIMARY KEY, vol TEXT, t REAL, mime TEXT, live INTEGER, relvid TEXT);")
+        exec(db, """
+        CREATE TABLE photos(
+          node TEXT PRIMARY KEY, vol TEXT, t REAL, mime TEXT, live INTEGER, relvid TEXT,
+          tags TEXT DEFAULT '', burst TEXT DEFAULT ''
+        );
+        """)
         exec(db, "CREATE INDEX idx_photos_t ON photos(t ASC);")
         exec(db, "CREATE INDEX idx_photos_vol_node ON photos(vol, node);")
 
-        let orderPlan = queryPlan(db, "SELECT node, vol, t, mime, live, relvid FROM photos ORDER BY t ASC;")
+        let orderPlan = queryPlan(db, "SELECT node, vol, t, mime, live, relvid, tags, burst FROM photos ORDER BY t ASC;")
         #expect(orderPlan.contains("idx_photos_t"))
         #expect(!orderPlan.uppercased().contains("TEMP B-TREE"))   // index satisfies the ORDER BY
 
