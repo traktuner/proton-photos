@@ -351,4 +351,128 @@ final class TimelineMetadataStoreTests: XCTestCase {
             .compactMap { ($0 as? URL)?.lastPathComponent } ?? []
         XCTAssertFalse(baseLeftovers.contains { $0.contains(uid) }, "account-tied files under base: \(baseLeftovers)")
     }
+
+    func testOrphanedLegacyTimelineSweepIgnoresOtherStores() throws {
+        let dir = try makeTempDir()
+        // Legacy formats from THREE different accounts — the wild state observed after the v1
+        // reset shipped: the uid-scoped sign-in cleanup missed accounts that never sign in again.
+        let legacy = [
+            "timeline-v3-\(uid).sqlite", "timeline-v3-\(uid).sqlite-wal",
+            "timeline-v3-OTHER.sqlite", "timeline-v3-OTHER.sqlite-shm",
+            "timeline-v2-ANCIENT.json",
+        ]
+        let bystanders = ["entities.sqlite", "entities.sqlite-wal", "account-users-\(uid).enc"]
+        for name in legacy + bystanders { try Data("x".utf8).write(to: dir.appendingPathComponent(name)) }
+
+        let removed = SDKMetadataStore.purgeOrphanedLegacyTimelineStores(in: dir)
+
+        XCTAssertEqual(removed, legacy.count, "every superseded timeline file goes, any account")
+        for name in legacy {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path))
+        }
+        for name in bystanders {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path), "\(name) must survive")
+        }
+    }
+
+    // MARK: - 9. Dimensions (photos.w/h)
+
+    private func dims(_ w: Int, _ h: Int) throws -> PhotoPixelDimensions {
+        try XCTUnwrap(PhotoPixelDimensions(width: w, height: h))
+    }
+
+    func testDimensionsRoundTripAndSurviveReopen() throws {
+        let dir = try makeTempDir()
+        let (store, url) = try makeStore(in: dir)
+        let a = makeItem(node: "a", t: 100)
+        let b = makeItem(node: "b", t: 200)
+        store.save([a, b])
+
+        let size = try dims(320, 240)
+        let result = store.updateDimensions([a.uid: size])
+        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(result.updatedRows, 1)
+
+        // On disk as real columns; undimensioned rows stay NULL (absent from the bulk load).
+        XCTAssertEqual(rawRows(url, "SELECT w, h FROM photos WHERE node='a';"), [["320", "240"]])
+        XCTAssertEqual(rawRows(url, "SELECT w, h FROM photos WHERE node='b';"), [["NULL", "NULL"]])
+        XCTAssertEqual(store.loadDimensions(), [a.uid: size])
+
+        store.close()
+        let reopened = try XCTUnwrap(TimelineMetadataStore(url: url))
+        XCTAssertEqual(reopened.loadDimensions(), [a.uid: size], "dimensions must survive reopen")
+        reopened.close()
+    }
+
+    func testTimelineRefreshDoesNotClobberLearnedDimensions() throws {
+        let dir = try makeTempDir()
+        let (store, _) = try makeStore(in: dir)
+        let a = makeItem(node: "a", t: 100)
+        let b = makeItem(node: "b", t: 200)
+        store.save([a, b])
+        store.updateDimensions([a.uid: try dims(320, 240)])
+
+        // A CHANGED refresh upserts every row (gen bump) — w/h must survive because the timeline
+        // upsert deliberately omits them.
+        let changed = store.save([a, b, makeItem(node: "c", t: 300)])
+        XCTAssertFalse(changed.skippedUnchanged)
+        XCTAssertEqual(store.loadDimensions(), [a.uid: try dims(320, 240)])
+
+        // An UNCHANGED refresh short-circuits — dimensions are not part of the timeline digest,
+        // so recording them must not break the no-op skip.
+        store.updateDimensions([b.uid: try dims(100, 100)])
+        let skipped = store.save([a, b, makeItem(node: "c", t: 300)])
+        XCTAssertTrue(skipped.skippedUnchanged, "dimension updates must not invalidate the save digest")
+        XCTAssertEqual(store.loadDimensions().count, 2)
+        store.close()
+    }
+
+    func testDimensionUpdateIsNoOpWhenUnchangedOrAlreadyLearned() throws {
+        let dir = try makeTempDir()
+        let (store, url) = try makeStore(in: dir)
+        let a = makeItem(node: "a", t: 100)
+        store.save([a])
+
+        XCTAssertEqual(store.updateDimensions([a.uid: try dims(320, 240)]).updatedRows, 1)
+        // Same values again → zero writes.
+        XCTAssertEqual(store.updateDimensions([a.uid: try dims(320, 240)]).updatedRows, 0)
+        // DIFFERENT values in default fill mode → still zero writes (first-seen-wins, so a late
+        // thumbnail decode can never clobber previously learned dimensions).
+        XCTAssertEqual(store.updateDimensions([a.uid: try dims(999, 111)]).updatedRows, 0)
+        XCTAssertEqual(rawRows(url, "SELECT w, h FROM photos WHERE node='a';"), [["320", "240"]])
+        store.close()
+    }
+
+    func testOverwriteModeReplacesOnlyChangedValues() throws {
+        let dir = try makeTempDir()
+        let (store, _) = try makeStore(in: dir)
+        let a = makeItem(node: "a", t: 100)
+        let b = makeItem(node: "b", t: 200)
+        store.save([a, b])
+        store.updateDimensions([a.uid: try dims(320, 240), b.uid: try dims(100, 100)])
+
+        // Future true-dimension writer: upgrades a (differs), skips b (identical values).
+        let result = store.updateDimensions(
+            [a.uid: try dims(4032, 3024), b.uid: try dims(100, 100)],
+            overwrite: true
+        )
+        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(result.updatedRows, 1)
+        XCTAssertEqual(store.loadDimensions(), [a.uid: try dims(4032, 3024), b.uid: try dims(100, 100)])
+        store.close()
+    }
+
+    func testDimensionUpdateIgnoresUnknownRows() throws {
+        let dir = try makeTempDir()
+        let (store, _) = try makeStore(in: dir)
+        store.save([makeItem(node: "a", t: 100)])
+
+        let unknown = PhotoUID(volumeID: "vol1", nodeID: "never-enumerated")
+        let result = store.updateDimensions([unknown: try dims(320, 240)])
+        XCTAssertTrue(result.succeeded)
+        XCTAssertEqual(result.updatedRows, 0, "dimension updates must never invent photo rows")
+        XCTAssertEqual(store.count(), 1)
+        XCTAssertTrue(store.loadDimensions().isEmpty)
+        store.close()
+    }
 }

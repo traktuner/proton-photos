@@ -176,9 +176,8 @@ struct AppInfrastructureTests {
     @Test func prefetchPauseReasons() async {
         let namespace = "tests-pause-\(UUID().uuidString)"
         let root = timelineFeatureTestCacheRoot("pause")
-        let aspects = await MainActor.run { AspectRegistry(namespace: namespace, rootDirectory: root) }
         let feed = ThumbnailFeed(cache: ThumbnailCache(namespace: namespace, rootDirectory: root),
-                                 loader: StubThumbnailLoader(), aspects: aspects,
+                                 loader: StubThumbnailLoader(),
                                  concurrency: 1, batch: 1)
         await feed.startPrefetch([PhotoUID(volumeID: "v", nodeID: "a")])
 
@@ -206,29 +205,10 @@ struct AppInfrastructureTests {
     // EXPLAIN QUERY PLAN against the REAL store's schema + load statement, so the schema mirror
     // that used to live here (and could drift from production) is gone for good.
 
-    @Test func aspectRegistryUsesInjectedRootAndPersistsThere() async throws {
-        let namespace = "tests-aspects-\(UUID().uuidString)"
-        let root = timelineFeatureTestCacheRoot("aspects")
-        let uid = PhotoUID(volumeID: "vol", nodeID: "aspect")
-        let productionURL = AspectRegistry.storageURL(namespace: namespace)
-        try? FileManager.default.removeItem(at: productionURL)
-
-        let registry = await MainActor.run { AspectRegistry(namespace: namespace, rootDirectory: root) }
-        registry.record(uid, aspect: 1.5)
-        try await Task.sleep(for: .milliseconds(180))
-
-        let reloaded = await MainActor.run { AspectRegistry(namespace: namespace, rootDirectory: root) }
-        let aspect = await MainActor.run { reloaded.aspect(for: uid) }
-        #expect(abs(aspect - 1.5) < 0.0001)
-        #expect(FileManager.default.fileExists(atPath: AspectRegistry.storageURL(namespace: namespace, rootDirectory: root).path))
-        #expect(!FileManager.default.fileExists(atPath: productionURL.path))
-    }
-
-    @Test func aspectRegistryDefaultPathContractStaysInProtonPhotosCaches() {
-        let namespace = "tests-default-path-\(UUID().uuidString)"
-        let expected = AspectRegistry.defaultRootDirectory().appendingPathComponent("\(namespace).json")
-        #expect(AspectRegistry.storageURL(namespace: namespace) == expected)
-    }
+    // AspectRegistry (and its plaintext aspects.json) is gone: learned dimensions persist into
+    // library-v1.sqlite (photos.w/h) via PhotoDimensionCoalescer → PhotoDimensionRecording. The
+    // pipeline's guards live in PhotosCoreTests (PhotoDimensionCoalescerTests +
+    // TimelineMetadataStoreTests dimension section).
 
     @Test func metalGridStatsFrameSurfacesRenderAndUploadCounters() {
         let stats = MetalGridStats.frame(

@@ -87,8 +87,7 @@ final class UploadRefreshAndInteractionTests: XCTestCase {
 @MainActor private func makeFeed() -> ThumbnailFeed {
     let namespace = "tests-refresh-\(UUID().uuidString)"
     let root = timelineFeatureTestCacheRoot("upload-refresh")
-    let aspects = AspectRegistry(namespace: namespace, rootDirectory: root)
-    return ThumbnailFeed(cache: ThumbnailCache(namespace: namespace, rootDirectory: root), loader: EmptyThumbnailLoader(), aspects: aspects)
+    return ThumbnailFeed(cache: ThumbnailCache(namespace: namespace, rootDirectory: root), loader: EmptyThumbnailLoader())
 }
 
 private func photo(_ id: String, seconds: TimeInterval) -> PhotoItem {

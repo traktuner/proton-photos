@@ -41,6 +41,28 @@ public enum SDKMetadataStore {
         return removed
     }
 
+    /// Filename prefixes of ALL superseded timeline cache formats, any account: `timeline-v2-*`
+    /// (JSON) and `timeline-v3-*` (SQLite + WAL sidecars). No supported build reads either format
+    /// anymore, so they are safe to sweep wholesale.
+    public static let legacyTimelinePrefixes = ["timeline-v2-", "timeline-v3-"]
+
+    /// Best-effort sweep of every superseded timeline cache file under `directory`, REGARDLESS of
+    /// account. The per-uid cleanup above runs at sign-in for the current account, but stores left
+    /// by accounts that signed in on older builds (and will never sign in again) would otherwise
+    /// linger as orphans — observed in the wild as `timeline-v3-<other-uid>.sqlite` plus a
+    /// `timeline-v2-*.json`. Leaves everything else (entities.sqlite, account caches) untouched.
+    /// Returns the number of files removed.
+    @discardableResult
+    public static func purgeOrphanedLegacyTimelineStores(in directory: URL) -> Int {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: directory.path) else { return 0 }
+        var removed = 0
+        for name in names where legacyTimelinePrefixes.contains(where: name.hasPrefix) {
+            if (try? fm.removeItem(at: directory.appendingPathComponent(name))) != nil { removed += 1 }
+        }
+        return removed
+    }
+
     /// Best-effort delete of every metadata file for `uid` under `directory`. Returns the number of
     /// files actually removed (i.e. that existed), so a caller or test can confirm the purge ran.
     /// Files belonging to other accounts, the encrypted caches, and the account-data cache that live

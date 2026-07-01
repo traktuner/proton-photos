@@ -70,8 +70,7 @@ final class BurstFilmstripArchitectureTests: XCTestCase {
             index: 1,
             feed: ThumbnailFeed(
                 cache: ThumbnailCache(namespace: "burst-filmstrip-\(UUID().uuidString)", rootDirectory: root),
-                loader: EmptyThumbnailLoader(),
-                aspects: AspectRegistry(rootDirectory: root)
+                loader: EmptyThumbnailLoader()
             ),
             media: FailingMediaProvider(),
             burstProvider: EmptyBurstProvider()
@@ -106,8 +105,7 @@ final class BurstFilmstripArchitectureTests: XCTestCase {
             index: 0,
             feed: ThumbnailFeed(
                 cache: ThumbnailCache(namespace: "burst-navigation-\(UUID().uuidString)", rootDirectory: root),
-                loader: EmptyThumbnailLoader(),
-                aspects: AspectRegistry(rootDirectory: root)
+                loader: EmptyThumbnailLoader()
             ),
             media: FailingMediaProvider(),
             burstProvider: StaticBurstProvider(items: burst)

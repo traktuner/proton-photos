@@ -150,9 +150,8 @@ struct ThumbnailCrawlYieldTests {
         batch: Int = 1
     ) async -> ThumbnailFeed {
         let root = timelineFeatureTestCacheRoot("yield")
-        let aspects = await MainActor.run { AspectRegistry(namespace: "yield-\(UUID())", rootDirectory: root) }
         let cache = cache ?? ThumbnailCache(namespace: "yield-\(UUID())", keyStore: MemoryCacheKeyStore(), rootDirectory: root)
-        return ThumbnailFeed(cache: cache, loader: loader, aspects: aspects, concurrency: concurrency, batch: batch, clock: clock.now)
+        return ThumbnailFeed(cache: cache, loader: loader, concurrency: concurrency, batch: batch, clock: clock.now)
     }
 
     /// Polls a condition up to ~3 s so the async crawl has time to run without a brittle fixed sleep.

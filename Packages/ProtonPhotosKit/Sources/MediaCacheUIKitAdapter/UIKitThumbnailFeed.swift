@@ -20,7 +20,7 @@ public actor UIKitThumbnailFeed {
     public init(
         cache: ThumbnailCache,
         loader: ThumbnailBatchLoader,
-        aspects: AspectRegistry,
+        dimensions: PhotoDimensionCoalescer? = nil,
         targetPixels: CGFloat = 320,
         concurrency: Int = UIKitMediaCachePolicy.downloadConcurrencyLimit(),
         batch: Int = 6,
@@ -46,7 +46,8 @@ public actor UIKitThumbnailFeed {
             configuration: configuration,
             clock: clock,
             onDecoded: { uid, decoded in
-                aspects.record(uid, aspect: decoded.aspectRatio)
+                // Same DB-backed dimension pipeline as the macOS feed — batched, off this path.
+                dimensions?.record(uid, width: decoded.pixelWidth, height: decoded.pixelHeight)
             }
         )
         imageWrappers.countLimit = 256

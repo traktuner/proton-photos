@@ -57,10 +57,12 @@ public actor PhotoDimensionCoalescer {
     /// returns; invalid sizes are dropped.
     public nonisolated func record(_ uid: PhotoUID, width: Int, height: Int) {
         guard let dimensions = PhotoPixelDimensions(width: width, height: height) else { return }
-        Task { await self.ingest(uid, dimensions) }
+        Task { await self.enqueue(uid, dimensions) }
     }
 
-    private func ingest(_ uid: PhotoUID, _ dimensions: PhotoPixelDimensions) {
+    /// Awaitable enqueue (the fire-and-forget `record` hops here) — first sighting of a UID wins
+    /// for the session, matching the store's fill-if-NULL semantics.
+    public func enqueue(_ uid: PhotoUID, _ dimensions: PhotoPixelDimensions) {
         guard !recorded.contains(uid), pending[uid] == nil else { return }
         pending[uid] = dimensions
         guard flushTask == nil else { return }

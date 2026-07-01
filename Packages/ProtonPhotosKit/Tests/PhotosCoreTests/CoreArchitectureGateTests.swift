@@ -64,7 +64,9 @@ final class CoreArchitectureGateTests: XCTestCase {
         ),
         CoreTargetRule(
             name: "MediaCacheCore",
-            allowedImports: ["Foundation", "Observation", "PhotosCore"],
+            // Observation dropped 2026-07-01: its only user was AspectRegistry, deleted when
+            // learned dimensions moved into the library metadata DB (photos.w/h).
+            allowedImports: ["Foundation", "PhotosCore"],
             expectedDependencies: ["PhotosCore"],
             extraForbiddenTokens: []
         ),

@@ -139,6 +139,13 @@ final class OfflineLibraryManager {
     /// already-unlocked session secret, so startup needs only the session Keychain item rather than a second
     /// Keychain prompt for a separate cache key item.
     func configure(session: ProtonSession) {
+        // One-shot cleanup of the legacy plaintext aspects.json (write-only, cross-account, never
+        // purged on sign-out). Learned dimensions now live in the per-account library metadata DB
+        // (photos.w/h), so the file must not linger; AspectRegistry itself is gone.
+        try? FileManager.default.removeItem(
+            at: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("ProtonPhotos/aspects.json")
+        )
         let key = Self.cacheKey(for: session)
         cache.configure(accountUID: session.uid, key: key)
         previewCache.configure(accountUID: session.uid, key: key)

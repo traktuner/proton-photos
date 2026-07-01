@@ -172,8 +172,7 @@ struct ThumbnailHealthTests {
         concurrency: Int = 2,
         batch: Int = 2
     ) async -> ThumbnailFeed {
-        let aspects = await MainActor.run { AspectRegistry(namespace: Self.uniqueNamespace("aspects"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health-aspects")) }
-        return ThumbnailFeed(cache: cache, loader: loader, aspects: aspects, concurrency: concurrency, batch: batch)
+        ThumbnailFeed(cache: cache, loader: loader, concurrency: concurrency, batch: batch)
     }
 
     private static func uniqueNamespace(_ prefix: String) -> String {

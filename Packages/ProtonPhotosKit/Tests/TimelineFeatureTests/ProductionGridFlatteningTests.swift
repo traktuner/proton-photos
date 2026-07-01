@@ -17,8 +17,7 @@ import GridCore
     private func feed() -> ThumbnailFeed {
         let root = timelineFeatureTestCacheRoot("flattening")
         return ThumbnailFeed(cache: ThumbnailCache(namespace: "test-\(UUID().uuidString)", rootDirectory: root),
-                             loader: NoopThumbnailLoader(),
-                             aspects: AspectRegistry(namespace: "test-\(UUID().uuidString)", rootDirectory: root))
+                             loader: NoopThumbnailLoader())
     }
 
     private func day(_ year: Int, _ month: Int, _ d: Int) -> Date {

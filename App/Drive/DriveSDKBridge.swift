@@ -91,7 +91,9 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             url: libraryDirectory.appendingPathComponent(LibraryDatabaseLocation.databaseFileName),
             policy: Self.libraryDatabasePolicy
         )
-        SDKMetadataStore.purgeLegacyTimelineStore(in: caches, uid: session.uid)
+        // Sweep ALL superseded timeline formats (any account): the uid-scoped delete alone leaves
+        // orphans behind for accounts that last signed in on older builds.
+        SDKMetadataStore.purgeOrphanedLegacyTimelineStores(in: caches)
 
         // SECURITY: the SDK secret cache holds DECRYPTED Proton key material (share/node/content keys). The
         // SDK writes it UNENCRYPTED unless a `secretCacheEncryptionKey` is supplied — and the ProtonPhotos
@@ -521,6 +523,16 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                 )
             }
         return BurstGroupResolver.memberLookup(candidates: candidates)
+    }
+}
+
+// MARK: - PhotoDimensionRecording (learned w/h into the library metadata DB)
+
+extension DriveSDKBridge: PhotoDimensionRecording {
+    /// Batched by `PhotoDimensionCoalescer`; the store fills only rows without dimensions
+    /// (first-seen-wins), so repeated decodes and future true-dimension writers can coexist.
+    func recordDimensions(_ batch: [PhotoUID: PhotoPixelDimensions]) async {
+        timelineStore?.updateDimensions(batch)
     }
 }
 

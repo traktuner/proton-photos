@@ -20,7 +20,7 @@ public actor ThumbnailFeed {
     public init(
         cache: ThumbnailCache,
         loader: ThumbnailBatchLoader,
-        aspects: AspectRegistry,
+        dimensions: PhotoDimensionCoalescer? = nil,
         targetPixels: CGFloat = 320,
         concurrency: Int = 10,
         batch: Int = 8,
@@ -46,7 +46,9 @@ public actor ThumbnailFeed {
             configuration: configuration,
             clock: clock,
             onDecoded: { uid, decoded in
-                aspects.record(uid, aspect: decoded.aspectRatio)
+                // Learned dimensions flow into the library metadata DB (batched, off this path);
+                // thumbnail-scale values fill only rows that have none yet.
+                dimensions?.record(uid, width: decoded.pixelWidth, height: decoded.pixelHeight)
             }
         )
         imageWrappers.countLimit = 512

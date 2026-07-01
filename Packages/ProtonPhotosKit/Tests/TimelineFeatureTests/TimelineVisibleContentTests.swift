@@ -147,8 +147,7 @@ import MediaCache
 @MainActor private func makeVisibleContentFeed() -> ThumbnailFeed {
     let namespace = "tests-visible-content-\(UUID().uuidString)"
     let root = timelineFeatureTestCacheRoot("visible")
-    let aspects = AspectRegistry(namespace: namespace, rootDirectory: root)
-    return ThumbnailFeed(cache: ThumbnailCache(namespace: namespace, rootDirectory: root), loader: VisibleContentThumbnailLoader(), aspects: aspects)
+    return ThumbnailFeed(cache: ThumbnailCache(namespace: namespace, rootDirectory: root), loader: VisibleContentThumbnailLoader())
 }
 
 private final class VisibleContentRepository: PhotosRepository, @unchecked Sendable {
