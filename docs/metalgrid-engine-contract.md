@@ -34,6 +34,7 @@ overlaid transparent `NSScrollView` document spacer provides physics + pointer e
 | `TileContentFitter` | `TileContentFitter.swift` | How media fits **inside** a square slot (content only). |
 | `GridTextureBudget` | `GridCore/GridTextureBudget.swift` | Portable texture budget shape; platform adapters inject concrete values. |
 | `MetalGridCoordinator` | `MetalGridCoordinator.swift` | Composes engine geometry + textures + fitting; owns camera state (level, committed phase) **and the live resize/sidebar presentation layer** (snapshot-scale). |
+| `AppKitMetalGridGlyphRasterizer` | `AppKitMetalGridGlyphRasterizer.swift` | macOS SF Symbol → `CGImage` badge rasterization injected into the texture cache. |
 | `MetalGridRenderer` | `MetalRenderingCore/MetalGridRenderer.swift` | Draws the quads it is handed. No layout math; `TimelineFeature` owns only the `MTKView` adapter extension. |
 | `MetalGridScrollHost` | `MetalGridScrollHost.swift` | AppKit host: scroll physics, gesture intake, resize entry, calls the engine helpers. |
 | `MetalGridPalette` | `MetalGridPalette.swift` | The single uniform grid surface colour. |
@@ -59,6 +60,10 @@ viewport-anchor (`anchorFractionY`, 0.5) rebase · bottom-pinned preservation ·
 
 **`GridTextureBudget` owns:** the portable shape of texture streaming policy: upload burst, resident texture
 capacity, and overscan fraction. Concrete defaults are platform-adapter policy, not Core behavior.
+
+**`MetalGridGlyphRasterizing` owns:** the platform-specific conversion from a glyph request to a `CGImage`.
+macOS uses `AppKitMetalGridGlyphRasterizer`; future iOS/iPadOS adapters must provide a UIKit equivalent rather
+than placing `NSImage`/`UIImage` logic in the texture cache or renderer.
 
 **`MetalGridRenderer` owns:** drawing supplied quads · the clear/background colour · placeholders · overlays.
 It performs **no** layout math and never sees media aspect ratio.

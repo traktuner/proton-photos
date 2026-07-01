@@ -118,6 +118,20 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
     }
 }
 
+@Suite struct MetalGridGlyphRasterizerTests {
+    @Test func glyphRequestCacheKeyIncludesSymbolWeightSizeAndColor() {
+        let white = MetalGridGlyphColor.white
+        let accent = MetalGridGlyphColor(red: 0.1, green: 0.2, blue: 0.9, alpha: 1)
+        let base = MetalGridGlyphRequest(symbol: "heart.fill", pixelSize: 44, weight: .bold, color: white)
+
+        #expect(base == MetalGridGlyphRequest(symbol: "heart.fill", pixelSize: 44, weight: .bold, color: white))
+        #expect(base != MetalGridGlyphRequest(symbol: "video.fill", pixelSize: 44, weight: .bold, color: white))
+        #expect(base != MetalGridGlyphRequest(symbol: "heart.fill", pixelSize: 30, weight: .bold, color: white))
+        #expect(base != MetalGridGlyphRequest(symbol: "heart.fill", pixelSize: 44, weight: .regular, color: white))
+        #expect(base != MetalGridGlyphRequest(symbol: "heart.fill", pixelSize: 44, weight: .bold, color: accent))
+    }
+}
+
 // MARK: Metal smoke — the renderer's runtime shader actually compiles
 
 @Suite struct MetalGridRendererSmokeTests {

@@ -553,3 +553,17 @@ platform UI, media feed, hardware query, default value, or photo-domain identity
 `GridTextureBudget`. This preserves current macOS behavior while preventing aggressive desktop RAM/GPU
 assumptions from becoming Universal Core policy. Future iOS/iPadOS adapters must construct their own measured
 `GridTextureBudget` values and inject them into the same coordinator/cache seam.
+
+#### Phase 4.7 — Metal grid glyph rasterizer seam
+
+Small adapter-boundary split with no intended behavior change.
+
+`MetalGridTextureCache` still belongs to the macOS `TimelineFeature` adapter because it owns real `MTLTexture`
+objects and `PhotoUID` residency. It no longer owns native SF Symbol rasterization. Instead it takes a
+`MetalGridGlyphRasterizing` dependency, asks it for a `CGImage`, then uploads that image through the same texture
+path used before.
+
+`AppKitMetalGridGlyphRasterizer` is the current macOS implementation. It is the only Metal-grid glyph file that
+may use `NSImage`, `NSColor`, and `NSFont`. Future iOS/iPadOS adapters should add a UIKit implementation that
+conforms to the same protocol and inject it at their platform edge, without forking the texture-cache upload or
+residency policy.

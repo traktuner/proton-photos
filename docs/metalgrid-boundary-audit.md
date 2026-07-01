@@ -117,8 +117,9 @@ These files are macOS-specific today:
 - `GridHeaderViews.swift`: AppKit headers.
 - `AspectSquareToggleModel.swift`: AppKit state/input layer.
 - `MetalGridDataSource.swift`: `MediaCache.ThumbnailFeed` adapter and main-actor macOS production feed bridge.
-- `MetalGridTextureCache.swift`: real `MTLTexture` cache plus AppKit-only SF Symbol rasterization through
-  `NSImage`, `NSColor`, and `NSFont`.
+- `MetalGridTextureCache.swift`: real `MTLTexture` cache, thumbnail upload, and resident glyph texture cache.
+- `AppKitMetalGridGlyphRasterizer.swift`: AppKit-only SF Symbol rasterization through `NSImage`, `NSColor`,
+  and `NSFont`, injected into the texture cache by the macOS coordinator.
 - `MetalGridPalette.swift`: shared RGBA values are portable, but the current file exposes `NSColor`.
 
 ## Performance findings
@@ -166,15 +167,17 @@ Solutions:
    measured visible-cell count. This keeps risky Metal changes out of pure geometry Core and allows staged A/B
    profiling.
 
-### iOS/iPadOS risk 3: AppKit glyph rasterization in the texture cache
+### iOS/iPadOS risk 3: AppKit glyph rasterization
 
-`MetalGridTextureCache` renders SF Symbol badges through `NSImage`, `NSColor`, and `NSFont`. This cannot be
-shared with iOS/iPadOS unchanged.
+Phase 4.7 removed direct AppKit rasterization from `MetalGridTextureCache`. The cache now takes a
+`MetalGridGlyphRasterizing` adapter and uploads the returned `CGImage` as before. macOS injects
+`AppKitMetalGridGlyphRasterizer`, which still renders SF Symbol badges through `NSImage`, `NSColor`, and
+`NSFont`. iOS/iPadOS still need their own UIKit implementation before sharing this adapter path.
 
 Solutions:
 
-1. Inject a `GridGlyphRasterizer` from the platform adapter: AppKit implementation on macOS, UIKit implementation
-   on iOS/iPadOS, shared texture upload after rasterization.
+1. Add a UIKit `MetalGridGlyphRasterizing` implementation for iOS/iPadOS, keeping shared texture upload after
+   rasterization.
 2. Replace rasterized SF Symbol badge textures with renderer-native vector/SDF badge primitives for heart, video,
    empty check, and filled check. This removes platform image APIs from the shared renderer path.
 
@@ -411,3 +414,18 @@ Texture budget policy split. No production behavior changed.
 - `MetalGridTypes.swift` no longer imports `PhotosCore`; its diagnostics count helper is generic over item ID.
 - `CoreArchitectureGateTests` now guards that the budget shape stays universal while concrete default values
   remain adapter-owned.
+
+## Phase 4.7 result
+
+Glyph rasterizer boundary split. No production behavior changed.
+
+- `MetalGridGlyphRasterizer.swift` defines the platform-neutral glyph request, color/weight values, and
+  `MetalGridGlyphRasterizing` protocol.
+- `AppKitMetalGridGlyphRasterizer.swift` owns the macOS SF Symbol rendering path using AppKit.
+- `MetalGridTextureCache.swift` no longer imports AppKit and no longer references `NSImage`, `NSColor`, or
+  `NSFont`; it caches resident glyph textures from an injected rasterizer and uses the same `CGImage` to
+  `MTLTexture` upload path as before.
+- `MetalGridCoordinator` explicitly injects `AppKitMetalGridGlyphRasterizer` and converts AppKit colors at the
+  macOS adapter edge.
+- `CoreArchitectureGateTests` now guards the glyph boundary so iOS/iPadOS can add a UIKit rasterizer without
+  forking texture-cache logic.

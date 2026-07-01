@@ -1,6 +1,5 @@
 import Metal
 import CoreGraphics
-import AppKit
 import PhotosCore
 import GridCore
 
@@ -14,6 +13,7 @@ import GridCore
 @MainActor
 final class MetalGridTextureCache {
     private let device: MTLDevice
+    private let glyphRasterizer: any MetalGridGlyphRasterizing
     private var lru: GridTextureResidencyPolicy<PhotoUID>
     private var textures: [PhotoUID: MTLTexture] = [:]
     private(set) var placeholderTexture: MTLTexture
@@ -28,8 +28,14 @@ final class MetalGridTextureCache {
     /// Max pixel side a thumbnail is uploaded at (Retina-aware crispness without wasting VRAM).
     let maxTexturePixels: Int
 
-    init?(device: MTLDevice, budget: MetalGridBudget, maxTexturePixels: Int = 320) {
+    init?(
+        device: MTLDevice,
+        budget: MetalGridBudget,
+        maxTexturePixels: Int = 320,
+        glyphRasterizer: any MetalGridGlyphRasterizing
+    ) {
         self.device = device
+        self.glyphRasterizer = glyphRasterizer
         self.maxTexturePixels = maxTexturePixels
         self.lru = GridTextureResidencyPolicy(
             capacity: budget.maxCachedTextures,
@@ -133,34 +139,22 @@ final class MetalGridTextureCache {
 
     // MARK: - Glyph textures (badges) — resident, not LRU-managed
 
-    private var glyphs: [String: MTLTexture] = [:]
+    private var glyphs: [MetalGridGlyphRequest: MTLTexture] = [:]
 
     /// A cached, tinted SF-Symbol texture for a badge glyph (favorite/checked/video). Resident for the
     /// session (a handful of small textures), so badge rendering is a cheap textured quad.
-    func glyphTexture(symbol: String, pixelSize: Int = 44, weight: NSFont.Weight = .bold, color: NSColor) -> MTLTexture? {
-        let rgba = color.usingColorSpace(.sRGB) ?? color
-        let key = "\(symbol)|\(pixelSize)|\(weight.rawValue)|\(rgba.redComponent),\(rgba.greenComponent),\(rgba.blueComponent),\(rgba.alphaComponent)"
-        if let cached = glyphs[key] { return cached }
-        guard let cg = Self.renderGlyph(symbol: symbol, pixelSize: pixelSize, weight: weight, color: color),
+    func glyphTexture(
+        symbol: String,
+        pixelSize: Int = 44,
+        weight: MetalGridGlyphWeight = .bold,
+        color: MetalGridGlyphColor
+    ) -> MTLTexture? {
+        let request = MetalGridGlyphRequest(symbol: symbol, pixelSize: pixelSize, weight: weight, color: color)
+        if let cached = glyphs[request] { return cached }
+        guard let cg = glyphRasterizer.image(for: request),
               let texture = makeTexture(from: cg) else { return nil }
-        glyphs[key] = texture
+        glyphs[request] = texture
         return texture
-    }
-
-    /// Renders a tinted SF Symbol centered into a transparent `pixelSize`² bitmap (template + sourceAtop
-    /// tint), returned via `nsImage.cgImage(...)` so it matches the orientation convention of thumbnails.
-    private static func renderGlyph(symbol: String, pixelSize: Int, weight: NSFont.Weight, color: NSColor) -> CGImage? {
-        let cfg = NSImage.SymbolConfiguration(pointSize: CGFloat(pixelSize) * 0.72, weight: weight)
-        guard let base = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?.withSymbolConfiguration(cfg) else { return nil }
-        let canvas = NSImage(size: NSSize(width: pixelSize, height: pixelSize))
-        canvas.lockFocus()
-        let s = base.size
-        let rect = NSRect(x: (CGFloat(pixelSize) - s.width) / 2, y: (CGFloat(pixelSize) - s.height) / 2, width: s.width, height: s.height)
-        base.draw(in: rect)
-        color.set()
-        NSRect(x: 0, y: 0, width: pixelSize, height: pixelSize).fill(using: .sourceAtop)
-        canvas.unlockFocus()
-        return canvas.cgImage(forProposedRect: nil, context: nil, hints: nil)
     }
 
     /// A small neutral warm-gray texture used as the resting placeholder + letterbox background.

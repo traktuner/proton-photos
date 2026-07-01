@@ -208,7 +208,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
           gridProfile: GridLevelProfile) {
         guard let renderer = MetalGridRenderer(device: device, clearColor: MetalGridPalette.clearColor),
-              let cache = MetalGridTextureCache(device: device, budget: budget) else { return nil }
+              let cache = MetalGridTextureCache(
+                  device: device,
+                  budget: budget,
+                  glyphRasterizer: AppKitMetalGridGlyphRasterizer()
+              ) else { return nil }
         self.renderer = renderer
         self.cache = cache
         self.dataSource = dataSource
@@ -1696,11 +1700,25 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         var groups: [MetalGridRenderGroup] = [
             MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
         ]
-        if !outlineQuads.isEmpty { groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: outlineQuads)) }
-        if !videoQuads.isEmpty, let t = cache.glyphTexture(symbol: "video.fill", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: videoQuads)) }
-        if !favoriteQuads.isEmpty, let t = cache.glyphTexture(symbol: "heart.fill", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: favoriteQuads)) }
-        if !checkEmptyQuads.isEmpty, let t = cache.glyphTexture(symbol: "circle", color: .white) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkEmptyQuads)) }
-        if !checkFilledQuads.isEmpty, let t = cache.glyphTexture(symbol: "checkmark.circle.fill", color: .controlAccentColor) { groups.append(MetalGridRenderGroup(source: .sharedTexture(t), quads: checkFilledQuads)) }
+        if !outlineQuads.isEmpty {
+            groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: outlineQuads))
+        }
+        if !videoQuads.isEmpty, let texture = cache.glyphTexture(symbol: "video.fill", color: .white) {
+            groups.append(MetalGridRenderGroup(source: .sharedTexture(texture), quads: videoQuads))
+        }
+        if !favoriteQuads.isEmpty, let texture = cache.glyphTexture(symbol: "heart.fill", color: .white) {
+            groups.append(MetalGridRenderGroup(source: .sharedTexture(texture), quads: favoriteQuads))
+        }
+        if !checkEmptyQuads.isEmpty, let texture = cache.glyphTexture(symbol: "circle", color: .white) {
+            groups.append(MetalGridRenderGroup(source: .sharedTexture(texture), quads: checkEmptyQuads))
+        }
+        if !checkFilledQuads.isEmpty,
+           let texture = cache.glyphTexture(
+               symbol: "checkmark.circle.fill",
+               color: MetalGridGlyphColor(.controlAccentColor)
+           ) {
+            groups.append(MetalGridRenderGroup(source: .sharedTexture(texture), quads: checkFilledQuads))
+        }
         return (groups, realCount)
     }
 
