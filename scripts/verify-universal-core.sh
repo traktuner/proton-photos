@@ -21,6 +21,10 @@ RENDERING_CORE_TARGETS=(
   MetalGridTextureCore
 )
 
+IOS_PLATFORM_ADAPTER_TARGETS=(
+  MetalGridTextureUIKitAdapter
+)
+
 PLATFORMS=(
   "iOS:generic/platform=iOS"
   "macOS:generic/platform=macOS"
@@ -66,4 +70,17 @@ for target in "${RENDERING_CORE_TARGETS[@]}"; do
   done
 done
 
-echo "[core-gate] universal Core + Metal Core gate passed"
+for target in "${IOS_PLATFORM_ADAPTER_TARGETS[@]}"; do
+  derived_data="$DERIVED_DATA_BASE/$target-iOS"
+
+  echo "[core-gate] building $target for iOS"
+  xcrun xcodebuild \
+    -scheme "$target" \
+    -destination "generic/platform=iOS" \
+    -derivedDataPath "$derived_data" \
+    -skipPackagePluginValidation \
+    -quiet \
+    build
+done
+
+echo "[core-gate] universal Core + Metal Core + iOS adapter proof gate passed"

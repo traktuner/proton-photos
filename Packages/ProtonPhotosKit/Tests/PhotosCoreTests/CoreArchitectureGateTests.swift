@@ -126,6 +126,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         "DesignSystem",
         "MapFeature",
         "MediaCache",
+        "MetalGridTextureUIKitAdapter",
         "PhotoViewerFeature",
         "ProtonAuth",
         "TimelineFeature",
@@ -821,6 +822,73 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             Texture upload/cache code may own Metal texture residency; native SF Symbol rasterization belongs
             behind an injected platform adapter so iOS/iPadOS can provide UIKit glyphs later.
+            """
+        )
+    }
+
+    func testUIKitGlyphRasterizerStaysInPlatformAdapter() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let adapterRoot = sourcesRoot.appendingPathComponent("MetalGridTextureUIKitAdapter")
+        let adapterFile = adapterRoot.appendingPathComponent("UIKitMetalGridGlyphRasterizer.swift")
+        let textureRoot = sourcesRoot.appendingPathComponent("MetalGridTextureCore")
+        var violations: [String] = []
+
+        if !manifest.contains(".library(name: \"MetalGridTextureUIKitAdapter\", targets: [\"MetalGridTextureUIKitAdapter\"])") {
+            violations.append("MetalGridTextureUIKitAdapter: missing matching library product")
+        }
+
+        if let targetLine = manifestLine(forTarget: "MetalGridTextureUIKitAdapter", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            if dependencies != ["MetalGridTextureCore"] {
+                violations.append("MetalGridTextureUIKitAdapter: dependencies \(dependencies.sorted()) != [MetalGridTextureCore]")
+            }
+        } else {
+            violations.append("MetalGridTextureUIKitAdapter: missing Package.swift target declaration")
+        }
+
+        guard FileManager.default.fileExists(atPath: adapterFile.path) else {
+            XCTFail("MetalGridTextureUIKitAdapter/UIKitMetalGridGlyphRasterizer.swift: missing UIKit glyph adapter")
+            return
+        }
+
+        let imports = try importedModules(in: adapterFile)
+        let expectedImports: Set<String> = ["CoreGraphics", "MetalGridTextureCore", "UIKit"]
+        if imports != expectedImports {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridGlyphRasterizer.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+        }
+        for forbidden in ["AppKit", "SwiftUI", "MetalKit", "PhotosCore", "MediaCache", "TimelineFeature"] where imports.contains(forbidden) {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridGlyphRasterizer.swift: must not import \(forbidden)")
+        }
+
+        let source = try String(contentsOf: adapterFile, encoding: .utf8)
+        for symbol in [
+            "#if canImport(UIKit)",
+            "package final class UIKitMetalGridGlyphRasterizer",
+            "MetalGridGlyphRasterizing",
+            "UIImage.SymbolConfiguration",
+            "UIImage(systemName:",
+            "UIGraphicsImageRenderer",
+            "image.cgImage"
+        ] where !source.contains(symbol) {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridGlyphRasterizer.swift: missing \(symbol)")
+        }
+
+        for file in try swiftFiles(in: textureRoot) {
+            let textureSource = try String(contentsOf: file, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: textureSource)
+            for token in ["UIKitMetalGridGlyphRasterizer", "UIImage", "UIColor", "UIGraphicsImageRenderer"] where contains(token, in: code) {
+                violations.append("MetalGridTextureCore/\(file.lastPathComponent): UIKit adapter leaked into texture core via \(token)")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 5.2 UIKit glyph adapter boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            UIKit SF Symbol rasterization belongs in an iOS/iPadOS adapter target. MetalGridTextureCore owns
+            only the shared cache and glyph request contract.
             """
         )
     }

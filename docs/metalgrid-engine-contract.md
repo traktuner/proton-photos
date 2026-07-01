@@ -36,6 +36,7 @@ overlaid transparent `NSScrollView` document spacer provides physics + pointer e
 | `MetalGridCoordinator` | `MetalGridCoordinator.swift` | Composes engine geometry + textures + fitting; owns camera state (level, committed phase) **and the live resize/sidebar presentation layer** (snapshot-scale). |
 | `MetalGridGlyphRasterizing` | `MetalGridTextureCore/MetalGridGlyphRasterizer.swift` | Platform-neutral badge glyph request contract; platform adapters inject native rasterizers. |
 | `AppKitMetalGridGlyphRasterizer` | `AppKitMetalGridGlyphRasterizer.swift` | macOS SF Symbol → `CGImage` badge rasterization injected into the texture cache. |
+| `UIKitMetalGridGlyphRasterizer` | `MetalGridTextureUIKitAdapter/UIKitMetalGridGlyphRasterizer.swift` | iOS/iPadOS SF Symbol → `CGImage` badge rasterization adapter; not used by the macOS production host. |
 | `MetalGridTextureCache<ID>` | `MetalGridTextureCore/MetalGridTextureCache.swift` | Generic per-item `MTLTexture` cache over `GridTextureResidencyPolicy<ID>`; the macOS coordinator binds `ID == PhotoUID`. |
 | `MetalGridRenderer` | `MetalRenderingCore/MetalGridRenderer.swift` | Draws the quads it is handed. No layout math; `TimelineFeature` owns only the `MTKView` adapter extension. |
 | `MetalGridScrollHost` | `MetalGridScrollHost.swift` | AppKit host: scroll physics, gesture intake, resize entry, calls the engine helpers. |
@@ -73,8 +74,9 @@ contract. It may depend on `GridCore` policy and use `Metal`/`CoreGraphics`, but
 encoding, MetalKit views, platform glyph implementations, photo IDs, media feeds, or platform budget defaults.
 
 **`MetalGridGlyphRasterizing` owns:** the platform-specific conversion from a glyph request to a `CGImage`.
-macOS uses `AppKitMetalGridGlyphRasterizer`; future iOS/iPadOS adapters must provide a UIKit equivalent rather
-than placing `NSImage`/`UIImage` logic in the texture cache or renderer.
+macOS uses `AppKitMetalGridGlyphRasterizer`; iOS/iPadOS can use `UIKitMetalGridGlyphRasterizer` from
+`MetalGridTextureUIKitAdapter`. `NSImage`/`UIImage` logic must stay in platform adapters, not in the texture cache
+or renderer.
 
 **`MetalGridRenderer` owns:** drawing supplied quads · the clear/background colour · placeholders · overlays.
 It performs **no** layout math and never sees media aspect ratio.

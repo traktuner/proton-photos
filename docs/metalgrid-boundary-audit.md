@@ -184,12 +184,13 @@ Solutions:
 Phase 4.7 removed direct AppKit rasterization from `MetalGridTextureCache`. The cache now takes a
 `MetalGridGlyphRasterizing` adapter and uploads the returned `CGImage` as before. macOS injects
 `AppKitMetalGridGlyphRasterizer`, which still renders SF Symbol badges through `NSImage`, `NSColor`, and
-`NSFont`. iOS/iPadOS still need their own UIKit implementation before sharing this adapter path.
+`NSFont`. Phase 5.2 adds `MetalGridTextureUIKitAdapter` with a UIKit implementation for iOS/iPadOS, but no
+production iOS grid host injects it yet.
 
 Solutions:
 
-1. Add a UIKit `MetalGridGlyphRasterizing` implementation for iOS/iPadOS, keeping shared texture upload after
-   rasterization.
+1. Wire the UIKit `MetalGridGlyphRasterizing` implementation into the future iOS/iPadOS grid adapter, keeping
+   shared texture upload after rasterization.
 2. Replace rasterized SF Symbol badge textures with renderer-native vector/SDF badge primitives for heart, video,
    empty check, and filled check. This removes platform image APIs from the shared renderer path.
 
@@ -480,3 +481,17 @@ Generic Metal texture cache extraction. No production behavior changed.
 - `CoreArchitectureGateTests` now guards that the generic cache and glyph contract stay in
   `MetalGridTextureCore`, while AppKit glyph rasterization and photo-domain specialization stay in the macOS
   adapter.
+
+## Phase 5.2 result
+
+UIKit glyph adapter proof. No macOS production behavior changed.
+
+- `MetalGridTextureUIKitAdapter` is now a SwiftPM product/target.
+- The target depends only on `MetalGridTextureCore` and is the iOS/iPadOS platform edge for SF Symbol badge
+  rasterization.
+- `UIKitMetalGridGlyphRasterizer` conforms to `MetalGridGlyphRasterizing`, uses
+  `UIImage.SymbolConfiguration`, `UIImage(systemName:)`, and `UIGraphicsImageRenderer`, and returns a `CGImage`
+  for the shared texture upload path.
+- `MetalGridTextureCore` remains UIKit-free; the shared cache still sees only the glyph request contract.
+- `scripts/verify-universal-core.sh` now builds `MetalGridTextureUIKitAdapter` for iOS as an adapter-proof gate
+  after the universal Core and Metal Core targets.

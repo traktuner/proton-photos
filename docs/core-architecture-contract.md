@@ -43,8 +43,10 @@ The mandatory layers are:
    rendering, platform-hosting, or concrete backend dependency.
 3. MetalRenderingCore: shared Metal renderer/shader layer with its own gate, separate from Universal Core.
 4. MetalGridTextureCore: shared Metal texture upload/cache layer with its own gate, dependent only on GridCore.
-5. Shared UI/UX: SwiftUI only where genuinely adaptive across Mac, iPhone, and iPad.
-6. Platform Adapters: AppKit/UIKit/SwiftUI hosts, scroll, gestures, safe areas, traits, accessibility, budgets,
+5. Platform Texture Adapters: native AppKit/UIKit glyph rasterizers and future platform texture-policy adapters
+   that depend on MetalGridTextureCore but never the reverse.
+6. Shared UI/UX: SwiftUI only where genuinely adaptive across Mac, iPhone, and iPad.
+7. Platform Adapters: AppKit/UIKit/SwiftUI hosts, scroll, gestures, safe areas, traits, accessibility, budgets,
    native controls, platform glyph rasterization, and concrete telemetry/export backends.
 
 Every new module must declare which layer it belongs to before code moves.
@@ -136,6 +138,22 @@ Forbidden:
 Platform adapters bind item IDs, supply decoded images, inject measured budgets, and provide native glyph
 rasterizers. macOS may bind `PhotoUID`; iOS/iPadOS may bind the same cache to its adapter ID without forking
 texture upload or residency logic.
+
+### Platform Texture Adapters
+
+Platform texture adapters own native rasterization or platform policy needed by `MetalGridTextureCore` through
+injected protocols. They are not Universal Core.
+
+Allowed examples:
+- `AppKitMetalGridGlyphRasterizer` in the macOS timeline adapter.
+- `MetalGridTextureUIKitAdapter`, which provides `UIKitMetalGridGlyphRasterizer` for iOS/iPadOS.
+
+Rules:
+- They may import the native platform framework they adapt (`AppKit` or `UIKit`), `CoreGraphics`, and
+  `MetalGridTextureCore`.
+- They must not own photo-domain identity, media feeds, render command encoding, `MTKView`, scroll hosts, or
+  concrete desktop budget defaults unless the target is explicitly a platform host.
+- `MetalGridTextureCore` must never depend on them. Adapters depend inward on the shared contract.
 
 ### Telemetry
 
@@ -641,3 +659,17 @@ native badge path without forking the shared cache.
 `TimelineFeature` remains the macOS adapter boundary for `PhotoUID` specialization
 (`MetalGridTextureCache<PhotoUID>`), decoded-image feed access, `MetalGridBudget.default`, `MTKView`, AppKit
 scroll/gesture hosting, accessibility, headers, and palette conversion.
+
+#### Phase 5.2 — UIKit glyph adapter proof
+
+Small platform-adapter addition with no macOS production behavior change.
+
+`MetalGridTextureUIKitAdapter` is now a dedicated target/product that depends only on
+`MetalGridTextureCore`. It provides `UIKitMetalGridGlyphRasterizer`, an iOS/iPadOS implementation of
+`MetalGridGlyphRasterizing` that follows Apple's UIKit SF Symbol and image-renderer path:
+`UIImage.SymbolConfiguration`, `UIImage(systemName:)`, tinting, and `UIGraphicsImageRenderer` to produce a
+`CGImage` for the shared texture upload path.
+
+This proves the 5.1 cache boundary is usable from a second Apple platform without forking cache logic.
+`MetalGridTextureCore` remains UIKit-free. The future iOS/iPadOS grid host still needs its own scroll/view
+adapter, texture budget values, safe-area/input policy, and explicit injection of `UIKitMetalGridGlyphRasterizer`.

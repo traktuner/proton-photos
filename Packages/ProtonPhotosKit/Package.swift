@@ -35,6 +35,7 @@ let package = Package(
         .library(name: "GridCore", targets: ["GridCore"]),
         .library(name: "MetalRenderingCore", targets: ["MetalRenderingCore"]),
         .library(name: "MetalGridTextureCore", targets: ["MetalGridTextureCore"]),
+        .library(name: "MetalGridTextureUIKitAdapter", targets: ["MetalGridTextureUIKitAdapter"]),
         .library(name: "MediaCache", targets: ["MediaCache"]),
         .library(name: "TimelineFeature", targets: ["TimelineFeature"]),
         .library(name: "PhotoViewerFeature", targets: ["PhotoViewerFeature"]),
@@ -67,6 +68,7 @@ let package = Package(
         .testTarget(name: "GridCoreTests", dependencies: ["GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalRenderingCore", swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalGridTextureCore", dependencies: ["GridCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MetalGridTextureUIKitAdapter", dependencies: ["MetalGridTextureCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCache", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",
