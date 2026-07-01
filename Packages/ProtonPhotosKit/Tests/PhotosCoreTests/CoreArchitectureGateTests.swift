@@ -1572,8 +1572,8 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if let targetLine = manifestLine(forTarget: "TimelineUIKitAdapter", in: manifest) {
             let dependencies = Set(dependencies(inTargetLine: targetLine))
-            if dependencies != ["GridCore", "TimelineCore"] {
-                violations.append("TimelineUIKitAdapter: dependencies \(dependencies.sorted()) != [GridCore, TimelineCore]")
+            if dependencies != ["GridCore", "MetalRenderingCore", "TimelineCore"] {
+                violations.append("TimelineUIKitAdapter: dependencies \(dependencies.sorted()) != [GridCore, MetalRenderingCore, TimelineCore]")
             }
         } else {
             violations.append("TimelineUIKitAdapter: missing Package.swift target declaration")
@@ -1640,6 +1640,112 @@ final class CoreArchitectureGateTests: XCTestCase {
             The first iOS/iPadOS timeline seam must stay viewport-driven: UIKit may translate current view
             bounds and safe-area/chrome insets into TimelineCore's profile resolver, but feature state,
             photo-domain IDs, device idioms, hardware probes, and macOS defaults stay out.
+            """
+        )
+    }
+
+    func testTimelineUIKitAdapterOwnsIOSMetalSurfaceOnly() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let adapterRoot = sourcesRoot.appendingPathComponent("TimelineUIKitAdapter")
+        let hostFile = adapterRoot.appendingPathComponent("UIKitTimelineMetalHostView.swift")
+        let drawableFile = adapterRoot.appendingPathComponent("UIKitTimelineMetalDrawableTarget.swift")
+        let displayLinkFile = adapterRoot.appendingPathComponent("UIKitTimelineDisplayLinkDriver.swift")
+        var violations: [String] = []
+
+        if let targetLine = manifestLine(forTarget: "TimelineUIKitAdapter", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            if dependencies != ["GridCore", "MetalRenderingCore", "TimelineCore"] {
+                violations.append("TimelineUIKitAdapter: dependencies \(dependencies.sorted()) != [GridCore, MetalRenderingCore, TimelineCore]")
+            }
+        } else {
+            violations.append("TimelineUIKitAdapter: missing Package.swift target declaration")
+        }
+
+        for file in [hostFile, drawableFile, displayLinkFile] where !FileManager.default.fileExists(atPath: file.path) {
+            violations.append("TimelineUIKitAdapter/\(file.lastPathComponent): missing UIKit Metal host seam file")
+        }
+
+        if FileManager.default.fileExists(atPath: hostFile.path) {
+            let imports = try importedModules(in: hostFile)
+            let expectedImports: Set<String> = ["Metal", "QuartzCore", "UIKit"]
+            if imports != expectedImports {
+                violations.append("TimelineUIKitAdapter/UIKitTimelineMetalHostView.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+            }
+            let source = try String(contentsOf: hostFile, encoding: .utf8)
+            for symbol in [
+                "#if canImport(UIKit)",
+                "public final class UIKitTimelineMetalHostView: UIView",
+                "override class var layerClass: AnyClass { CAMetalLayer.self }",
+                "public var metalLayer: CAMetalLayer",
+                "public func configure(",
+                "device: MTLDevice?",
+                "metalLayer.framebufferOnly = true",
+                "metalLayer.maximumDrawableCount = 3",
+                "updateDrawableSize()",
+                "traitCollection.displayScale"
+            ] where !source.contains(symbol) {
+                violations.append("TimelineUIKitAdapter/UIKitTimelineMetalHostView.swift: missing \(symbol)")
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: drawableFile.path) {
+            let imports = try importedModules(in: drawableFile)
+            let expectedImports: Set<String> = ["Metal", "MetalRenderingCore", "QuartzCore"]
+            if imports != expectedImports {
+                violations.append("TimelineUIKitAdapter/UIKitTimelineMetalDrawableTarget.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+            }
+            let source = try String(contentsOf: drawableFile, encoding: .utf8)
+            for symbol in [
+                "package extension MetalGridDrawableTarget",
+                "init?(layer: CAMetalLayer",
+                "layer.nextDrawable()",
+                "MTLRenderPassDescriptor()",
+                "presentsWithTransaction: layer.presentsWithTransaction"
+            ] where !source.contains(symbol) {
+                violations.append("TimelineUIKitAdapter/UIKitTimelineMetalDrawableTarget.swift: missing \(symbol)")
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: displayLinkFile.path) {
+            let imports = try importedModules(in: displayLinkFile)
+            let expectedImports: Set<String> = ["QuartzCore", "UIKit"]
+            if imports != expectedImports {
+                violations.append("TimelineUIKitAdapter/UIKitTimelineDisplayLinkDriver.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+            }
+            let source = try String(contentsOf: displayLinkFile, encoding: .utf8)
+            for symbol in [
+                "#if canImport(UIKit)",
+                "public final class UIKitTimelineDisplayLinkDriver",
+                "CADisplayLink",
+                "preferredFramesPerSecond",
+                "add(to: .main, forMode: .common)",
+                "stop()"
+            ] where !source.contains(symbol) {
+                violations.append("TimelineUIKitAdapter/UIKitTimelineDisplayLinkDriver.swift: missing \(symbol)")
+            }
+        }
+
+        for file in try swiftFiles(in: adapterRoot) {
+            let imports = try importedModules(in: file)
+            for forbidden in ["AppKit", "SwiftUI", "MetalKit", "PhotosCore", "MediaCache", "TimelineFeature", "ProtonDriveSDK"] where imports.contains(forbidden) {
+                violations.append("TimelineUIKitAdapter/\(file.lastPathComponent): must not import \(forbidden)")
+            }
+            let source = try String(contentsOf: file, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: source)
+            for forbidden in ["MTKView", "NSView", "NSScrollView", "NSImage", "PhotoUID", "PhotoItem", "ThumbnailFeed", "UIDevice", "userInterfaceIdiom", "UIScreen.main"] where contains(forbidden, in: code) {
+                violations.append("TimelineUIKitAdapter/\(file.lastPathComponent): forbidden macOS/domain/hardware reference \(forbidden)")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Timeline UIKit Metal host boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            iOS/iPadOS timeline hosting may own CAMetalLayer/CADisplayLink and convert that surface into the
+            shared MetalRenderingCore drawable target. Grid geometry, photo-domain data, cache policy, and
+            macOS MTKView hosting must remain outside this adapter.
             """
         )
     }
