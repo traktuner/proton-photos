@@ -1,6 +1,7 @@
 import AppKit
 import MetalKit
 import CoreGraphics
+import MetalRenderingCore
 import simd
 import PhotosCore
 import GridCore

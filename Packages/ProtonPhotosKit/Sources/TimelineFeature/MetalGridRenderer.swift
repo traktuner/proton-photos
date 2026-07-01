@@ -2,56 +2,19 @@ import Metal
 import MetalKit
 import QuartzCore
 import CoreGraphics
+import MetalRenderingCore
 import simd
 
-/// How a quad is shaded.
-enum MetalGridQuadMode: Int32 {
-    case textured = 0   // sample the bound texture, tint by `color`
-    case solid = 1      // fill with `color` (rounded)
-    case border = 2     // stroke a rounded-rect ring of width `borderWidth` in `color`
-}
-
-/// One quad in viewport (point) coordinates, with the UV window, corner radius, and shading.
-struct MetalGridQuad {
-    var rect: CGRect
-    var uvMin: SIMD2<Float> = SIMD2(0, 0)
-    var uvMax: SIMD2<Float> = SIMD2(1, 1)
-    var radius: Float
-    var alpha: Float = 1
-    var color: SIMD4<Float> = SIMD4(1, 1, 1, 1)
-    var mode: MetalGridQuadMode = .textured
-    var borderWidth: Float = 0
-}
-
-/// A batch of quads sharing draw state. `sharedTexture` → one draw call for all quads; `perQuadTexture`
-/// → one draw call per quad (each binds its own texture, for distinct thumbnails).
-struct MetalGridRenderGroup {
-    enum Source {
-        case sharedTexture(MTLTexture)
-        case perQuadTexture([MTLTexture])
-    }
-    var source: Source
-    var quads: [MetalGridQuad]
-}
-
-/// Narrow drawable boundary for the renderer. `MTKView` is converted to this adapter at the edge; the draw
-/// path below only needs a drawable, pass descriptor, and present mode.
-struct MetalGridDrawableTarget {
-    let drawable: CAMetalDrawable
-    let renderPassDescriptor: MTLRenderPassDescriptor
-    let presentsWithTransaction: Bool
-
-    var pixelSize: CGSize {
-        CGSize(width: drawable.texture.width, height: drawable.texture.height)
-    }
-
+extension MetalGridDrawableTarget {
     @MainActor
     init?(view: MTKView) {
         guard let drawable = view.currentDrawable,
               let pass = view.currentRenderPassDescriptor else { return nil }
-        self.drawable = drawable
-        self.renderPassDescriptor = pass
-        self.presentsWithTransaction = view.presentsWithTransaction
+        self.init(
+            drawable: drawable,
+            renderPassDescriptor: pass,
+            presentsWithTransaction: view.presentsWithTransaction
+        )
     }
 }
 

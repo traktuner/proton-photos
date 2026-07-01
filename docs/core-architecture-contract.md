@@ -411,7 +411,8 @@ Audit + guard hardening only; no production grid behavior changed.
 take the target; the `MTKView`-taking methods are thin edge adapters that build it via
 `MetalGridDrawableTarget(view:)` — the single `MTKView` → draw seam. This removes the `MTKView` entry-point that
 previously blocked a future `MetalRenderingCore`. The renderer stays in `TimelineFeature` for now because it
-still imports `Metal`/`MetalKit`; the remaining split work is packaging, not draw-path redesign.
+still imports `Metal`/`MetalKit`; after Phase 4.4 the package gate exists, so the remaining split work is moving
+renderer/shader code behind that gate, not draw-path redesign.
 
 `GridCore` gains a platform-neutral telemetry seam in `CoreTelemetry.swift`: the value type
 `CoreTelemetryEvent` (a name plus `[String: String]` fields, `Sendable`) and
@@ -508,3 +509,19 @@ owns no renderer, host view, image/cache object, platform framework, or photo-do
 leaving the Core seam generic and reusable for iOS/iPadOS. `TimelineFeature` still owns `GridInitialViewport`,
 native host placement, AppKit coordinate conversion, `MetalGridScrollHost`, data-source wiring, renderer/cache
 integration, diagnostics, gestures, and accessibility.
+
+#### Phase 4.4 — MetalRenderingCore package gate and draw primitives
+
+Small rendering-boundary split with no intended behavior change.
+
+`MetalRenderingCore` is now a separate SwiftPM target/product, distinct from Universal `GridCore`. It may import
+`Metal`, `QuartzCore`, `CoreGraphics`, and `simd`, but it is guarded against `MetalKit`, AppKit, UIKit, SwiftUI,
+photo-domain IDs, media-feed/cache APIs, platform views, scroll/gesture hosts, platform glyph rasterization, and
+adapter hardware-policy sizing.
+
+The first moved code is only the renderer's Metal draw primitives and narrow drawable target:
+`MetalGridQuadMode`, `MetalGridQuad`, `MetalGridRenderGroup`, and `MetalGridDrawableTarget`. The `MTKView`
+conversion remains in `TimelineFeature` as an adapter extension, so shared rendering can accept a drawable/pass
+descriptor while platform adapters continue to own view hosting. `MetalGridRenderer` still lives in
+`TimelineFeature`; moving it is a later measured step after this gate proves the package boundary on macOS and
+iOS.

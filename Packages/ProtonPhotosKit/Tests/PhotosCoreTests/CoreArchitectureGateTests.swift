@@ -132,6 +132,56 @@ final class CoreArchitectureGateTests: XCTestCase {
         "UploadFeature",
     ]
 
+    private static let renderingCoreAllowedImports: Set<String> = [
+        "CoreGraphics",
+        "Metal",
+        "QuartzCore",
+        "simd",
+    ]
+
+    private static let renderingCoreForbiddenImports: Set<String> = [
+        "AppKit",
+        "UIKit",
+        "SwiftUI",
+        "MapKit",
+        "AVKit",
+        "MetalKit",
+        "PhotosCore",
+        "MediaCache",
+        "TimelineFeature",
+    ]
+
+    private static let renderingCoreForbiddenTokens: [String] = [
+        "MTKView",
+        "NSView",
+        "UIView",
+        "NSImage",
+        "UIImage",
+        "NSScrollView",
+        "UIScrollView",
+        "NSEvent",
+        "UIEvent",
+        "NSGestureRecognizer",
+        "UIGestureRecognizer",
+        "NSAccessibility",
+        "NSColor",
+        "UIColor",
+        "NSFont",
+        "UIFont",
+        "NSBezierPath",
+        "UIBezierPath",
+        "PhotoUID",
+        "PhotoItem",
+        "ThumbnailFeed",
+        "MediaCache",
+        "CAMetalLayer",
+        "CAMetalDisplayLink",
+        "CADisplayLink",
+        "CALayer",
+        "ProcessInfo.processInfo.physicalMemory",
+        "ProcessInfo.processInfo.activeProcessorCount",
+    ]
+
     func testUniversalCoreImportsStayOnTargetAllowlists() throws {
         var violations: [String] = []
 
@@ -243,6 +293,74 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             missing.isEmpty,
             "Universal Core targets must be published as matching library products: \(missing.sorted())"
+        )
+    }
+
+    func testMetalRenderingCoreHasSeparatePackageBoundary() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        var violations: [String] = []
+
+        if !manifest.contains(".library(name: \"MetalRenderingCore\", targets: [\"MetalRenderingCore\"])") {
+            violations.append("MetalRenderingCore: missing matching library product")
+        }
+
+        guard let targetLine = manifestLine(forTarget: "MetalRenderingCore", in: manifest) else {
+            XCTFail("MetalRenderingCore: missing Package.swift target declaration")
+            return
+        }
+
+        let dependencies = Set(dependencies(inTargetLine: targetLine))
+        if !dependencies.isEmpty {
+            violations.append("MetalRenderingCore: dependencies \(dependencies.sorted()) != []")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            MetalRenderingCore package boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            Shared Metal rendering has its own target and gate; it is not Universal GridCore.
+            """
+        )
+    }
+
+    func testMetalRenderingCoreStaysRenderOnly() throws {
+        let sourceRoot = sourcesRoot.appendingPathComponent("MetalRenderingCore")
+        let files = try swiftFiles(in: sourceRoot)
+        XCTAssertFalse(files.isEmpty, "Expected source files for MetalRenderingCore")
+
+        var violations: [String] = []
+
+        for file in files {
+            let imports = try importedModules(in: file)
+            let unexpected = imports.subtracting(Self.renderingCoreAllowedImports)
+            if !unexpected.isEmpty {
+                violations.append("MetalRenderingCore/\(file.lastPathComponent): unexpected imports \(unexpected.sorted())")
+            }
+
+            let forbiddenImports = imports.intersection(Self.renderingCoreForbiddenImports)
+            if !forbiddenImports.isEmpty {
+                violations.append("MetalRenderingCore/\(file.lastPathComponent): forbidden imports \(forbiddenImports.sorted())")
+            }
+
+            let source = try String(contentsOf: file, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: source)
+            for token in Self.renderingCoreForbiddenTokens where contains(token, in: code) {
+                violations.append("MetalRenderingCore/\(file.lastPathComponent): forbidden token \(token)")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            MetalRenderingCore render-only gate failed:
+            \(violations.joined(separator: "\n"))
+
+            MetalRenderingCore may own Metal draw primitives and draw targets, but platform views,
+            scroll/gesture hosts, glyph rasterization, photo-domain IDs, media feeds, and hardware budgets
+            belong in adapters.
+            """
         )
     }
 

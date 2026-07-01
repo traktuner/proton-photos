@@ -11,7 +11,7 @@ import GridCore
     private func engine(_ count: Int = 20000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
     private func repoRoot() -> URL { var u = URL(fileURLWithPath: #filePath); for _ in 0 ..< 5 { u.deleteLastPathComponent() }; return u }
     private func src(_ name: String) -> String {
-        for target in ["TimelineFeature", "GridCore"] {
+        for target in ["TimelineFeature", "GridCore", "MetalRenderingCore"] {
             let rel = "Packages/ProtonPhotosKit/Sources/\(target)/\(name)"
             if let source = try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8) { return source }
         }
@@ -76,7 +76,8 @@ import GridCore
     // thin so the Metal renderer can later move behind a platform-neutral adapter.
     @Test func rendererUsesDrawableTargetBoundary() {
         let r = src("MetalGridRenderer.swift")
-        #expect(r.contains("struct MetalGridDrawableTarget"))
+        let renderingCore = src("MetalGridRenderPrimitives.swift")
+        #expect(renderingCore.contains("struct MetalGridDrawableTarget"))
         #expect(r.contains("guard let target = MetalGridDrawableTarget(view: view) else { return }"))
         #expect(r.contains("func render(to target: MetalGridDrawableTarget"))
         #expect(r.contains("func renderLayerDissolve(to target: MetalGridDrawableTarget"))

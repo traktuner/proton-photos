@@ -87,16 +87,23 @@ Extraction rule: move only pure value types and algorithms first. Do not move `T
 These are cross-platform Metal candidates only after view-hosting is split away:
 
 - `MetalGridRenderer.swift`
-- `MetalGridTypes.swift`
 - shader source embedded in `MetalGridRenderer`
+
+Already moved to `MetalRenderingCore` (Phase 4.4):
+
+- `MetalGridQuadMode`
+- `MetalGridQuad`
+- `MetalGridRenderGroup`
+- `MetalGridDrawableTarget`
 
 Entry-point blocker RESOLVED (Phase 3.9, commit 4259c6e): `MetalGridRenderer` now exposes a narrow
 `MetalGridDrawableTarget` (a `CAMetalDrawable`, an `MTLRenderPassDescriptor`, and a `presentsWithTransaction`
 flag) plus `render(to:)` / `renderLayerDissolve(to:)` overloads that take it. The `MTKView`-taking methods are
 now thin edge adapters that build the target via `MetalGridDrawableTarget(view:)` — the single `MTKView` → draw
 seam — and delegate to the `to:` overloads, which never reference `MTKView`. The remaining `MetalRenderingCore`
-prerequisite is packaging, not the render entry point: the renderer file still lives in `TimelineFeature` and
-still imports `Metal`/`MetalKit`, so split it into a Metal-only target with the `MTKView` adapter left behind.
+work is the renderer/shader move, not the render entry point: the first package boundary now exists, but the
+renderer file still lives in `TimelineFeature` and still imports `Metal`/`MetalKit`, so split it into a
+Metal-only target with the `MTKView` adapter left behind.
 
 ### Must remain platform adapter until split
 
@@ -278,11 +285,13 @@ plan/fallback/settle events, not per rendered thumbnail.
 
 Render-boundary / adapter-boundary hardening. Audit + guards + doc sync only; no production behavior changed.
 
-- Renderer drawable boundary (commit 4259c6e): `MetalGridRenderer` now renders through `MetalGridDrawableTarget`
+- Renderer drawable boundary (commit 4259c6e, advanced in Phase 4.4): `MetalGridRenderer` now renders through
+  `MetalGridDrawableTarget`
   (a `CAMetalDrawable`, an `MTLRenderPassDescriptor`, and a `presentsWithTransaction` flag). `render(to:)` /
   `renderLayerDissolve(to:)` take the target; the `MTKView` methods are thin edge adapters. This removes the
-  `MTKView` entry-point blocker for a future `MetalRenderingCore`, but the renderer file still imports
-  `Metal`/`MetalKit` and stays in `TimelineFeature`, so the remaining split work is packaging.
+  `MTKView` entry-point blocker for `MetalRenderingCore`; Phase 4.4 moved the draw primitive/drawable target
+  types into that target. The renderer file still imports `Metal`/`MetalKit` and stays in `TimelineFeature`, so
+  the remaining split work is moving renderer/shader code behind the established package gate.
 - Core telemetry seam (commit 3f58dbc): `GridCore` owns `CoreTelemetry.swift` — `CoreTelemetryEvent` (name +
   `[String: String]` fields, `Sendable`) and `CoreTelemetrySink = (CoreTelemetryEvent) -> Void`.
   `GridTransitionController` emits string-keyed events through an injected optional sink; `MetalGridCoordinator`
@@ -360,3 +369,17 @@ Generic shell/grid seam extraction. Behavior change intentionally avoided.
   `MetalGridScrollHost`, `MetalProductionGridView`, renderer/cache integration, and data-source wiring.
 - `CoreArchitectureGateTests` now guards that the proxy seam stays generic and universal, with no `PhotosCore`,
   `PhotoItem`, `PhotoUID`, or `TimelineFeature` references inside `GridCore`.
+
+## Phase 4.4 result
+
+MetalRenderingCore package gate and first draw-primitives split. No production behavior changed.
+
+- `MetalRenderingCore` is now a dedicated SwiftPM target/product, separate from Universal `GridCore`.
+- `MetalGridQuadMode`, `MetalGridQuad`, `MetalGridRenderGroup`, and `MetalGridDrawableTarget` moved into
+  `MetalRenderingCore`. These are Metal draw primitives and a narrow drawable/pass-descriptor target, not
+  platform view-hosting code.
+- The `MTKView` conversion remains in `TimelineFeature` as an adapter extension. `MetalGridRenderer` still lives
+  in `TimelineFeature` and still owns shader/pipeline encoding; moving it is future work.
+- `CoreArchitectureGateTests` now includes a separate render-only gate for `MetalRenderingCore`, and
+  `scripts/verify-universal-core.sh` builds the rendering core target for iOS and macOS alongside the universal
+  Core targets.
