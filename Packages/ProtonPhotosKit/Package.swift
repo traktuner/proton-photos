@@ -51,6 +51,7 @@ let package = Package(
         .library(name: "PhotoViewerFeature", targets: ["PhotoViewerFeature"]),
         // Modular feature foundation: album management + the upload queue/state-machine. Both are
         // pure (no SDK/HTTP) and drive injected backend protocols the app implements.
+        .library(name: "AlbumCore", targets: ["AlbumCore"]),
         .library(name: "AlbumsFeature", targets: ["AlbumsFeature"]),
         .library(name: "UploadCore", targets: ["UploadCore"]),
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
@@ -108,10 +109,13 @@ let package = Package(
             dependencies: ["TimelineFeature", "TimelineCore", "GridCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter", "MediaCache", "PhotosCore"],
             swiftSettings: disableDynamicActorIsolation
         ),
-        // Albums: management protocols + repository over an injected backend (SDK has no album APIs,
-        // so the app's backend routes reads via direct HTTP and reports writes as unsupported).
-        .target(name: "AlbumsFeature", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
-        .testTarget(name: "AlbumsFeatureTests", dependencies: ["AlbumsFeature", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        // Albums: universal management protocols + repository over an injected backend. The app's
+        // current backend routes reads via direct HTTP and reports album writes as unsupported until
+        // Proton's SDK exposes the album-write API.
+        .target(name: "AlbumCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        // Backward-compatible feature product for app targets already importing AlbumsFeature.
+        .target(name: "AlbumsFeature", dependencies: ["AlbumCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "AlbumsFeatureTests", dependencies: ["AlbumCore", "AlbumsFeature", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         // UploadCore: pure queue + state machine + folder enumeration over an injected upload backend.
         .target(name: "UploadCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         // UploadFeature: SwiftUI adapter over UploadCore. No DesignSystem dependency; the native

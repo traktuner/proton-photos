@@ -88,6 +88,12 @@ final class CoreArchitectureGateTests: XCTestCase {
             extraForbiddenTokens: []
         ),
         CoreTargetRule(
+            name: "AlbumCore",
+            allowedImports: ["Foundation", "PhotosCore"],
+            expectedDependencies: ["PhotosCore"],
+            extraForbiddenTokens: []
+        ),
+        CoreTargetRule(
             name: "TimelineCore",
             allowedImports: ["CoreGraphics", "Foundation", "GridCore", "PhotosCore"],
             expectedDependencies: ["GridCore", "PhotosCore"],

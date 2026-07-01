@@ -84,8 +84,8 @@ public extension PhotoUploading {
 // MARK: - Album attachment (albums seam, optional)
 
 /// The album side of an upload. Optional: when nil, only library uploads are possible. Implemented in
-/// the app by bridging `AlbumsFeature.AlbumManaging`, so `UploadFeature` and `AlbumsFeature` stay
-/// independently removable.
+/// the app by bridging `AlbumCore.AlbumManaging` through the compatibility feature export, so
+/// `UploadFeature` and album management stay independently removable.
 ///
 /// `resolveAlbum` runs once per batch *before* uploading, and must throw if the destination can't be
 /// honoured (e.g. album creation unsupported) — so the app never silently uploads to the library when

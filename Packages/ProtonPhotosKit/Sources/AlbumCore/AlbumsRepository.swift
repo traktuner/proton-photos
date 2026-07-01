@@ -3,10 +3,10 @@ import PhotosCore
 
 /// App-facing album operations. UI binds to this, never to the SDK/HTTP layer. Shares its method set
 /// with the `AlbumBackend` data seam via `AlbumOperations`; this facade adds input validation and a
-/// normalised `AlbumError` surface on top of an injected backend.
+/// normalized `AlbumError` surface on top of an injected backend.
 public protocol AlbumManaging: AlbumOperations {}
 
-/// Default implementation over an injected `AlbumBackend`. Validates input and normalises errors so
+/// Default implementation over an injected `AlbumBackend`. Validates input and normalizes errors so
 /// every UI/caller sees the same `AlbumError` surface regardless of which backend is wired.
 public actor AlbumsRepository: AlbumManaging {
     private let backend: any AlbumBackend
@@ -32,7 +32,7 @@ public actor AlbumsRepository: AlbumManaging {
         guard backend.capabilities.canCreate else {
             throw AlbumError.unsupported(
                 operation: "Create album",
-                gap: "the Proton SDK exposes no album API and album-node encryption isn’t implemented"
+                gap: "the wired album backend has no SDK-backed album create operation yet"
             )
         }
         return try await backend.createAlbum(name: trimmed)
@@ -43,7 +43,7 @@ public actor AlbumsRepository: AlbumManaging {
         guard backend.capabilities.canAddPhotos else {
             throw AlbumError.unsupported(
                 operation: "Add to album",
-                gap: "adding a photo re-encrypts its content key to the album key, which isn’t implemented"
+                gap: "the wired album backend has no SDK-backed album photo attachment operation yet"
             )
         }
         try await backend.addPhotos(photoUIDs, to: albumID)
@@ -53,7 +53,7 @@ public actor AlbumsRepository: AlbumManaging {
         guard backend.capabilities.canSetCover else {
             throw AlbumError.unsupported(
                 operation: "Set album cover",
-                gap: "the Proton SDK exposes no album-cover API and no encrypted-write HTTP path exists yet"
+                gap: "the wired album backend exposes no album-cover write"
             )
         }
         try await backend.setAlbumCover(albumID: albumID, photoUID: photoUID)

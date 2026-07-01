@@ -1,6 +1,6 @@
 import XCTest
 import PhotosCore
-@testable import AlbumsFeature
+@testable import AlbumCore
 
 /// A configurable in-memory backend so the repository's validation + capability gating can be tested
 /// without any SDK/HTTP.
