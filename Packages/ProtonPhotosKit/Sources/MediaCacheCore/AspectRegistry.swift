@@ -17,11 +17,19 @@ public final class AspectRegistry {
     private var flushScheduled = false
     private let url: URL
 
-    public init(namespace: String = "aspects") {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let dir = caches.appendingPathComponent("ProtonPhotos", isDirectory: true)
+    public nonisolated static func defaultRootDirectory() -> URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ProtonPhotos", isDirectory: true)
+    }
+
+    public nonisolated static func storageURL(namespace: String = "aspects", rootDirectory: URL? = nil) -> URL {
+        (rootDirectory ?? defaultRootDirectory()).appendingPathComponent("\(namespace).json")
+    }
+
+    public init(namespace: String = "aspects", rootDirectory: URL? = nil) {
+        let dir = rootDirectory ?? Self.defaultRootDirectory()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        url = dir.appendingPathComponent("\(namespace).json")
+        url = Self.storageURL(namespace: namespace, rootDirectory: dir)
         if let data = try? Data(contentsOf: url),
            let dict = try? JSONDecoder().decode([String: CGFloat].self, from: data) {
             aspects = dict

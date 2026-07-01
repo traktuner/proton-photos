@@ -40,6 +40,7 @@ struct SecureThumbnailCacheTests {
     }
 
     private func uniqueNamespace() -> String { "sec-\(UUID().uuidString)" }
+    private func uniqueRoot() -> URL { timelineFeatureTestCacheRoot("secure-thumb") }
     private func uid(_ id: String = "node-1") -> PhotoUID { PhotoUID(volumeID: "vol-1", nodeID: id) }
     private func fileSize(_ url: URL) -> Int64 {
         Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
@@ -48,7 +49,7 @@ struct SecureThumbnailCacheTests {
     // MARK: - On-disk encryption
 
     @Test func encryptedBlobHasNoPlaintext() throws {
-        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore())
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore(), rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")
         let plaintext = png()
         cache.storeToDisk(plaintext, for: uid())
@@ -96,7 +97,7 @@ struct SecureThumbnailCacheTests {
     @Test func differentAccountCannotReadCacheBlob() {
         let store = MemoryCacheKeyStore()
         let ns = uniqueNamespace()
-        let cache = ThumbnailCache(namespace: ns, keyStore: store)
+        let cache = ThumbnailCache(namespace: ns, keyStore: store, rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")
         cache.storeToDisk(png(), for: uid())
         #expect(cache.diskData(for: uid()) == png())
@@ -110,7 +111,7 @@ struct SecureThumbnailCacheTests {
     // MARK: - Failure modes
 
     @Test func missingKeyIsCacheMissNotCrash() {
-        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore(available: false))
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore(available: false), rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")           // Keychain unavailable → locked
         cache.storeToDisk(png(), for: uid())            // dropped (no-op)
         #expect(cache.has(uid()) == false)
@@ -118,7 +119,7 @@ struct SecureThumbnailCacheTests {
     }
 
     @Test func hasUsableDiskDataRejectsAndDeletesCorruptBlob() throws {
-        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore())
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore(), rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")
         // A corrupt blob written directly (not via storeToDisk → not pre-validated), as from a prior launch.
         try Data(repeating: 0x09, count: 64).write(to: cache.diskURL(for: uid()))
@@ -132,7 +133,7 @@ struct SecureThumbnailCacheTests {
     }
 
     @Test func corruptBlobIsMissAndDeleted() throws {
-        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore())
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore(), rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")
         cache.storeToDisk(png(), for: uid())
         let url = cache.diskURL(for: uid())
@@ -145,7 +146,7 @@ struct SecureThumbnailCacheTests {
 
     @Test func signOutRemovesBlobsAndKey() {
         let store = MemoryCacheKeyStore()
-        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: store)
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: store, rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")
         cache.storeToDisk(png(), for: uid())
         #expect(cache.has(uid()) == true)
@@ -162,11 +163,12 @@ struct SecureThumbnailCacheTests {
         // configured cache, not a throwaway ThumbnailCache() that stays on a per-process ephemeral key.)
         let store = MemoryCacheKeyStore()
         let ns = uniqueNamespace()
-        let first = ThumbnailCache(namespace: ns, keyStore: store)
+        let root = uniqueRoot()
+        let first = ThumbnailCache(namespace: ns, keyStore: store, rootDirectory: root)
         first.configure(accountUID: "acct-A")
         first.storeToDisk(png(), for: uid())
 
-        let relaunched = ThumbnailCache(namespace: ns, keyStore: store)
+        let relaunched = ThumbnailCache(namespace: ns, keyStore: store, rootDirectory: root)
         relaunched.configure(accountUID: "acct-A")
         #expect(relaunched.has(uid()) == true)
         #expect(relaunched.diskData(for: uid()) == png())
@@ -177,8 +179,9 @@ struct SecureThumbnailCacheTests {
         // derivative-bound: an original blob is not a valid thumbnail blob and vice versa.
         let store = MemoryCacheKeyStore()
         let ns = uniqueNamespace()
-        let original = ThumbnailCache(namespace: ns, derivative: "original", keyStore: store)
-        let thumbnail = ThumbnailCache(namespace: ns, derivative: "thumbnail", keyStore: store)
+        let root = uniqueRoot()
+        let original = ThumbnailCache(namespace: ns, derivative: "original", keyStore: store, rootDirectory: root)
+        let thumbnail = ThumbnailCache(namespace: ns, derivative: "thumbnail", keyStore: store, rootDirectory: root)
         original.configure(accountUID: "acct-A")
         thumbnail.configure(accountUID: "acct-A")
 
@@ -189,7 +192,7 @@ struct SecureThumbnailCacheTests {
     }
 
     @Test func originalsLRUCapEvictsOldestBlobFirst() throws {
-        let cache = ThumbnailCache(namespace: uniqueNamespace(), derivative: "original", keyStore: MemoryCacheKeyStore())
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), derivative: "original", keyStore: MemoryCacheKeyStore(), rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")
         let old = uid("old")
         let keepA = uid("keep-a")
@@ -214,7 +217,7 @@ struct SecureThumbnailCacheTests {
     }
 
     @Test func originalsTouchKeepsRecentlyUsedBlobDuringCapEnforcement() throws {
-        let cache = ThumbnailCache(namespace: uniqueNamespace(), derivative: "original", keyStore: MemoryCacheKeyStore())
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), derivative: "original", keyStore: MemoryCacheKeyStore(), rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")
         let old = uid("old")
         let recentlyUsed = uid("recent")
@@ -239,25 +242,25 @@ struct SecureThumbnailCacheTests {
         // unconfigured cache would re-crawl everything every launch.
         let store = MemoryCacheKeyStore()
         let ns = uniqueNamespace()
-        let configured = ThumbnailCache(namespace: ns, keyStore: store)
+        let root = uniqueRoot()
+        let configured = ThumbnailCache(namespace: ns, keyStore: store, rootDirectory: root)
         configured.configure(accountUID: "acct-A")
         configured.storeToDisk(png(), for: uid())
 
-        let unconfigured = ThumbnailCache(namespace: ns, keyStore: store)
+        let unconfigured = ThumbnailCache(namespace: ns, keyStore: store, rootDirectory: root)
         #expect(unconfigured.diskData(for: uid()) == nil)
     }
 
     @Test func legacyPlaintextCacheIsPurgedOnConfigure() throws {
         let ns = uniqueNamespace()
-        let legacyDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ProtonPhotos", isDirectory: true)
-            .appendingPathComponent(ns, isDirectory: true)
+        let root = uniqueRoot()
+        let legacyDir = root.appendingPathComponent(ns, isDirectory: true)
         try FileManager.default.createDirectory(at: legacyDir, withIntermediateDirectories: true)
         // A pre-encryption PLAINTEXT thumbnail sitting in the old cache directory.
         try png().write(to: legacyDir.appendingPathComponent("vol-1~node-1"))
         #expect(FileManager.default.fileExists(atPath: legacyDir.path))
 
-        let cache = ThumbnailCache(namespace: ns, keyStore: MemoryCacheKeyStore())
+        let cache = ThumbnailCache(namespace: ns, keyStore: MemoryCacheKeyStore(), rootDirectory: root)
         cache.configure(accountUID: "acct-A")                       // must purge the legacy plaintext dir
         #expect(FileManager.default.fileExists(atPath: legacyDir.path) == false)
     }

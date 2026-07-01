@@ -48,12 +48,19 @@ struct MediaByteCacheTests {
         "byte-cache-\(UUID().uuidString)"
     }
 
+    private func uniqueRoot() -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProtonPhotosKit-byte-cache-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
     private func uid(_ id: String = "node-1") -> PhotoUID {
         PhotoUID(volumeID: "vol-1", nodeID: id)
     }
 
     @Test func encryptedBlobHasNoPlaintextAndRoundTrips() throws {
-        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore())
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore(), rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")
 
         let plaintext = png()
@@ -70,11 +77,12 @@ struct MediaByteCacheTests {
     @Test func configuredCacheSurvivesAcrossInstances() {
         let store = MemoryCacheKeyStore()
         let namespace = uniqueNamespace()
-        let first = ThumbnailCache(namespace: namespace, keyStore: store)
+        let root = uniqueRoot()
+        let first = ThumbnailCache(namespace: namespace, keyStore: store, rootDirectory: root)
         first.configure(accountUID: "acct-A")
         first.storeToDisk(png(), for: uid())
 
-        let relaunched = ThumbnailCache(namespace: namespace, keyStore: store)
+        let relaunched = ThumbnailCache(namespace: namespace, keyStore: store, rootDirectory: root)
         relaunched.configure(accountUID: "acct-A")
 
         #expect(relaunched.has(uid()) == true)
@@ -82,7 +90,7 @@ struct MediaByteCacheTests {
     }
 
     @Test func missingKeyIsCacheMissNotCrash() {
-        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore(available: false))
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore(available: false), rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")
         cache.storeToDisk(png(), for: uid())
 
@@ -91,7 +99,7 @@ struct MediaByteCacheTests {
     }
 
     @Test func corruptBlobIsMissAndDeleted() throws {
-        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore())
+        let cache = ThumbnailCache(namespace: uniqueNamespace(), keyStore: MemoryCacheKeyStore(), rootDirectory: uniqueRoot())
         cache.configure(accountUID: "acct-A")
         cache.storeToDisk(png(), for: uid())
 

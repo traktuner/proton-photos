@@ -201,6 +201,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     // Diagnostics state
     private var lastHUDPushDetent: CFTimeInterval = 0
+    private var lastPerfDiagnosticsLog: CFTimeInterval = 0
     private var lastCommitFrameLog: CFTimeInterval = 0
 
     /// True when some VISIBLE cell still lacks a real texture — the host keeps ticking redraws while this
@@ -1486,13 +1487,14 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         for s in srcSlots where s.index < flatUIDs.count { uids.append(flatUIDs[s.index]) }
         for s in tgtSlots where s.index < flatUIDs.count { uids.append(flatUIDs[s.index]) }
         streamTextures(visibleUIDs: uids, overscanUIDs: [])
-        let (srcGroups, _) = buildRealGroups(slots: srcSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.sourceDisplayMode)
-        let (tgtGroups, _) = buildRealGroups(slots: tgtSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.targetDisplayMode)
+        let (srcGroups, srcRealCount) = buildRealGroups(slots: srcSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.sourceDisplayMode)
+        let (tgtGroups, tgtRealCount) = buildRealGroups(slots: tgtSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.targetDisplayMode)
         cache.evictToBudget()
         renderer.renderLayerDissolve(in: view, viewportSize: viewportSize,
                                      sourceGroups: srcGroups, targetGroups: tgtGroups, t: Float(plan.targetOpacity))
         hasPendingVisibleThumbnails = uids.contains { !cache.isResident($0) }
-        publishLightDiagnostics(visibleCount: uids.count, realCount: srcSlots.count + tgtSlots.count,
+        publishLightDiagnostics(phase: "overviewDissolve", visibleCount: uids.count, overscanCount: 0,
+                                realCount: srcRealCount + tgtRealCount,
                                 cellCount: srcSlots.count + tgtSlots.count,
                                 visibleRect: CGRect(origin: .zero, size: viewportSize),
                                 contentSize: engine.contentSize(level: plan.targetLevel, width: layoutWidth,
@@ -1506,8 +1508,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         var uids: [PhotoUID] = []
         for d in draws where d.index < flatUIDs.count { uids.append(flatUIDs[d.index]) }
         streamTextures(visibleUIDs: uids, overscanUIDs: [])
-        renderTransitionDraws(in: view, draws: draws, flatUIDs: flatUIDs, viewportSize: viewportSize)
-        publishLightDiagnostics(visibleCount: uids.count, realCount: draws.count, cellCount: draws.count,
+        let realCount = renderTransitionDraws(in: view, draws: draws, flatUIDs: flatUIDs, viewportSize: viewportSize)
+        publishLightDiagnostics(phase: "transition", visibleCount: uids.count, overscanCount: 0,
+                                realCount: realCount, cellCount: draws.count,
                                 visibleRect: CGRect(origin: .zero, size: viewportSize),
                                 contentSize: engine.contentSize(level: level, width: layoutWidth, columnPhase: currentPhase()),
                                 now: now)
@@ -1524,8 +1527,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// background card. So gaps, aspectFit letterbox, and a tile fading to/from background all show the
     /// single constant grid surface (a per-slot placeholder card here gave a mismatched colour during
     /// the animation). Reuses the texture cache + TileContentFitter; geometry comes from the plan.
+    @discardableResult
     private func renderTransitionDraws(in view: MTKView, draws: [GridTransitionDraw], flatUIDs: [PhotoUID],
-                                       viewportSize: CGSize) {
+                                       viewportSize: CGSize) -> Int {
         let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
         let displayMode = effectiveDisplayMode
         var images: [MetalGridQuad] = []
@@ -1548,6 +1552,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         renderer.render(in: view, viewportSize: viewportSize, groups: [
             MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
         ])
+        return images.count
     }
 
     /// The geometry-only commit bridge: smooth only the SUB-CELL residual between the transaction-final frame
@@ -1575,7 +1580,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
         let realCount = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
         hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
-        publishLightDiagnostics(visibleCount: visibleUIDs.count, realCount: realCount, cellCount: slots.count,
+        publishLightDiagnostics(phase: "commitBridge", visibleCount: visibleUIDs.count,
+                                overscanCount: overscanUIDs.count, realCount: realCount, cellCount: slots.count,
                                 visibleRect: CGRect(origin: scrollOffset, size: viewportSize),
                                 contentSize: settledContentSize, now: now)
     }
@@ -1641,7 +1647,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
         let realCount = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
         hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
-        publishLightDiagnostics(visibleCount: visibleUIDs.count, realCount: realCount, cellCount: slots.count,
+        publishLightDiagnostics(phase: zoomTransaction == nil ? "settled" : "liveZoom",
+                                visibleCount: visibleUIDs.count, overscanCount: overscanUIDs.count,
+                                realCount: realCount, cellCount: slots.count,
                                 visibleRect: CGRect(origin: clip.bounds.origin, size: viewportSize),
                                 contentSize: contentSizeForDiag, now: now)
     }
@@ -1790,21 +1798,50 @@ extension MetalGridCoordinator {
         }
     }
 
-    private func publishLightDiagnostics(visibleCount: Int, realCount: Int, cellCount: Int, visibleRect: CGRect, contentSize: CGSize, now: CFTimeInterval) {
+    private func publishLightDiagnostics(phase: String, visibleCount: Int, overscanCount: Int, realCount: Int,
+                                         cellCount: Int, visibleRect: CGRect, contentSize: CGSize, now: CFTimeInterval) {
         guard now - lastHUDPushDetent > 0.1 else { return }
         lastHUDPushDetent = now
-        var stats = MetalGridStats()
-        stats.visibleItems = visibleCount
-        stats.realTextureItems = realCount
-        stats.placeholderItems = max(0, cellCount - realCount)
-        stats.drawCalls = renderer.lastDrawCalls
-        stats.instanceCount = renderer.lastInstanceCount
+        let stats = MetalGridStats.frame(
+            visibleCount: visibleCount,
+            overscanCount: overscanCount,
+            realCount: realCount,
+            cellCount: cellCount,
+            textureUploads: cache.uploadsThisFrame,
+            textureUploadBytes: cache.uploadBytesThisFrame,
+            textureUploadMs: cache.uploadMsThisFrame,
+            evictions: cache.evictionsThisFrame,
+            residentBytes: cache.residentBytes,
+            drawCalls: renderer.lastDrawCalls,
+            textureBinds: renderer.lastTextureBinds,
+            instanceCount: renderer.lastInstanceCount,
+            gpuDrawMs: renderer.lastDrawMs
+        )
         var hud = MetalGridHUD()
         hud.stats = stats
         hud.level = level
         hud.totalItems = totalItems
         hud.dataSource = dataSource.label
         onHUD?(hud)
+        guard now - lastPerfDiagnosticsLog >= 0.5 else { return }
+        lastPerfDiagnosticsLog = now
+        PhotoDiagnostics.shared.emit("MetalGridPerf", [
+            "phase": phase,
+            "level": "\(level)",
+            "visible": "\(stats.visibleItems)",
+            "overscan": "\(stats.overscanItems)",
+            "real": "\(stats.realTextureItems)",
+            "placeholder": "\(stats.placeholderItems)",
+            "drawCalls": "\(stats.drawCalls)",
+            "textureBinds": "\(stats.textureBinds)",
+            "instances": "\(stats.instanceCount)",
+            "gpuDrawMs": String(format: "%.2f", stats.gpuDrawMs),
+            "uploads": "\(stats.textureUploads)",
+            "uploadBytes": "\(stats.textureUploadBytes)",
+            "uploadMs": String(format: "%.2f", stats.textureUploadMs),
+            "evictions": "\(stats.evictions)",
+            "residentMB": String(format: "%.2f", Double(stats.memoryEstimateBytes) / 1_048_576),
+        ])
     }
 
 }

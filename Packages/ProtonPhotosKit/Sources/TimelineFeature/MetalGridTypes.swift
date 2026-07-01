@@ -21,6 +21,7 @@ struct MetalGridStats: Equatable, Sendable {
     var cacheMisses = 0
     var evictions = 0
     var drawCalls = 0
+    var textureBinds = 0
     var instanceCount = 0
     var cpuLayoutMs: Double = 0
     var cpuInstanceMs: Double = 0
@@ -33,6 +34,7 @@ struct MetalGridStats: Equatable, Sendable {
         "visibleItems=\(visibleItems) overscanItems=\(overscanItems) realTextureItems=\(realTextureItems) "
         + "placeholderItems=\(placeholderItems) textureUploads=\(textureUploads) textureUploadBytes=\(textureUploadBytes) "
         + "cacheHits=\(cacheHits) cacheMisses=\(cacheMisses) evictions=\(evictions) drawCalls=\(drawCalls) "
+        + "textureBinds=\(textureBinds) "
         + "instanceCount=\(instanceCount) cpuLayoutMs=\(fmt(cpuLayoutMs)) cpuInstanceMs=\(fmt(cpuInstanceMs)) "
         + "textureUploadMs=\(fmt(textureUploadMs)) gpuDrawMs=\(fmt(gpuDrawMs)) fpsEstimate=\(fmt(fpsEstimate)) "
         + "memoryEstimateMB=\(fmt(Double(memoryEstimateBytes) / 1_048_576))"
@@ -52,6 +54,40 @@ struct MetalGridStats: Equatable, Sendable {
         var real = 0
         for uid in drawnUIDs where realResident(uid) { real += 1 }
         return (real, drawnUIDs.count - real)
+    }
+
+    static func frame(
+        visibleCount: Int,
+        overscanCount: Int,
+        realCount: Int,
+        cellCount: Int,
+        textureUploads: Int,
+        textureUploadBytes: Int,
+        textureUploadMs: Double,
+        evictions: Int,
+        residentBytes: Int,
+        drawCalls: Int,
+        textureBinds: Int,
+        instanceCount: Int,
+        gpuDrawMs: Double
+    ) -> MetalGridStats {
+        var stats = MetalGridStats()
+        stats.visibleItems = visibleCount
+        stats.overscanItems = overscanCount
+        stats.realTextureItems = realCount
+        stats.placeholderItems = max(0, cellCount - realCount)
+        stats.textureUploads = textureUploads
+        stats.textureUploadBytes = textureUploadBytes
+        stats.textureUploadMs = textureUploadMs
+        stats.evictions = evictions
+        stats.memoryEstimateBytes = residentBytes
+        stats.cacheHits = realCount
+        stats.cacheMisses = stats.placeholderItems
+        stats.drawCalls = drawCalls
+        stats.textureBinds = textureBinds
+        stats.instanceCount = instanceCount
+        stats.gpuDrawMs = gpuDrawMs
+        return stats
     }
 }
 

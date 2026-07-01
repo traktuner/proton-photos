@@ -37,13 +37,15 @@ public actor ThumbnailCache {
     public init(
         namespace: String = "thumbnails",
         derivative: String? = nil,
-        keyStore: CacheKeyStore = KeychainCacheKeyStore()
+        keyStore: CacheKeyStore = KeychainCacheKeyStore(),
+        rootDirectory: URL? = nil
     ) {
         self.init(
             namespace: namespace,
             derivative: derivative,
             keyStore: keyStore,
-            configuration: ThumbnailCacheConfiguration()
+            configuration: ThumbnailCacheConfiguration(),
+            rootDirectory: rootDirectory
         )
     }
 
@@ -51,10 +53,10 @@ public actor ThumbnailCache {
         namespace: String = "thumbnails",
         derivative: String? = nil,
         keyStore: CacheKeyStore = KeychainCacheKeyStore(),
-        configuration: ThumbnailCacheConfiguration = ThumbnailCacheConfiguration()
+        configuration: ThumbnailCacheConfiguration = ThumbnailCacheConfiguration(),
+        rootDirectory: URL? = nil
     ) {
-        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ProtonPhotos", isDirectory: true)
+        let root = rootDirectory ?? Self.defaultRootDirectory()
         self.namespace = namespace
         self.derivative = derivative ?? Self.defaultDerivative(for: namespace)
         self.keyStore = keyStore
@@ -72,6 +74,11 @@ public actor ThumbnailCache {
             account: CryptoBox.ephemeralAccount
         )
         memory.totalCostLimit = configuration.dataMemoryBudgetBytes
+    }
+
+    public nonisolated static func defaultRootDirectory() -> URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ProtonPhotos", isDirectory: true)
     }
 
     // MARK: - Account configuration

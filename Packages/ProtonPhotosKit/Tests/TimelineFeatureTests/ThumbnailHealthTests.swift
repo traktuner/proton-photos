@@ -10,7 +10,7 @@ import MediaCache
 struct ThumbnailHealthTests {
     @Test func diskButNotRAMWarmupTest() async throws {
         let uid = PhotoUID(volumeID: "vol", nodeID: "disk-only")
-        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("disk"))
+        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("disk"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health"))
         cache.storeToDisk(Self.pngData(), for: uid)
         let loader = FakeThumbnailLoader()
         let feed = await Self.makeFeed(cache: cache, loader: loader)
@@ -36,7 +36,7 @@ struct ThumbnailHealthTests {
 
     @Test func noMainThreadDecodeTest() async throws {
         let uid = PhotoUID(volumeID: "vol", nodeID: "no-main")
-        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("main"))
+        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("main"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health"))
         cache.storeToDisk(Self.pngData(), for: uid)
         let feed = await Self.makeFeed(cache: cache, loader: FakeThumbnailLoader())
 
@@ -60,7 +60,7 @@ struct ThumbnailHealthTests {
         // the uid list's (count-first-last) signature, so a fixed id would resume "at end" on reruns.
         let uid = PhotoUID(volumeID: "vol", nodeID: "prefetch-\(UUID().uuidString)")
         let loader = FakeThumbnailLoader(payloads: [uid: Self.pngData()])
-        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("prefetch"))
+        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("prefetch"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health"))
         let feed = await Self.makeFeed(cache: cache, loader: loader, concurrency: 1, batch: 1)
         let prefetcher = ThumbnailPrefetcher(feed: feed)
 
@@ -75,7 +75,7 @@ struct ThumbnailHealthTests {
     @Test func priorityUpgradeTest() async throws {
         let uid = PhotoUID(volumeID: "vol", nodeID: "upgrade")
         let loader = FakeThumbnailLoader(payloads: [uid: Self.pngData()])
-        let feed = await Self.makeFeed(cache: ThumbnailCache(namespace: Self.uniqueNamespace("upgrade")), loader: loader, concurrency: 1, batch: 1)
+        let feed = await Self.makeFeed(cache: ThumbnailCache(namespace: Self.uniqueNamespace("upgrade"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health")), loader: loader, concurrency: 1, batch: 1)
         PhotoDiagnostics.shared.resetForTests()
 
         await feed.requestPriority(uid, priority: .idleLibraryCrawl)
@@ -86,7 +86,7 @@ struct ThumbnailHealthTests {
 
     @Test func cacheStateSeparationTest() async throws {
         let uid = PhotoUID(volumeID: "vol", nodeID: "tier")
-        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("tier"))
+        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("tier"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health"))
         cache.storeToDisk(Self.pngData(), for: uid)
         let feed = await Self.makeFeed(cache: cache, loader: FakeThumbnailLoader())
 
@@ -153,7 +153,7 @@ struct ThumbnailHealthTests {
     @Test func decodeWarmupStatsAreObservable() async throws {
         PhotoDiagnostics.shared.resetForTests()
         let uid = PhotoUID(volumeID: "vol", nodeID: "decode-stats")
-        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("decode-stats"))
+        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("decode-stats"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health"))
         cache.storeToDisk(Self.pngData(), for: uid)
         let feed = await Self.makeFeed(cache: cache, loader: FakeThumbnailLoader())
 
@@ -172,7 +172,7 @@ struct ThumbnailHealthTests {
         concurrency: Int = 2,
         batch: Int = 2
     ) async -> ThumbnailFeed {
-        let aspects = await MainActor.run { AspectRegistry(namespace: Self.uniqueNamespace("aspects")) }
+        let aspects = await MainActor.run { AspectRegistry(namespace: Self.uniqueNamespace("aspects"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health-aspects")) }
         return ThumbnailFeed(cache: cache, loader: loader, aspects: aspects, concurrency: concurrency, batch: batch)
     }
 

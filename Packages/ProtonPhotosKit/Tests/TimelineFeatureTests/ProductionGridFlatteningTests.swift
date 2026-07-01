@@ -15,9 +15,10 @@ import GridCore
 @Suite struct ProductionGridFlatteningTests {
 
     private func feed() -> ThumbnailFeed {
-        ThumbnailFeed(cache: ThumbnailCache(namespace: "test-\(UUID().uuidString)"),
-                      loader: NoopThumbnailLoader(),
-                      aspects: AspectRegistry(namespace: "test-\(UUID().uuidString)"))
+        let root = timelineFeatureTestCacheRoot("flattening")
+        return ThumbnailFeed(cache: ThumbnailCache(namespace: "test-\(UUID().uuidString)", rootDirectory: root),
+                             loader: NoopThumbnailLoader(),
+                             aspects: AspectRegistry(namespace: "test-\(UUID().uuidString)", rootDirectory: root))
     }
 
     private func day(_ year: Int, _ month: Int, _ d: Int) -> Date {

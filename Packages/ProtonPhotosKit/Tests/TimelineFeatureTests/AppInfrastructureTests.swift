@@ -4,6 +4,7 @@ import SQLite3
 import Testing
 import PhotosCore
 import MediaCache
+@testable import TimelineFeature
 
 /// Tests for the engineering/infrastructure pass: settings persistence, window-frame validation,
 /// sidebar metrics, the video state machine, thumbnail priority ordering, prefetch pause reasons,
@@ -175,8 +176,9 @@ struct AppInfrastructureTests {
 
     @Test func prefetchPauseReasons() async {
         let namespace = "tests-pause-\(UUID().uuidString)"
-        let aspects = await MainActor.run { AspectRegistry(namespace: namespace) }
-        let feed = ThumbnailFeed(cache: ThumbnailCache(namespace: namespace),
+        let root = timelineFeatureTestCacheRoot("pause")
+        let aspects = await MainActor.run { AspectRegistry(namespace: namespace, rootDirectory: root) }
+        let feed = ThumbnailFeed(cache: ThumbnailCache(namespace: namespace, rootDirectory: root),
                                  loader: StubThumbnailLoader(), aspects: aspects,
                                  concurrency: 1, batch: 1)
         await feed.startPrefetch([PhotoUID(volumeID: "v", nodeID: "a")])
@@ -223,6 +225,63 @@ struct AppInfrastructureTests {
         let lookupPlan = queryPlan(db, "SELECT t FROM photos WHERE vol = 'x' AND node = 'y';")
         #expect(lookupPlan.uppercased().contains("SEARCH"))        // index search, not full SCAN
         #expect(!lookupPlan.uppercased().contains("SCAN PHOTOS"))
+    }
+
+    @Test func aspectRegistryUsesInjectedRootAndPersistsThere() async throws {
+        let namespace = "tests-aspects-\(UUID().uuidString)"
+        let root = timelineFeatureTestCacheRoot("aspects")
+        let uid = PhotoUID(volumeID: "vol", nodeID: "aspect")
+        let productionURL = AspectRegistry.storageURL(namespace: namespace)
+        try? FileManager.default.removeItem(at: productionURL)
+
+        let registry = await MainActor.run { AspectRegistry(namespace: namespace, rootDirectory: root) }
+        registry.record(uid, aspect: 1.5)
+        try await Task.sleep(for: .milliseconds(180))
+
+        let reloaded = await MainActor.run { AspectRegistry(namespace: namespace, rootDirectory: root) }
+        let aspect = await MainActor.run { reloaded.aspect(for: uid) }
+        #expect(abs(aspect - 1.5) < 0.0001)
+        #expect(FileManager.default.fileExists(atPath: AspectRegistry.storageURL(namespace: namespace, rootDirectory: root).path))
+        #expect(!FileManager.default.fileExists(atPath: productionURL.path))
+    }
+
+    @Test func aspectRegistryDefaultPathContractStaysInProtonPhotosCaches() {
+        let namespace = "tests-default-path-\(UUID().uuidString)"
+        let expected = AspectRegistry.defaultRootDirectory().appendingPathComponent("\(namespace).json")
+        #expect(AspectRegistry.storageURL(namespace: namespace) == expected)
+    }
+
+    @Test func metalGridStatsFrameSurfacesRenderAndUploadCounters() {
+        let stats = MetalGridStats.frame(
+            visibleCount: 7,
+            overscanCount: 3,
+            realCount: 5,
+            cellCount: 8,
+            textureUploads: 2,
+            textureUploadBytes: 4_096,
+            textureUploadMs: 1.25,
+            evictions: 1,
+            residentBytes: 8_192,
+            drawCalls: 6,
+            textureBinds: 7,
+            instanceCount: 5,
+            gpuDrawMs: 0.75
+        )
+        #expect(stats.visibleItems == 7)
+        #expect(stats.overscanItems == 3)
+        #expect(stats.realTextureItems == 5)
+        #expect(stats.placeholderItems == 3)
+        #expect(stats.textureUploads == 2)
+        #expect(stats.textureUploadBytes == 4_096)
+        #expect(stats.textureUploadMs == 1.25)
+        #expect(stats.evictions == 1)
+        #expect(stats.memoryEstimateBytes == 8_192)
+        #expect(stats.cacheHits == 5)
+        #expect(stats.cacheMisses == 3)
+        #expect(stats.drawCalls == 6)
+        #expect(stats.textureBinds == 7)
+        #expect(stats.instanceCount == 5)
+        #expect(stats.gpuDrawMs == 0.75)
     }
 
     // MARK: - SQLite helpers

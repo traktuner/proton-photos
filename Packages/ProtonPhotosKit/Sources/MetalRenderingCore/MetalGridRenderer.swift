@@ -24,6 +24,7 @@ package final class MetalGridRenderer {
     package private(set) var lastDrawMs: Double = 0
     package private(set) var lastDrawCalls = 0
     package private(set) var lastInstanceCount = 0
+    package private(set) var lastTextureBinds = 0
 
     /// Triple-buffered vertex pool for the steady `render(...)` path: instead of allocating a fresh
     /// `MTLBuffer` per group every frame, each frame packs all groups' vertices into one growable,
@@ -110,12 +111,13 @@ package final class MetalGridRenderer {
         let slot = frameCounter % Self.maxInFlight
         commandBuffer.addCompletedHandler { [frameBoundary] _ in frameBoundary.signal() }
         configure(encoder, viewportSize: viewportSize)
-        let (drawCalls, instances) = encode(groups: groups, into: encoder, pooledSlot: slot)
+        let (drawCalls, instances, textureBinds) = encode(groups: groups, into: encoder, pooledSlot: slot)
         encoder.endEncoding()
         present(commandBuffer, to: target)
         lastDrawMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
         lastDrawCalls = drawCalls
         lastInstanceCount = instances
+        lastTextureBinds = textureBinds
     }
 
     /// Set the shared per-frame state (pipeline, sampler, viewport uniforms) on an encoder. Used by the
@@ -134,7 +136,7 @@ package final class MetalGridRenderer {
     /// into one reused ring buffer (the steady `render(...)` path — no per-frame allocation); `nil` allocates
     /// a fresh shared buffer per group (the transient offscreen dissolve path, where pooling buys nothing).
     @discardableResult
-    private func encode(groups: [MetalGridRenderGroup], into encoder: MTLRenderCommandEncoder, pooledSlot: Int? = nil) -> (Int, Int) {
+    private func encode(groups: [MetalGridRenderGroup], into encoder: MTLRenderCommandEncoder, pooledSlot: Int? = nil) -> (Int, Int, Int) {
         let stride = MemoryLayout<Vertex>.stride
         // Build each non-empty group's vertices up front, recording its byte offset into the packed buffer.
         var built: [(verts: [Vertex], source: MetalGridRenderGroup.Source, quadCount: Int, offset: Int)] = []
@@ -147,7 +149,7 @@ package final class MetalGridRenderer {
             built.append((verts, group.source, group.quads.count, totalVerts * stride))
             totalVerts += verts.count
         }
-        guard totalVerts > 0 else { return (0, 0) }
+        guard totalVerts > 0 else { return (0, 0, 0) }
 
         // Resolve the vertex buffer + each group's offset into it.
         let packed: MTLBuffer?
@@ -167,6 +169,7 @@ package final class MetalGridRenderer {
 
         var drawCalls = 0
         var instances = 0
+        var textureBinds = 0
         for g in built {
             let buffer: MTLBuffer
             let offset: Int
@@ -184,19 +187,21 @@ package final class MetalGridRenderer {
                 encoder.setFragmentTexture(texture, index: 0)
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: g.verts.count)
                 drawCalls += 1
+                textureBinds += 1
                 instances += g.quadCount
             case .perQuadTexture(let textures) where textures.count == g.quadCount:
                 for (i, texture) in textures.enumerated() {
                     encoder.setFragmentTexture(texture, index: 0)
                     encoder.drawPrimitives(type: .triangle, vertexStart: i * 6, vertexCount: 6)
                     drawCalls += 1
+                    textureBinds += 1
                     instances += 1
                 }
             default:
                 break
             }
         }
-        return (drawCalls, instances)
+        return (drawCalls, instances, textureBinds)
     }
 
     /// The ring buffer for `slot`, grown (doubling) when the frame needs more than it currently holds.
@@ -222,16 +227,17 @@ package final class MetalGridRenderer {
     }
 
     private func encodeLayerPass(into cmd: MTLCommandBuffer, texture: MTLTexture,
-                                 groups: [MetalGridRenderGroup], viewportSize: CGSize) {
+                                 groups: [MetalGridRenderGroup], viewportSize: CGSize) -> (Int, Int, Int) {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = texture
         pass.colorAttachments[0].loadAction = .clear
         pass.colorAttachments[0].clearColor = clearColor
         pass.colorAttachments[0].storeAction = .store
-        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return (0, 0, 0) }
         configure(enc, viewportSize: viewportSize)
-        _ = encode(groups: groups, into: enc)
+        let stats = encode(groups: groups, into: enc)
         enc.endEncoding()
+        return stats
     }
 
     /// Render the OVERVIEW LAYER DISSOLVE: rasterise the source layer to texA and the target layer to texB
@@ -253,8 +259,8 @@ package final class MetalGridRenderer {
         guard let texA = layerA, let texB = layerB else {
             render(to: target, viewportSize: viewportSize, groups: targetGroups); return   // safe fallback
         }
-        encodeLayerPass(into: cmd, texture: texA, groups: sourceGroups, viewportSize: viewportSize)
-        encodeLayerPass(into: cmd, texture: texB, groups: targetGroups, viewportSize: viewportSize)
+        let sourceStats = encodeLayerPass(into: cmd, texture: texA, groups: sourceGroups, viewportSize: viewportSize)
+        let targetStats = encodeLayerPass(into: cmd, texture: texB, groups: targetGroups, viewportSize: viewportSize)
         let drawablePass = target.renderPassDescriptor
         drawablePass.colorAttachments[0].loadAction = .clear
         drawablePass.colorAttachments[0].clearColor = clearColor
@@ -269,6 +275,9 @@ package final class MetalGridRenderer {
         enc.endEncoding()
         present(cmd, to: target)
         lastDrawMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
+        lastDrawCalls = sourceStats.0 + targetStats.0 + 1
+        lastInstanceCount = sourceStats.1 + targetStats.1
+        lastTextureBinds = sourceStats.2 + targetStats.2 + 2
     }
 
     private func present(_ commandBuffer: MTLCommandBuffer, to target: MetalGridDrawableTarget) {

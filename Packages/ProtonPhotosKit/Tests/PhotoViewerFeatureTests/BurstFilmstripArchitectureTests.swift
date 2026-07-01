@@ -59,6 +59,7 @@ final class BurstFilmstripArchitectureTests: XCTestCase {
 
     @MainActor
     func testViewerSeedsKnownBurstMembersBeforeProviderResponse() async {
+        let root = Self.cacheRoot("burst-filmstrip")
         let items = [
             makeItem("a", burstMembers: ["a", "b", "c"]),
             makeItem("b", burstMembers: ["a", "b", "c"]),
@@ -68,9 +69,9 @@ final class BurstFilmstripArchitectureTests: XCTestCase {
             items: items,
             index: 1,
             feed: ThumbnailFeed(
-                cache: ThumbnailCache(namespace: "burst-filmstrip-\(UUID().uuidString)"),
+                cache: ThumbnailCache(namespace: "burst-filmstrip-\(UUID().uuidString)", rootDirectory: root),
                 loader: EmptyThumbnailLoader(),
-                aspects: AspectRegistry()
+                aspects: AspectRegistry(rootDirectory: root)
             ),
             media: FailingMediaProvider(),
             burstProvider: EmptyBurstProvider()
@@ -92,6 +93,7 @@ final class BurstFilmstripArchitectureTests: XCTestCase {
 
     @MainActor
     func testContextualNavigationPrefersFilmstripThenFallsThroughToLibrary() async {
+        let root = Self.cacheRoot("burst-navigation")
         let title = makeItem("b", burstMembers: ["a", "b", "c"])
         let nextLibraryItem = makeItem("d", burstMembers: [])
         let burst = [
@@ -103,9 +105,9 @@ final class BurstFilmstripArchitectureTests: XCTestCase {
             items: [title, nextLibraryItem],
             index: 0,
             feed: ThumbnailFeed(
-                cache: ThumbnailCache(namespace: "burst-navigation-\(UUID().uuidString)"),
+                cache: ThumbnailCache(namespace: "burst-navigation-\(UUID().uuidString)", rootDirectory: root),
                 loader: EmptyThumbnailLoader(),
-                aspects: AspectRegistry()
+                aspects: AspectRegistry(rootDirectory: root)
             ),
             media: FailingMediaProvider(),
             burstProvider: StaticBurstProvider(items: burst)
@@ -135,6 +137,13 @@ final class BurstFilmstripArchitectureTests: XCTestCase {
             tags: [.bursts],
             burstMemberIDs: burstMembers
         )
+    }
+
+    private static func cacheRoot(_ prefix: String) -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProtonPhotosKit-\(prefix)-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
     }
 }
 

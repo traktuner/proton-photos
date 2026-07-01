@@ -105,7 +105,7 @@ struct ThumbnailCrawlYieldTests {
 
     @Test func diskHitWarmsRamWithoutNetwork() async throws {
         let store = MemoryCacheKeyStore()
-        let cache = ThumbnailCache(namespace: "diskhit-\(UUID())", keyStore: store)
+        let cache = ThumbnailCache(namespace: "diskhit-\(UUID())", keyStore: store, rootDirectory: timelineFeatureTestCacheRoot("yield-diskhit"))
         cache.configure(accountUID: "acct-A")
         let uid = PhotoUID(volumeID: "v", nodeID: "disk-only")
         cache.storeToDisk(Self.bytes(), for: uid)               // encrypted on disk, no RAM, no network
@@ -123,7 +123,7 @@ struct ThumbnailCrawlYieldTests {
 
     @Test func corruptDiskBlobDoesNotStarveVisibleFetch() async throws {
         let store = MemoryCacheKeyStore()
-        let cache = ThumbnailCache(namespace: "corrupt-\(UUID())", keyStore: store)
+        let cache = ThumbnailCache(namespace: "corrupt-\(UUID())", keyStore: store, rootDirectory: timelineFeatureTestCacheRoot("yield-corrupt"))
         cache.configure(accountUID: "acct-A")
         let uid = PhotoUID(volumeID: "v", nodeID: "corrupt")
         // A blob that EXISTS on disk but can't decrypt (as if left by a prior launch / wrong key). Written
@@ -149,8 +149,9 @@ struct ThumbnailCrawlYieldTests {
         concurrency: Int = 1,
         batch: Int = 1
     ) async -> ThumbnailFeed {
-        let aspects = await MainActor.run { AspectRegistry(namespace: "yield-\(UUID())") }
-        let cache = cache ?? ThumbnailCache(namespace: "yield-\(UUID())", keyStore: MemoryCacheKeyStore())
+        let root = timelineFeatureTestCacheRoot("yield")
+        let aspects = await MainActor.run { AspectRegistry(namespace: "yield-\(UUID())", rootDirectory: root) }
+        let cache = cache ?? ThumbnailCache(namespace: "yield-\(UUID())", keyStore: MemoryCacheKeyStore(), rootDirectory: root)
         return ThumbnailFeed(cache: cache, loader: loader, aspects: aspects, concurrency: concurrency, batch: batch, clock: clock.now)
     }
 

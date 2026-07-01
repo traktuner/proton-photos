@@ -156,7 +156,14 @@ struct ThumbnailFeedCoreTests {
     }
 
     private static func cache(_ prefix: String) -> ThumbnailCache {
-        let cache = ThumbnailCache(namespace: "feed-core-\(prefix)-\(UUID().uuidString)", keyStore: MemoryCacheKeyStore())
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ProtonPhotosKit-feed-core-\(prefix)-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let cache = ThumbnailCache(
+            namespace: "feed-core-\(prefix)-\(UUID().uuidString)",
+            keyStore: MemoryCacheKeyStore(),
+            rootDirectory: root
+        )
         cache.configure(accountUID: "acct-A")
         return cache
     }
