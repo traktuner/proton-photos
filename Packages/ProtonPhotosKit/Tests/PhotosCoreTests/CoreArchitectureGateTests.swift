@@ -160,6 +160,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         "PhotoViewerCore",
         "ProtonAuth",
         "TimelineFeature",
+        "TimelineUIKitAdapter",
         "UploadFeature",
     ]
 
@@ -1337,6 +1338,90 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             The iOS/iPadOS adapter may assemble the shared cache from a platform policy and glyph rasterizer,
             but it must not fork cache logic or bind photo-domain IDs.
+            """
+        )
+    }
+
+    func testTimelineUIKitAdapterUsesViewportDrivenCoreProfileResolver() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let adapterRoot = sourcesRoot.appendingPathComponent("TimelineUIKitAdapter")
+        let adapterFile = adapterRoot.appendingPathComponent("UIKitTimelineGridProfileAdapter.swift")
+        var violations: [String] = []
+
+        if !manifest.contains(".library(name: \"TimelineUIKitAdapter\", targets: [\"TimelineUIKitAdapter\"])") {
+            violations.append("TimelineUIKitAdapter: missing matching library product")
+        }
+
+        if let targetLine = manifestLine(forTarget: "TimelineUIKitAdapter", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            if dependencies != ["GridCore", "TimelineCore"] {
+                violations.append("TimelineUIKitAdapter: dependencies \(dependencies.sorted()) != [GridCore, TimelineCore]")
+            }
+        } else {
+            violations.append("TimelineUIKitAdapter: missing Package.swift target declaration")
+        }
+
+        guard FileManager.default.fileExists(atPath: adapterFile.path) else {
+            XCTFail("TimelineUIKitAdapter/UIKitTimelineGridProfileAdapter.swift: missing UIKit timeline adapter")
+            return
+        }
+
+        let imports = try importedModules(in: adapterFile)
+        let expectedImports: Set<String> = ["CoreGraphics", "GridCore", "TimelineCore", "UIKit"]
+        if imports != expectedImports {
+            violations.append("TimelineUIKitAdapter/UIKitTimelineGridProfileAdapter.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+        }
+        for forbidden in ["AppKit", "SwiftUI", "Metal", "MetalKit", "PhotosCore", "MediaCache", "TimelineFeature"] where imports.contains(forbidden) {
+            violations.append("TimelineUIKitAdapter/UIKitTimelineGridProfileAdapter.swift: must not import \(forbidden)")
+        }
+
+        let source = try String(contentsOf: adapterFile, encoding: .utf8)
+        let code = stripCommentsAndStringLiterals(from: source)
+        for symbol in [
+            "#if canImport(UIKit)",
+            "public struct UIKitTimelineGridProfileAdapter",
+            "TimelineGridProfileConfiguration.production.resolver",
+            "profile(for view: UIView",
+            "view.bounds",
+            "view.safeAreaInsets",
+            "forBounds bounds: CGRect",
+            "safeAreaInsets: UIEdgeInsets",
+            "additionalInsets: UIEdgeInsets",
+            "TimelineGridViewport(layoutWidth:",
+            "resolver.profile(for:",
+            "usableAxis("
+        ] where !source.contains(symbol) {
+            violations.append("TimelineUIKitAdapter/UIKitTimelineGridProfileAdapter.swift: missing \(symbol)")
+        }
+        for forbidden in [
+            "PhotoUID",
+            "PhotoItem",
+            "ThumbnailFeed",
+            "MediaCache",
+            "TimelineFeature",
+            "UIDevice",
+            "userInterfaceIdiom",
+            "UIScreen.main",
+            "horizontalSizeClass",
+            "verticalSizeClass",
+            "ProcessInfo.processInfo.physicalMemory",
+            "ProcessInfo.processInfo.activeProcessorCount",
+            "MTKView",
+            "UIScrollView",
+            "MetalGridTexture"
+        ] where contains(forbidden, in: code) {
+            violations.append("TimelineUIKitAdapter/UIKitTimelineGridProfileAdapter.swift: viewport adapter leaked forbidden policy/domain type \(forbidden)")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 5.8 Timeline UIKit adapter boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            The first iOS/iPadOS timeline seam must stay viewport-driven: UIKit may translate current view
+            bounds and safe-area/chrome insets into TimelineCore's profile resolver, but feature state,
+            photo-domain IDs, device idioms, hardware probes, and macOS defaults stay out.
             """
         )
     }
