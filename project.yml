@@ -119,6 +119,8 @@ targets:
       - package: ProtonPhotosKit
         product: MediaCacheCore
       - package: ProtonPhotosKit
+        product: MediaCacheUIKitAdapter
+      - package: ProtonPhotosKit
         product: MetalRenderingCore
       - package: ProtonPhotosKit
         product: MetalGridTextureCore

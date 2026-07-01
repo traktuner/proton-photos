@@ -154,6 +154,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         "MediaCache",
         "MediaCacheAppKitAdapter",
         "MediaCacheCore",
+        "MediaCacheUIKitAdapter",
         "MetalGridTextureAppKitAdapter",
         "MetalGridTextureUIKitAdapter",
         "PhotoViewerFeature",
@@ -1338,6 +1339,121 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             The iOS/iPadOS adapter may assemble the shared cache from a platform policy and glyph rasterizer,
             but it must not fork cache logic or bind photo-domain IDs.
+            """
+        )
+    }
+
+    func testUIKitMediaCacheAdapterStaysThinAndCoreBacked() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let adapterRoot = sourcesRoot.appendingPathComponent("MediaCacheUIKitAdapter")
+        let feedFile = adapterRoot.appendingPathComponent("UIKitThumbnailFeed.swift")
+        let policyFile = adapterRoot.appendingPathComponent("UIKitMediaCachePolicy.swift")
+        let decoderFile = adapterRoot.appendingPathComponent("UIKitThumbnailImageDecoder.swift")
+        let prefetchFile = adapterRoot.appendingPathComponent("UIKitThumbnailPrefetcher.swift")
+        var violations: [String] = []
+
+        if !manifest.contains(".library(name: \"MediaCacheUIKitAdapter\", targets: [\"MediaCacheUIKitAdapter\"])") {
+            violations.append("MediaCacheUIKitAdapter: missing matching library product")
+        }
+
+        if let targetLine = manifestLine(forTarget: "MediaCacheUIKitAdapter", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            let expected: Set<String> = ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaCacheCore"]
+            if dependencies != expected {
+                violations.append("MediaCacheUIKitAdapter: dependencies \(dependencies.sorted()) != \(expected.sorted())")
+            }
+        } else {
+            violations.append("MediaCacheUIKitAdapter: missing Package.swift target declaration")
+        }
+
+        for file in [feedFile, policyFile, decoderFile, prefetchFile] where !FileManager.default.fileExists(atPath: file.path) {
+            violations.append("MediaCacheUIKitAdapter/\(file.lastPathComponent): missing UIKit cache adapter file")
+        }
+
+        if FileManager.default.fileExists(atPath: feedFile.path) {
+            let imports = try importedModules(in: feedFile)
+            let expectedImports: Set<String> = [
+                "Foundation",
+                "MediaByteCache",
+                "MediaCacheCore",
+                "MediaDecodingCore",
+                "MediaFeedCore",
+                "PhotosCore",
+                "UIKit",
+            ]
+            if imports != expectedImports {
+                violations.append("MediaCacheUIKitAdapter/UIKitThumbnailFeed.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+            }
+
+            let source = try String(contentsOf: feedFile, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: source)
+            for symbol in [
+                "#if canImport(UIKit)",
+                "public actor UIKitThumbnailFeed",
+                "ThumbnailFeedCore(",
+                "UIKitMediaCachePolicy.decodedRAMBudgetBytes()",
+                "UIKitMediaCachePolicy.maxConcurrentDecodes()",
+                "NSCache<NSString, UIImage>",
+                "memoryCGImage(for uid: PhotoUID) -> CGImage?",
+                "decoded.decodedCostBytes",
+                "UIKitThumbnailImageDecoder.image(from: decoded)"
+            ] where !source.contains(symbol) {
+                violations.append("MediaCacheUIKitAdapter/UIKitThumbnailFeed.swift: missing \(symbol)")
+            }
+            for forbidden in ["AppKit", "SwiftUI", "Metal", "MetalKit", "TimelineFeature", "PhotoViewerFeature", "MapFeature", "ProtonDriveSDK", "NSImage"] where contains(forbidden, in: code) {
+                violations.append("MediaCacheUIKitAdapter/UIKitThumbnailFeed.swift: forbidden adapter dependency/reference \(forbidden)")
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: policyFile.path) {
+            let imports = try importedModules(in: policyFile)
+            if imports != ["Foundation", "MediaByteCache"] {
+                violations.append("MediaCacheUIKitAdapter/UIKitMediaCachePolicy.swift: imports \(imports.sorted()) != [Foundation, MediaByteCache]")
+            }
+
+            let source = try String(contentsOf: policyFile, encoding: .utf8)
+            for symbol in [
+                "UIKitMediaCachePolicy",
+                "thumbnailByteCacheConfiguration()",
+                "dataMemoryBudgetBytes",
+                "decodedRAMBudgetBytes",
+                "wrapperRAMBudgetBytes",
+                "downloadConcurrencyLimit",
+                "maxConcurrentDecodes"
+            ] where !source.contains(symbol) {
+                violations.append("MediaCacheUIKitAdapter/UIKitMediaCachePolicy.swift: missing \(symbol)")
+            }
+            for macValue in [
+                "physical * 0.15",
+                "ceilingMiB: 20480",
+                "countLimit = 512",
+                "priorityQueueLimit: 600",
+                "sequentialScanLimit: 128"
+            ] where source.contains(macValue) {
+                violations.append("MediaCacheUIKitAdapter/UIKitMediaCachePolicy.swift: UIKit policy must not copy macOS default \(macValue)")
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: decoderFile.path) {
+            let imports = try importedModules(in: decoderFile)
+            if imports != ["MediaDecodingCore", "UIKit"] {
+                violations.append("MediaCacheUIKitAdapter/UIKitThumbnailImageDecoder.swift: imports \(imports.sorted()) != [MediaDecodingCore, UIKit]")
+            }
+
+            let source = try String(contentsOf: decoderFile, encoding: .utf8)
+            for symbol in ["UIImage(cgImage: decoded.image", "decodedCost(_ image: UIImage)", "image.cgImage"] where !source.contains(symbol) {
+                violations.append("MediaCacheUIKitAdapter/UIKitThumbnailImageDecoder.swift: missing \(symbol)")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            UIKit media-cache adapter boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            iOS/iPadOS may adapt decoded Core `CGImage` thumbnails to `UIImage` and own conservative mobile
+            RAM/concurrency policy, but feed/cache logic must remain in MediaFeedCore and MediaCacheCore.
             """
         )
     }

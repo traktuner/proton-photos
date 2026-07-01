@@ -86,6 +86,7 @@ final class ProjectHygieneTests: XCTestCase {
             "TARGETED_DEVICE_FAMILY: \"1,2\"",
             "product: PhotosCore",
             "product: TimelineUIKitAdapter",
+            "product: MediaCacheUIKitAdapter",
             "product: MetalGridTextureUIKitAdapter",
             "product: PhotoViewerCore",
             "product: UploadCore"
