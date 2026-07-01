@@ -13,6 +13,9 @@ cd "$(dirname "$0")/.."
 
 DD="build/DD.noindex"
 rm -rf build/DD   # remove any legacy INDEXED build dir so its product stops appearing in Spotlight
+find "$HOME/Library/Developer/Xcode/DerivedData" \
+  -path "*/Build/Products/*/ProtonPhotos.app" \
+  -prune -exec rm -rf {} + 2>/dev/null || true
 PROJECT="ProtonPhotos.xcodeproj"
 SCHEME="ProtonPhotos"
 
