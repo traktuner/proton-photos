@@ -321,9 +321,16 @@ The performance contract from the existing Metal grid is preserved and tightened
 
 #### Phase 2.5 — Universal Core regression gate
 
-`CoreArchitectureGateTests` is the shared no-regression gate for the current universal Core set: `PhotosCore`, `MediaByteCache`, `MediaDecodingCore`, `MediaFeedCore`, `MediaLocationCore`, and `GridCore`. New reusable Core targets must be added to this gate before they are treated as universal Core.
+`CoreArchitectureGateTests` is the shared no-regression gate for the current UI-free universal Core set:
+`PhotosCore`, `MediaByteCache`, `MediaDecodingCore`, `MediaFeedCore`, `MediaLocationCore`, `MediaCacheCore`,
+`GridCore`, `UploadCore`, `TimelineCore`, and `PhotoViewerCore`. New reusable Core targets must be added to this
+gate before they are treated as universal Core.
 
-The executable local gate is `scripts/verify-universal-core.sh`. It runs the shared architecture tests and builds every current universal Core target for `generic/platform=iOS` and `generic/platform=macOS`. Because SwiftPM models iPadOS through the iOS platform declaration, this iOS-family build is the package-level iPadOS compatibility check until separate iPad UI targets exist.
+The executable local gate is `scripts/verify-universal-core.sh`. It runs the shared architecture tests and builds
+every current UI-free universal Core target for `generic/platform=iOS` and `generic/platform=macOS`. It also builds
+`DesignSystemCore` as the current shared SwiftUI/UX target, plus the separate Metal rendering/texture cores and the
+current AppKit/UIKit texture adapters. Because SwiftPM models iPadOS through the iOS platform declaration, this
+iOS-family build is the package-level iPadOS compatibility check until separate iPad UI targets exist.
 
 Agents MUST run `scripts/verify-universal-core.sh` before committing a change that modifies universal Core boundaries, package target dependencies, Core imports, platform purity rules, or cross-platform cache/feed/location behavior. If the gate cannot run, the final report must name the exact command, failure, and residual risk.
 

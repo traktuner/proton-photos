@@ -1,6 +1,21 @@
 import Foundation
 import AVFoundation
+import Observation
 import PhotosCore
+
+public struct VideoPlaybackDiagnosticEvent: Equatable, Sendable {
+    public let name: String
+    public let fields: [String: String]
+    public let throttleSeconds: TimeInterval
+
+    public init(name: String, fields: [String: String], throttleSeconds: TimeInterval = 0) {
+        self.name = name
+        self.fields = fields
+        self.throttleSeconds = throttleSeconds
+    }
+}
+
+public typealias VideoPlaybackDiagnosticSink = @MainActor @Sendable (VideoPlaybackDiagnosticEvent) -> Void
 
 /// Owns the single `AVPlayer` and every AVFoundation observation for the video path, and drives the
 /// `VideoViewerState` machine. Pulled out of `PhotoViewerModel` so the viewer no longer carries
@@ -31,9 +46,11 @@ public final class VideoPlaybackController {
     /// Seconds to wait for first playback before declaring the attempt stuck. Matches the web client's
     /// 30 s first-block timeout.
     private let firstFrameDeadline: TimeInterval
+    private let diagnostics: VideoPlaybackDiagnosticSink?
 
-    public init(firstFrameDeadline: TimeInterval = 30) {
+    public init(firstFrameDeadline: TimeInterval = 30, diagnostics: VideoPlaybackDiagnosticSink? = nil) {
         self.firstFrameDeadline = firstFrameDeadline
+        self.diagnostics = diagnostics
     }
 
     // MARK: - State the model pushes in (resolution phase, before a player exists)
@@ -210,7 +227,7 @@ public final class VideoPlaybackController {
             try? await Task.sleep(for: .seconds(deadline))
             guard let self, !Task.isCancelled else { return }
             guard self.currentUID == uid, !self.didReachPlaying else { return }
-            PhotoDiagnostics.shared.emit("VideoPlayer", [
+            self.emitDiagnostics([
                 "uid": self.key(uid), "event": "watchdogTimeout", "deadline": "\(Int(deadline))s",
             ])
             self.handleFailure(.timedOut, uid: uid)
@@ -251,6 +268,14 @@ public final class VideoPlaybackController {
 
     private func key(_ uid: PhotoUID) -> String { "\(uid.volumeID)~\(uid.nodeID)" }
 
+    private func emitDiagnostics(_ fields: [String: String], throttleSeconds: TimeInterval = 0) {
+        diagnostics?(VideoPlaybackDiagnosticEvent(
+            name: "VideoPlayer",
+            fields: fields,
+            throttleSeconds: throttleSeconds
+        ))
+    }
+
     private func logPlayer(item: AVPlayerItem?, player: AVPlayer, error: Error? = nil) {
         guard let item else { return }
         let loaded = item.loadedTimeRanges
@@ -258,7 +283,7 @@ public final class VideoPlaybackController {
             .map { "\(String(format: "%.1f", $0.start.seconds))-\(String(format: "%.1f", ($0.start + $0.duration).seconds))" }
             .joined(separator: ",")
         let duration = item.duration.isNumeric ? String(format: "%.1f", item.duration.seconds) : "?"
-        PhotoDiagnostics.shared.emit("VideoPlayer", [
+        emitDiagnostics([
             "uid": currentUID.map(key) ?? "-",
             "status": "\(item.status.rawValue)",
             "timeControl": "\(player.timeControlStatus.rawValue)",

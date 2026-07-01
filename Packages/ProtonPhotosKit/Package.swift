@@ -44,6 +44,7 @@ let package = Package(
         .library(name: "MediaCache", targets: ["MediaCache"]),
         .library(name: "TimelineCore", targets: ["TimelineCore"]),
         .library(name: "TimelineFeature", targets: ["TimelineFeature"]),
+        .library(name: "PhotoViewerCore", targets: ["PhotoViewerCore"]),
         .library(name: "PhotoViewerFeature", targets: ["PhotoViewerFeature"]),
         // Modular feature foundation: album management + the upload queue/state-machine. Both are
         // pure (no SDK/HTTP) and drive injected backend protocols the app implements.
@@ -88,12 +89,13 @@ let package = Package(
             dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "GridCore", "TimelineCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter"],
             swiftSettings: disableDynamicActorIsolation
         ),
+        .target(name: "PhotoViewerCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "PhotoViewerFeature",
-            dependencies: ["PhotosCore", "DesignSystem", "MediaCache"],
+            dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "PhotoViewerCore"],
             swiftSettings: disableDynamicActorIsolation
         ),
-        .testTarget(name: "PhotoViewerFeatureTests", dependencies: ["PhotoViewerFeature"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "PhotoViewerFeatureTests", dependencies: ["PhotoViewerFeature", "PhotoViewerCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(
             name: "TimelineFeatureTests",
             dependencies: ["TimelineFeature", "TimelineCore", "GridCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter", "MediaCache", "PhotosCore"],

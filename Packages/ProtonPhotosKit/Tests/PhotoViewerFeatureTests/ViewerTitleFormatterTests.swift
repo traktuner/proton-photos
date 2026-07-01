@@ -1,4 +1,5 @@
 import XCTest
+@testable import PhotoViewerCore
 @testable import PhotoViewerFeature
 
 final class ViewerTitleFormatterTests: XCTestCase {

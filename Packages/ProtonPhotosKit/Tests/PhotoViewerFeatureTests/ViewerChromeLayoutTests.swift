@@ -1,5 +1,6 @@
 import XCTest
 import CoreGraphics
+@testable import PhotoViewerCore
 @testable import PhotoViewerFeature
 
 final class ViewerChromeLayoutTests: XCTestCase {

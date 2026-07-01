@@ -4,6 +4,7 @@ import AVFoundation
 import ImageIO
 import PhotosCore
 import MediaCache
+import PhotoViewerCore
 
 /// Drives the full-screen viewer with progressive quality (thumbnail → preview → original):
 ///  1. show the grid thumbnail instantly (soft — small image scaled up for full-screen),
@@ -28,7 +29,7 @@ public final class PhotoViewerModel {
     public private(set) var isSharp = false
     /// Owns the AVPlayer + the video state machine (streaming, watchdog, stall/buffer handling). The
     /// model decides *which* source to play; the controller decides *how it's going*.
-    public let video = VideoPlaybackController()
+    public let video: VideoPlaybackController
     /// The single AVPlayer used for video (streaming or downloaded). `nil` for images.
     public var player: AVPlayer? { video.player }
     /// Explicit video lifecycle — the view shows progress / error from this.
@@ -98,6 +99,9 @@ public final class PhotoViewerModel {
         self.originalsCache = originalsCache
         self.cacheOriginals = cacheOriginals
         self.originalsCapBytes = originalsCapBytes
+        self.video = VideoPlaybackController { event in
+            PhotoDiagnostics.shared.emit(event.name, event.fields, throttleSeconds: event.throttleSeconds)
+        }
     }
 
     public func toggleInfo() {

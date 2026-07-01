@@ -93,6 +93,12 @@ final class CoreArchitectureGateTests: XCTestCase {
             expectedDependencies: ["GridCore", "PhotosCore"],
             extraForbiddenTokens: []
         ),
+        CoreTargetRule(
+            name: "PhotoViewerCore",
+            allowedImports: ["AVFoundation", "CoreGraphics", "Foundation", "Observation", "PhotosCore"],
+            expectedDependencies: ["PhotosCore"],
+            extraForbiddenTokens: ["PhotoDiagnostics"]
+        ),
     ]
 
     private static let forbiddenFrameworkImports: Set<String> = [
@@ -151,6 +157,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         "MetalGridTextureAppKitAdapter",
         "MetalGridTextureUIKitAdapter",
         "PhotoViewerFeature",
+        "PhotoViewerCore",
         "ProtonAuth",
         "TimelineFeature",
         "UploadFeature",

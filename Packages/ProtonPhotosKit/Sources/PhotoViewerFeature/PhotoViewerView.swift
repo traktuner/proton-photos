@@ -3,6 +3,7 @@ import AVKit
 import AVFoundation
 import PhotosCore
 import DesignSystem
+import PhotoViewerCore
 
 /// `AVPlayerView` that turns a pinch-OUT into the SAME "fly closed" dismiss the still image uses — so a PLAYING
 /// video can be pinched/swiped shut too (previously the gesture only existed on the image path, so it did nothing

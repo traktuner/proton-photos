@@ -2,6 +2,7 @@ import SwiftUI
 import MapKit
 import PhotosCore
 import DesignSystem
+import PhotoViewerCore
 
 /// Liquid-Glass info panel that slides in from the right edge of the viewer, listing all available
 /// file metadata for the current photo/video plus a native map when GPS is present.

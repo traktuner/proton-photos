@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE="$ROOT/Packages/ProtonPhotosKit"
-DERIVED_DATA_BASE="${DERIVED_DATA_BASE:-/tmp/protonphotos-universal-core-gate}"
+DERIVED_DATA_BASE="${DERIVED_DATA_BASE:-/tmp/protonphotos-package-core-gate}"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 
@@ -13,7 +13,15 @@ CORE_TARGETS=(
   MediaDecodingCore
   MediaFeedCore
   MediaLocationCore
+  MediaCacheCore
   GridCore
+  UploadCore
+  TimelineCore
+  PhotoViewerCore
+)
+
+SHARED_UI_TARGETS=(
+  DesignSystemCore
 )
 
 RENDERING_CORE_TARGETS=(
@@ -40,6 +48,8 @@ echo "[core-gate] developer dir: $DEVELOPER_DIR"
 echo "[core-gate] running CoreArchitectureGateTests"
 xcrun swift test --package-path "$PACKAGE" --filter CoreArchitectureGateTests
 
+pushd "$PACKAGE" >/dev/null
+
 for target in "${CORE_TARGETS[@]}"; do
   for platform in "${PLATFORMS[@]}"; do
     name="${platform%%:*}"
@@ -47,6 +57,23 @@ for target in "${CORE_TARGETS[@]}"; do
     derived_data="$DERIVED_DATA_BASE/$target-$name"
 
     echo "[core-gate] building $target for $name"
+    xcrun xcodebuild \
+      -scheme "$target" \
+      -destination "$destination" \
+      -derivedDataPath "$derived_data" \
+      -skipPackagePluginValidation \
+      -quiet \
+      build
+  done
+done
+
+for target in "${SHARED_UI_TARGETS[@]}"; do
+  for platform in "${PLATFORMS[@]}"; do
+    name="${platform%%:*}"
+    destination="${platform#*:}"
+    derived_data="$DERIVED_DATA_BASE/$target-$name"
+
+    echo "[core-gate] building shared UI $target for $name"
     xcrun xcodebuild \
       -scheme "$target" \
       -destination "$destination" \
@@ -100,4 +127,6 @@ for target in "${IOS_PLATFORM_ADAPTER_TARGETS[@]}"; do
     build
 done
 
-echo "[core-gate] universal Core + Metal Core + platform texture adapter proof gate passed"
+popd >/dev/null
+
+echo "[core-gate] universal Core + shared UI + Metal Core + platform texture adapter proof gate passed"
