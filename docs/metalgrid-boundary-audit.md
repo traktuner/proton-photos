@@ -507,3 +507,15 @@ UIKit texture budget policy proof. No macOS production behavior changed.
   the macOS adapter default and are intended as a safe starting point until real-device Instruments tuning.
 - `CoreArchitectureGateTests` now guards that UIKit texture policy does not copy `MetalGridBudget.default`,
   query raw hardware counts, or leak into `MetalGridTextureCore`.
+
+## Phase 5.4 result
+
+UIKit texture cache factory proof. No macOS production behavior changed.
+
+- `UIKitMetalGridTextureCacheFactory` now assembles `MetalGridTextureCache<ID>` for iOS/iPadOS from an injected
+  `MTLDevice`, a `UIKitMetalGridTexturePolicy`, and a `UIKitMetalGridGlyphRasterizer`.
+- The factory stays generic over `ID: Hashable & Sendable`; it does not bind `PhotoUID` or media-feed types.
+- The factory has a viewport-size convenience entry point that resolves through `UIKitMetalGridTexturePolicies`
+  and then calls the same shared cache initializer.
+- `CoreArchitectureGateTests` now guards that the factory uses the shared `MetalGridTextureCore` cache rather
+  than forking upload/residency logic or embedding new budget constants.

@@ -685,3 +685,14 @@ portable `GridTextureBudget` and a `maxTexturePixels` cap for `MetalGridTextureC
 These values intentionally do not copy macOS `MetalGridBudget.default` (`96` uploads/frame, `4096` resident
 textures, `1.2` overscan, `320` pixels). They are adapter-owned starting values for future iOS/iPadOS hosts and
 must be tuned with Instruments on real hardware before release.
+
+#### Phase 5.4 — UIKit texture cache factory proof
+
+Small platform-adapter addition with no macOS production behavior change.
+
+`MetalGridTextureUIKitAdapter` now provides `UIKitMetalGridTextureCacheFactory`, which assembles the shared
+`MetalGridTextureCache<ID>` from an `MTLDevice`, a UIKit texture policy, and a UIKit glyph rasterizer. The factory
+is still generic over item identity and does not reference `PhotoUID`, media feeds, or macOS defaults.
+
+This is the injection proof for a future iOS/iPadOS grid host: the host can choose viewport policy, pass its item
+ID type, and receive the same shared texture cache implementation used by macOS.

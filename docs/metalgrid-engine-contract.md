@@ -38,6 +38,7 @@ overlaid transparent `NSScrollView` document spacer provides physics + pointer e
 | `AppKitMetalGridGlyphRasterizer` | `AppKitMetalGridGlyphRasterizer.swift` | macOS SF Symbol → `CGImage` badge rasterization injected into the texture cache. |
 | `UIKitMetalGridGlyphRasterizer` | `MetalGridTextureUIKitAdapter/UIKitMetalGridGlyphRasterizer.swift` | iOS/iPadOS SF Symbol → `CGImage` badge rasterization adapter; not used by the macOS production host. |
 | `UIKitMetalGridTexturePolicies` | `MetalGridTextureUIKitAdapter/UIKitMetalGridTexturePolicy.swift` | Conservative iOS-family texture-budget presets resolved from viewport surface class. |
+| `UIKitMetalGridTextureCacheFactory` | `MetalGridTextureUIKitAdapter/UIKitMetalGridTextureCacheFactory.swift` | iOS/iPadOS cache assembly over the shared generic `MetalGridTextureCache<ID>`. |
 | `MetalGridTextureCache<ID>` | `MetalGridTextureCore/MetalGridTextureCache.swift` | Generic per-item `MTLTexture` cache over `GridTextureResidencyPolicy<ID>`; the macOS coordinator binds `ID == PhotoUID`. |
 | `MetalGridRenderer` | `MetalRenderingCore/MetalGridRenderer.swift` | Draws the quads it is handed. No layout math; `TimelineFeature` owns only the `MTKView` adapter extension. |
 | `MetalGridScrollHost` | `MetalGridScrollHost.swift` | AppKit host: scroll physics, gesture intake, resize entry, calls the engine helpers. |
@@ -71,6 +72,7 @@ real-device tuning replaces or refines those values.
 placeholder texture lifetime, badge glyph texture caching, and byte/upload counters. It is generic over item
 identity and must not import photo-domain packages. Platform adapters bind the ID type, provide decoded images,
 inject concrete budgets, and inject glyph rasterizers.
+The UIKit adapter's factory proves this assembly path without introducing an iOS grid host yet.
 
 **`MetalGridTextureCore` owns:** reusable Metal texture upload/cache code and the platform-neutral glyph request
 contract. It may depend on `GridCore` policy and use `Metal`/`CoreGraphics`, but it must not own render command

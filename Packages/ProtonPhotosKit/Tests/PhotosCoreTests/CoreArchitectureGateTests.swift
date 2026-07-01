@@ -962,6 +962,56 @@ final class CoreArchitectureGateTests: XCTestCase {
         )
     }
 
+    func testUIKitTextureCacheFactoryUsesSharedTextureCore() throws {
+        let adapterRoot = sourcesRoot.appendingPathComponent("MetalGridTextureUIKitAdapter")
+        let factoryFile = adapterRoot.appendingPathComponent("UIKitMetalGridTextureCacheFactory.swift")
+        var violations: [String] = []
+
+        guard FileManager.default.fileExists(atPath: factoryFile.path) else {
+            XCTFail("MetalGridTextureUIKitAdapter/UIKitMetalGridTextureCacheFactory.swift: missing UIKit cache factory")
+            return
+        }
+
+        let imports = try importedModules(in: factoryFile)
+        let expectedImports: Set<String> = ["CoreGraphics", "Metal", "MetalGridTextureCore"]
+        if imports != expectedImports {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridTextureCacheFactory.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+        }
+        for forbidden in ["AppKit", "SwiftUI", "MetalKit", "PhotosCore", "MediaCache", "TimelineFeature"] where imports.contains(forbidden) {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridTextureCacheFactory.swift: must not import \(forbidden)")
+        }
+
+        let source = try String(contentsOf: factoryFile, encoding: .utf8)
+        let code = stripCommentsAndStringLiterals(from: source)
+        for symbol in [
+            "#if canImport(UIKit)",
+            "UIKitMetalGridTextureCacheFactory",
+            "makeCache<ID: Hashable & Sendable>",
+            "MetalGridTextureCache<ID>",
+            "UIKitMetalGridTexturePolicy",
+            "UIKitMetalGridTexturePolicies.policy(forViewportSize:",
+            "UIKitMetalGridGlyphRasterizer()",
+            "budget: policy.budget",
+            "maxTexturePixels: policy.maxTexturePixels"
+        ] where !source.contains(symbol) {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridTextureCacheFactory.swift: missing \(symbol)")
+        }
+        for forbidden in ["PhotoUID", "PhotoItem", "MetalGridBudget.default", "GridTextureBudget(", "maxUploadsPerFrame:", "maxCachedTextures:"] where contains(forbidden, in: code) {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridTextureCacheFactory.swift: factory must use injected UIKit policy and generic IDs, found \(forbidden)")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 5.4 UIKit texture cache factory boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            The iOS/iPadOS adapter may assemble the shared cache from a platform policy and glyph rasterizer,
+            but it must not fork cache logic or bind photo-domain IDs.
+            """
+        )
+    }
+
     func testMetalGridTextureCacheStaysItemIDGeneric() throws {
         let textureRoot = sourcesRoot.appendingPathComponent("MetalGridTextureCore")
         let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")
