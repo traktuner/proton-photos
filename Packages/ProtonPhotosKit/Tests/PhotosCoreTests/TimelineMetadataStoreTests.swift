@@ -233,8 +233,10 @@ final class TimelineMetadataStoreTests: XCTestCase {
         XCTAssertEqual(reopened.load(), items.sorted(by: TimelineOrder.areInIncreasingOrder))
 
         // Any real change breaks the short-circuit again.
-        let changed = store.save(items + [makeItem(node: "new", t: 2000)])
+        let changed = reopened.save(items + [makeItem(node: "new", t: 2000)])
         XCTAssertFalse(changed.skippedUnchanged)
+        XCTAssertTrue(changed.succeeded)
+        XCTAssertEqual(changed.upsertedRows, 51)
         reopened.close()
         store.close()
     }
