@@ -107,6 +107,14 @@ public enum LibraryDatabaseLocation {
 
 // MARK: - Save result
 
+/// Structural outcome of a `TimelineMetadataStore.updateDimensions` batch.
+public struct TimelineDimensionUpdateResult: Sendable, Equatable {
+    /// Rows actually written (unchanged / already-dimensioned / unknown rows count as 0).
+    public let updatedRows: Int
+    /// False when the transaction failed and was rolled back.
+    public let succeeded: Bool
+}
+
 /// Structural outcome of a `TimelineMetadataStore.save` — tests and `[DBHealth]` logging assert on
 /// this instead of on flaky timings.
 public struct TimelineSaveResult: Sendable, Equatable {
@@ -504,6 +512,91 @@ public final class TimelineMetadataStore {
             }
         }
         return true
+    }
+
+    // MARK: Dimensions
+
+    /// Batched write of learned dimensions into `photos.w`/`photos.h`, independent of timeline
+    /// saves: dimensions arrive from decode/metadata paths on their own schedule and are
+    /// deliberately NOT part of the timeline digest, so recording them never invalidates the
+    /// no-op save short-circuit — and a timeline refresh never touches `w`/`h` (its upsert omits
+    /// them), so learned values survive every refresh.
+    ///
+    /// Default (`overwrite: false`) is first-seen-wins: only rows with NULL dimensions are
+    /// filled. That keeps thumbnail-scale dimensions from clobbering true dimensions a future
+    /// metadata writer may have stored. `overwrite: true` is that future writer's mode — it
+    /// rewrites rows whose values actually differ (NULL-safe compare), so an unchanged batch is
+    /// still a no-op. Rows for unknown `(vol, node)` keys are ignored, never invented.
+    @discardableResult
+    public func updateDimensions(
+        _ batch: [PhotoUID: PhotoPixelDimensions],
+        overwrite: Bool = false
+    ) -> TimelineDimensionUpdateResult {
+        guard !batch.isEmpty else { return TimelineDimensionUpdateResult(updatedRows: 0, succeeded: true) }
+        let start = Date()
+        guard sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+            return TimelineDimensionUpdateResult(updatedRows: 0, succeeded: false)
+        }
+        // `IS NOT` is SQLite's NULL-safe inequality; the guards make every re-run a zero-write no-op.
+        let sql = overwrite
+            ? "UPDATE photos SET w=?1, h=?2 WHERE vol=?3 AND node=?4 AND (w IS NOT ?1 OR h IS NOT ?2);"
+            : "UPDATE photos SET w=?1, h=?2 WHERE vol=?3 AND node=?4 AND w IS NULL AND h IS NULL;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return TimelineDimensionUpdateResult(updatedRows: 0, succeeded: false)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var updated = 0
+        for (uid, dimensions) in batch {
+            sqlite3_reset(stmt)
+            sqlite3_bind_int(stmt, 1, Int32(dimensions.width))
+            sqlite3_bind_int(stmt, 2, Int32(dimensions.height))
+            sqlite3_bind_text(stmt, 3, uid.volumeID, -1, transient)
+            sqlite3_bind_text(stmt, 4, uid.nodeID, -1, transient)
+            guard sqlite3_step(stmt) == SQLITE_DONE else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return TimelineDimensionUpdateResult(updatedRows: 0, succeeded: false)
+            }
+            updated += Int(sqlite3_changes(db))
+        }
+        guard sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return TimelineDimensionUpdateResult(updatedRows: 0, succeeded: false)
+        }
+        PhotoDiagnostics.shared.recordDBQuery(
+            queryName: "timeline.dimensions.update",
+            durationMs: Date().timeIntervalSince(start) * 1000,
+            rowsReturned: updated
+        )
+        return TimelineDimensionUpdateResult(updatedRows: updated, succeeded: true)
+    }
+
+    /// Bulk dictionary read of every known dimension — one pass, for grid/timeline planning to
+    /// consume alongside `load()` instead of a separate aspect file. Rows without learned
+    /// dimensions are simply absent.
+    public func loadDimensions() -> [PhotoUID: PhotoPixelDimensions] {
+        let start = Date()
+        var stmt: OpaquePointer?
+        let sql = "SELECT vol, node, w, h FROM photos WHERE w IS NOT NULL AND h IS NOT NULL;"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return [:] }
+        defer { sqlite3_finalize(stmt) }
+        var result: [PhotoUID: PhotoPixelDimensions] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            guard let volC = sqlite3_column_text(stmt, 0), let nodeC = sqlite3_column_text(stmt, 1),
+                  let dimensions = PhotoPixelDimensions(
+                      width: Int(sqlite3_column_int(stmt, 2)),
+                      height: Int(sqlite3_column_int(stmt, 3))
+                  ) else { continue }
+            result[PhotoUID(volumeID: String(cString: volC), nodeID: String(cString: nodeC))] = dimensions
+        }
+        PhotoDiagnostics.shared.recordDBQuery(
+            queryName: "timeline.dimensions.load",
+            durationMs: Date().timeIntervalSince(start) * 1000,
+            rowsReturned: result.count
+        )
+        return result
     }
 
     // MARK: Digest
