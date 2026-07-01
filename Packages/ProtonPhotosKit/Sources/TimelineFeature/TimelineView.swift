@@ -129,12 +129,47 @@ public struct TimelineView: View {
 
     private var emptyState: some View {
         ContentUnavailableView {
-            Label(L10n.string("empty.no_photos_title"), systemImage: "photo.on.rectangle.angled")
+            Label(emptyStateCopy.title, systemImage: emptyStateCopy.systemImage)
         } description: {
-            Text(L10n.string("empty.no_photos_description"))
+            Text(emptyStateCopy.description)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(timelineSurfaceBackground)
+    }
+
+    private var emptyStateCopy: (title: String, description: String, systemImage: String) {
+        switch model.filter {
+        case .all:
+            return (
+                L10n.string("empty.no_photos_title"),
+                L10n.string("empty.no_photos_description"),
+                "photo.on.rectangle.angled"
+            )
+        case .tag(let tag):
+            return (
+                L10n.string("empty.filter_title \(tag.title)"),
+                L10n.string("empty.filter_description"),
+                tag.systemImage
+            )
+        case .album:
+            return (
+                L10n.string("empty.album_title"),
+                L10n.string("empty.album_description"),
+                "rectangle.stack"
+            )
+        case .trash:
+            return (
+                L10n.string("empty.trash_title"),
+                L10n.string("empty.trash_description"),
+                "trash"
+            )
+        case .map:
+            return (
+                L10n.string("empty.no_photos_title"),
+                L10n.string("empty.no_photos_description"),
+                "map"
+            )
+        }
     }
 
     private func errorState(_ message: String) -> some View {

@@ -1409,8 +1409,12 @@ private struct SidebarView: View {
                 Label("Map", systemImage: "map")
                     .tag(PhotoFilter.map)
             }
-            if !albums.isEmpty {
-                Section("sidebar.albums") {
+            Section("sidebar.albums") {
+                if albums.isEmpty {
+                    Label("sidebar.no_albums", systemImage: "tray")
+                        .foregroundStyle(.secondary)
+                        .disabled(true)
+                } else {
                     ForEach(albums) { album in
                         Label(album.title, systemImage: "rectangle.stack")
                             .tag(PhotoFilter.album(id: album.id, title: album.title))

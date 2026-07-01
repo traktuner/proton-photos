@@ -827,6 +827,114 @@
         }
       }
     },
+    "empty.album_title": {
+      "extractionState": "manual",
+      "comment": "Empty album route title.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No photos in this album"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Fotos in diesem Album"
+          }
+        }
+      }
+    },
+    "empty.album_description": {
+      "extractionState": "manual",
+      "comment": "Empty album route description.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos added to this album will appear here."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fotos, die zu diesem Album hinzugefügt werden, erscheinen hier."
+          }
+        }
+      }
+    },
+    "empty.filter_title %@": {
+      "extractionState": "manual",
+      "comment": "Empty smart-filter route title. %@ is the filter name.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No %@ photos"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Fotos für %@"
+          }
+        }
+      }
+    },
+    "empty.filter_description": {
+      "extractionState": "manual",
+      "comment": "Empty smart-filter route description.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No photos match this smart filter."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Fotos entsprechen diesem Smart-Filter."
+          }
+        }
+      }
+    },
+    "empty.trash_title": {
+      "extractionState": "manual",
+      "comment": "Empty trash route title.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recently Deleted is empty"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zuletzt gelöscht ist leer"
+          }
+        }
+      }
+    },
+    "empty.trash_description": {
+      "extractionState": "manual",
+      "comment": "Empty trash route description.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deleted photos will appear here before they are permanently removed."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gelöschte Fotos erscheinen hier, bevor sie endgültig entfernt werden."
+          }
+        }
+      }
+    },
     "error.load_library_title": {
       "extractionState": "manual",
       "comment": "Library load-error title.",

@@ -410,6 +410,24 @@
         }
       }
     },
+    "sidebar.no_albums": {
+      "extractionState": "manual",
+      "comment": "Disabled sidebar row shown when the account has no albums.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Albums"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Alben"
+          }
+        }
+      }
+    },
     "sidebar.recently_deleted": {
       "extractionState": "manual",
       "comment": "Sidebar item / title for the trash.",

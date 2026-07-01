@@ -184,6 +184,48 @@ struct ProductionRouteGuardTests {
         #expect(!uploadQueue.contains(".background(.regularMaterial)"), "popover content must not stack a second material over native popover glass")
     }
 
+    @Test func albumsSidebarAndEmptyRoutesStayExplicit() throws {
+        let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
+        let sidebar = try Self.body(of: mainView, from: "private struct SidebarView: View", to: ".scrollContentBackground(.hidden)")
+        #expect(sidebar.contains("Section(\"sidebar.albums\")"),
+                "the Albums section must stay visible even before the account has albums")
+        #expect(sidebar.contains("if albums.isEmpty"))
+        #expect(sidebar.contains("Label(\"sidebar.no_albums\", systemImage: \"tray\")"))
+        #expect(sidebar.contains(".disabled(true)"), "the empty-albums row is information, not a fake route")
+        #expect(!sidebar.contains("if !albums.isEmpty"),
+                "hiding the whole Albums section makes 'no albums' indistinguishable from a broken album fetch")
+
+        let appStrings = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Localizable.xcstrings"), encoding: .utf8)
+        #expect(appStrings.contains("\"sidebar.no_albums\""))
+
+        let timeline = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/TimelineView.swift"), encoding: .utf8)
+        #expect(timeline.contains("private var emptyStateCopy"))
+        #expect(timeline.contains("switch model.filter"))
+        #expect(timeline.contains("empty.album_title"))
+        #expect(timeline.contains("empty.filter_title"))
+        #expect(timeline.contains("empty.trash_title"))
+
+        let packageStrings = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotosCore/Resources/Localizable.xcstrings"), encoding: .utf8)
+        for key in ["empty.album_title", "empty.album_description", "empty.filter_title %@", "empty.filter_description", "empty.trash_title", "empty.trash_description"] {
+            #expect(packageStrings.contains("\"\(key)\""), "missing package localization key \(key)")
+        }
+    }
+
+    @Test func motionSidebarFilterTracksProtonSdkPhotoTag() throws {
+        let domain = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotosCore/PhotoLibrary.swift"), encoding: .utf8)
+        #expect(domain.contains("case motionPhotos = 4"),
+                "Motion must remain aligned with Proton's server-side motionPhoto tag")
+        #expect(domain.contains("case .motionPhotos: L10n.string(\"tag.motion\")"))
+
+        let sdk = try String(contentsOf: Self.repoRoot.appendingPathComponent("Vendor/sdk-swift/Sources/Generated/proton.drive.sdk.pb.swift"), encoding: .utf8)
+        #expect(sdk.contains("case motionPhoto // = 4"),
+                "the vendored SDK must expose Proton_Drive_Sdk_PhotoTag.motionPhoto")
+
+        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSDKBridge.swift"), encoding: .utf8)
+        #expect(bridge.contains("fetchPhotosList(volumeID: root.volumeID, tag: tag.rawValue)"),
+                "sidebar smart filters must query Proton by the server tag raw value")
+    }
+
     @Test func sidebarFilterChangesUseInitialViewportPolicy() throws {
         // A sidebar route switch opens the route via a ONE-SHOT INITIAL-VIEWPORT POLICY owned by the Metal grid
         // host — restoring the route's remembered scroll position, or opening at newest on first visit — NEVER an
