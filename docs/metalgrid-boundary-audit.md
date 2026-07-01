@@ -206,7 +206,7 @@ Solutions:
 2. `GridCore` layout profiles must stay viewport-scoped (`regularTimeline`, `compactTimeline`, etc.). Platform
    adapters map scene size, safe areas, traits, and hardware capability to a profile; the renderer just draws
    the resulting `GridFramePlan`.
-3. Production profile values are loaded from the adapter's validated `GridProfiles.plist`, not from renderer
+3. Production profile values are loaded from `TimelineCore`'s validated `GridProfiles.plist`, not from renderer
    defaults. Invalid profile data must fail validation rather than silently falling back to a desktop profile.
 4. macOS `TimelineFeature` adapter keeps `MetalProductionGridView`, `MetalGridScrollHost`, header/accessibility,
    real data source, and AppKit symbol rasterization.
@@ -262,7 +262,7 @@ so `regularTimeline`/`compactTimeline` changes do not jump.
 
 ## Phase 3.6 result
 
-`TimelineFeature` now owns viewport-resolved production profile selection. `GridProfiles.plist` may define
+`TimelineCore` now owns viewport-resolved production profile selection. `GridProfiles.plist` may define
 validated `selectionRules`; the shipped rule selects `compactTimeline` at layout widths up to `640pt` and falls
 back to the configured default profile (`regularTimeline`) above that.
 
@@ -278,7 +278,7 @@ compact ladder; wide windows keep the existing regular ladder.
 ## Phase 3.7 result
 
 `GridCore` now exposes semantic grid-level roles and a pure derivation rule for adjacent transition kinds. Production
-`GridProfiles.plist` no longer duplicates `transitionKindToNext`; `TimelineFeature` derives it during validated
+`GridProfiles.plist` no longer duplicates `transitionKindToNext`; `TimelineCore` derives it during validated
 profile loading and rejects explicit values that disagree with the adjacent level roles.
 
 The normal-level single-lattice planner now accepts one common presentation rect when fitting the source/target

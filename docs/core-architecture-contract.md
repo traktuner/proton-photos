@@ -367,8 +367,9 @@ must remain profile-agnostic and draw the `GridFramePlan` it receives.
 
 #### Phase 3.4 — Config-driven production grid profiles
 
-Production grid profiles are app/adapter configuration, not Core defaults. `TimelineFeature` owns the bundled
-`Resources/GridProfiles.plist` and validates it at load time before constructing `GridLevelProfile` values.
+Production grid profiles are app/feature-core configuration, not renderer defaults. `TimelineCore` owns the
+bundled `Resources/GridProfiles.plist` and validates it at load time before constructing `GridLevelProfile`
+values.
 Invalid profile data must fail validation rather than silently falling back or clamping product behavior.
 
 `MetalGridCoordinator` and `MetalGridScrollHost` must be initialized with an explicit `GridLevelProfile`; they
@@ -396,9 +397,10 @@ or any future profile. Platform adapters provide that policy from scene/viewport
 
 #### Phase 3.6 — Viewport-resolved production profile selection
 
-`TimelineFeature` resolves the active production grid profile from validated `GridProfiles.plist` selection
-rules. The current production rule is viewport-based: layout widths up to `640pt` use `compactTimeline`; wider
-layout surfaces fall back to the default `regularTimeline`.
+`TimelineCore` resolves the active production grid profile from validated `GridProfiles.plist` selection rules.
+The current production rule is viewport-based: layout widths up to `640pt` use `compactTimeline`; wider layout
+surfaces fall back to the default `regularTimeline`. `TimelineFeature` applies that resolved profile through the
+macOS Metal-grid adapter.
 
 Profile selection rules must name viewport classes, not platforms or device families. A future iPhone, iPad,
 Mac, foldable, Stage Manager, split-view, external-display, or resized-window surface must be expressible by the

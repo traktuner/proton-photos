@@ -36,7 +36,7 @@ else
 fi
 
 echo "Preflight: validating grid profile configuration"
-plutil -lint Packages/ProtonPhotosKit/Sources/TimelineFeature/Resources/GridProfiles.plist >/dev/null
+plutil -lint Packages/ProtonPhotosKit/Sources/TimelineCore/Resources/GridProfiles.plist >/dev/null
 xcrun swift test --package-path Packages/ProtonPhotosKit --filter TimelineGridProfileConfigurationTests
 
 echo "Preflight: building $SCHEME scheme for generic macOS"
