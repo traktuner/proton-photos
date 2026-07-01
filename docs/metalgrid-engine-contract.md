@@ -37,6 +37,7 @@ overlaid transparent `NSScrollView` document spacer provides physics + pointer e
 | `MetalGridGlyphRasterizing` | `MetalGridTextureCore/MetalGridGlyphRasterizer.swift` | Platform-neutral badge glyph request contract; platform adapters inject native rasterizers. |
 | `AppKitMetalGridGlyphRasterizer` | `AppKitMetalGridGlyphRasterizer.swift` | macOS SF Symbol → `CGImage` badge rasterization injected into the texture cache. |
 | `UIKitMetalGridGlyphRasterizer` | `MetalGridTextureUIKitAdapter/UIKitMetalGridGlyphRasterizer.swift` | iOS/iPadOS SF Symbol → `CGImage` badge rasterization adapter; not used by the macOS production host. |
+| `UIKitMetalGridTexturePolicies` | `MetalGridTextureUIKitAdapter/UIKitMetalGridTexturePolicy.swift` | Conservative iOS-family texture-budget presets resolved from viewport surface class. |
 | `MetalGridTextureCache<ID>` | `MetalGridTextureCore/MetalGridTextureCache.swift` | Generic per-item `MTLTexture` cache over `GridTextureResidencyPolicy<ID>`; the macOS coordinator binds `ID == PhotoUID`. |
 | `MetalGridRenderer` | `MetalRenderingCore/MetalGridRenderer.swift` | Draws the quads it is handed. No layout math; `TimelineFeature` owns only the `MTKView` adapter extension. |
 | `MetalGridScrollHost` | `MetalGridScrollHost.swift` | AppKit host: scroll physics, gesture intake, resize entry, calls the engine helpers. |
@@ -63,6 +64,8 @@ viewport-anchor (`anchorFractionY`, 0.5) rebase · bottom-pinned preservation ·
 
 **`GridTextureBudget` owns:** the portable shape of texture streaming policy: upload burst, resident texture
 capacity, and overscan fraction. Concrete defaults are platform-adapter policy, not Core behavior.
+macOS keeps `MetalGridBudget.default`; iOS/iPadOS starts from `UIKitMetalGridTexturePolicies` until measured
+real-device tuning replaces or refines those values.
 
 **`MetalGridTextureCache<ID>` owns:** real GPU texture residency, bounded per-frame upload from decoded `CGImage`,
 placeholder texture lifetime, badge glyph texture caching, and byte/upload counters. It is generic over item

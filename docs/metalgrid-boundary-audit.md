@@ -159,9 +159,9 @@ budget and must not become an iPhone/iPad default.
 
 Solutions:
 
-1. Keep `GridTextureBudget` injected by platform adapters. macOS can keep the current `MetalGridBudget.default`
-   compatibility alias; iPhone/iPad should start with conservative budgets and tune with Instruments on real
-   devices.
+1. Keep `GridTextureBudget` injected by platform adapters. macOS keeps the current `MetalGridBudget.default`
+   compatibility alias; Phase 5.3 adds conservative viewport-surface policies in `MetalGridTextureUIKitAdapter`
+   as the iOS/iPadOS starting point, to be tuned with Instruments on real devices.
 2. Replace fixed texture capacity with a viewport-derived budget: visible cells plus overscan plus a small
    hysteresis window. Derive `maxTexturePixels` from rendered slot size and screen scale, capped per platform.
 
@@ -495,3 +495,15 @@ UIKit glyph adapter proof. No macOS production behavior changed.
 - `MetalGridTextureCore` remains UIKit-free; the shared cache still sees only the glyph request contract.
 - `scripts/verify-universal-core.sh` now builds `MetalGridTextureUIKitAdapter` for iOS as an adapter-proof gate
   after the universal Core and Metal Core targets.
+
+## Phase 5.3 result
+
+UIKit texture budget policy proof. No macOS production behavior changed.
+
+- `MetalGridTextureUIKitAdapter` now owns conservative iOS-family texture policy presets.
+- `UIKitMetalGridTextureSurfaceClass` resolves a budget from viewport size (`compact`, `regular`, `expanded`)
+  rather than hard-coding device names.
+- `UIKitMetalGridTexturePolicies` provides `GridTextureBudget` plus `maxTexturePixels` values that are lower than
+  the macOS adapter default and are intended as a safe starting point until real-device Instruments tuning.
+- `CoreArchitectureGateTests` now guards that UIKit texture policy does not copy `MetalGridBudget.default`,
+  query raw hardware counts, or leak into `MetalGridTextureCore`.

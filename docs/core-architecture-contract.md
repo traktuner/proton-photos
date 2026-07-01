@@ -673,3 +673,15 @@ Small platform-adapter addition with no macOS production behavior change.
 This proves the 5.1 cache boundary is usable from a second Apple platform without forking cache logic.
 `MetalGridTextureCore` remains UIKit-free. The future iOS/iPadOS grid host still needs its own scroll/view
 adapter, texture budget values, safe-area/input policy, and explicit injection of `UIKitMetalGridGlyphRasterizer`.
+
+#### Phase 5.3 — UIKit texture budget policy proof
+
+Small platform-adapter addition with no macOS production behavior change.
+
+`MetalGridTextureUIKitAdapter` now owns conservative iOS-family texture policies. The policy resolves from
+viewport surface size (`compact`, `regular`, `expanded`) rather than from device names, and returns both the
+portable `GridTextureBudget` and a `maxTexturePixels` cap for `MetalGridTextureCache`.
+
+These values intentionally do not copy macOS `MetalGridBudget.default` (`96` uploads/frame, `4096` resident
+textures, `1.2` overscan, `320` pixels). They are adapter-owned starting values for future iOS/iPadOS hosts and
+must be tuned with Instruments on real hardware before release.

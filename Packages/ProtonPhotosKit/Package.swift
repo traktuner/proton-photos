@@ -68,7 +68,7 @@ let package = Package(
         .testTarget(name: "GridCoreTests", dependencies: ["GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalRenderingCore", swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalGridTextureCore", dependencies: ["GridCore"], swiftSettings: disableDynamicActorIsolation),
-        .target(name: "MetalGridTextureUIKitAdapter", dependencies: ["MetalGridTextureCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MetalGridTextureUIKitAdapter", dependencies: ["MetalGridTextureCore", "GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCache", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",

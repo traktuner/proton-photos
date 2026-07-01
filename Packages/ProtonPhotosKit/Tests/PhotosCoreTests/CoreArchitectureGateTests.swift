@@ -839,8 +839,8 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if let targetLine = manifestLine(forTarget: "MetalGridTextureUIKitAdapter", in: manifest) {
             let dependencies = Set(dependencies(inTargetLine: targetLine))
-            if dependencies != ["MetalGridTextureCore"] {
-                violations.append("MetalGridTextureUIKitAdapter: dependencies \(dependencies.sorted()) != [MetalGridTextureCore]")
+            if dependencies != ["GridCore", "MetalGridTextureCore"] {
+                violations.append("MetalGridTextureUIKitAdapter: dependencies \(dependencies.sorted()) != [GridCore, MetalGridTextureCore]")
             }
         } else {
             violations.append("MetalGridTextureUIKitAdapter: missing Package.swift target declaration")
@@ -889,6 +889,75 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             UIKit SF Symbol rasterization belongs in an iOS/iPadOS adapter target. MetalGridTextureCore owns
             only the shared cache and glyph request contract.
+            """
+        )
+    }
+
+    func testUIKitTextureBudgetsStayAdapterOwnedAndConservative() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let adapterRoot = sourcesRoot.appendingPathComponent("MetalGridTextureUIKitAdapter")
+        let policyFile = adapterRoot.appendingPathComponent("UIKitMetalGridTexturePolicy.swift")
+        let timelineTypesFile = sourcesRoot
+            .appendingPathComponent("TimelineFeature")
+            .appendingPathComponent("MetalGridTypes.swift")
+        var violations: [String] = []
+
+        if let targetLine = manifestLine(forTarget: "MetalGridTextureUIKitAdapter", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            if dependencies != ["GridCore", "MetalGridTextureCore"] {
+                violations.append("MetalGridTextureUIKitAdapter: dependencies \(dependencies.sorted()) != [GridCore, MetalGridTextureCore]")
+            }
+        } else {
+            violations.append("MetalGridTextureUIKitAdapter: missing Package.swift target declaration")
+        }
+
+        guard FileManager.default.fileExists(atPath: policyFile.path) else {
+            XCTFail("MetalGridTextureUIKitAdapter/UIKitMetalGridTexturePolicy.swift: missing UIKit texture budget policy")
+            return
+        }
+
+        let imports = try importedModules(in: policyFile)
+        if imports != ["CoreGraphics", "GridCore"] {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridTexturePolicy.swift: imports \(imports.sorted()) != [CoreGraphics, GridCore]")
+        }
+
+        let source = try String(contentsOf: policyFile, encoding: .utf8)
+        let code = stripCommentsAndStringLiterals(from: source)
+        for symbol in [
+            "UIKitMetalGridTextureSurfaceClass",
+            "resolving(viewportSize:",
+            "UIKitMetalGridTexturePolicy",
+            "UIKitMetalGridTexturePolicies",
+            "GridTextureBudget",
+            "maxTexturePixels"
+        ] where !code.contains(symbol) {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridTexturePolicy.swift: missing \(symbol)")
+        }
+        for forbidden in ["ProcessInfo.processInfo.physicalMemory", "activeProcessorCount", "UIDevice", "userInterfaceIdiom", "MetalGridBudget.default"] where code.contains(forbidden) {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridTexturePolicy.swift: budget policy must be viewport/capability injected, found \(forbidden)")
+        }
+        for macValue in [
+            "maxUploadsPerFrame: 96",
+            "maxCachedTextures: 4096",
+            "overscanFraction: 1.2",
+            "maxTexturePixels: 320"
+        ] where source.contains(macValue) {
+            violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridTexturePolicy.swift: UIKit policy must not copy macOS default \(macValue)")
+        }
+
+        let timelineSource = try String(contentsOf: timelineTypesFile, encoding: .utf8)
+        if !timelineSource.contains("static let `default` = GridTextureBudget(") {
+            violations.append("TimelineFeature/MetalGridTypes.swift: macOS default budget must remain adapter-owned")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Phase 5.3 UIKit texture budget boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            iOS/iPadOS texture budgets must stay in the UIKit adapter and must not inherit aggressive macOS
+            cache/upload defaults.
             """
         )
     }
