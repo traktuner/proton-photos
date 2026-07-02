@@ -114,6 +114,17 @@ struct ProductionRouteGuardTests {
         #expect(viewer.contains("plaintext local motion-video files are forbidden by the local E2EE contract"))
     }
 
+    @Test func videoBlockCacheStoreDoesNotWalkWholeTreePerBlock() throws {
+        let cache = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/Streaming/VideoByteRangeCache.swift"), encoding: .utf8)
+        let storeBody = try Self.body(of: cache, from: "func store(uid: PhotoUID, block: Int, encrypted: Data) {", to: "    /// Clears the whole video block cache")
+        #expect(storeBody.contains("sizeOnDiskLocked()"), "store must initialize from the cached size tracker")
+        #expect(storeBody.contains("enforceBudgetLocked(keep:"), "store must enforce budget from the cached size tracker")
+        #expect(!storeBody.contains("directorySize(root)"), "store must not rescan the full video cache tree for every block")
+
+        let budgetBody = try Self.body(of: cache, from: "private func enforceBudgetLocked(keep: String) {", to: "private func sizeOnDiskLocked()")
+        #expect(budgetBody.contains("var total = sizeOnDiskLocked()"), "budget enforcement must consume the running size tracker")
+    }
+
     @Test func burstProviderMaterializesHiddenSeriesMembers() throws {
         let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSDKBridge.swift"), encoding: .utf8)
         let body = try Self.body(of: bridge, from: "func burstGroup(containing uid: PhotoUID) async throws -> [PhotoItem] {", to: "    // MARK: - VideoStreamProvider")

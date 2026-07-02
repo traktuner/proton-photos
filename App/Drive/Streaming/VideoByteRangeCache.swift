@@ -16,6 +16,7 @@ final class VideoByteRangeCache: @unchecked Sendable {
     private let lock = NSLock()
     private let budgetBytes: Int
     private let fm = FileManager.default
+    private var sizeOnDisk: Int?
 
     init(budgetBytes: Int = 512 * 1024 * 1024) {
         self.budgetBytes = budgetBytes
@@ -41,6 +42,7 @@ final class VideoByteRangeCache: @unchecked Sendable {
         return lock.withLock {
             guard let data = try? Data(contentsOf: url) else { return nil }
             try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path)
+            try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: url.deletingLastPathComponent().path)
             return data
         }
     }
@@ -51,9 +53,17 @@ final class VideoByteRangeCache: @unchecked Sendable {
         let d = dir(for: uid)
         lock.withLock {
             try? fm.createDirectory(at: d, withIntermediateDirectories: true)
-            try? encrypted.write(to: d.appendingPathComponent("\(block).blk"), options: .atomic)
+            let url = d.appendingPathComponent("\(block).blk")
+            let previousTotal = sizeOnDiskLocked()
+            let oldSize = fileSize(url)
+            do {
+                try encrypted.write(to: url, options: .atomic)
+                sizeOnDisk = max(0, previousTotal - oldSize + encrypted.count)
+            } catch {
+                return
+            }
+            enforceBudgetLocked(keep: d.lastPathComponent)
         }
-        enforceBudget(uid: uid)
     }
 
     /// Clears the whole video block cache (wired to the existing "delete cache" Settings action).
@@ -61,6 +71,7 @@ final class VideoByteRangeCache: @unchecked Sendable {
         lock.withLock {
             try? fm.removeItem(at: root)
             try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+            sizeOnDisk = 0
         }
         PhotoDiagnostics.shared.emit("VideoCache", ["action": "clearAll", "sizeOnDisk": "0"])
     }
@@ -70,25 +81,34 @@ final class VideoByteRangeCache: @unchecked Sendable {
     /// Evicts least-recently-used uid directories until under budget. Coarse-grained (per video, by
     /// the directory's newest mtime) — cheap and good enough; a single video's blocks live or die
     /// together, which keeps a partially-played file fully reusable.
-    private func enforceBudget(uid: PhotoUID) {
-        lock.withLock {
-            var total = directorySize(root)
-            guard total > budgetBytes else { return }
-            let dirs = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey]))
-                ?? []
-            let keep = dir(for: uid).lastPathComponent
-            let sorted = dirs
-                .filter { $0.lastPathComponent != keep }   // never evict the video being played
-                .sorted { mtime($0) < mtime($1) }          // oldest first
-            for d in sorted where total > budgetBytes {
-                let size = directorySize(d)
-                try? fm.removeItem(at: d)
-                total -= size
-                PhotoDiagnostics.shared.emit("VideoCache", [
-                    "action": "evict", "dir": d.lastPathComponent, "freed": "\(size)", "sizeOnDisk": "\(total)",
-                ])
-            }
+    private func enforceBudgetLocked(keep: String) {
+        var total = sizeOnDiskLocked()
+        guard total > budgetBytes else { return }
+        let dirs = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey]))
+            ?? []
+        let sorted = dirs
+            .filter { $0.lastPathComponent != keep }   // never evict the video being played
+            .sorted { mtime($0) < mtime($1) }          // oldest first
+        for d in sorted where total > budgetBytes {
+            let size = directorySize(d)
+            try? fm.removeItem(at: d)
+            total = max(0, total - size)
+            sizeOnDisk = total
+            PhotoDiagnostics.shared.emit("VideoCache", [
+                "action": "evict", "dir": d.lastPathComponent, "freed": "\(size)", "sizeOnDisk": "\(total)",
+            ])
         }
+    }
+
+    private func sizeOnDiskLocked() -> Int {
+        if let sizeOnDisk { return sizeOnDisk }
+        let measured = directorySize(root)
+        sizeOnDisk = measured
+        return measured
+    }
+
+    private func fileSize(_ url: URL) -> Int {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
     }
 
     private func mtime(_ url: URL) -> Date {
