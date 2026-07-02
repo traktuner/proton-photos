@@ -25,6 +25,9 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         headers: [(String, [String])]
     ) async -> Result<HttpClientResponse, NSError> {
         let url = Self.driveURL(relativePath, makeURL: driveSession.makeURL)
+        guard Self.isTrustedDriveAPIURL(url, baseURL: driveSession.config.baseURL) else {
+            return .failure(Self.invalidURL("Refusing Drive API request outside trusted Proton API host"))
+        }
         var req = URLRequest(url: url)
         req.httpMethod = method
         applyAuthAndHeaders(&req, headers: headers)
@@ -54,9 +57,8 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         content: StreamForUpload,
         headers: [(String, [String])]
     ) async -> Result<HttpClientResponse, NSError> {
-        guard let requestURL = URL(string: url) else {
-            return .failure(NSError(domain: "ProtonPhotos.SDKHttpClient", code: -5,
-                                    userInfo: [NSLocalizedDescriptionKey: "Invalid storage upload URL"]))
+        guard let requestURL = Self.httpsURL(url) else {
+            return .failure(Self.invalidURL("Invalid storage upload URL"))
         }
         var req = URLRequest(url: requestURL)
         req.httpMethod = method
@@ -96,9 +98,8 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         headers: [(String, [String])],
         downloadStreamCreator: @Sendable @escaping (URLSession.AsyncBytes) -> AnyAsyncSequence<UInt8>
     ) async -> Result<HttpClientStream, NSError> {
-        guard let requestURL = URL(string: url) else {
-            return .failure(NSError(domain: "ProtonPhotos.SDKHttpClient", code: -3,
-                                    userInfo: [NSLocalizedDescriptionKey: "Invalid storage URL"]))
+        guard let requestURL = Self.httpsURL(url) else {
+            return .failure(Self.invalidURL("Invalid storage URL"))
         }
         var req = URLRequest(url: requestURL)
         req.httpMethod = method
@@ -187,6 +188,27 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         combined += embedded.path.hasPrefix("/") ? embedded.path : "/\(embedded.path)"
         if let query = embedded.query, !query.isEmpty { combined += "?\(query)" }
         return URL(string: combined) ?? makeURL(relativePath)
+    }
+
+    private static func isTrustedDriveAPIURL(_ url: URL, baseURL: URL) -> Bool {
+        guard url.scheme == "https",
+              let host = url.host?.lowercased(),
+              let expected = baseURL.host?.lowercased()
+        else { return false }
+        return host == expected
+    }
+
+    private static func httpsURL(_ raw: String) -> URL? {
+        guard let url = URL(string: raw), url.scheme == "https", url.host != nil else { return nil }
+        return url
+    }
+
+    private static func invalidURL(_ reason: String) -> NSError {
+        NSError(
+            domain: "ProtonPhotos.SDKHttpClient",
+            code: -7,
+            userInfo: [NSLocalizedDescriptionKey: reason]
+        )
     }
 
     private static func headerPairs(_ http: HTTPURLResponse) -> [(String, [String])] {

@@ -158,15 +158,18 @@ extension DriveSession {
     /// Fetches raw encrypted block bytes from storage for video streaming. Two patterns:
     ///  • `token != nil` → hit `url` (a BareURL) with the `pm-storage-token` header and NO session
     ///    auth (the web client pattern).
-    ///  • `token == nil` → `url` is a pre-signed full URL, fetched with normal session auth headers.
+    ///  • `token == nil` → `url` is a full URL. Session auth is sent only to the trusted Drive API host;
+    ///    pre-signed storage URLs are fetched as-is so bearer tokens cannot leak cross-host.
     /// A fresh `URLSession.shared` request is used so the JSON `Accept` header isn't sent to the CDN.
     func fetchBlock(url: String, token: String?) async throws -> Data {
-        guard let u = URL(string: url) else { throw ProtonAuthError.invalidResponse }
+        guard let u = URL(string: url), u.scheme == "https", u.host != nil else {
+            throw ProtonAuthError.invalidResponse
+        }
         var req = URLRequest(url: u)
         req.httpMethod = "GET"
         if let token {
             req.setValue(token, forHTTPHeaderField: "pm-storage-token")
-        } else {
+        } else if isTrustedAPIURL(u) {
             for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
         }
         let (data, response) = try await URLSession.shared.data(for: req)
@@ -175,6 +178,14 @@ extension DriveSession {
             throw ProtonAuthError.apiError(code: http.statusCode, message: "block fetch HTTP \(http.statusCode)")
         }
         return data
+    }
+
+    private func isTrustedAPIURL(_ url: URL) -> Bool {
+        guard url.scheme == "https",
+              let host = url.host?.lowercased(),
+              let expected = config.baseURL.host?.lowercased()
+        else { return false }
+        return host == expected
     }
 
     /// Enumerates the photos listing for a volume via the direct REST endpoint (cursor pagination),
