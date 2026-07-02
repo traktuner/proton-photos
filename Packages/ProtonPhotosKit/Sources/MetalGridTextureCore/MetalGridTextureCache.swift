@@ -53,6 +53,11 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     /// this and always size against `maxTexturePixels` (their size must stay stable across zoom).
     package private(set) var effectiveMaxTexturePixels: Int
 
+    /// Memory-pressure scale on the resident count/byte ceiling (governor-driven, 1.0 = full platform
+    /// budget). `< 1` shrinks how much offscreen residency `evictToBudget` keeps each frame; `0` keeps
+    /// only the pinned visible working set. Default 1.0 leaves eviction byte-identical to before.
+    package private(set) var residencyPressureScale: Double = 1.0
+
     package var residentCount: Int { lru.residentCount }
     package var pinnedCount: Int { lru.pinnedCount }
     package var inFlightCount: Int { lru.inFlightCount }
@@ -244,15 +249,35 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         }
     }
 
-    /// Evict offscreen LRU textures down to the count + byte budget and release their GPU memory.
+    /// Evict offscreen LRU textures down to the count + byte budget and release their GPU memory. Under
+    /// memory pressure (`residencyPressureScale < 1`) the ceiling is scaled down; the visible pinned set
+    /// is never evicted, so the grid stays drawable. At full scale this is the original budget eviction.
     package func evictToBudget() {
         let start = CFAbsoluteTimeGetCurrent()
-        let evicted = lru.evictToBudget()
+        let evicted: [ID]
+        if residencyPressureScale >= 1 {
+            evicted = lru.evictToBudget()
+        } else {
+            let maxCount = Int(Double(budget.maxCachedTextures) * residencyPressureScale)
+            let maxCost = Int(Double(budget.maxResidentBytes) * residencyPressureScale)
+            evicted = lru.evictToReducedBudget(maxCount: maxCount, maxCost: maxCost)
+        }
         for id in evicted {
             textures.removeValue(forKey: id)
         }
         evictionsThisFrame = evicted.count
         evictMsThisFrame += (CFAbsoluteTimeGetCurrent() - start) * 1000
+    }
+
+    /// Governor-driven memory-pressure response: set the resident ceiling scale (`1.0` = full budget,
+    /// `0.0` = keep only the visible pinned set) and reclaim immediately at the new ceiling. Applies to
+    /// future frames too, so residency stays reduced while pressure persists and grows back once the
+    /// governor restores `1.0`. Visible tiles are never evicted, so what is on screen stays drawable.
+    package func setResidencyPressureScale(_ scale: Double) {
+        let clamped = min(1, max(0, scale))
+        guard clamped != residencyPressureScale else { return }
+        residencyPressureScale = clamped
+        evictToBudget()
     }
 
     // MARK: - Texture creation

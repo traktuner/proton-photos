@@ -127,7 +127,9 @@ package struct GridTextureResidencyPolicy<ID: Hashable & Sendable>: Equatable {
         inFlight.remove(id)
     }
 
-    private var overBudget: Bool { resident.count > capacity || residentCost > costCapacity }
+    private func isOverBudget(maxCount: Int, maxCost: Int) -> Bool {
+        resident.count > maxCount || residentCost > maxCost
+    }
 
     /// Evict least-recently-used non-pinned textures until residency fits BOTH the count and the cost
     /// budget. Partial selection (never a full sort of the resident set): each pass heap-selects the k
@@ -135,10 +137,22 @@ package struct GridTextureResidencyPolicy<ID: Hashable & Sendable>: Equatable {
     /// cost for the cost budget; eviction stops at the minimal LRU prefix that satisfies both budgets,
     /// looping only if the estimate under-shot.
     package mutating func evictToBudget() -> [ID] {
+        evict(maxCount: capacity, maxCost: costCapacity)
+    }
+
+    /// Memory-pressure response: shed non-pinned LRU residents down to a REDUCED ceiling. The ceiling
+    /// is clamped to the normal budget, so this can only ever shrink residency, never grow it. Pinned
+    /// (visible-first) entries are never evicted - so the visible working set stays drawable even at a
+    /// `0` ceiling ("keep only what is visible"). Returns evicted IDs.
+    package mutating func evictToReducedBudget(maxCount: Int, maxCost: Int) -> [ID] {
+        evict(maxCount: min(capacity, max(0, maxCount)), maxCost: min(costCapacity, max(0, maxCost)))
+    }
+
+    private mutating func evict(maxCount: Int, maxCost: Int) -> [ID] {
         var evicted: [ID] = []
-        while overBudget {
-            let countOver = max(0, resident.count - capacity)
-            let costOver = residentCost > costCapacity ? residentCost - costCapacity : 0
+        while isOverBudget(maxCount: maxCount, maxCost: maxCost) {
+            let countOver = max(0, resident.count - maxCount)
+            let costOver = residentCost > maxCost ? residentCost - maxCost : 0
             let averageCost = max(1, residentCost / max(1, resident.count))
             let costDrivenNeed = (costOver + averageCost - 1) / averageCost
             let evictionsNeeded = max(1, max(countOver, costDrivenNeed))
@@ -186,7 +200,7 @@ package struct GridTextureResidencyPolicy<ID: Hashable & Sendable>: Equatable {
             let selectionExhaustedNonPinned = candidates.count < evictionsNeeded
             candidates.sort { $0.tick < $1.tick }
             for candidate in candidates {
-                guard overBudget else { break }
+                guard isOverBudget(maxCount: maxCount, maxCost: maxCost) else { break }
                 resident.remove(candidate.id)
                 lastUsed.removeValue(forKey: candidate.id)
                 if let c = cost.removeValue(forKey: candidate.id) { residentCost -= c }

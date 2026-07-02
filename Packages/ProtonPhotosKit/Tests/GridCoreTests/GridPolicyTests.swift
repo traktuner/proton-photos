@@ -214,6 +214,40 @@ import GridCore
             #expect(policy.pinnedResidentCost <= 2_000)
         }
     }
+
+    // MARK: - Memory-pressure reduced-budget eviction
+
+    @Test func reducedBudgetShedsOffscreenDownToCeilingButKeepsVisiblePinned() {
+        var policy = GridTextureResidencyPolicy<String>(capacity: 100, costCapacity: 10_000, uploadBudgetPerFrame: 20)
+        for i in 0 ..< 8 { upload("off-\(i)", cost: 1_000, into: &policy) }   // 8 offscreen @1000 = 8000
+        upload("visible", cost: 1_000, pinned: ["visible"], into: &policy)    // + pinned 1000 = 9000 total
+        policy.beginFrame(pinned: ["visible"])
+        #expect(policy.residentCost == 9_000)
+
+        // Reduced ceiling of 3000 bytes: shed offscreen LRU until resident bytes fit, keep the pinned visible.
+        let evicted = policy.evictToReducedBudget(maxCount: 100, maxCost: 3_000)
+        #expect(policy.residentCost <= 3_000)
+        #expect(policy.isResident("visible"), "the visible pinned texture must stay drawable")
+        #expect(evicted.allSatisfy { $0 != "visible" })
+    }
+
+    @Test func reducedBudgetToZeroKeepsOnlyVisibleAndClampsCannotGrow() {
+        var policy = GridTextureResidencyPolicy<String>(capacity: 100, costCapacity: 10_000, uploadBudgetPerFrame: 20)
+        for i in 0 ..< 5 { upload("off-\(i)", cost: 500, into: &policy) }
+        upload("v1", cost: 500, pinned: ["v1", "v2"], into: &policy)
+        upload("v2", cost: 500, pinned: ["v1", "v2"], into: &policy)
+        policy.beginFrame(pinned: ["v1", "v2"])
+
+        // Critical purge: a 0 ceiling evicts every non-pinned texture, visible stay resident/drawable.
+        _ = policy.evictToReducedBudget(maxCount: 0, maxCost: 0)
+        #expect(policy.residentCount == 2)
+        #expect(policy.isResident("v1") && policy.isResident("v2"))
+
+        // Clamp: asking for a ceiling ABOVE the normal budget can never grow residency (a no-op here).
+        let evicted = policy.evictToReducedBudget(maxCount: .max, maxCost: .max)
+        #expect(evicted.isEmpty)
+        #expect(policy.residentCount == 2)
+    }
 }
 
 @Suite struct GridTextureStreamingPolicyTests {
