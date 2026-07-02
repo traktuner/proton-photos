@@ -285,7 +285,9 @@ struct ProductionRouteGuardTests {
 
         let timelineViewModel = Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/TimelineViewModel.swift")
         let timelineViewModelText = try String(contentsOf: timelineViewModel, encoding: .utf8)
-        #expect(timelineViewModelText.contains("MetalGridProductionAdapter.dateMarkers(sections: visibleSections, granularity: .month)"))
+        // Month markers are derived from the visible route's already-flattened items (the `items:` overload
+        // avoids a second flatten; one-pass boundary detection replaces per-item Calendar.dateComponents).
+        #expect(timelineViewModelText.contains("MetalGridProductionAdapter.dateMarkers(items: visibleItems, granularity: .month)"))
 
         let productionView = Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/MetalProductionGridView.swift")
         let productionText = try String(contentsOf: productionView, encoding: .utf8)

@@ -148,7 +148,7 @@ public final class TimelineViewModel {
         let visibleSections = TimelineSearch.filter(sections, query: searchText, context: context)
         let visibleItems = visibleSections.flatMap(\.items)
         let monthMarkers = includeMonthMarkers
-            ? MetalGridProductionAdapter.dateMarkers(sections: visibleSections, granularity: .month)
+            ? MetalGridProductionAdapter.dateMarkers(items: visibleItems, granularity: .month)
             : []
         let value = TimelineVisibleContent(
             sections: visibleSections,

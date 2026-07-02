@@ -28,22 +28,55 @@ enum MetalGridProductionAdapter {
     static func dateMarkers(sections: [TimelineSection], granularity: TimelineDateMarker.Granularity,
                             calendar: Calendar = .autoupdatingCurrent,
                             locale: Locale = .autoupdatingCurrent) -> [TimelineDateMarker] {
-        let items = sections.flatMap { $0.items }
+        dateMarkers(items: sections.flatMap { $0.items }, granularity: granularity, calendar: calendar, locale: locale)
+    }
+
+    /// Same markers over an ALREADY-flattened item list, so callers that have flattened the sections (e.g.
+    /// `visibleContent`) don't pay the flatten twice.
+    ///
+    /// One pass, emitting a marker at every calendar-bucket boundary. It replaces the old per-item
+    /// `Calendar.dateComponents` (one calendar computation per photo - the dominant main-actor cost at library
+    /// scale) with a `dateInterval` half-open membership test: a calendar computation runs only when an item
+    /// falls outside the current bucket (≈ once per month/day/year present), and every other item is a cheap
+    /// `Date` comparison. The emitted markers are identical to the components-per-item version - a marker still
+    /// appears whenever an item's bucket differs from the previously emitted marker's bucket (verified by the
+    /// equivalence test) - because months/days/years partition the timeline and `[start, end)` membership is the
+    /// same partition `dateComponents` equality expresses.
+    static func dateMarkers(items: [PhotoItem], granularity: TimelineDateMarker.Granularity,
+                            calendar: Calendar = .autoupdatingCurrent,
+                            locale: Locale = .autoupdatingCurrent) -> [TimelineDateMarker] {
         guard !items.isEmpty else { return [] }
-        var markers: [TimelineDateMarker] = []
-        var lastKey: DateComponents?
+        let component = calendarComponent(for: granularity)
         let formatter = makeFormatter(granularity: granularity, locale: locale)   // built ONCE, reused per boundary
+        var markers: [TimelineDateMarker] = []
+        var bucketStart: Date?
+        var bucketEnd: Date?
         for (i, item) in items.enumerated() {
-            let key = components(for: item.captureTime, granularity: granularity, calendar: calendar)
-            if key != lastKey {
-                lastKey = key
-                markers.append(TimelineDateMarker(index: i,
-                                                  date: item.captureTime,
-                                                  text: formatter.string(from: item.captureTime),
-                                                  granularity: granularity))
+            let time = item.captureTime
+            if let start = bucketStart, let end = bucketEnd, time >= start, time < end {
+                continue   // same bucket as the last emitted marker → no boundary
             }
+            if let interval = calendar.dateInterval(of: component, for: time) {
+                bucketStart = interval.start
+                bucketEnd = interval.end
+            } else {
+                bucketStart = nil   // no interval (pathological date) → emit for every such item, as before
+                bucketEnd = nil
+            }
+            markers.append(TimelineDateMarker(index: i,
+                                              date: time,
+                                              text: formatter.string(from: time),
+                                              granularity: granularity))
         }
         return markers
+    }
+
+    private static func calendarComponent(for granularity: TimelineDateMarker.Granularity) -> Calendar.Component {
+        switch granularity {
+        case .day: .day
+        case .month: .month
+        case .year: .year
+        }
     }
 
     /// Month/year markers (flat item index → localized "MMM yyyy"), one per month boundary in library order.
@@ -60,18 +93,6 @@ enum MetalGridProductionAdapter {
         if let first = sections.first?.items.first { hasher.combine(first.uid) }
         if let last = sections.last?.items.last { hasher.combine(last.uid) }
         return hasher.finalize()
-    }
-
-    private static func components(for date: Date, granularity: TimelineDateMarker.Granularity,
-                                   calendar: Calendar) -> DateComponents {
-        switch granularity {
-        case .day:
-            calendar.dateComponents([.year, .month, .day], from: date)
-        case .month:
-            calendar.dateComponents([.year, .month], from: date)
-        case .year:
-            calendar.dateComponents([.year], from: date)
-        }
     }
 
     /// One configured formatter per (granularity, locale), built ONCE per `dateMarkers` call and reused for every
