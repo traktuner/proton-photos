@@ -714,6 +714,18 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         targetBounds.translate(slots)
     }
 
+    /// How many of `slots` currently have a resident (real, non-placeholder) texture. Used by the overview
+    /// dissolve to detect when a layer's content changed (a wanted thumbnail streamed in) so only that layer is
+    /// re-rasterized - a cheap `isResident` dict lookup per slot, far below re-running `buildRealGroups` + a
+    /// full offscreen pass every frame.
+    private func residentSlotCount(_ slots: [GridRenderSlot], flatUIDs: [PhotoUID]) -> Int {
+        var count = 0
+        for slot in slots where slot.index < flatUIDs.count {
+            if cache.isResident(flatUIDs[slot.index]) { count += 1 }
+        }
+        return count
+    }
+
     /// Visible cells (flat index + content rect) for the accessibility provider / header positioning.
     func visibleCells() -> [(flatIndex: Int, rect: CGRect)] {
         guard let clip = clipView, metalView != nil, layoutWidth > 1 else { return [] }
@@ -1339,6 +1351,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             anchorContentPoint: anchorContentPoint, anchorViewportPoint: viewportPoint, overscan: overscan)
         else { return nil }
         overviewDissolve = plan
+        renderer.invalidateDissolveLayers()   // new plan → re-raster both layers on the first dissolve frame
         overviewClickDissolveActive = true
         overviewClickDissolveStart = 0
         committedPhase = plan.targetColumnPhase
@@ -1357,6 +1370,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     private func finishClickOverviewDissolve() {
         overviewDissolve = nil
+        renderer.endLayerDissolve()   // free the two offscreen dissolve textures; settled render doesn't use them
         overviewClickDissolveActive = false
         overviewClickDissolveStart = 0
         requestRedraw()
@@ -1493,6 +1507,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             anchorContentPoint: cursorContent, anchorViewportPoint: tx.anchorViewportPoint, overscan: overscan)
         else { return false }
         overviewDissolve = plan
+        renderer.invalidateDissolveLayers()   // new plan → re-raster both layers on the first dissolve frame
         requestRedraw()
         return true
     }
@@ -1519,6 +1534,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             scrollY = srcScrollY
         }
         overviewDissolve = nil
+        renderer.endLayerDissolve()   // free the two offscreen dissolve textures; settled render doesn't use them
         overviewClickDissolveActive = false
         overviewClickDissolveStart = 0
         zoomTransaction = nil
@@ -1539,21 +1555,37 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         var uids: [PhotoUID] = []
         for s in srcSlots where s.index < flatUIDs.count { uids.append(flatUIDs[s.index]) }
         for s in tgtSlots where s.index < flatUIDs.count { uids.append(flatUIDs[s.index]) }
+        // Content-arrival detection: re-raster a frozen layer ONLY when one of its wanted thumbnails becomes
+        // resident this frame (its resident-slot count changes). A steady scrub streams nothing new → both
+        // counts hold → the renderer reuses both cached offscreen layers and its group closures never run, so
+        // the frame pays only the fullscreen composite. (First frame / resize / new-plan re-raster is forced
+        // inside the renderer via the layer cache; the closures still supply the groups when it does.)
+        let srcResidentBefore = residentSlotCount(srcSlots, flatUIDs: flatUIDs)
+        let tgtResidentBefore = residentSlotCount(tgtSlots, flatUIDs: flatUIDs)
         streamTextures(visibleUIDs: uids, overscanUIDs: [])
-        let (srcGroups, srcRealCount) = PhotoPerformanceSignposts.grid.interval("buildRealGroups") {
-            buildRealGroups(slots: srcSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.sourceDisplayMode)
-        }
-        let (tgtGroups, tgtRealCount) = PhotoPerformanceSignposts.grid.interval("buildRealGroups") {
-            buildRealGroups(slots: tgtSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.targetDisplayMode)
-        }
+        let srcResidentAfter = residentSlotCount(srcSlots, flatUIDs: flatUIDs)
+        let tgtResidentAfter = residentSlotCount(tgtSlots, flatUIDs: flatUIDs)
         evictTexturesToBudget()
         PhotoPerformanceSignposts.grid.interval("dissolve.layerPass") {
-            renderer.renderLayerDissolve(in: view, viewportSize: viewportSize,
-                                         sourceGroups: srcGroups, targetGroups: tgtGroups, t: Float(plan.targetOpacity))
+            renderer.renderLayerDissolve(
+                in: view, viewportSize: viewportSize,
+                redrawSource: srcResidentAfter != srcResidentBefore,
+                redrawTarget: tgtResidentAfter != tgtResidentBefore,
+                sourceGroups: {
+                    PhotoPerformanceSignposts.grid.interval("buildRealGroups") {
+                        buildRealGroups(slots: srcSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.sourceDisplayMode).0
+                    }
+                },
+                targetGroups: {
+                    PhotoPerformanceSignposts.grid.interval("buildRealGroups") {
+                        buildRealGroups(slots: tgtSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.targetDisplayMode).0
+                    }
+                },
+                t: Float(plan.targetOpacity))
         }
         hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && hasRetryableMissingVisibleTexture(uids)
         publishLightDiagnostics(phase: "overviewDissolve", visibleCount: uids.count, overscanCount: 0,
-                                realCount: srcRealCount + tgtRealCount,
+                                realCount: srcResidentAfter + tgtResidentAfter,
                                 cellCount: srcSlots.count + tgtSlots.count,
                                 visibleRect: CGRect(origin: .zero, size: viewportSize),
                                 contentSize: engine.contentSize(level: plan.targetLevel, width: layoutWidth,

@@ -242,7 +242,7 @@ import GridCore
         #expect(r.contains("encodeLayerPass"))                      // each layer rendered to its own texture
         #expect(r.contains("mix(a.rgb, b.rgb, t)"))                 // linear composite in the shader
         #expect(r.contains("metalGridCompositeFragment"))
-        #expect(r.contains("render(to: target, viewportSize: viewportSize, groups: targetGroups)"))
+        #expect(r.contains("render(to: target, viewportSize: viewportSize, groups: targetGroups())"))
     }
 
     // GUARD: toolbar/keyboard +/- must use the same whole-grid overview dissolve as pinch at L3↔L4 / L4↔L5.

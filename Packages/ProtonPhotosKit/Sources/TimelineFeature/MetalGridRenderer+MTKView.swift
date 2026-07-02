@@ -26,14 +26,18 @@ extension MetalGridRenderer {
     func renderLayerDissolve(
         in view: MTKView,
         viewportSize: CGSize,
-        sourceGroups: [MetalGridRenderGroup],
-        targetGroups: [MetalGridRenderGroup],
+        redrawSource: Bool,
+        redrawTarget: Bool,
+        sourceGroups: () -> [MetalGridRenderGroup],
+        targetGroups: () -> [MetalGridRenderGroup],
         t: Float
     ) {
         guard let target = MetalGridDrawableTarget(view: view) else { return }
         renderLayerDissolve(
             to: target,
             viewportSize: viewportSize,
+            redrawSource: redrawSource,
+            redrawTarget: redrawTarget,
             sourceGroups: sourceGroups,
             targetGroups: targetGroups,
             t: t

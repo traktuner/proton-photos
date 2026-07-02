@@ -17,9 +17,13 @@ package final class MetalGridRenderer {
     /// composite functions failed to build ⇒ `renderLayerDissolve` falls back to the target settled render.
     private let compositePipeline: MTLRenderPipelineState?
     /// Offscreen per-layer render targets (source, target), lazily sized to the drawable. ONLY used by
-    /// `renderLayerDissolve`; the normal `render(...)` path never touches them.
+    /// `renderLayerDissolve`; the normal `render(...)` path never touches them. Released on `endLayerDissolve`
+    /// so a held dissolve's ~two fullscreen private textures don't linger after the gesture.
     private var layerA: MTLTexture?
     private var layerB: MTLTexture?
+    /// Which frozen dissolve layers actually need re-rasterizing this frame (pure state machine); a steady
+    /// scrub reuses both offscreen textures and only re-runs the cheap composite.
+    private var dissolveCache = DissolveLayerCache()
 
     package private(set) var lastDrawMs: Double = 0
     package private(set) var lastDrawCalls = 0
@@ -226,6 +230,18 @@ package final class MetalGridRenderer {
         layerB = device.makeTexture(descriptor: d)
     }
 
+    /// A new dissolve plan began (fresh begin): re-raster both layers on the next frame even if nothing has
+    /// streamed in, so the new plan's geometry replaces the previous plan's frozen layers.
+    @MainActor package func invalidateDissolveLayers() { dissolveCache.invalidate() }
+
+    /// The dissolve committed/finished: drop the two offscreen textures (their GPU memory returns once the last
+    /// in-flight command buffer that references them completes) and reset the layer cache.
+    @MainActor package func endLayerDissolve() {
+        layerA = nil
+        layerB = nil
+        dissolveCache.release()
+    }
+
     private func encodeLayerPass(into cmd: MTLCommandBuffer, texture: MTLTexture,
                                  groups: [MetalGridRenderGroup], viewportSize: CGSize) -> (Int, Int, Int) {
         let pass = MTLRenderPassDescriptor()
@@ -246,21 +262,36 @@ package final class MetalGridRenderer {
     /// under-weighting / background bleed (the artifact a single-pass source-over dissolve would produce).
     /// `t` is the (already-eased) progress 0…1. Falls back to the target settled render if compositing is
     /// unavailable. The normal `render(...)` path is untouched.
+    ///
+    /// Layer caching: only the layers the caller flags (`redrawSource`/`redrawTarget` - a wanted thumbnail
+    /// arrived), plus any never-rasterized-yet layer and both layers on a drawable resize, are re-rasterized.
+    /// A steady scrub (only `t` moving) re-runs NEITHER offscreen pass NOR its `buildRealGroups` - the group
+    /// closures are evaluated ONLY for a layer being drawn - and pays just the fullscreen composite. The two
+    /// offscreen textures persist (`.private`, `.store`) between frames, so a reused layer composites its
+    /// prior contents.
     @MainActor
     package func renderLayerDissolve(to target: MetalGridDrawableTarget, viewportSize: CGSize,
-                                     sourceGroups: [MetalGridRenderGroup], targetGroups: [MetalGridRenderGroup], t: Float) {
+                                     redrawSource: Bool, redrawTarget: Bool,
+                                     sourceGroups: () -> [MetalGridRenderGroup],
+                                     targetGroups: () -> [MetalGridRenderGroup], t: Float) {
         let start = CFAbsoluteTimeGetCurrent()
         guard let composite = compositePipeline,
               let cmd = commandQueue.makeCommandBuffer() else {
-            render(to: target, viewportSize: viewportSize, groups: targetGroups)
+            render(to: target, viewportSize: viewportSize, groups: targetGroups())
             return
         }
-        ensureLayerTextures(width: Int(target.pixelSize.width), height: Int(target.pixelSize.height))
+        let width = Int(target.pixelSize.width), height = Int(target.pixelSize.height)
+        ensureLayerTextures(width: width, height: height)
         guard let texA = layerA, let texB = layerB else {
-            render(to: target, viewportSize: viewportSize, groups: targetGroups); return   // safe fallback
+            render(to: target, viewportSize: viewportSize, groups: targetGroups()); return   // safe fallback
         }
-        let sourceStats = encodeLayerPass(into: cmd, texture: texA, groups: sourceGroups, viewportSize: viewportSize)
-        let targetStats = encodeLayerPass(into: cmd, texture: texB, groups: targetGroups, viewportSize: viewportSize)
+        // Decide (and record) which layers to draw. ensureLayerTextures reallocated on the SAME size change the
+        // cache detects, so a resize consistently forces both here and fresh textures above.
+        let draw = dissolveCache.plan(redrawSource: redrawSource, redrawTarget: redrawTarget, width: width, height: height)
+        var sourceStats = (0, 0, 0)
+        var targetStats = (0, 0, 0)
+        if draw.source { sourceStats = encodeLayerPass(into: cmd, texture: texA, groups: sourceGroups(), viewportSize: viewportSize) }
+        if draw.target { targetStats = encodeLayerPass(into: cmd, texture: texB, groups: targetGroups(), viewportSize: viewportSize) }
         let drawablePass = target.renderPassDescriptor
         drawablePass.colorAttachments[0].loadAction = .clear
         drawablePass.colorAttachments[0].clearColor = clearColor
