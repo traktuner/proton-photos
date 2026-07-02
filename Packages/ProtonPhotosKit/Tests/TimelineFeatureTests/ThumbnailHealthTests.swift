@@ -30,6 +30,30 @@ struct ThumbnailHealthTests {
         #expect(after.ramDecoded)
     }
 
+    @Test @MainActor func realDataSourceWarmDrainsMoreThanOneBatch() async throws {
+        let count = 130
+        let uids = (0 ..< count).map { PhotoUID(volumeID: "vol", nodeID: "warm-batch-\($0)") }
+        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("warm-batch"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health"))
+        let png = Self.pngData()
+        for uid in uids {
+            cache.storeToDisk(png, for: uid)
+        }
+        let feed = await Self.makeFeed(cache: cache, loader: FakeThumbnailLoader())
+        let items = uids.map { PhotoItem(uid: $0, captureTime: Date(timeIntervalSince1970: 0), mediaType: "image/jpeg") }
+        let dataSource = RealMetalGridDataSource(sections: [
+            TimelineSection(id: "warm-batch", date: Date(timeIntervalSince1970: 0), title: "Warm Batch", items: items)
+        ], feed: feed)
+
+        var availabilityCallbacks = 0
+        dataSource.onImagesAvailable = { availabilityCallbacks += 1 }
+        dataSource.warm(uids)
+
+        try await Self.waitUntil {
+            uids.allSatisfy { dataSource.hasImage(for: $0) }
+        }
+        #expect(availabilityCallbacks >= 2, "warming \(count) items must drain across more than one \(96)-item batch")
+    }
+
     // (Placeholder-image + GridTransitionSpriteDescriptor "no drop / arrives during pinch" tests were
     // removed with the legacy GridThumbnailFallback / GridSpriteTransitionView. The Metal grid's
     // placeholder-until-resident behavior is covered by MetalGridPlaceholderTests.)
@@ -183,6 +207,21 @@ struct ThumbnailHealthTests {
         let image = testCGImage()
         let rep = NSBitmapImageRep(cgImage: image)
         return rep.representation(using: .png, properties: [:])!
+    }
+
+    private static func waitUntil(
+        timeout: Duration = .seconds(2),
+        interval: Duration = .milliseconds(20),
+        _ condition: @MainActor @escaping () -> Bool
+    ) async throws {
+        let started = ContinuousClock.now
+        while await !condition() {
+            if started.duration(to: .now) >= timeout {
+                Issue.record("condition did not become true within \(timeout)")
+                return
+            }
+            try await Task.sleep(for: interval)
+        }
     }
 
     private static func testCGImage() -> CGImage {
