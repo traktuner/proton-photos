@@ -230,7 +230,111 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
             overscanFraction: 1.0
         )) else { return }
 
-        #expect(cache.maxSafePinnedCount == 10)                           // 163,840 / (64·64·4)
+        #expect(cache.maxSafePinnedCount == 10)                           // 163,840 / (64·64·4), effective==max
+    }
+
+    @Test func effectiveCapShrinksDenseUploadSizeAndByteCost() throws {
+        guard let cache = Self.makeCache(budget: GridTextureBudget(
+            maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 1_048_576,
+            maxCachedTextures: 1000, maxResidentBytes: 1_048_576, overscanFraction: 1.0   // count cap high → bytes bind
+        )), let image = Self.makeImage(side: 64) else { return }          // 64px source (cap is also 64)
+
+        // Dense level: the coordinator lowers the effective cap to 32 px → a 64px source uploads a 32×32
+        // texture (32·32·4 = 4,096 B) instead of the worst-case 64×64 (16,384 B).
+        cache.setEffectiveMaxTexturePixels(32)
+        let dense = uid("dense")
+        cache.beginFrame(pinned: [dense])
+        cache.uploadVisible(wanted: [dense]) { _ in image }
+        #expect(cache.uploadsThisFrame == 1)
+        #expect(cache.uploadBytesThisFrame == 4_096)                      // 32·32·4 — sized to the effective cap
+        #expect(cache.residentBytes == 4_096)
+        #expect(cache.texture(for: dense).width == 32)
+        // The pin budget tracks the effective cap, so far more dense tiles can pin within the same byte budget.
+        #expect(cache.maxSafePinnedCount == 1_048_576 / (32 * 32 * 4))    // 256, vs 64 at the full 64px cap
+    }
+
+    @Test func largeLevelEffectiveCapRetainsFullQualityUploadSize() throws {
+        guard let cache = Self.makeCache(budget: GridTextureBudget(
+            maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 1_048_576,
+            maxCachedTextures: 100, maxResidentBytes: 1_048_576, overscanFraction: 1.0
+        )), let image = Self.makeImage(side: 64) else { return }
+
+        // A sparse level asks for MORE than the cap (say 200) — the cap (64) still bounds it, so the upload is
+        // identical to the fixed-size behaviour: no quality regression at large levels.
+        cache.setEffectiveMaxTexturePixels(200)
+        #expect(cache.effectiveMaxTexturePixels == 64)                    // clamped to maxTexturePixels
+        let big = uid("big")
+        cache.beginFrame(pinned: [big])
+        cache.uploadVisible(wanted: [big]) { _ in image }
+        #expect(cache.texture(for: big).width == 64)                      // full cap, unchanged
+        #expect(cache.uploadBytesThisFrame == 16_384)
+    }
+
+    @Test func undersizedResidentUpgradesInPlaceWhenCapGrows() throws {
+        guard let cache = Self.makeCache(budget: GridTextureBudget(
+            maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 1_048_576,
+            maxCachedTextures: 100, maxResidentBytes: 1_048_576, overscanFraction: 1.0
+        )), let image = Self.makeImage(side: 64) else { return }
+        let item = uid("carried")
+
+        // Dense level: upload small (32px).
+        cache.setEffectiveMaxTexturePixels(32)
+        cache.beginFrame(pinned: [item])
+        cache.uploadVisible(wanted: [item]) { _ in image }
+        #expect(cache.texture(for: item).width == 32)
+
+        // Zoom back out: cap grows to 64. The carried-over 32px texture upgrades IN PLACE (no placeholder gap),
+        // and the resident-byte ledger swaps 32² → 64² without changing the resident count.
+        cache.setEffectiveMaxTexturePixels(64)
+        cache.beginFrame(pinned: [item])
+        cache.uploadVisible(wanted: [item].filter { !cache.isResident($0) }) { _ in image }   // resident → nothing new
+        #expect(cache.uploadsThisFrame == 0)
+        cache.upgradeUndersizedResident([item]) { _ in image }
+        #expect(cache.texture(for: item).width == 64)                     // upgraded to full crispness
+        #expect(cache.upgradesThisFrame == 1)
+        #expect(cache.residentCount == 1)                                 // in place — no extra resident
+        #expect(cache.residentBytes == 16_384)                            // 64² now, not 32²
+        #expect(!cache.byteBudgetOverflow)
+
+        // Stable: a second pass finds nothing to grow (no churn).
+        cache.beginFrame(pinned: [item])
+        cache.upgradeUndersizedResident([item]) { _ in image }
+        #expect(cache.upgradesThisFrame == 0)
+        #expect(!cache.pendingUpgradesThisFrame)
+    }
+
+    @Test func upgradeRespectsPerFrameUploadByteBudgetAndSignalsPending() throws {
+        guard let cache = Self.makeCache(budget: GridTextureBudget(
+            maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 16_384,       // room for exactly one 64² upgrade/frame
+            maxCachedTextures: 100, maxResidentBytes: 4_194_304, overscanFraction: 1.0
+        )), let image = Self.makeImage(side: 64) else { return }
+        let items = (0 ..< 3).map { uid("carried-\($0)") }
+
+        cache.setEffectiveMaxTexturePixels(32)                            // seed three small (32px) textures
+        cache.beginFrame(pinned: Set(items))
+        cache.uploadVisible(wanted: items) { _ in image }
+        #expect(items.allSatisfy { cache.texture(for: $0).width == 32 })
+
+        // Cap grows; the per-frame byte budget only admits one 64² (16,384 B) upgrade, the rest defer.
+        cache.setEffectiveMaxTexturePixels(64)
+        cache.beginFrame(pinned: Set(items))
+        cache.upgradeUndersizedResident(items) { _ in image }
+        #expect(cache.upgradesThisFrame == 1)
+        #expect(cache.uploadBytesThisFrame == 16_384)
+        #expect(cache.pendingUpgradesThisFrame)                           // more to do → coordinator keeps ticking
+        #expect(cache.residentBytes <= cache.residentByteBudget)
+    }
+
+    @Test func glyphSizingIgnoresEffectiveCap() throws {
+        guard let cache = Self.makeCache(budget: GridTextureBudget(
+            maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 1_048_576,
+            maxCachedTextures: 100, maxResidentBytes: 1_048_576, overscanFraction: 1.0
+        )) else { return }
+        // Even with a tiny effective cap, a badge glyph rasterizes/uploads at its own requested pixel size
+        // (bounded only by the absolute maxTexturePixels), so badges never shrink with zoom.
+        cache.setEffectiveMaxTexturePixels(8)
+        let glyph = cache.glyphTexture(symbol: "heart.fill", pixelSize: 44, color: .white)
+        if let glyph { #expect(glyph.width > 8) }                         // not clamped to the 8px effective cap
     }
 
     @Test func scrolledAwayTexturesEvictSoNewWindowStaysWithinByteBudget() throws {

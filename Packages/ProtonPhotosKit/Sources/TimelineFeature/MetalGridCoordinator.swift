@@ -211,6 +211,36 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// only busy-spin the display link.
     private(set) var hasPendingVisibleThumbnails = false
 
+    // MARK: - Level-aware upload sizing
+    //
+    // Thumbnails upload at the on-screen slot's native pixel size (slot points × display backing scale),
+    // not a fixed 320 px, so the dense overview levels — where a tile is physically ~39–94 px — stop wasting
+    // 11–33× the texels they can display. Sparse levels saturate at the adapter's `maxTexturePixels`, so their
+    // quality is unchanged. The pure sizing math lives in `GridCore.GridTextureUploadSizing`; here we only
+    // supply the current level's slot side + the live backing scale.
+
+    /// Live display backing scale (drawable px per point), refreshed from the MTKView each frame: 2 on a Retina
+    /// display, 1 on a non-Retina external monitor. 2 is a safe default until the first `draw(in:)`.
+    private var backingScale: CGFloat = 2
+    /// Supersampling headroom over a slot's native pixel size when choosing upload resolution. > 1 spends a
+    /// little VRAM to cut minification shimmer on the mip-less grid textures; at sparse levels the result
+    /// saturates at `maxTexturePixels` anyway, so those keep full quality.
+    private static let uploadPixelsHeadroom: CGFloat = 1.25
+    /// Never upload a thumbnail below this, even for a physically tiny dense-overview slot — a crispness floor.
+    private static let uploadPixelsFloor = 96
+
+    /// The effective upload cap for the CURRENT settled level: native slot pixels clamped to the adapter cap.
+    private func effectiveUploadPixels() -> Int {
+        let (_, slotSide, _, _) = engine.resolvedMetrics(level: level, width: layoutWidth)
+        return GridTextureUploadSizing.uploadPixels(
+            slotSidePoints: slotSide,
+            backingScale: backingScale,
+            headroom: Self.uploadPixelsHeadroom,
+            floor: Self.uploadPixelsFloor,
+            cap: cache.maxTexturePixels
+        )
+    }
+
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
           gridProfile: GridLevelProfile) {
         let texturePolicy = AppKitMetalGridTexturePolicies.policy(budget: budget)
@@ -1174,6 +1204,12 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         guard let clip = clipView else { return }
         let viewportSize = view.bounds.size
         guard viewportSize.width > 1, viewportSize.height > 1 else { return }
+        // Refresh the display backing scale from the live drawable (invariant to window size — the ratio is the
+        // Retina factor). Set before any early-returning branch so every path that reaches `streamTextures`
+        // sizes uploads against the current display.
+        if view.bounds.width > 0, view.drawableSize.width > 0 {
+            backingScale = max(1, view.drawableSize.width / view.bounds.width)
+        }
         // LIVE WINDOW RESIZE: scale the gesture-start snapshot about the viewport centre (fixed columns, no reflow;
         // the clip is frozen — the host re-centres it ONCE on release). Armed for a horizontal/corner drag.
         if presentationResizeActive {
@@ -1661,9 +1697,14 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             if s.rect.intersects(pureViewport) { visibleUIDs.append(flatUIDs[s.index]) }
             else { overscanUIDs.append(flatUIDs[s.index]) }
         }
-        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
+        // Fully settled (no live focus-row transaction) → allow the soft→sharp upgrade of carried-over textures.
+        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs, allowUpgrade: zoomTransaction == nil)
         let realCount = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
-        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && visibleUIDs.contains { !cache.isResident($0) }
+        // Keep ticking while a visible cell is still a placeholder OR a resident texture is mid-upgrade (a
+        // budget-deferred soft→sharp grow), so both finish on an otherwise-idle grid. Residency-saturated
+        // frames stay forced-idle: those placeholders can only fill on a window change, which redraws anyway.
+        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame
+            && (cache.pendingUpgradesThisFrame || visibleUIDs.contains { !cache.isResident($0) })
         publishLightDiagnostics(phase: zoomTransaction == nil ? "settled" : "liveZoom",
                                 visibleCount: visibleUIDs.count, overscanCount: overscanUIDs.count,
                                 realCount: realCount, cellCount: slots.count,
@@ -1799,7 +1840,12 @@ extension MetalGridCoordinator {
 
     // MARK: Texture streaming (visible-first upload + off-main warm)
 
-    private func streamTextures(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID]) {
+    private func streamTextures(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID], allowUpgrade: Bool = false) {
+        // Level-aware upload size: dense levels upload smaller textures (10–30× less GPU memory + bandwidth at
+        // L4/L5), sparse levels saturate at the adapter cap (unchanged quality). Set BEFORE `maxSafePinnedCount`
+        // is read below, so at dense levels each texture is cheap and far more of the visible tiles can be
+        // pinned within the same byte budget instead of degrading to placeholders.
+        cache.setEffectiveMaxTexturePixels(effectiveUploadPixels())
         // Pinning is clamped to what the byte budget can guarantee (visible first, then nearest overscan)
         // so dense zoom levels degrade to placeholders instead of pinning more than the budget can hold.
         // While visible items are still missing, keep overscan uploadable/warmable but evictable: otherwise
@@ -1814,6 +1860,14 @@ extension MetalGridCoordinator {
         for uid in priority where !cache.isResident(uid) && dataSource.hasImage(for: uid) { wanted.append(uid) }
         PhotoPerformanceSignposts.grid.interval("streamTextures.upload") {
             cache.uploadVisible(wanted: wanted) { [dataSource] uid in dataSource.image(for: uid) }
+        }
+        // Settled only: after fresh uploads spend their share of the budget, grow any visible texture still
+        // below the current cap (carried over from a denser level) to full crispness, in place. Skipped during
+        // transitions/dissolve — the settle frame that follows handles it, and the apparent size is in flux.
+        if allowUpgrade {
+            PhotoPerformanceSignposts.grid.interval("streamTextures.upgrade") {
+                cache.upgradeUndersizedResident(visibleUIDs) { [dataSource] uid in dataSource.image(for: uid) }
+            }
         }
         var warm: [PhotoUID] = []
         for uid in priority where !cache.isResident(uid) && !cache.isInFlight(uid) && !dataSource.hasImage(for: uid) { warm.append(uid) }
@@ -1896,6 +1950,8 @@ extension MetalGridCoordinator {
             "uploadBudgetBytes": "\(stats.uploadByteBudget)",
             "byteBudgetOverflow": "\(stats.byteBudgetOverflow)",
             "residencySaturated": "\(stats.residencySaturated)",
+            "effectivePixels": "\(cache.effectiveMaxTexturePixels)",
+            "upgrades": "\(cache.upgradesThisFrame)",
         ])
     }
 

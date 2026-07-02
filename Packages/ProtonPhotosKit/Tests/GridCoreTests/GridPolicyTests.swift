@@ -1,4 +1,5 @@
 import Testing
+import CoreGraphics
 import GridCore
 
 @Suite struct CoreTelemetryEventTests {
@@ -270,6 +271,54 @@ import GridCore
         #expect(budget.maxCachedTextures == 17)
         #expect(budget.maxResidentBytes == 56_789)
         #expect(budget.overscanFraction == 0.75)
+    }
+}
+
+@Suite struct GridTextureUploadSizingTests {
+    // Representative macOS geometry (1200 pt-wide grid @2×): L5 = 30 cols ≈ 39 pt slot; L0 = 3 cols ≈ 389 pt.
+    private func pixels(slot: CGFloat, scale: CGFloat = 2, headroom: CGFloat = 1.25, floor: Int = 96, cap: Int = 320) -> Int {
+        GridTextureUploadSizing.uploadPixels(slotSidePoints: slot, backingScale: scale, headroom: headroom, floor: floor, cap: cap)
+    }
+
+    @Test func denseSlotUploadsWellBelowCap() {
+        // A 39 pt L5 tile @2× is 78 native px; even with headroom that is far below the 320 px cap.
+        let dense = pixels(slot: 39)
+        #expect(dense < 320)
+        #expect(dense == 98)                      // round(39·2·1.25)
+        // A 58 pt L4 tile likewise stays well under the cap.
+        #expect(pixels(slot: 58) < 320)
+    }
+
+    @Test func sparseSlotSaturatesAtCapSoLargeLevelsKeepQuality() {
+        // A 389 pt L0 tile @2× wants ~973 px — clamped to the cap, i.e. IDENTICAL to the fixed-320 behaviour.
+        #expect(pixels(slot: 389) == 320)
+        #expect(pixels(slot: 163) == 320)         // L2 (163 pt) also saturates
+        // The result can never exceed the cap regardless of slot size / scale.
+        #expect(pixels(slot: 10_000, scale: 3) == 320)
+    }
+
+    @Test func neverBelowTheCrispnessFloorNorAboveTheCap() {
+        // A pathologically tiny slot floors at 96 rather than uploading mush.
+        #expect(pixels(slot: 10) == 96)
+        #expect(pixels(slot: 0) == 96)
+        // Floor is itself clamped to the cap, so a small-cap adapter never overshoots.
+        #expect(pixels(slot: 10, floor: 96, cap: 64) == 64)
+    }
+
+    @Test func scalesWithBackingScale() {
+        // A non-Retina external display uploads half the native pixels of a Retina one for the same slot.
+        let retina = pixels(slot: 120, scale: 2)      // 120·2·1.25 = 300
+        let nonRetina = pixels(slot: 120, scale: 1)   // 120·1·1.25 = 150
+        #expect(retina == 300)
+        #expect(nonRetina == 150)
+        #expect(retina > nonRetina)
+    }
+
+    @Test func iOSSmallerCapStillSaturatesOnSparseLevels() {
+        // iPhone compact cap is 224; a large-tile level still saturates there (unchanged quality), a dense one
+        // resolves below it (the memory win).
+        #expect(pixels(slot: 389, cap: 224) == 224)
+        #expect(pixels(slot: 39, scale: 3, cap: 224) < 224)   // 39·3·1.25 = 146
     }
 }
 
