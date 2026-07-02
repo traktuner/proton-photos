@@ -140,6 +140,25 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
             #expect(policy.maxTexturePixels < 320)
         }
     }
+
+    @Test func denseLevelAwarePoliciesBindOnBytesBeforeCountAtUploadFloor() {
+        // The level-aware uploader floors dense thumbnails at 96 px. Count caps must be high enough that
+        // the byte budget, not the structural count backstop, is the first binding limit at that floor.
+        // Runtime logs after the 112 px L5 pass showed the old macOS 4096 cap stuck at ~140 MiB resident
+        // with textureCapacity full, which reopened scroll churn despite an idle 512 MiB byte budget.
+        let floorTextureBytes = 96 * 96 * 4
+        let policies: [(name: String, budget: GridTextureBudget)] = [
+            ("macOS", MetalGridBudget.default),
+            ("iOS compact", UIKitMetalGridTexturePolicies.compact.budget),
+            ("iOS regular", UIKitMetalGridTexturePolicies.regular.budget),
+            ("iPad expanded", UIKitMetalGridTexturePolicies.expanded.budget),
+        ]
+
+        for policy in policies {
+            #expect(policy.budget.maxCachedTextures * floorTextureBytes >= policy.budget.maxResidentBytes,
+                    "\(policy.name) count cap must not bind before bytes for 96 px dense thumbnails")
+        }
+    }
 }
 
 @Suite struct MetalGridGlyphRasterizerTests {

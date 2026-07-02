@@ -868,7 +868,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             let appKitSource = try String(contentsOf: appKitPolicyFile, encoding: .utf8)
             for symbol in [
                 "AppKitMetalGridTexturePolicies",
-                "GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 4096, maxResidentBytes: 536_870_912, overscanFraction: 1.2)",
+                "GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 16_384, maxResidentBytes: 536_870_912, overscanFraction: 1.2)",
                 "package extension GridTextureBudget",
                 "static let `default` = AppKitMetalGridTexturePolicies.default.budget"
             ] where !appKitSource.contains(symbol) {
@@ -1091,7 +1091,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             "AppKitMetalGridTexturePolicies",
             "defaultMaxTexturePixels",
             "maxTexturePixels",
-            "GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 4096, maxResidentBytes: 536_870_912, overscanFraction: 1.2)",
+            "GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 16_384, maxResidentBytes: 536_870_912, overscanFraction: 1.2)",
             "maxTexturePixels: defaultMaxTexturePixels",
             "package extension GridTextureBudget",
             "static let `default` = AppKitMetalGridTexturePolicies.default.budget"
@@ -1299,7 +1299,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         for macValue in [
             "maxUploadsPerFrame: 48",
             "maxUploadBytesPerFrame: 6_291_456",
-            "maxCachedTextures: 4096",
+            "maxCachedTextures: 16_384",
             "maxResidentBytes: 536_870_912",
             "overscanFraction: 1.2",
             "maxTexturePixels: 320"
