@@ -45,6 +45,7 @@ let package = Package(
         .library(name: "MediaCache", targets: ["MediaCache"]),
         .library(name: "TimelineCore", targets: ["TimelineCore"]),
         .library(name: "TimelineUIKitAdapter", targets: ["TimelineUIKitAdapter"]),
+        .library(name: "TimelineUIKitFeature", targets: ["TimelineUIKitFeature"]),
         .library(name: "TimelineFeature", targets: ["TimelineFeature"]),
         .library(name: "PhotoViewerCore", targets: ["PhotoViewerCore"]),
         .library(name: "PhotoViewerUIKitAdapter", targets: ["PhotoViewerUIKitAdapter"]),
@@ -84,6 +85,7 @@ let package = Package(
         .testTarget(name: "GridCoreTests", dependencies: ["GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalRenderingCore", swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalGridTextureCore", dependencies: ["GridCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "MetalGridTextureCoreTests", dependencies: ["MetalGridTextureCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalGridTextureAppKitAdapter", dependencies: ["MetalGridTextureCore", "GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalGridTextureUIKitAdapter", dependencies: ["MetalGridTextureCore", "GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCacheAppKitAdapter", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaCacheCore"], swiftSettings: disableDynamicActorIsolation),
@@ -91,6 +93,7 @@ let package = Package(
         .target(name: "MediaCache", dependencies: ["MediaByteCache", "MediaLocationCore", "MediaCacheCore", "MediaCacheAppKitAdapter"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "TimelineCore", dependencies: ["PhotosCore", "GridCore"], resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
         .target(name: "TimelineUIKitAdapter", dependencies: ["GridCore", "TimelineCore", "MetalRenderingCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "TimelineUIKitFeature", dependencies: ["PhotosCore", "GridCore", "TimelineCore", "TimelineUIKitAdapter", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureUIKitAdapter", "MediaCacheUIKitAdapter"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",
             dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "GridCore", "TimelineCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter"],

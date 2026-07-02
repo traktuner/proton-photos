@@ -3,7 +3,7 @@ import CoreGraphics
 import ImageIO
 import Foundation
 import UniformTypeIdentifiers
-@testable import GridCore
+@testable import MetalGridTextureCore
 
 /// Tests for the pure, GPU-free direct-upload decision that lets the Metal texture cache skip the
 /// main-thread CGContext normalization redraw when a decoded thumbnail is already verbatim-compatible.

@@ -87,6 +87,7 @@ final class ProjectHygieneTests: XCTestCase {
             "product: PhotosCore",
             "product: ProtonAuth",
             "product: TimelineUIKitAdapter",
+            "product: TimelineUIKitFeature",
             "product: MediaCacheUIKitAdapter",
             "product: MetalGridTextureUIKitAdapter",
             "product: AlbumsFeature",
@@ -112,18 +113,26 @@ final class ProjectHygieneTests: XCTestCase {
 
         for url in mobileAppSourceFiles() {
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let importLines = Set(
+                text.split(whereSeparator: \.isNewline)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { $0.hasPrefix("import ") }
+            )
             for forbidden in [
                 "import AppKit",
                 "import TimelineFeature",
                 "import PhotoViewerFeature",
                 "import MapFeature",
-                "import MediaCache",
                 "NSView",
                 "NSImage",
                 "NSScrollView"
             ] {
                 XCTAssertFalse(text.contains(forbidden), "\(url.lastPathComponent) leaks macOS feature/API \(forbidden)")
             }
+            XCTAssertFalse(
+                importLines.contains("import MediaCache"),
+                "\(url.lastPathComponent) leaks macOS feature/API import MediaCache"
+            )
         }
 
         let verifyScript = repoRoot.appendingPathComponent("scripts/verify-ios-app-shell.sh")

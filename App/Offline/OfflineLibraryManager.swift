@@ -237,10 +237,7 @@ final class OfflineLibraryManager {
     }
 
     private static func cacheKey(for session: ProtonSession) -> SymmetricKey {
-        let input = SymmetricKey(data: Data(session.keyPassword.utf8))
-        let salt = Data("ProtonPhotos.local-cache.v1.\(session.uid)".utf8)
-        let info = Data("thumbnail-preview-cache".utf8)
-        return HKDF<SHA256>.deriveKey(inputKeyMaterial: input, salt: salt, info: info, outputByteCount: 32)
+        LocalCacheKeyDerivation.thumbnailPreviewCacheKey(accountUID: session.uid, keyPassword: session.keyPassword)
     }
 
     /// MASTER RESET: erases EVERYTHING on disk for the current account - thumbnails, previews, full originals, and

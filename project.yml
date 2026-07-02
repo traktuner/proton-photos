@@ -113,6 +113,8 @@ targets:
       - package: ProtonPhotosKit
         product: TimelineUIKitAdapter
       - package: ProtonPhotosKit
+        product: TimelineUIKitFeature
+      - package: ProtonPhotosKit
         product: MediaByteCache
       - package: ProtonPhotosKit
         product: MediaDecodingCore

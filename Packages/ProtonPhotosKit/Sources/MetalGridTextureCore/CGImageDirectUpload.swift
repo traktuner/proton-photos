@@ -1,6 +1,6 @@
 import CoreGraphics
 
-/// Pure, GPU-free decision for whether a decoded `CGImage` can be uploaded into an `rgba8Unorm` Metal
+/// Pure, GPU-free texture-upload decision for whether a decoded `CGImage` can be uploaded into an `rgba8Unorm` Metal
 /// texture **directly from its pixel bytes** - skipping the per-upload `CGContext` RGBA8 normalization
 /// redraw that the texture cache otherwise runs on the main thread inside `draw()`.
 ///

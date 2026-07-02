@@ -16,14 +16,24 @@ public struct ProtonSession: Codable, Sendable, Equatable {
     }
 }
 
-/// Persists the session (tokens + key password) in the macOS Keychain only.
+/// Persists the session (tokens + key password) in the platform Keychain.
 public struct SessionKeychainStore: Sendable {
     private let service: String
     private let account: String
 
-    public init(service: String = "me.protonphotos.mac.session", account: String = "default") {
+    public init(service: String = Self.defaultService, account: String = "default") {
         self.service = service
         self.account = account
+    }
+
+    public static var defaultService: String {
+        #if os(iOS)
+        "me.protonphotos.ios.session"
+        #elseif os(macOS)
+        "me.protonphotos.mac.session"
+        #else
+        "me.protonphotos.session"
+        #endif
     }
 
     public func load() -> ProtonSession? {

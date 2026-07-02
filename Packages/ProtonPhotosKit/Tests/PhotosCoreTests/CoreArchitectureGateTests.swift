@@ -1888,6 +1888,115 @@ final class CoreArchitectureGateTests: XCTestCase {
         )
     }
 
+    func testTimelineUIKitFeatureOwnsIOSPhotoGridAssembly() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let featureRoot = sourcesRoot.appendingPathComponent("TimelineUIKitFeature")
+        let hostFile = featureRoot.appendingPathComponent("UIKitTimelineGridHost.swift")
+        var violations: [String] = []
+
+        if !manifest.contains(".library(name: \"TimelineUIKitFeature\", targets: [\"TimelineUIKitFeature\"])") {
+            violations.append("TimelineUIKitFeature: missing matching library product")
+        }
+
+        if let targetLine = manifestLine(forTarget: "TimelineUIKitFeature", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            let expected: Set<String> = [
+                "PhotosCore",
+                "GridCore",
+                "TimelineCore",
+                "TimelineUIKitAdapter",
+                "MetalRenderingCore",
+                "MetalGridTextureCore",
+                "MetalGridTextureUIKitAdapter",
+                "MediaCacheUIKitAdapter",
+            ]
+            if dependencies != expected {
+                violations.append("TimelineUIKitFeature: dependencies \(dependencies.sorted()) != \(expected.sorted())")
+            }
+        } else {
+            violations.append("TimelineUIKitFeature: missing Package.swift target declaration")
+        }
+
+        guard FileManager.default.fileExists(atPath: hostFile.path) else {
+            XCTFail("TimelineUIKitFeature/UIKitTimelineGridHost.swift: missing UIKit timeline grid host")
+            return
+        }
+
+        let imports = try importedModules(in: hostFile)
+        for required in [
+            "UIKit",
+            "SwiftUI",
+            "PhotosCore",
+            "GridCore",
+            "TimelineCore",
+            "TimelineUIKitAdapter",
+            "MetalRenderingCore",
+            "MetalGridTextureCore",
+            "MetalGridTextureUIKitAdapter",
+            "MediaCacheUIKitAdapter",
+        ] where !imports.contains(required) {
+            violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: missing import \(required)")
+        }
+        for forbidden in [
+            "AppKit",
+            "MetalKit",
+            "TimelineFeature",
+            "MediaCache",
+            "MediaCacheAppKitAdapter",
+            "DesignSystem",
+            "DesignSystemAppKitAdapter",
+            "PhotoViewerFeature",
+            "MapFeature",
+            "ProtonDriveSDK",
+        ] where imports.contains(forbidden) {
+            violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: forbidden import \(forbidden)")
+        }
+
+        let source = try String(contentsOf: hostFile, encoding: .utf8)
+        for required in [
+            "public struct UIKitTimelineGrid: UIViewRepresentable",
+            "public final class UIKitTimelineGridHostView: UIView",
+            "UIKitTimelineMetalHostView",
+            "UIScrollViewDelegate",
+            "SquareTileGridEngine",
+            "UIKitMetalGridTextureCacheFactory.makeCache",
+            "UIKitThumbnailFeed",
+            "GridTextureStreamingPolicy.window",
+            "MetalGridRenderer",
+            "MetalGridDrawableTarget(layer:",
+            "device.supportsFamily(.apple7)",
+        ] where !source.contains(required) {
+            violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: missing \(required)")
+        }
+
+        let code = stripCommentsAndStringLiterals(from: source)
+        for forbidden in [
+            "NSView",
+            "NSScrollView",
+            "NSImage",
+            "MTKView",
+            "MacMediaCachePolicy",
+            "AppKitMetalGrid",
+            "TimelineViewModel",
+            "MetalGridScrollHost",
+            "ProtonDriveSDK",
+        ] where contains(forbidden, in: code) {
+            violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: forbidden macOS/SDK reference \(forbidden)")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Timeline UIKit feature boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            The UIKit timeline feature may assemble the shared GridCore, MetalRenderingCore, texture cache,
+            and UIKit thumbnail feed for iOS/iPadOS. macOS TimelineFeature/AppKit hosts, SDK glue, and desktop
+            cache policy must stay outside this target.
+            """
+        )
+    }
+
     func testMetalGridTextureCacheStaysItemIDGeneric() throws {
         let textureRoot = sourcesRoot.appendingPathComponent("MetalGridTextureCore")
         let timelineRoot = sourcesRoot.appendingPathComponent("TimelineFeature")

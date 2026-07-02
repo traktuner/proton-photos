@@ -32,6 +32,7 @@ RENDERING_CORE_TARGETS=(
 IOS_PLATFORM_ADAPTER_TARGETS=(
   MetalGridTextureUIKitAdapter
   TimelineUIKitAdapter
+  TimelineUIKitFeature
 )
 
 MACOS_PLATFORM_ADAPTER_TARGETS=(
