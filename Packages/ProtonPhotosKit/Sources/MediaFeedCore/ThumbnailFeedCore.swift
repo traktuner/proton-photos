@@ -89,7 +89,7 @@ public actor ThumbnailFeedCore {
     /// UIDs whose thumbnail the backend refused per item (e.g. "no thumbnail"). Quarantined so the
     /// crawl doesn't re-request them every batch; cleared by `startPrefetch` so a fresh crawl
     /// (new session, timeline refresh) retries them exactly once.
-    private var unfetchable: Set<PhotoUID> = []
+    private nonisolated let unfetchable = UnfetchableThumbnailBox()
     private var skippedUnfetchable = 0
     private var lastRepassPercent = -1.0
     private var targetConcurrency = 2
@@ -138,6 +138,10 @@ public actor ThumbnailFeedCore {
 
     public nonisolated func memoryDecoded(for uid: PhotoUID) -> DecodedThumbnail? {
         decoded.object(forKey: Self.key(uid))?.value
+    }
+
+    public nonisolated func isKnownUnfetchable(_ uid: PhotoUID) -> Bool {
+        unfetchable.contains(uid)
     }
 
     public func cacheState(for request: ThumbnailRequest, gpuTextureResident: Bool = false) -> ThumbnailCacheTierState {
@@ -716,6 +720,31 @@ private final class DecodedThumbnailBox: @unchecked Sendable {
 
     init(_ value: DecodedThumbnail) {
         self.value = value
+    }
+}
+
+private final class UnfetchableThumbnailBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ids: Set<PhotoUID> = []
+
+    var count: Int {
+        lock.withLock { ids.count }
+    }
+
+    func contains(_ uid: PhotoUID) -> Bool {
+        lock.withLock { ids.contains(uid) }
+    }
+
+    func insert(_ uid: PhotoUID) {
+        lock.withLock { _ = ids.insert(uid) }
+    }
+
+    func formUnion<S: Sequence>(_ sequence: S) where S.Element == PhotoUID {
+        lock.withLock { ids.formUnion(sequence) }
+    }
+
+    func removeAll() {
+        lock.withLock { ids.removeAll(keepingCapacity: true) }
     }
 }
 

@@ -91,6 +91,10 @@ public actor ThumbnailFeed {
         core.memoryDecoded(for: uid)?.image
     }
 
+    public nonisolated func isKnownUnfetchable(_ uid: PhotoUID) -> Bool {
+        core.isKnownUnfetchable(uid)
+    }
+
     public func cacheState(for request: ThumbnailRequest, gpuTextureResident: Bool = false) async -> ThumbnailCacheTierState {
         await core.cacheState(for: request, gpuTextureResident: gpuTextureResident)
     }

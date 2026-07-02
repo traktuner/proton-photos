@@ -1166,7 +1166,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         }
         streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
         _ = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
-        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && visibleUIDs.contains { !cache.isResident($0) }
+        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && hasRetryableMissingVisibleTexture(visibleUIDs)
     }
 
     /// Max per-item rect delta (L1 of origin + size) between two index-keyed slot sets — 0 when every shared item
@@ -1543,7 +1543,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             renderer.renderLayerDissolve(in: view, viewportSize: viewportSize,
                                          sourceGroups: srcGroups, targetGroups: tgtGroups, t: Float(plan.targetOpacity))
         }
-        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && uids.contains { !cache.isResident($0) }
+        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && hasRetryableMissingVisibleTexture(uids)
         publishLightDiagnostics(phase: "overviewDissolve", visibleCount: uids.count, overscanCount: 0,
                                 realCount: srcRealCount + tgtRealCount,
                                 cellCount: srcSlots.count + tgtSlots.count,
@@ -1630,7 +1630,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         }
         streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
         let realCount = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
-        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && visibleUIDs.contains { !cache.isResident($0) }
+        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && hasRetryableMissingVisibleTexture(visibleUIDs)
         publishLightDiagnostics(phase: "commitBridge", visibleCount: visibleUIDs.count,
                                 overscanCount: overscanUIDs.count, realCount: realCount, cellCount: slots.count,
                                 visibleRect: CGRect(origin: scrollOffset, size: viewportSize),
@@ -1705,7 +1705,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         // budget-deferred soft→sharp grow), so both finish on an otherwise-idle grid. Residency-saturated
         // frames stay forced-idle: those placeholders can only fill on a window change, which redraws anyway.
         hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame
-            && (pendingVisibleQualityUpgrade || visibleUIDs.contains { !cache.isResident($0) })
+            && (pendingVisibleQualityUpgrade || hasRetryableMissingVisibleTexture(visibleUIDs))
         publishLightDiagnostics(phase: zoomTransaction == nil ? "settled" : "liveZoom",
                                 visibleCount: visibleUIDs.count, overscanCount: overscanUIDs.count,
                                 realCount: realCount, cellCount: slots.count,
@@ -1841,6 +1841,10 @@ extension MetalGridCoordinator {
 
     // MARK: Texture streaming (visible-first upload + off-main warm)
 
+    private func hasRetryableMissingVisibleTexture(_ uids: [PhotoUID]) -> Bool {
+        uids.contains { !cache.isResident($0) && dataSource.canRetryThumbnail(for: $0) }
+    }
+
     @discardableResult
     private func streamTextures(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID], allowUpgrade: Bool = false) -> Bool {
         // Level-aware upload size: dense levels upload smaller textures (10–30× less GPU memory + bandwidth at
@@ -1852,7 +1856,7 @@ extension MetalGridCoordinator {
         // so dense zoom levels degrade to placeholders instead of pinning more than the budget can hold.
         // While visible items are still missing, keep overscan uploadable/warmable but evictable: otherwise
         // already-resident overscan can occupy the pinned byte floor and starve newly visible thumbnails.
-        let pinOverscan = visibleUIDs.allSatisfy { cache.isResident($0) }
+        let pinOverscan = visibleUIDs.allSatisfy { cache.isResident($0) || !dataSource.canRetryThumbnail(for: $0) }
         let window = GridTextureStreamingPolicy.window(visibleIDs: visibleUIDs, overscanIDs: overscanUIDs,
                                                        maxPinned: cache.maxSafePinnedCount,
                                                        pinOverscan: pinOverscan)
@@ -1878,7 +1882,7 @@ extension MetalGridCoordinator {
             guard queuedWarm.insert(uid).inserted else { return }
             warm.append(uid)
         }
-        for uid in priority where !cache.isResident(uid) && !cache.isInFlight(uid) && !dataSource.hasImage(for: uid) {
+        for uid in priority where !cache.isResident(uid) && !cache.isInFlight(uid) && !dataSource.hasImage(for: uid) && dataSource.canRetryThumbnail(for: uid) {
             appendWarm(uid)
         }
         var pendingVisibleQualityUpgrade = cache.pendingUpgradesThisFrame
@@ -1888,7 +1892,7 @@ extension MetalGridCoordinator {
                 // the source image so a settled sparse frame can replace it with a sharp texture. If the source
                 // is present but source-limited or the pinned floor cannot fit the replacement, there is no
                 // retryable work, so do not keep the display link awake forever.
-                guard !dataSource.hasImage(for: uid) else { continue }
+                guard !dataSource.hasImage(for: uid), dataSource.canRetryThumbnail(for: uid) else { continue }
                 appendWarm(uid)
                 pendingVisibleQualityUpgrade = true
             }
@@ -1896,7 +1900,8 @@ extension MetalGridCoordinator {
         if !warm.isEmpty { dataSource.warm(warm) }
         // First fully-populated on-screen frame (every VISIBLE cell uploaded, just now via `uploadVisible`) →
         // tell the shell to lift the launch veil. One-shot; `allSatisfy` short-circuits on the first miss.
-        if !firstContentReported, !visibleUIDs.isEmpty, visibleUIDs.allSatisfy({ cache.isResident($0) }) {
+        if !firstContentReported, !visibleUIDs.isEmpty,
+           visibleUIDs.allSatisfy({ cache.isResident($0) || !dataSource.canRetryThumbnail(for: $0) }) {
             firstContentReported = true
             onFirstContentReady?()
         }

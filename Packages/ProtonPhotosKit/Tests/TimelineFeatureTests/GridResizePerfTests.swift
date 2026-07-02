@@ -140,8 +140,19 @@ import GridCore
 
     @Test func overscanIsNotPinnedWhileVisibleThumbnailsAreCold() {
         let coord = src("MetalGridCoordinator.swift")
-        #expect(coord.contains("let pinOverscan = visibleUIDs.allSatisfy { cache.isResident($0) }"))
+        #expect(coord.contains("let pinOverscan = visibleUIDs.allSatisfy { cache.isResident($0) || !dataSource.canRetryThumbnail(for: $0) }"))
         #expect(coord.contains("pinOverscan: pinOverscan"))
+    }
+
+    @Test func unfetchableVisibleThumbnailsDoNotKeepDisplayLinkPending() {
+        let coord = src("MetalGridCoordinator.swift")
+        let dataSource = src("MetalGridDataSource.swift")
+        #expect(dataSource.contains("func canRetryThumbnail(for uid: PhotoUID) -> Bool"))
+        #expect(coord.contains("private func hasRetryableMissingVisibleTexture"))
+        #expect(coord.contains("dataSource.canRetryThumbnail(for: $0)"))
+        #expect(coord.contains("!dataSource.canRetryThumbnail(for: $0)"))
+        #expect(!coord.contains("visibleUIDs.contains { !cache.isResident($0) }"),
+                "pending visible work must ignore backend-refused, non-retryable thumbnails")
     }
 
     // 6 — no synchronous decode on the resize path: the rebase is pure geometry; texture work stays in the cache.

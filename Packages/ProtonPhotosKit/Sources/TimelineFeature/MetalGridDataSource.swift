@@ -13,6 +13,9 @@ protocol MetalGridDataSource: AnyObject {
     var flatUIDs: [PhotoUID] { get }
     /// Cheap "is a RAM image ready?" check (no decode/conversion) — drives upload selection.
     func hasImage(for uid: PhotoUID) -> Bool
+    /// True when a missing thumbnail can still make progress through disk/network/decode. Backend-refused
+    /// thumbnails draw as stable placeholders and must not keep the display link or warm queue alive.
+    func canRetryThumbnail(for uid: PhotoUID) -> Bool
     /// Synchronous in-RAM image for `uid`, or nil if not yet available (caller draws a placeholder).
     /// Only called for the bounded set of UIDs actually being uploaded this frame.
     func image(for uid: PhotoUID) -> CGImage?
@@ -29,6 +32,7 @@ protocol MetalGridDataSource: AnyObject {
 
 extension MetalGridDataSource {
     func isVideo(_ uid: PhotoUID) -> Bool { false }
+    func canRetryThumbnail(for uid: PhotoUID) -> Bool { true }
     func prefetchWarm(_ uids: [PhotoUID]) {}   // only the real source decodes; test sources opt out
 }
 
@@ -75,6 +79,10 @@ final class RealMetalGridDataSource: MetalGridDataSource {
 
     func hasImage(for uid: PhotoUID) -> Bool { feed.memoryCGImage(for: uid) != nil }
 
+    func canRetryThumbnail(for uid: PhotoUID) -> Bool {
+        !feed.isKnownUnfetchable(uid)
+    }
+
     func image(for uid: PhotoUID) -> CGImage? {
         feed.memoryCGImage(for: uid)
     }
@@ -94,6 +102,8 @@ final class RealMetalGridDataSource: MetalGridDataSource {
     }
 
     func warm(_ uids: [PhotoUID]) {
+        let uids = uids.filter { !feed.isKnownUnfetchable($0) }
+        guard !uids.isEmpty else { return }
         // Latest viewport wins (the coordinator passes the still-missing cells in visible-first order each
         // frame). No permanent suppression — a cell evicted from the RAM cache must be able to re-warm.
         pendingWarm = uids
@@ -121,7 +131,7 @@ final class RealMetalGridDataSource: MetalGridDataSource {
                 if self.networkDebouncer.hasPendingUnflushed() { self.scheduleSettleCheck() }
                 return
             }
-            let missing = settled.filter { self.feed.memoryCGImage(for: $0) == nil }
+            let missing = settled.filter { self.feed.memoryCGImage(for: $0) == nil && !self.feed.isKnownUnfetchable($0) }
             guard !missing.isEmpty else { return }
             Task { [feed = self.feed] in
                 for uid in missing { await feed.requestPriority(uid, priority: .visibleNow) }

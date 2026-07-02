@@ -54,6 +54,22 @@ struct ThumbnailHealthTests {
         #expect(availabilityCallbacks >= 2, "warming \(count) items must drain across more than one \(96)-item batch")
     }
 
+    @Test @MainActor func realDataSourceMarksBackendRefusedThumbnailsNonRetryable() async throws {
+        let uid = PhotoUID(volumeID: "vol", nodeID: "refused-\(UUID().uuidString)")
+        let feed = await Self.makeFeed(
+            cache: ThumbnailCache(namespace: Self.uniqueNamespace("refused"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health")),
+            loader: FakeThumbnailLoader(itemErrors: [uid: "no thumbnail for node"])
+        )
+        let item = PhotoItem(uid: uid, captureTime: Date(timeIntervalSince1970: 0), mediaType: "image/jpeg")
+        let dataSource = RealMetalGridDataSource(sections: [
+            TimelineSection(id: "refused", date: Date(timeIntervalSince1970: 0), title: "Refused", items: [item])
+        ], feed: feed)
+
+        #expect(dataSource.canRetryThumbnail(for: uid))
+        #expect(await feed.image(for: uid) == nil)
+        #expect(!dataSource.canRetryThumbnail(for: uid))
+    }
+
     // (Placeholder-image + GridTransitionSpriteDescriptor "no drop / arrives during pinch" tests were
     // removed with the legacy GridThumbnailFallback / GridSpriteTransitionView. The Metal grid's
     // placeholder-until-resident behavior is covered by MetalGridPlaceholderTests.)
@@ -253,9 +269,11 @@ struct ThumbnailHealthTests {
 private actor FakeThumbnailLoader: ThumbnailBatchLoader {
     private var requests: [PhotoUID] = []
     private let payloads: [PhotoUID: Data]
+    private let itemErrors: [PhotoUID: String]
 
-    init(payloads: [PhotoUID: Data] = [:]) {
+    init(payloads: [PhotoUID: Data] = [:], itemErrors: [PhotoUID: String] = [:]) {
         self.payloads = payloads
+        self.itemErrors = itemErrors
     }
 
     func loadThumbnails(
@@ -263,12 +281,15 @@ private actor FakeThumbnailLoader: ThumbnailBatchLoader {
         onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
     ) async -> ThumbnailBatchLoadResult {
         requests.append(contentsOf: uids)
+        var errors: [PhotoUID: String] = [:]
         for uid in uids {
             if let data = payloads[uid] {
                 onLoaded(uid, data)
+            } else if let reason = itemErrors[uid] {
+                errors[uid] = reason
             }
         }
-        return .delivered
+        return ThumbnailBatchLoadResult(itemErrors: errors)
     }
 
     func requestCount() -> Int {
