@@ -180,7 +180,7 @@ import TimelineCore
         let coord = src("MetalGridCoordinator.swift")
         let host = src("MetalGridScrollHost.swift")
 
-        #expect(coord.contains("gridProfile: GridLevelProfile)"))
+        #expect(coord.contains("gridProfile: GridLevelProfile"))
         #expect(coord.contains("engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: gridProfile)"))
         #expect(coord.contains("level = gridProfile.defaultLevel"))
         #expect(host.contains("gridProfile: GridLevelProfile,"))

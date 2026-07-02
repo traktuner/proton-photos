@@ -242,7 +242,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     }
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
-          gridProfile: GridLevelProfile) {
+          gridProfile: GridLevelProfile, memoryGovernor: MemoryPressureGovernor? = nil) {
         let texturePolicy = AppKitMetalGridTexturePolicies.policy(budget: budget)
         guard let renderer = MetalGridRenderer(device: device, clearColor: MetalGridPalette.clearColor),
               let cache = AppKitMetalGridTextureCacheFactory.makeCache(
@@ -258,6 +258,13 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         self.engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: gridProfile)
         super.init()
         rebuildIndex()
+        // Register the GPU texture cache with the injected memory governor (nil in tests — they never
+        // touch the shared governor). Weak capture means an orphaned coordinator's handler no-ops, so
+        // no deinit bookkeeping is needed. On pressure the cache sheds offscreen residency but never the
+        // visible pinned set, so what is on screen stays drawable.
+        memoryGovernor?.register { [weak cache] tier in
+            cache?.setResidencyPressureScale(tier.budgetScale)
+        }
     }
 
     func setDataSource(_ newSource: MetalGridDataSource) {

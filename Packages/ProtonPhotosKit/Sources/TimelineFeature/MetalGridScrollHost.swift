@@ -175,7 +175,8 @@ final class MetalGridScrollHost: NSView {
           gridProfile: GridLevelProfile,
           gridProfileResolver: TimelineGridProfileResolver? = nil) {
         guard let coordinator = MetalGridCoordinator(device: device, dataSource: dataSource, budget: budget,
-                                                     gridProfile: gridProfile) else { return nil }
+                                                     gridProfile: gridProfile,
+                                                     memoryGovernor: .shared) else { return nil }
         self.coordinator = coordinator
         self.metalView = MetalGridView(frame: .zero, device: device)
         self.gridProfileResolver = gridProfileResolver

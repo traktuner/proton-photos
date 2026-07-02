@@ -145,6 +145,9 @@ final class AppModel {
                 SDKCapabilities.current.log()
                 facade = ProtonClientFacade.make(bridge: bridge)
                 backend = .ready(bridge)
+                // Start coordinating cache footprint with system memory pressure / thermal state now
+                // that the account-configured caches exist. Idempotent across backend rebuilds.
+                AppMemoryPressureCoordinator.shared.install()
             } catch is CancellationError {
                 // ignore
             } catch {

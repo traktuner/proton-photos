@@ -69,6 +69,17 @@ public actor ThumbnailFeed {
         return Int(min(max(physical * 0.005, floor), ceiling))
     }
 
+    /// Governor-driven memory-pressure response for BOTH macOS RAM tiers this adapter owns: the AppKit
+    /// NSImage wrappers here and the shared decoded-CGImage tier in the core. `scale` lowers each cost
+    /// limit; `purge` drops held images now. `nonisolated` + thread-safe NSCaches, so the governor never
+    /// hops this actor. Nothing is lost — wrappers rebuild from the decoded tier, decodes from disk.
+    public nonisolated func applyMemoryPressure(scale: Double, purge: Bool) {
+        let clamped = min(1, max(0, scale))
+        imageWrappers.totalCostLimit = max(1, Int(Double(Self.wrapperRAMBudgetBytes()) * clamped))
+        if purge { imageWrappers.removeAllObjects() }
+        core.applyDecodedMemoryPressure(scale: clamped, purge: purge)
+    }
+
     static func decodedCost(_ image: NSImage) -> Int {
         MacThumbnailImageDecoder.decodedCost(image)
     }

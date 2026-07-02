@@ -148,6 +148,9 @@ struct MainView: View {
             .task { await loadAlbums() }
             .onAppear {
                 attachOfflineManager()
+                // Register the live feed's RAM caches with the memory governor (idempotent by identity,
+                // so SwiftUI re-creating this view never double-registers or leaks a stale feed).
+                AppMemoryPressureCoordinator.shared.attachFeed(timelineModel.feed)
                 // The grid calls this once the first on-screen frame is fully drawn → lift the veil then.
                 gridProxy.onFirstContentReady = { [weak model] in model?.markLibraryReady() }
                 evaluateVeilLift()
