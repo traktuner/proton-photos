@@ -76,6 +76,15 @@ private actor RecordingLoader: ThumbnailBatchLoader {
     func finishedBatches() -> Int { finishedBatchCount }
 }
 
+/// Advanceable monotonic clock for deterministic demand-window tests (no real sleeps / wall-clock reliance).
+private final class MutableClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Date
+    init(_ start: Date) { current = start }
+    func read() -> Date { lock.withLock { current } }
+    func advance(_ seconds: TimeInterval) { lock.withLock { current = current.addingTimeInterval(seconds) } }
+}
+
 @Suite("MediaFeedCore")
 struct ThumbnailFeedCoreTests {
     @Test func diskOnlyBytesWarmIntoDecodedRamWithoutNetwork() async throws {
@@ -242,6 +251,63 @@ struct ThumbnailFeedCoreTests {
 
         #expect(statsInOneStep < library.count)   // one actor-held step never scans the whole 5000-item library
         #expect(statsInOneStep == 512)            // it advances exactly one bounded chunk
+    }
+
+    @Test func coverageScanAbortsImmediatelyWhenViewportIsLive() async throws {
+        // A live viewport aborts the coverage re-scan BEFORE it stats a single item, so a visible warm decode is
+        // never blocked behind coverage maintenance. Frozen clock → the demand stays "recent".
+        let frozen = Date(timeIntervalSince1970: 5000)
+        let feed = ThumbnailFeedCore(cache: Self.cache("coverage-abort"), loader: RecordingLoader(),
+                                     configuration: Self.configuration(), clock: { frozen })
+        feed.noteVisibleDemand()   // synchronous (nonisolated); frozen clock keeps it recent
+        let library = (0 ..< 5000).map { Self.uid("abort-\($0)") }
+
+        let scanned = await feed.coverageScanStepStatCountForTesting(seeding: library)
+
+        #expect(scanned == 0)   // aborted before the first `cache.has` stat
+    }
+
+    @Test func endOfCrawlCoverageRefreshIsSingleFlightAndSkipsRedundantScan() async throws {
+        // Many workers reach the drained end together, but the coverage refresh is SINGLE-FLIGHT: exactly one
+        // runs, not one per worker (the previous end-of-crawl stampede). And because the crawl's per-item
+        // `diskPresence` tracking already established full coverage during the drain, that one refresh settles
+        // from the KNOWN state without a redundant full `cache.has` re-scan.
+        let uids = (0 ..< 40).map { Self.uid("single-flight-\($0)") }
+        let cache = Self.cache("single-flight")
+        let png = Self.pngData(width: 8, height: 8)
+        for uid in uids { cache.storeToDisk(png, for: uid) }   // all disk-present → the crawl drains straight to the end
+        let feed = ThumbnailFeedCore(cache: cache, loader: RecordingLoader(),
+                                     configuration: Self.configuration(downloadConcurrencyLimit: 8))
+
+        await feed.startPrefetch(uids)
+        try await Self.waitUntil { await feed.coverageRefreshStartCountForTesting() >= 1 }
+        try await Task.sleep(for: .milliseconds(120))   // give any stampede a chance to (wrongly) start more
+
+        #expect(await feed.coverageRefreshStartCountForTesting() == 1)              // one refresh, not one per worker
+        #expect(await feed.coverageFullScanCountForTesting() == 0)                  // known state → no redundant full sweep
+        #expect(await feed.prefetchStatus().diskThumbnailCoverageFraction >= 1.0)   // and coverage is correct
+        await feed.stopPrefetch()
+    }
+
+    @Test func coverageRefreshResumesAfterVisibleDemandQuiets() async throws {
+        let clock = MutableClock(Date(timeIntervalSince1970: 1000))
+        let uids = (0 ..< 20).map { Self.uid("resume-\($0)") }
+        let cache = Self.cache("coverage-resume")
+        let png = Self.pngData(width: 8, height: 8)
+        for uid in uids { cache.storeToDisk(png, for: uid) }
+        let feed = ThumbnailFeedCore(cache: cache, loader: RecordingLoader(),
+                                     configuration: Self.configuration(downloadConcurrencyLimit: 4),
+                                     clock: { clock.read() })
+
+        feed.noteVisibleDemand()   // viewport live at T=1000 → coverage refresh must stay gated
+        await feed.startPrefetch(uids)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(await feed.coverageRefreshStartCountForTesting() == 0)   // no refresh while demand is recent
+
+        clock.advance(1.0)   // demand quiets
+        try await Self.waitUntil { await feed.coverageRefreshStartCountForTesting() >= 1 }
+        #expect(await feed.coverageRefreshStartCountForTesting() >= 1)   // coverage refresh resumes once idle
+        await feed.stopPrefetch()
     }
 
     @Test func diskHitsDoNotBecomeDownloads() async throws {

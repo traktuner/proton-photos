@@ -93,10 +93,17 @@ public actor ThumbnailFeedCore {
     private var skippedUnfetchable = 0
     private var lastRepassPercent = -1.0
     /// Cursor + one-shot completion flag for the BOUNDED end-of-crawl disk-coverage re-scan
-    /// (`advanceDiskCoverageScan`). Workers share the cursor so together they complete one pass in bounded
-    /// chunks; none holds the serial actor for an O(library) scan. Reset per crawl in `startPrefetch`.
+    /// (`advanceDiskCoverageScan`). Reset per crawl in `startPrefetch`.
     private var coverageScanCursor = 0
     private var coverageSettled = false
+    /// Single-flight guard for `runCoverageRefresh` (only one worker runs the coverage refresh; the rest idle)
+    /// + a per-crawl count of refreshes actually started, so a test can prove one refresh runs, not N.
+    private var coverageRefreshInFlight = false
+    private var coverageRefreshStarts = 0
+    /// How many coverage refreshes ran an actual chunked `cache.has` sweep (vs. settling from the tracker's
+    /// already-known state). Lets a test prove the redundant full re-scan is skipped when `DiskPresenceCache`
+    /// already knows coverage.
+    private var coverageFullScans = 0
     private var targetConcurrency = 2
     private var activeDownloaders = 0
     private var aimdSuccessStreak = 0
@@ -371,6 +378,9 @@ public actor ThumbnailFeedCore {
         lastRepassPercent = -1.0
         coverageScanCursor = 0
         coverageSettled = false
+        coverageRefreshInFlight = false
+        coverageRefreshStarts = 0
+        coverageFullScans = 0
         startWorkers()
     }
 
@@ -504,23 +514,29 @@ public actor ThumbnailFeedCore {
                         try? await Task.sleep(for: .milliseconds(150))
                         continue
                     }
-                    // Refresh disk coverage in a BOUNDED chunk of stats (never an O(library) actor hold), so a
-                    // full re-scan — even with every worker reaching the end together — can never starve a
-                    // visible warm decode. `nil` = the pass isn't finished (or it bailed to a live viewport):
-                    // yield the actor and continue it on a later iteration.
-                    guard let coverage = advanceDiskCoverageScan() else {
-                        try? await Task.sleep(for: .milliseconds(15))
+                    // SINGLE-FLIGHT: exactly one worker runs the end-of-crawl coverage refresh; the rest idle
+                    // (staying available for a demand burst) rather than each scanning. Combined with the
+                    // chunked, demand-aborting `runCoverageRefresh`, this means one bounded refresh per drain,
+                    // never a stampede of N full-library scans on the serial actor.
+                    guard !coverageRefreshInFlight else {
+                        try? await Task.sleep(for: .milliseconds(150))
                         continue
                     }
-                    if coverage.percent < 0.995, coverage.percent > lastRepassPercent + 0.01 {
-                        lastRepassPercent = coverage.percent
+                    coverageRefreshInFlight = true
+                    let outcome = await runCoverageRefresh()
+                    coverageRefreshInFlight = false
+                    switch outcome {
+                    case .aborted:
+                        continue                       // a viewport went live → go service it; coverage retries when quiet
+                    case .recrawl:
                         sequentialIndex = 0
                         coverageScanCursor = 0
                         try? await Task.sleep(for: .seconds(2))
                         continue
+                    case .settled:
+                        coverageSettled = true         // ≥99.5% (or no longer improving) → stop re-scanning this crawl
+                        return
                     }
-                    coverageSettled = true   // ≥99.5% (or no longer improving) → stop re-scanning this crawl
-                    return
                 }
                 try? await Task.sleep(for: .milliseconds(150))
                 continue
@@ -723,6 +739,60 @@ public actor ThumbnailFeedCore {
         return diskPresence.coverage()
     }
 
+    private enum CoverageRefreshOutcome { case settled, recrawl, aborted }
+
+    /// Runs the end-of-crawl disk-coverage refresh to completion, in bounded `advanceDiskCoverageScan` chunks
+    /// that yield the serial actor between them and abort the instant a viewport goes live. Invoked SINGLE-FLIGHT
+    /// (guarded by `coverageRefreshInFlight`), so exactly one runs per drain regardless of worker count - it can
+    /// never hold the actor for an O(library) scan, be multiplied by the worker count, or starve a visible warm
+    /// decode. Emits one `[ThumbCoverage]` line at start and one at finish (never per item).
+    private func runCoverageRefresh() async -> CoverageRefreshOutcome {
+        let startedAt = clock()
+        coverageRefreshStarts += 1
+        emitCoverage("refreshStart", scanned: 0, coverage: diskPresence.coverage(), startedAt: startedAt, reason: "-")
+        // Known-state fast path: if the incremental tracker already reports (near) complete coverage from this
+        // session's crawling, settle WITHOUT a full `cache.has` sweep — it would be redundant background I/O.
+        // The tracker only counts UIDs it has POSITIVELY seen present, so this can never falsely report "warm"
+        // from incomplete knowledge; a real scan runs only when knowledge is incomplete (e.g. a checkpoint
+        // resume left early items unscanned) and might reveal missing items to re-crawl.
+        let known = diskPresence.coverage()
+        if known.percent >= 0.995 {
+            emitCoverage("refreshDone", scanned: 0, coverage: known, startedAt: startedAt, reason: "trackerComplete")
+            return .settled
+        }
+        coverageFullScans += 1
+        coverageScanCursor = 0
+        while true {
+            if recentVisibleDemand() {
+                emitCoverage("refreshAbortVisibleDemand", scanned: coverageScanCursor,
+                             coverage: diskPresence.coverage(), startedAt: startedAt, reason: "visibleDemand")
+                return .aborted
+            }
+            guard let coverage = advanceDiskCoverageScan() else {
+                try? await Task.sleep(for: .milliseconds(1))   // one chunk done (or bailed) → yield the actor
+                continue
+            }
+            let recrawl = coverage.percent < 0.995 && coverage.percent > lastRepassPercent + 0.01
+            if recrawl { lastRepassPercent = coverage.percent }
+            emitCoverage("refreshDone", scanned: coverage.total, coverage: coverage, startedAt: startedAt,
+                         reason: recrawl ? "recrawl" : "settled")
+            return recrawl ? .recrawl : .settled
+        }
+    }
+
+    private func emitCoverage(_ event: String, scanned: Int, coverage: (present: Int, total: Int, percent: Double),
+                              startedAt: Date, reason: String) {
+        PhotoDiagnostics.shared.emit("ThumbCoverage", [
+            "event": event,
+            "scanned": "\(scanned)",
+            "total": "\(coverage.total)",
+            "present": "\(coverage.present)",
+            "durationMs": "\(Int(clock().timeIntervalSince(startedAt) * 1000))",
+            "workers": "\(configuration.downloadConcurrencyLimit)",
+            "reason": reason,
+        ])
+    }
+
     private func decode(_ data: Data, for uid: PhotoUID) -> DecodedThumbnail? {
         prefetchDecodeStarted += 1
         decodeInFlight += 1
@@ -809,8 +879,19 @@ extension ThumbnailFeedCore {
         sequential = uids
         coverageScanCursor = 0
         _ = advanceDiskCoverageScan()
-        return coverageScanCursor == 0 ? uids.count : coverageScanCursor
+        // The cursor starts at 0 and advances one bounded chunk per call (it only wraps to 0 after a FULL pass,
+        // which for a >chunk library can't happen in one call), so it IS the stat count for this step: 0 when a
+        // live viewport aborted before the first stat, else the chunk size.
+        return coverageScanCursor
     }
+
+    /// Test seam (DEBUG only): how many end-of-crawl coverage refreshes have actually STARTED this crawl.
+    /// Proves single-flight — one refresh per drain, not one per worker.
+    func coverageRefreshStartCountForTesting() -> Int { coverageRefreshStarts }
+
+    /// Test seam (DEBUG only): how many coverage refreshes ran a real chunked `cache.has` sweep (vs. settling
+    /// from the tracker's known state). Proves the redundant full re-scan is skipped when coverage is known.
+    func coverageFullScanCountForTesting() -> Int { coverageFullScans }
 }
 #endif
 
