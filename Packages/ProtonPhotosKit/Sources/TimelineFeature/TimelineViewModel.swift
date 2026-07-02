@@ -87,6 +87,40 @@ public final class TimelineViewModel {
     /// staleness, so no explicit invalidation is needed. (`.all` has its own on-disk cache via the repository.)
     @ObservationIgnored private var filterCache: [PhotoFilter: [TimelineSection]] = [:]
 
+    /// In-memory snapshot of the `.all` route's sections for THIS session, so returning to All Photos shows
+    /// its content instantly from memory (no disk read, no re-dedup) - the counterpart to `filterCache` for
+    /// the whole-library route, which otherwise re-materialized from the repository on every revisit. Kept in
+    /// sync by `applyAllContent`, `refreshCurrent`, and `remove`.
+    @ObservationIgnored private var allRouteSnapshot: [TimelineSection]?
+
+    /// Whether `sections` flattens to exactly `items` (same `PhotoItem`s, same order) WITHOUT allocating the
+    /// flattened array - the content-equality that lets an unchanged refresh/revisit skip state reassignment
+    /// (no grid rebuild, no month-marker rebuild, no thumbnail-prefetch restart, scroll + selection preserved).
+    /// Pure + `nonisolated`, so it is trivially testable and safe to evaluate off the main actor.
+    public nonisolated static func timelineContentUnchanged(_ sections: [TimelineSection], vs items: [PhotoItem]) -> Bool {
+        var count = 0
+        for section in sections { count += section.items.count }
+        guard count == items.count else { return false }
+        var i = 0
+        for section in sections {
+            for item in section.items {
+                if item != items[i] { return false }
+                i += 1
+            }
+        }
+        return true
+    }
+
+    /// One line per timeline refresh/revisit outcome (never per frame) + a testable counter. Grep
+    /// `[TimelineRefreshPerf]`; `event` is `applied` (content changed → reassign + prefetch), `unchangedSkip`
+    /// (identical → no reassignment), or `snapshotHit` (`.all` shown instantly from the session snapshot).
+    private func noteRefresh(_ event: String) {
+        PhotoDiagnostics.shared.increment("timeline.refresh.\(event)")
+        PhotoDiagnostics.shared.emit("TimelineRefreshPerf", [
+            "event": event, "filter": Self.describe(filter), "rows": "\(allItems.count)",
+        ])
+    }
+
     func visibleContent(searchText: String, favoriteUIDs: Set<PhotoUID>, includeMonthMarkers: Bool) -> TimelineVisibleContent {
         let context = TimelineSearchContext(activeFilter: filter, favoriteUIDs: favoriteUIDs)
         let key = VisibleContentCacheKey(
@@ -224,41 +258,42 @@ public final class TimelineViewModel {
             for i in sections.indices { sections[i].items.removeAll { uids.contains($0.uid) } }
             sections.removeAll { $0.items.isEmpty }
             state = sections.isEmpty ? .empty : .loaded(sections)
-            if filter != .all { filterCache[filter] = sections }   // keep the route's instant-revisit cache consistent
+            // Keep the route's instant-revisit view consistent with the optimistic removal, so returning to
+            // it doesn't flash the just-trashed items back in.
+            if filter == .all { allRouteSnapshot = sections } else { filterCache[filter] = sections }
         }
     }
 
     private func loadAll(force: Bool) async {
         if !force, case .loaded = state { return }   // load once
 
-        // Instant: show the last-known timeline from disk so there's no "Building your library…"
-        // spinner on relaunch. The fresh enumeration below then refreshes it in the background.
-        let cached = await repository.cachedTimeline()
-        // A sidebar switch may have landed WHILE we were fetching. If the active filter is no longer `.all`,
-        // BAIL - never clobber the newly-selected route's content with the whole library. This is the
-        // "I clicked RAW right after launch but stayed in All Photos" bug: the slow `.all` load used to win.
-        // Every `await` below re-checks this so the views stay married to the sidebar selection.
-        guard filter == .all else { return }
-        if let cached, !cached.isEmpty {
-            let deduped = Self.deduplicatedSections(cached)
-            allItems = deduped.flatMap(\.items)
-            state = .loaded(deduped)
-            await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(allItems))
+        // Instant: show the in-memory `.all` snapshot captured earlier this session (no disk read, no
+        // re-dedup) so a REVISIT never re-materializes the whole library. Only the very first visit / a
+        // relaunch falls back to the on-disk cache so there's no "Building your library…" spinner. Either
+        // way `applyAllContent` reassigns state ONLY when the content actually differs.
+        if let snapshot = allRouteSnapshot {
+            noteRefresh("snapshotHit")
+            await applyAllContent(snapshot)
         } else {
-            state = .loading
+            let cached = await repository.cachedTimeline()
+            // A sidebar switch may have landed WHILE we were fetching. If the active filter is no longer `.all`,
+            // BAIL - never clobber the newly-selected route's content with the whole library. This is the
+            // "I clicked RAW right after launch but stayed in All Photos" bug: the slow `.all` load used to win.
+            // Every `await` below re-checks this so the views stay married to the sidebar selection.
+            guard filter == .all else { return }
+            if let cached, !cached.isEmpty {
+                await applyAllContent(Self.deduplicatedSections(cached))
+            } else if case .loaded = state {} else {
+                state = .loading
+            }
         }
 
         do {
             let sections = Self.deduplicatedSections(try await repository.loadTimeline())
             guard filter == .all else { return }   // route switched mid-fetch - keep the new route, not All Photos
-            let fresh = sections.flatMap(\.items)
-            // Only swap the grid if the library actually changed - otherwise keep the cached view
-            // (and the user's scroll position) untouched.
-            if fresh != allItems {
-                allItems = fresh
-                state = sections.isEmpty ? .empty : .loaded(sections)
-                await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(allItems))
-            }
+            // Only swap the grid if the library actually changed - otherwise keep the shown view (and the
+            // user's scroll position) untouched.
+            await applyAllContent(sections)
         } catch is CancellationError {
             // ignore
         } catch {
@@ -267,6 +302,28 @@ public final class TimelineViewModel {
             // nothing to show.
             if case .loaded = state {} else { state = .failed(error.localizedDescription) }
         }
+    }
+
+    /// Show `.all` content: refresh the session snapshot, and (re)assign `state`/`allItems` + restart the
+    /// thumbnail crawl ONLY when the flattened item sequence differs from what is already displayed. A revisit
+    /// or behind-the-scenes refresh of an UNCHANGED library therefore does no grid rebuild and no prefetch
+    /// restart. The `.loaded`/`.empty` guard still lets the FIRST load settle an empty library off `.loading`.
+    private func applyAllContent(_ sections: [TimelineSection]) async {
+        allRouteSnapshot = sections
+        let settled: Bool
+        switch state {
+        case .loaded, .empty: settled = true
+        default: settled = false
+        }
+        if settled, Self.timelineContentUnchanged(sections, vs: allItems) {
+            noteRefresh("unchangedSkip")
+            return
+        }
+        let items = sections.flatMap(\.items)
+        allItems = items
+        state = items.isEmpty ? .empty : .loaded(sections)
+        noteRefresh("applied")
+        await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
     }
 
     private func refreshCurrent(uploadedUID: PhotoUID?) async -> TimelineRefreshResult {
@@ -283,10 +340,26 @@ public final class TimelineViewModel {
                     errorMessage: "superseded by route switch"
                 )
             }
+            // No-op refresh: if the freshly fetched content is identical to what's already shown, do NOT
+            // reassign state/allItems, refresh the route cache, or restart the crawl - the grid stays put
+            // (scroll + selection preserved). The found-item lookup still runs against the current list.
+            if Self.timelineContentUnchanged(sections, vs: allItems) {
+                noteRefresh("unchangedSkip")
+                let foundItem = uploadedUID.flatMap { uid in allItems.first { $0.uid == uid } }
+                return TimelineRefreshResult(
+                    uploadedUID: uploadedUID,
+                    foundItem: foundItem,
+                    timelineCountBefore: before,
+                    timelineCountAfter: allItems.count,
+                    filterDescription: Self.describe(filter),
+                    elapsedMs: elapsedMilliseconds(since: start)
+                )
+            }
             let items = sections.flatMap(\.items)
             allItems = items
             state = items.isEmpty ? .empty : .loaded(sections)
-            if f != .all { filterCache[f] = sections }   // refresh the route's instant-revisit cache
+            if f == .all { allRouteSnapshot = sections } else { filterCache[f] = sections }   // keep the route's instant-revisit view fresh
+            noteRefresh("applied")
             await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
             let foundItem = uploadedUID.flatMap { uid in items.first { $0.uid == uid } }
             return TimelineRefreshResult(
