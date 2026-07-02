@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import OSLog
 
 public enum ThumbnailPriority: Int, CaseIterable, Codable, Sendable, Comparable {
     case visibleNow = 0
@@ -254,6 +255,30 @@ public struct DBQueryMetric: Sendable, Equatable {
         self.duringActivePinch = duringActivePinch
         self.timestamp = timestamp
     }
+}
+
+public struct PhotoPerformanceSignposter: @unchecked Sendable {
+    private let signposter: OSSignposter
+
+    public init(category: String) {
+        let logger = Logger(subsystem: "me.protonphotos", category: category)
+        self.signposter = OSSignposter(logger: logger)
+    }
+
+    @discardableResult
+    public func interval<T>(_ name: StaticString, _ work: () throws -> T) rethrows -> T {
+        let id = signposter.makeSignpostID()
+        let state = signposter.beginInterval(name, id: id)
+        defer { signposter.endInterval(name, state) }
+        return try work()
+    }
+}
+
+public enum PhotoPerformanceSignposts {
+    public static let database = PhotoPerformanceSignposter(category: "Database")
+    public static let grid = PhotoPerformanceSignposter(category: "Grid")
+    public static let mediaFeed = PhotoPerformanceSignposter(category: "MediaFeed")
+    public static let viewer = PhotoPerformanceSignposter(category: "Viewer")
 }
 
 public final class PhotoDiagnostics: @unchecked Sendable {

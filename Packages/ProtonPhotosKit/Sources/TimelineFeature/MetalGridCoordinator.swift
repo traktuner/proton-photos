@@ -1263,8 +1263,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                                     viewportPoint: viewportPoint, level: lv, width: width, columnPhase: tgtPhase)
         let tgt = engine.framePlan(level: lv, viewportSize: lvp, scrollOffset: CGPoint(x: 0, y: tgtScroll.y),
                                    overscan: overscan, columnPhase: tgtPhase)
-        guard gridTransition.beginClick(source: src, target: tgt, anchorIndex: a.flatIndex,
-                                        viewportSize: lvp, selection: selectedFlatIndices) else { return nil }
+        let began = PhotoPerformanceSignposts.grid.interval("transition.planBuild") {
+            gridTransition.beginClick(source: src, target: tgt, anchorIndex: a.flatIndex,
+                                      viewportSize: lvp, selection: selectedFlatIndices)
+        }
+        guard began else { return nil }
         committedPhase = tgtPhase                 // commit settled target state (post-transition frame is the target)
         level = lv
         transitionPrevNow = 0
@@ -1362,9 +1365,12 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                        overscan: overscan, columnPhase: sp.phase)
         let tgtPlan = engine.framePlan(level: t, viewportSize: lvp, scrollOffset: CGPoint(x: 0, y: tp.scrollY),
                                        overscan: overscan, columnPhase: tp.phase)
-        guard let tx = zoomTransaction,
-              gridTransition.beginPinch(source: srcPlan, target: tgtPlan, anchorIndex: tx.anchorGlobalIndex,
-                                        viewportSize: lvp, selection: selectedFlatIndices) else { return false }
+        guard let tx = zoomTransaction else { return false }
+        let began = PhotoPerformanceSignposts.grid.interval("transition.planBuild") {
+            gridTransition.beginPinch(source: srcPlan, target: tgtPlan, anchorIndex: tx.anchorGlobalIndex,
+                                      viewportSize: lvp, selection: selectedFlatIndices)
+        }
+        guard began else { return false }
         pinchSegmentSource = s
         pinchSegmentTarget = t
         // Anticipatory prefetch: decode the FULL target-level visible set NOW, at segment build — the decode
@@ -1487,11 +1493,17 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         for s in srcSlots where s.index < flatUIDs.count { uids.append(flatUIDs[s.index]) }
         for s in tgtSlots where s.index < flatUIDs.count { uids.append(flatUIDs[s.index]) }
         streamTextures(visibleUIDs: uids, overscanUIDs: [])
-        let (srcGroups, srcRealCount) = buildRealGroups(slots: srcSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.sourceDisplayMode)
-        let (tgtGroups, tgtRealCount) = buildRealGroups(slots: tgtSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.targetDisplayMode)
-        cache.evictToBudget()
-        renderer.renderLayerDissolve(in: view, viewportSize: viewportSize,
-                                     sourceGroups: srcGroups, targetGroups: tgtGroups, t: Float(plan.targetOpacity))
+        let (srcGroups, srcRealCount) = PhotoPerformanceSignposts.grid.interval("buildRealGroups") {
+            buildRealGroups(slots: srcSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.sourceDisplayMode)
+        }
+        let (tgtGroups, tgtRealCount) = PhotoPerformanceSignposts.grid.interval("buildRealGroups") {
+            buildRealGroups(slots: tgtSlots, flatUIDs: flatUIDs, viewportSize: viewportSize, displayMode: plan.targetDisplayMode)
+        }
+        evictTexturesToBudget()
+        PhotoPerformanceSignposts.grid.interval("dissolve.layerPass") {
+            renderer.renderLayerDissolve(in: view, viewportSize: viewportSize,
+                                         sourceGroups: srcGroups, targetGroups: tgtGroups, t: Float(plan.targetOpacity))
+        }
         hasPendingVisibleThumbnails = uids.contains { !cache.isResident($0) }
         publishLightDiagnostics(phase: "overviewDissolve", visibleCount: uids.count, overscanCount: 0,
                                 realCount: srcRealCount + tgtRealCount,
@@ -1548,7 +1560,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                         alpha: Float(max(0, min(1, d.alpha)))))
             imageTextures.append(texture)
         }
-        cache.evictToBudget()
+        evictTexturesToBudget()
         renderer.render(in: view, viewportSize: viewportSize, groups: [
             MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
         ])
@@ -1630,8 +1642,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             } else {
                 renderY = rawOrigin.y
             }
-            let plan = engine.framePlan(level: level, viewportSize: layoutViewportSize,
-                                        scrollOffset: CGPoint(x: rawOrigin.x, y: renderY), overscan: overscan, columnPhase: phase)
+            let plan = PhotoPerformanceSignposts.grid.interval("framePlan") {
+                engine.framePlan(level: level, viewportSize: layoutViewportSize,
+                                 scrollOffset: CGPoint(x: rawOrigin.x, y: renderY), overscan: overscan, columnPhase: phase)
+            }
             slots = renderTranslate(plan.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) })
             contentSizeForDiag = plan.contentSize
         }
@@ -1659,9 +1673,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Missing thumbnails draw nothing, so the bottom-most clear surface remains one continuous field.
     @discardableResult
     private func renderRealSlots(in view: MTKView, slots: [GridRenderSlot], flatUIDs: [PhotoUID], viewportSize: CGSize) -> Int {
-        let (groups, realCount) = buildRealGroups(slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize,
-                                                  displayMode: effectiveDisplayMode)
-        cache.evictToBudget()
+        let (groups, realCount) = PhotoPerformanceSignposts.grid.interval("buildRealGroups") {
+            buildRealGroups(slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize,
+                            displayMode: effectiveDisplayMode)
+        }
+        evictTexturesToBudget()
         renderer.render(in: view, viewportSize: viewportSize, groups: groups)
         return realCount
     }
@@ -1786,7 +1802,9 @@ extension MetalGridCoordinator {
         let priority = window.priority
         var wanted: [PhotoUID] = []
         for uid in priority where !cache.isResident(uid) && dataSource.hasImage(for: uid) { wanted.append(uid) }
-        cache.uploadVisible(wanted: wanted) { [dataSource] uid in dataSource.image(for: uid) }
+        PhotoPerformanceSignposts.grid.interval("streamTextures.upload") {
+            cache.uploadVisible(wanted: wanted) { [dataSource] uid in dataSource.image(for: uid) }
+        }
         var warm: [PhotoUID] = []
         for uid in priority where !cache.isResident(uid) && !cache.isInFlight(uid) && !dataSource.hasImage(for: uid) { warm.append(uid) }
         if !warm.isEmpty { dataSource.warm(warm) }
@@ -1795,6 +1813,12 @@ extension MetalGridCoordinator {
         if !firstContentReported, !visibleUIDs.isEmpty, visibleUIDs.allSatisfy({ cache.isResident($0) }) {
             firstContentReported = true
             onFirstContentReady?()
+        }
+    }
+
+    private func evictTexturesToBudget() {
+        PhotoPerformanceSignposts.grid.interval("evictToBudget") {
+            cache.evictToBudget()
         }
     }
 
@@ -1809,9 +1833,15 @@ extension MetalGridCoordinator {
             cellCount: cellCount,
             textureUploads: cache.uploadsThisFrame,
             textureUploadBytes: cache.uploadBytesThisFrame,
+            deferredTextureUploads: cache.deferredUploadsThisFrame,
             textureUploadMs: cache.uploadMsThisFrame,
             evictions: cache.evictionsThisFrame,
+            evictMs: cache.evictMsThisFrame,
             residentBytes: cache.residentBytes,
+            residentTextureCount: cache.residentCount,
+            pinnedTextureCount: cache.pinnedCount,
+            textureCapacity: cache.residencyCapacity,
+            pinnedTextureOverflow: cache.pinnedOverflow,
             drawCalls: renderer.lastDrawCalls,
             textureBinds: renderer.lastTextureBinds,
             instanceCount: renderer.lastInstanceCount,
@@ -1838,8 +1868,15 @@ extension MetalGridCoordinator {
             "gpuDrawMs": String(format: "%.2f", stats.gpuDrawMs),
             "uploads": "\(stats.textureUploads)",
             "uploadBytes": "\(stats.textureUploadBytes)",
+            "deferredUploads": "\(stats.deferredTextureUploads)",
             "uploadMs": String(format: "%.2f", stats.textureUploadMs),
             "evictions": "\(stats.evictions)",
+            "evictMs": String(format: "%.2f", stats.evictMs),
+            "residentTextures": "\(stats.residentTextureCount)",
+            "pinnedTextures": "\(stats.pinnedTextureCount)",
+            "textureCapacity": "\(stats.textureCapacity)",
+            "pinnedOverflow": "\(stats.pinnedTextureOverflow)",
+            "encodedSlots": "\(stats.encodedSlotItems)",
             "residentMB": String(format: "%.2f", Double(stats.memoryEstimateBytes) / 1_048_576),
         ])
     }

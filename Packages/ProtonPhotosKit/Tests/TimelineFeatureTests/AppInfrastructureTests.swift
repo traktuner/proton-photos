@@ -218,9 +218,15 @@ struct AppInfrastructureTests {
             cellCount: 8,
             textureUploads: 2,
             textureUploadBytes: 4_096,
+            deferredTextureUploads: 3,
             textureUploadMs: 1.25,
             evictions: 1,
+            evictMs: 0.5,
             residentBytes: 8_192,
+            residentTextureCount: 9,
+            pinnedTextureCount: 4,
+            textureCapacity: 10,
+            pinnedTextureOverflow: false,
             drawCalls: 6,
             textureBinds: 7,
             instanceCount: 5,
@@ -232,9 +238,16 @@ struct AppInfrastructureTests {
         #expect(stats.placeholderItems == 3)
         #expect(stats.textureUploads == 2)
         #expect(stats.textureUploadBytes == 4_096)
+        #expect(stats.deferredTextureUploads == 3)
         #expect(stats.textureUploadMs == 1.25)
         #expect(stats.evictions == 1)
+        #expect(stats.evictMs == 0.5)
         #expect(stats.memoryEstimateBytes == 8_192)
+        #expect(stats.residentTextureCount == 9)
+        #expect(stats.pinnedTextureCount == 4)
+        #expect(stats.textureCapacity == 10)
+        #expect(!stats.pinnedTextureOverflow)
+        #expect(stats.encodedSlotItems == 8)
         #expect(stats.cacheHits == 5)
         #expect(stats.cacheMisses == 3)
         #expect(stats.drawCalls == 6)

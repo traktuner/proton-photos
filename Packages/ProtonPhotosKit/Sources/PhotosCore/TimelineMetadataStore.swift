@@ -304,6 +304,12 @@ public final class TimelineMetadataStore {
     /// membership are reconstructed from their feature tables with one full pass each (dictionary
     /// join in memory — no per-row queries, no blob decoding).
     public func load() -> [PhotoItem] {
+        PhotoPerformanceSignposts.database.interval("db.load") {
+            loadInstrumented()
+        }
+    }
+
+    private func loadInstrumented() -> [PhotoItem] {
         let start = Date()
         let tags = loadTags()
         let bursts = loadBurstMembers()
@@ -383,6 +389,13 @@ public final class TimelineMetadataStore {
     /// and left untouched on update so a future dimension writer is not clobbered by refreshes.
     @discardableResult
     public func save(_ items: [PhotoItem]) -> TimelineSaveResult {
+        PhotoPerformanceSignposts.database.interval("db.save") {
+            saveInstrumented(items)
+        }
+    }
+
+    @discardableResult
+    private func saveInstrumented(_ items: [PhotoItem]) -> TimelineSaveResult {
         let start = Date()
         // Canonical order: identical input sets digest identically regardless of arrival order,
         // and rows persist in exactly the order load() returns them.

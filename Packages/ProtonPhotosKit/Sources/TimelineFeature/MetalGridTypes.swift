@@ -17,9 +17,16 @@ struct MetalGridStats: Equatable, Sendable {
     var placeholderItems = 0
     var textureUploads = 0
     var textureUploadBytes = 0
+    var deferredTextureUploads = 0
     var cacheHits = 0
     var cacheMisses = 0
     var evictions = 0
+    var evictMs: Double = 0
+    var residentTextureCount = 0
+    var pinnedTextureCount = 0
+    var textureCapacity = 0
+    var pinnedTextureOverflow = false
+    var encodedSlotItems = 0
     var drawCalls = 0
     var textureBinds = 0
     var instanceCount = 0
@@ -33,8 +40,11 @@ struct MetalGridStats: Equatable, Sendable {
     var summary: String {
         "visibleItems=\(visibleItems) overscanItems=\(overscanItems) realTextureItems=\(realTextureItems) "
         + "placeholderItems=\(placeholderItems) textureUploads=\(textureUploads) textureUploadBytes=\(textureUploadBytes) "
-        + "cacheHits=\(cacheHits) cacheMisses=\(cacheMisses) evictions=\(evictions) drawCalls=\(drawCalls) "
-        + "textureBinds=\(textureBinds) "
+        + "deferredTextureUploads=\(deferredTextureUploads) cacheHits=\(cacheHits) cacheMisses=\(cacheMisses) "
+        + "evictions=\(evictions) evictMs=\(fmt(evictMs)) residentTextureCount=\(residentTextureCount) "
+        + "pinnedTextureCount=\(pinnedTextureCount) textureCapacity=\(textureCapacity) "
+        + "pinnedTextureOverflow=\(pinnedTextureOverflow) encodedSlotItems=\(encodedSlotItems) "
+        + "drawCalls=\(drawCalls) textureBinds=\(textureBinds) "
         + "instanceCount=\(instanceCount) cpuLayoutMs=\(fmt(cpuLayoutMs)) cpuInstanceMs=\(fmt(cpuInstanceMs)) "
         + "textureUploadMs=\(fmt(textureUploadMs)) gpuDrawMs=\(fmt(gpuDrawMs)) fpsEstimate=\(fmt(fpsEstimate)) "
         + "memoryEstimateMB=\(fmt(Double(memoryEstimateBytes) / 1_048_576))"
@@ -63,9 +73,15 @@ struct MetalGridStats: Equatable, Sendable {
         cellCount: Int,
         textureUploads: Int,
         textureUploadBytes: Int,
+        deferredTextureUploads: Int,
         textureUploadMs: Double,
         evictions: Int,
+        evictMs: Double,
         residentBytes: Int,
+        residentTextureCount: Int,
+        pinnedTextureCount: Int,
+        textureCapacity: Int,
+        pinnedTextureOverflow: Bool,
         drawCalls: Int,
         textureBinds: Int,
         instanceCount: Int,
@@ -76,11 +92,18 @@ struct MetalGridStats: Equatable, Sendable {
         stats.overscanItems = overscanCount
         stats.realTextureItems = realCount
         stats.placeholderItems = max(0, cellCount - realCount)
+        stats.encodedSlotItems = cellCount
         stats.textureUploads = textureUploads
         stats.textureUploadBytes = textureUploadBytes
+        stats.deferredTextureUploads = deferredTextureUploads
         stats.textureUploadMs = textureUploadMs
         stats.evictions = evictions
+        stats.evictMs = evictMs
         stats.memoryEstimateBytes = residentBytes
+        stats.residentTextureCount = residentTextureCount
+        stats.pinnedTextureCount = pinnedTextureCount
+        stats.textureCapacity = textureCapacity
+        stats.pinnedTextureOverflow = pinnedTextureOverflow
         stats.cacheHits = realCount
         stats.cacheMisses = stats.placeholderItems
         stats.drawCalls = drawCalls

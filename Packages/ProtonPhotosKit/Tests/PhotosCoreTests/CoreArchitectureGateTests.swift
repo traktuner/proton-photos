@@ -31,10 +31,11 @@ final class CoreArchitectureGateTests: XCTestCase {
     private static let coreTargets: [CoreTargetRule] = [
         CoreTargetRule(
             name: "PhotosCore",
-            // CryptoKit: timeline save-skip digest (contract-permitted). SQLite3: the system C
+            // CryptoKit: timeline save-skip digest (contract-permitted). OSLog: package-wide
+            // Apple-platform signpost instrumentation (macOS/iOS/iPadOS), not UI or hardware policy. SQLite3: the system C
             // SQLite module backing the app-owned `library-v1.sqlite` timeline metadata store —
             // public, supported API on macOS/iOS/iPadOS (QA1809), not a UI framework.
-            allowedImports: ["AVFoundation", "CoreGraphics", "CryptoKit", "Foundation", "SQLite3"],
+            allowedImports: ["AVFoundation", "CoreGraphics", "CryptoKit", "Foundation", "OSLog", "SQLite3"],
             expectedDependencies: [],
             extraForbiddenTokens: []
         ),

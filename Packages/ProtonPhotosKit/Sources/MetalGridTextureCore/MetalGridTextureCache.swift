@@ -22,10 +22,18 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     package private(set) var uploadBytesThisFrame = 0
     package private(set) var uploadMsThisFrame: Double = 0
     package private(set) var evictionsThisFrame = 0
+    package private(set) var evictMsThisFrame: Double = 0
     package private(set) var residentBytes = 0
+    package private(set) var deferredUploadsThisFrame = 0
 
     /// Max pixel side a thumbnail is uploaded at (Retina-aware crispness without wasting VRAM).
     package let maxTexturePixels: Int
+
+    package var residentCount: Int { lru.residentCount }
+    package var pinnedCount: Int { lru.pinnedCount }
+    package var inFlightCount: Int { lru.inFlightCount }
+    package var residencyCapacity: Int { lru.capacity }
+    package var pinnedOverflow: Bool { lru.pinnedCount > lru.capacity }
 
     package init?(
         device: MTLDevice,
@@ -52,6 +60,8 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         uploadBytesThisFrame = 0
         uploadMsThisFrame = 0
         evictionsThisFrame = 0
+        evictMsThisFrame = 0
+        deferredUploadsThisFrame = 0
     }
 
     package func noteUsed(_ id: ID) { lru.noteUsed(id) }
@@ -69,6 +79,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     /// for the IDs actually selected this frame, and never for an already-resident/in-flight ID.
     package func uploadVisible(wanted: [ID], provideImage: (ID) -> CGImage?) {
         let chosen = lru.selectUploads(wanted: wanted)
+        deferredUploadsThisFrame = max(0, wanted.count - chosen.count)
         for id in chosen {
             guard let image = provideImage(id) else {
                 lru.abandonUpload(id)   // image vanished between selection and upload — retry later
@@ -91,6 +102,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
 
     /// Evict offscreen LRU textures down to the budget and release their GPU memory.
     package func evictToBudget() {
+        let start = CFAbsoluteTimeGetCurrent()
         let evicted = lru.evictToBudget()
         for id in evicted {
             if let tex = textures.removeValue(forKey: id) {
@@ -98,6 +110,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
             }
         }
         evictionsThisFrame = evicted.count
+        evictMsThisFrame += (CFAbsoluteTimeGetCurrent() - start) * 1000
     }
 
     // MARK: - Texture creation

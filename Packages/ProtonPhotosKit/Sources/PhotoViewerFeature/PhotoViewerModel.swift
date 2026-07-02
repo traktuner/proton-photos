@@ -313,7 +313,9 @@ public final class PhotoViewerModel {
 
     /// Wraps the Core `CGImage` decode as AppKit image. The heavy ImageIO decode still runs off the main actor.
     private nonisolated static func decodeFullImage(_ data: Data) -> NSImage? {
-        guard let cg = ViewerFullImageDecoder.decodeCGImage(data) else { return NSImage(data: data) }
+        guard let cg = PhotoPerformanceSignposts.viewer.interval("viewer.decode", {
+            ViewerFullImageDecoder.decodeCGImage(data)
+        }) else { return NSImage(data: data) }
         return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 

@@ -219,11 +219,15 @@ public actor ThumbnailFeedCore {
                 func addNext() {
                     guard let uid = iterator.next() else { return }
                     group.addTask {
-                        guard let data = cache.diskData(for: uid) else {
+                        guard let data = PhotoPerformanceSignposts.mediaFeed.interval("feed.decrypt", {
+                            cache.diskData(for: uid)
+                        }) else {
                             return DecodedTile(uid: uid, decoded: nil, diskHadData: false, durationMs: 0)
                         }
                         let start = Date()
-                        let decoded = ThumbnailImageDecoder.downsample(data, maxPixelSize: maxPixels)
+                        let decoded = PhotoPerformanceSignposts.mediaFeed.interval("feed.decode") {
+                            ThumbnailImageDecoder.downsample(data, maxPixelSize: maxPixels)
+                        }
                         return DecodedTile(
                             uid: uid,
                             decoded: decoded,
@@ -259,7 +263,9 @@ public actor ThumbnailFeedCore {
                         PhotoDiagnostics.shared.recordDecodeFailed(queueDepth: 0)
                         recordError("decode failed for \(Self.key(tile.uid))")
                     }
-                } else if cache.hasUsableDiskData(tile.uid) {
+                } else if PhotoPerformanceSignposts.mediaFeed.interval("feed.decrypt", {
+                    cache.hasUsableDiskData(tile.uid)
+                }) {
                     diskPresence.set(tile.uid, present: true)
                     PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
                     missing += 1
@@ -633,7 +639,9 @@ public actor ThumbnailFeedCore {
         decodeInFlight += 1
         PhotoDiagnostics.shared.recordDecodeStarted(queueDepth: decodeInFlight)
         let start = Date()
-        let image = ThumbnailImageDecoder.downsample(data, maxPixelSize: configuration.targetPixels)
+        let image = PhotoPerformanceSignposts.mediaFeed.interval("feed.decode") {
+            ThumbnailImageDecoder.downsample(data, maxPixelSize: configuration.targetPixels)
+        }
         let durationMs = Date().timeIntervalSince(start) * 1000
         decodeInFlight = max(0, decodeInFlight - 1)
         if let image {
