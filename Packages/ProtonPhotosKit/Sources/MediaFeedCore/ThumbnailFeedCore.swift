@@ -1102,30 +1102,33 @@ private final class LastDemandBox: @unchecked Sendable {
     }
 }
 
-private final class DiskPresenceCache: @unchecked Sendable {
+/// Tracks disk-presence of thumbnails for the crawl-coverage percentage. Keyed directly by `PhotoUID` (the
+/// stable (volumeID, nodeID) domain identity) rather than an interpolated `"vol~node"` string: it drops one
+/// `String`/NSString allocation on every disk probe in the crawl hot path (`set` is called per probe), and
+/// removes a latent aliasing bug where two distinct UIDs whose fields straddle the `~` separator would have
+/// collided into one key. `internal` (not `private`) only so the re-key is directly unit-testable.
+final class DiskPresenceCache: @unchecked Sendable {
     private let lock = NSLock()
-    private var values: [String: Bool] = [:]
-    private var trackedKeys: Set<String> = []
+    private var values: [PhotoUID: Bool] = [:]
+    private var trackedKeys: Set<PhotoUID> = []
     private var trackedTotal = 0
     private var trackedPresent = 0
 
     func beginTracking(_ uids: [PhotoUID]) {
-        let keys = uids.map(Self.key)
         lock.withLock {
-            trackedKeys = Set(keys)
+            trackedKeys = Set(uids)
             trackedTotal = uids.count
-            trackedPresent = keys.reduce(0) { count, key in
-                count + (values[key] == true ? 1 : 0)
+            trackedPresent = uids.reduce(0) { count, uid in
+                count + (values[uid] == true ? 1 : 0)
             }
         }
     }
 
     func set(_ uid: PhotoUID, present: Bool) {
-        let key = Self.key(uid)
         lock.withLock {
-            let old = values[key]
-            values[key] = present
-            guard trackedKeys.contains(key), old != present else { return }
+            let old = values[uid]
+            values[uid] = present
+            guard trackedKeys.contains(uid), old != present else { return }
             if present {
                 trackedPresent += 1
             } else if old == true {
@@ -1140,9 +1143,5 @@ private final class DiskPresenceCache: @unchecked Sendable {
             let present = min(trackedPresent, trackedTotal)
             return (present, trackedTotal, Double(present) / Double(trackedTotal))
         }
-    }
-
-    private static func key(_ uid: PhotoUID) -> String {
-        "\(uid.volumeID)~\(uid.nodeID)"
     }
 }
