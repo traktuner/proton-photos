@@ -25,6 +25,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// holds the launch veil until this so it never lifts onto blank thumbnails. See `streamTextures`.
     var onFirstContentReady: (() -> Void)?
     private var firstContentReported = false
+    /// One-shot cold-start `[FirstContent]` trace state: the wall-clock of the first on-screen frame with real
+    /// visible cells, used to report how long the grid stayed on placeholders before it became resident.
+    private var firstContentTraced = false
+    private var firstGridFrameAt: CFTimeInterval = 0
 
     weak var clipView: NSClipView?
     weak var metalView: MTKView?
@@ -1909,11 +1913,28 @@ extension MetalGridCoordinator {
             }
         }
         if !warm.isEmpty { dataSource.warm(warm) }
+        // Cold-start latency trace: mark the first on-screen frame that has real visible cells, then measure how
+        // long until they are resident. One-shot, DEBUG-only sink; grep `[FirstContent]`.
+        if !firstContentTraced, !visibleUIDs.isEmpty {
+            firstContentTraced = true
+            firstGridFrameAt = CACurrentMediaTime()
+            let missing = visibleUIDs.reduce(into: 0) { $0 += cache.isResident($1) ? 0 : 1 }
+            PhotoDiagnostics.shared.emit("FirstContent", [
+                "event": "gridFrame", "visible": "\(visibleUIDs.count)", "missing": "\(missing)",
+                "resident": "\(visibleUIDs.count - missing)", "level": "\(level)", "phase": "coldStart",
+            ])
+        }
         // First fully-populated on-screen frame (every VISIBLE cell uploaded, just now via `uploadVisible`) →
         // tell the shell to lift the launch veil. One-shot; `allSatisfy` short-circuits on the first miss.
         if !firstContentReported, !visibleUIDs.isEmpty,
            visibleUIDs.allSatisfy({ cache.isResident($0) || !dataSource.canRetryThumbnail(for: $0) }) {
             firstContentReported = true
+            let elapsedMs = firstGridFrameAt > 0 ? (CACurrentMediaTime() - firstGridFrameAt) * 1000 : 0
+            let resident = visibleUIDs.reduce(into: 0) { $0 += cache.isResident($1) ? 1 : 0 }
+            PhotoDiagnostics.shared.emit("FirstContent", [
+                "event": "ready", "visible": "\(visibleUIDs.count)", "resident": "\(resident)",
+                "elapsedMs": String(format: "%.0f", elapsedMs), "level": "\(level)", "phase": "coldStart",
+            ])
             onFirstContentReady?()
         }
         return pendingVisibleQualityUpgrade

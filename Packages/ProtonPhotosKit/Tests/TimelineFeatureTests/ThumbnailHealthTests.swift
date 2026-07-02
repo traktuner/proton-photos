@@ -54,6 +54,39 @@ struct ThumbnailHealthTests {
         #expect(availabilityCallbacks >= 2, "warming \(count) items must drain across more than one \(96)-item batch")
     }
 
+    @Test @MainActor func firstWarmPassFetchesVisibleNetworkMissesButNotDiskHits() async throws {
+        // The opening viewport (a fresh data source's first warm pass) must decode disk-present cells straight
+        // from disk and fetch only the true disk-misses over the network — exercising the first-pass
+        // `.visibleNow` warm path (map to ThumbnailRequest + priority) end to end.
+        let misses = (0 ..< 3).map { PhotoUID(volumeID: "vol", nodeID: "fp-miss-\($0)-\(UUID().uuidString)") }
+        let onDisk = PhotoUID(volumeID: "vol", nodeID: "fp-hit-\(UUID().uuidString)")
+        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("first-pass"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health"))
+        cache.storeToDisk(Self.pngData(), for: onDisk)
+        let loader = FakeThumbnailLoader(payloads: Dictionary(uniqueKeysWithValues: misses.map { ($0, Self.pngData()) }))
+        let feed = await Self.makeFeed(cache: cache, loader: loader)
+        let items = (misses + [onDisk]).map { PhotoItem(uid: $0, captureTime: Date(timeIntervalSince1970: 0), mediaType: "image/jpeg") }
+        let dataSource = RealMetalGridDataSource(sections: [
+            TimelineSection(id: "first-pass", date: Date(timeIntervalSince1970: 0), title: "First Pass", items: items)
+        ], feed: feed)
+
+        dataSource.warm(misses + [onDisk])   // opening viewport → first warm pass
+
+        for _ in 0 ..< 150 {
+            let allMissesFetched = await withAllFetched(misses, loader)
+            if dataSource.hasImage(for: onDisk) && allMissesFetched { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(dataSource.hasImage(for: onDisk))          // disk hit decoded from disk in the first pass
+        #expect(await withAllFetched(misses, loader))      // every true miss was fetched over the network
+        #expect(await loader.fetched(onDisk) == false)     // the disk hit was never fetched
+    }
+
+    private func withAllFetched(_ uids: [PhotoUID], _ loader: FakeThumbnailLoader) async -> Bool {
+        for uid in uids where await !loader.fetched(uid) { return false }
+        return true
+    }
+
     @Test @MainActor func realDataSourceMarksBackendRefusedThumbnailsNonRetryable() async throws {
         let uid = PhotoUID(volumeID: "vol", nodeID: "refused-\(UUID().uuidString)")
         let feed = await Self.makeFeed(
@@ -294,5 +327,9 @@ private actor FakeThumbnailLoader: ThumbnailBatchLoader {
 
     func requestCount() -> Int {
         requests.count
+    }
+
+    func fetched(_ uid: PhotoUID) -> Bool {
+        requests.contains(uid)
     }
 }

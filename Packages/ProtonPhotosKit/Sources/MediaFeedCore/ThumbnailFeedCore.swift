@@ -96,8 +96,13 @@ public actor ThumbnailFeedCore {
     private var activeDownloaders = 0
     private var aimdSuccessStreak = 0
 
-    private let clock: @Sendable () -> Date
-    private var lastDemandAt: Date?
+    private nonisolated let clock: @Sendable () -> Date
+    /// Last visible-demand timestamp. Held in a `nonisolated`, lock-guarded box (not actor state) SO THAT
+    /// `noteVisibleDemand` can record demand WITHOUT queuing behind the crawl on the serial actor — the crawl
+    /// workers read it `nonisolated` too, so they back off the instant a viewport goes live even while one of
+    /// them is mid-scan. If this were actor state the demand signal would starve on the same queue as the
+    /// `warmDecoded` it is meant to unblock (the cold-start bug).
+    private nonisolated let lastDemand = LastDemandBox()
     private var crawlBackoffUntil: Date?
 
     public init(
@@ -168,7 +173,7 @@ public actor ThumbnailFeedCore {
     }
 
     public func requestPriority(_ uid: PhotoUID, priority requestedPriority: ThumbnailPriority = .visibleNow) {
-        if requestedPriority != .idleLibraryCrawl { lastDemandAt = clock() }
+        if requestedPriority != .idleLibraryCrawl { lastDemand.set(clock()) }
         PhotoDiagnostics.shared.recordDiskPresenceCheckDuringPinch()
         let diskHit = cache.hasUsableDiskData(uid)
         diskPresence.set(uid, present: diskHit)
@@ -195,8 +200,18 @@ public actor ThumbnailFeedCore {
     }
 
     public func hasRecentVisibleDemand(within: TimeInterval = 2.0) -> Bool {
-        guard let last = lastDemandAt else { return false }
+        guard let last = lastDemand.get() else { return false }
         return clock().timeIntervalSince(last) < within
+    }
+
+    /// Records that a viewport is live WITHOUT enqueuing or decoding anything — a single lock-guarded clock
+    /// write, `nonisolated` so it never queues on the serial actor. The per-frame warm path calls this the
+    /// instant the first visible cells are known, so the background crawl's `recentDemand` gate (`takeBatch` /
+    /// the end-of-list coverage re-scan) backs its filesystem scanning off immediately and yields the actor to
+    /// the visible decode — instead of the crawl only learning of demand once `warmDecoded` itself reaches the
+    /// actor, the very call the crawl is starving on a cold start.
+    public nonisolated func noteVisibleDemand() {
+        lastDemand.set(clock())
     }
 
     public func hasPendingThumbnailWork() -> Bool {
@@ -210,7 +225,7 @@ public actor ThumbnailFeedCore {
         limit: Int
     ) async -> WarmDecodedResult {
         let targets = Array(requests.prefix(max(0, limit)))
-        lastDemandAt = clock()
+        lastDemand.set(clock())
         var alreadyDecoded = 0
         var decodedFromDisk = 0
         var queuedNetwork = 0
@@ -473,6 +488,14 @@ public actor ThumbnailFeedCore {
             let chunk = takeBatch()
             if chunk.isEmpty {
                 if priority.isEmpty && sequentialIndex >= sequential.count {
+                    // The end-of-list coverage re-scan is O(library) `cache.has` stats held on the serial
+                    // actor, and with every worker reaching the end together it stampedes. Never run it while
+                    // the viewport is actively warming (recent visible demand) — it would block the visible
+                    // decode that demand represents. Idle instead; it runs once demand quiets.
+                    if recentVisibleDemand() {
+                        try? await Task.sleep(for: .milliseconds(150))
+                        continue
+                    }
                     let percent = refreshDiskCoverageFromCache().percent
                     if percent < 0.995, percent > lastRepassPercent + 0.01 {
                         lastRepassPercent = percent
@@ -627,9 +650,8 @@ public actor ThumbnailFeedCore {
         }
 
         let now = clock()
-        let recentDemand = lastDemandAt.map { now.timeIntervalSince($0) < configuration.visibleQuietWindow } ?? false
         let backingOff = crawlBackoffUntil.map { now < $0 } ?? false
-        guard !interactionActive, !prefetchPaused, prefetchEnabled, !recentDemand, !backingOff else { return out }
+        guard !interactionActive, !prefetchPaused, prefetchEnabled, !recentVisibleDemand(now: now), !backingOff else { return out }
 
         var scannedThisCall = 0
         while out.count < configuration.batchSize,
@@ -653,9 +675,21 @@ public actor ThumbnailFeedCore {
         return out
     }
 
+    /// Whether a viewport has demanded thumbnails within the quiet window. `nonisolated` (reads the lock-guarded
+    /// demand box), so the crawl can consult it mid-scan without touching actor state.
+    private nonisolated func recentVisibleDemand(now: Date? = nil) -> Bool {
+        guard let last = lastDemand.get() else { return false }
+        return (now ?? clock()).timeIntervalSince(last) < configuration.visibleQuietWindow
+    }
+
     private func refreshDiskCoverageFromCache() -> (present: Int, total: Int, percent: Double) {
+        var scanned = 0
         for uid in sequential {
             diskPresence.set(uid, present: cache.has(uid))
+            scanned += 1
+            // This is O(library) `cache.has` stats on the serial actor. If a viewport goes live mid-scan, bail
+            // so the visible decode isn't blocked behind the rest of the scan; the next idle pass finishes it.
+            if scanned & 0x1FF == 0, recentVisibleDemand() { break }
         }
         return diskPresence.coverage()
     }
@@ -814,6 +848,22 @@ private final class OnceFlag: @unchecked Sendable {
             claimed = true
             return true
         }
+    }
+}
+
+/// Lock-guarded last-visible-demand timestamp, shared between the actor's methods and the `nonisolated`
+/// crawl reads. Lets `noteVisibleDemand` record demand without an actor hop (so it can't starve behind the
+/// crawl it is meant to pause).
+private final class LastDemandBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Date?
+
+    func set(_ date: Date) {
+        lock.withLock { value = date }
+    }
+
+    func get() -> Date? {
+        lock.withLock { value }
     }
 }
 

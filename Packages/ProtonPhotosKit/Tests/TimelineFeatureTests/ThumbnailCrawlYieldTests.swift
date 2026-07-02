@@ -87,6 +87,31 @@ struct ThumbnailCrawlYieldTests {
         #expect(seq.allSatisfy { finalOrder.contains($0) })   // crawl resumes once demand quiets
     }
 
+    @Test func noteVisibleDemandPausesSequentialCrawl() async throws {
+        // The cold-start starvation fix: the grid notes a live viewport via `noteVisibleDemand()` BEFORE it
+        // decodes anything, so the crawl's `recentDemand` gate backs its filesystem scan off immediately and
+        // yields the serial feed actor to the visible decode — without waiting for `warmDecoded` (the very
+        // call the crawl would otherwise starve) to reach the actor first.
+        let seq = (0 ..< 3).map { PhotoUID(volumeID: "v", nodeID: "note-seq-\(UUID())-\($0)") }
+        let payloads = Dictionary(uniqueKeysWithValues: seq.map { ($0, Self.bytes()) })
+        let loader = RecordingLoader(payloads: payloads)
+        let clock = ClockBox(Date(timeIntervalSince1970: 1000))
+        let feed = await Self.makeFeed(loader: loader, clock: clock, concurrency: 1, batch: 1)
+
+        await feed.noteVisibleDemand()   // viewport is live at T=1000; no enqueue, no decode
+        await feed.startPrefetch(seq)
+
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(await loader.fetchOrder().isEmpty)   // sequential crawl suppressed while demand is recent
+
+        // Demand goes quiet (past the 0.25 s window) → the crawl resumes and drains the sequential set.
+        clock.advance(1.0)
+        await feed.resumePrefetch()
+        try await Self.waitUntil { let o = await loader.fetchOrder(); return seq.allSatisfy { o.contains($0) } }
+        let finalOrder = await loader.fetchOrder()
+        #expect(seq.allSatisfy { finalOrder.contains($0) })
+    }
+
     @Test func rateLimitedBatchBacksOffSequentialCrawl() async throws {
         // A loader that fails everything models a 429: the crawl should back off rather than hammer on.
         let seq = (0 ..< 3).map { PhotoUID(volumeID: "v", nodeID: "rl-\(UUID())-\($0)") }

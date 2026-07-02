@@ -57,6 +57,9 @@ final class RealMetalGridDataSource: MetalGridDataSource {
     private let videoUIDs: Set<PhotoUID>
     private var warmInFlight = false
     private var pendingWarm: [PhotoUID] = []
+    /// Cleared per data source (a new route/library builds a new instance). The first warm batch is the
+    /// opening viewport, warmed at `.visibleNow`; every later batch uses the steady-state warm priority.
+    private var didFirstVisiblePass = false
     private var prefetchTask: Task<Void, Never>?
     /// Decode at most this many disk→RAM per in-flight batch. `warmDecoded` now decodes a batch CONCURRENTLY
     /// across all cores, so this is sized to cover a typical screenful in one or two batches (fewer main-thread
@@ -104,6 +107,11 @@ final class RealMetalGridDataSource: MetalGridDataSource {
     func warm(_ uids: [PhotoUID]) {
         let uids = uids.filter { !feed.isKnownUnfetchable($0) }
         guard !uids.isEmpty else { return }
+        // Tell the feed a viewport is live BEFORE the heavier `warmDecoded` is enqueued. `noteVisibleDemand`
+        // is `nonisolated` (a lock-guarded write), so it records demand SYNCHRONOUSLY without queuing behind
+        // the crawl on the serial feed actor — the crawl reads it `nonisolated` and backs its scan off at once,
+        // yielding the actor to this decode instead of starving it on a cold start.
+        feed.noteVisibleDemand()
         // Latest viewport wins (the coordinator passes the still-missing cells in visible-first order each
         // frame). No permanent suppression - a cell evicted from the RAM cache must be able to re-warm.
         pendingWarm = uids
@@ -146,8 +154,31 @@ final class RealMetalGridDataSource: MetalGridDataSource {
         warmInFlight = true
         let batch = Array(pendingWarm.prefix(maxWarmBatch))
         pendingWarm.removeFirst(min(maxWarmBatch, pendingWarm.count))
+        // The FIRST batch of a fresh data source is the opening viewport. Enqueue its true disk-misses at
+        // `.visibleNow` so they jump the background crawl immediately, instead of sitting at
+        // `.zoomAnchorAndFocusRow` until the ~120 ms viewport-settle upgrade (`scheduleSettleCheck`). Disk
+        // hits still decode straight from disk and never touch the network. One-shot per data source — a new
+        // route/library builds a new `RealMetalGridDataSource`, so steady-state scrolling is unchanged.
+        let priority: ThumbnailPriority = didFirstVisiblePass ? .zoomAnchorAndFocusRow : .visibleNow
+        let firstPass = !didFirstVisiblePass
+        didFirstVisiblePass = true
+        // One-shot cold-start trace: the gap between queueing the first warm batch and its result lands the
+        // actor-starvation signal (large gap + decodedFromDisk>0 ⇒ feed actor was blocked; small gap +
+        // queuedNetwork>0 ⇒ genuine disk miss going to the network). Grep `[FirstContent]`.
+        let queuedAt = firstPass ? CACurrentMediaTime() : 0
+        if firstPass {
+            PhotoDiagnostics.shared.emit("FirstContent", ["event": "warmQueued", "count": "\(batch.count)", "phase": "coldStart"])
+        }
         Task { [feed] in
-            _ = await feed.warmDecoded(batch, limit: batch.count)
+            let result = await feed.warmDecoded(batch.map { ThumbnailRequest(uid: $0) }, priority: priority, limit: batch.count)
+            if firstPass {
+                let elapsedMs = (CACurrentMediaTime() - queuedAt) * 1000
+                PhotoDiagnostics.shared.emit("FirstContent", [
+                    "event": "warmDecoded", "elapsedMs": String(format: "%.0f", elapsedMs),
+                    "diskDecoded": "\(result.decodedFromDisk)", "alreadyDecoded": "\(result.alreadyDecoded)",
+                    "queuedNetwork": "\(result.queuedNetwork)", "missing": "\(result.missing)", "phase": "coldStart",
+                ])
+            }
             await MainActor.run {
                 self.warmInFlight = false
                 self.onImagesAvailable?()

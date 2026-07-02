@@ -614,6 +614,12 @@ struct MainView: View {
         guard veilTimeout == nil else { return }
         veilTimeout = Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
+            // If the grid never reported first content in time, the veil lifts here onto a still-filling grid.
+            // Trace it once (grep `[FirstContent]`) so a cold-start log distinguishes a natural ready from this
+            // fallback; skip the trace when content already became ready so the log stays truthful.
+            if !model.libraryReady {
+                PhotoDiagnostics.shared.emit("FirstContent", ["event": "veilTimeout", "phase": "coldStart"])
+            }
             model.markLibraryReady()
         }
     }

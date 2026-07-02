@@ -118,6 +118,10 @@ public actor ThumbnailFeed {
         await core.hasRecentVisibleDemand(within: within)
     }
 
+    public nonisolated func noteVisibleDemand() {
+        core.noteVisibleDemand()
+    }
+
     public func hasPendingThumbnailWork() async -> Bool {
         await core.hasPendingThumbnailWork()
     }
