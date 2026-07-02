@@ -181,6 +181,19 @@ import GridCore
         #expect(policy.canAdmitUpload("incoming", cost: 400))
     }
 
+    @Test func replacementAdmissionUsesPinnedFloorNotFullResidentTotal() {
+        var policy = GridTextureResidencyPolicy<String>(capacity: 100, costCapacity: 1_000, uploadBudgetPerFrame: 10)
+        upload("visible-soft", cost: 100, pinned: ["visible-soft"], into: &policy)
+        upload("offscreen", cost: 900, into: &policy)
+
+        policy.beginFrame(pinned: ["visible-soft"])
+        #expect(policy.residentCost == 1_000)
+        #expect(policy.pinnedResidentCost == 100)
+        #expect(policy.canReplaceResident("visible-soft", oldCost: 100, newCost: 500))
+        #expect(!policy.canReplaceResident("visible-soft", oldCost: 100, newCost: 1_100))
+        #expect(!policy.canReplaceResident("missing", oldCost: 100, newCost: 500))
+    }
+
     @Test func admissionGatedFramesKeepResidencyByteBoundedUnderChurn() {
         var policy = GridTextureResidencyPolicy<Int>(capacity: 50, costCapacity: 2_000, uploadBudgetPerFrame: 8)
         // Simulate a scroll: each frame a fresh window of 6 items (3 visible + 3 overscan) shifted by 2.

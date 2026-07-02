@@ -89,6 +89,20 @@ package struct GridTextureResidencyPolicy<ID: Hashable & Sendable>: Equatable {
         return resident.count < capacity && residentCost + uploadCost <= costCapacity
     }
 
+    /// Whether an already-resident texture can be replaced with a larger/smaller texture and still end the
+    /// frame structurally admissible. Count is unchanged, so only the byte delta matters. Pinned replacements
+    /// use the same visible-first floor as pinned uploads: offscreen residents may be evicted later to make
+    /// room, but the pinned working set itself must fit inside the byte budget.
+    package func canReplaceResident(_ id: ID, oldCost: Int, newCost: Int) -> Bool {
+        guard resident.contains(id) else { return false }
+        let oldCost = max(0, oldCost)
+        let newCost = max(0, newCost)
+        if pinned.contains(id) {
+            return pinnedResidentCost - oldCost + newCost <= costCapacity
+        }
+        return residentCost - oldCost + newCost <= costCapacity
+    }
+
     /// A texture upload finished: the ID is now resident at `cost` and freshly used.
     package mutating func completeUpload(_ id: ID, cost uploadCost: Int) {
         inFlight.remove(id)

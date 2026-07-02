@@ -1698,13 +1698,14 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             else { overscanUIDs.append(flatUIDs[s.index]) }
         }
         // Fully settled (no live focus-row transaction) → allow the soft→sharp upgrade of carried-over textures.
-        streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs, allowUpgrade: zoomTransaction == nil)
+        let pendingVisibleQualityUpgrade = streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs,
+                                                          allowUpgrade: zoomTransaction == nil)
         let realCount = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
         // Keep ticking while a visible cell is still a placeholder OR a resident texture is mid-upgrade (a
         // budget-deferred soft→sharp grow), so both finish on an otherwise-idle grid. Residency-saturated
         // frames stay forced-idle: those placeholders can only fill on a window change, which redraws anyway.
         hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame
-            && (cache.pendingUpgradesThisFrame || visibleUIDs.contains { !cache.isResident($0) })
+            && (pendingVisibleQualityUpgrade || visibleUIDs.contains { !cache.isResident($0) })
         publishLightDiagnostics(phase: zoomTransaction == nil ? "settled" : "liveZoom",
                                 visibleCount: visibleUIDs.count, overscanCount: overscanUIDs.count,
                                 realCount: realCount, cellCount: slots.count,
@@ -1840,7 +1841,8 @@ extension MetalGridCoordinator {
 
     // MARK: Texture streaming (visible-first upload + off-main warm)
 
-    private func streamTextures(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID], allowUpgrade: Bool = false) {
+    @discardableResult
+    private func streamTextures(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID], allowUpgrade: Bool = false) -> Bool {
         // Level-aware upload size: dense levels upload smaller textures (10–30× less GPU memory + bandwidth at
         // L4/L5), sparse levels saturate at the adapter cap (unchanged quality). Set BEFORE `maxSafePinnedCount`
         // is read below, so at dense levels each texture is cheap and far more of the visible tiles can be
@@ -1858,6 +1860,7 @@ extension MetalGridCoordinator {
         let priority = window.priority
         var wanted: [PhotoUID] = []
         for uid in priority where !cache.isResident(uid) && dataSource.hasImage(for: uid) { wanted.append(uid) }
+        let upgradeCandidates = allowUpgrade ? visibleUIDs.filter { cache.residentTextureNeedsMeaningfulUpgrade($0) } : []
         PhotoPerformanceSignposts.grid.interval("streamTextures.upload") {
             cache.uploadVisible(wanted: wanted) { [dataSource] uid in dataSource.image(for: uid) }
         }
@@ -1866,11 +1869,30 @@ extension MetalGridCoordinator {
         // transitions/dissolve — the settle frame that follows handles it, and the apparent size is in flux.
         if allowUpgrade {
             PhotoPerformanceSignposts.grid.interval("streamTextures.upgrade") {
-                cache.upgradeUndersizedResident(visibleUIDs) { [dataSource] uid in dataSource.image(for: uid) }
+                cache.upgradeUndersizedResident(upgradeCandidates) { [dataSource] uid in dataSource.image(for: uid) }
             }
         }
         var warm: [PhotoUID] = []
-        for uid in priority where !cache.isResident(uid) && !cache.isInFlight(uid) && !dataSource.hasImage(for: uid) { warm.append(uid) }
+        var queuedWarm = Set<PhotoUID>()
+        func appendWarm(_ uid: PhotoUID) {
+            guard queuedWarm.insert(uid).inserted else { return }
+            warm.append(uid)
+        }
+        for uid in priority where !cache.isResident(uid) && !cache.isInFlight(uid) && !dataSource.hasImage(for: uid) {
+            appendWarm(uid)
+        }
+        var pendingVisibleQualityUpgrade = cache.pendingUpgradesThisFrame
+        if allowUpgrade {
+            for uid in upgradeCandidates where cache.residentTextureNeedsMeaningfulUpgrade(uid) {
+                // A low-res resident texture keeps drawing while the RAM decode is missing; request/wait for
+                // the source image so a settled sparse frame can replace it with a sharp texture. If the source
+                // is present but source-limited or the pinned floor cannot fit the replacement, there is no
+                // retryable work, so do not keep the display link awake forever.
+                guard !dataSource.hasImage(for: uid) else { continue }
+                appendWarm(uid)
+                pendingVisibleQualityUpgrade = true
+            }
+        }
         if !warm.isEmpty { dataSource.warm(warm) }
         // First fully-populated on-screen frame (every VISIBLE cell uploaded, just now via `uploadVisible`) →
         // tell the shell to lift the launch veil. One-shot; `allSatisfy` short-circuits on the first miss.
@@ -1878,6 +1900,7 @@ extension MetalGridCoordinator {
             firstContentReported = true
             onFirstContentReady?()
         }
+        return pendingVisibleQualityUpgrade
     }
 
     private func evictTexturesToBudget() {

@@ -132,6 +132,16 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         textures[id] ?? placeholderTexture
     }
 
+    /// True when a resident texture is materially below the current effective cap and should be considered
+    /// for a soft→sharp replacement. Uses the same 1.25× hysteresis as `upgradeUndersizedResident` so small
+    /// cap fluctuations do not keep the display link awake or churn uploads.
+    package func residentTextureNeedsMeaningfulUpgrade(_ id: ID) -> Bool {
+        guard let current = textures[id] else { return false }
+        let currentLongest = max(current.width, current.height)
+        guard currentLongest < effectiveMaxTexturePixels else { return false }
+        return effectiveMaxTexturePixels * 4 >= currentLongest * 5
+    }
+
     /// Upload the chosen subset of `wanted` (visible-first priority order) from the supplied RAM images.
     /// Honours the per-frame count budget + in-flight dedup via the LRU policy (`provideImage` is only
     /// called for the IDs actually selected this frame, never for an already-resident/in-flight ID), the
@@ -211,8 +221,10 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
                 pendingUpgradesThisFrame = true
                 break
             }
-            // Replacement admission: residency count is unchanged, so only the net byte delta must fit.
-            guard lru.residentCost - oldBytes + newBytes <= budget.maxResidentBytes else { continue }
+            // Replacement admission: residency count is unchanged. For visible/pinned replacements, the
+            // policy checks the pinned byte floor instead of the current total so evictable offscreen
+            // residents do not permanently block a visible low-res→full-res upgrade at a full cache.
+            guard lru.canReplaceResident(id, oldCost: oldBytes, newCost: newBytes) else { continue }
             let start = CFAbsoluteTimeGetCurrent()
             guard let texture = makeTexture(from: image, width: size.width, height: size.height) else { continue }
             uploadMsThisFrame += (CFAbsoluteTimeGetCurrent() - start) * 1000

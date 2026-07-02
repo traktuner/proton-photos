@@ -322,6 +322,39 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
         #expect(!cache.pendingUpgradesThisFrame)
     }
 
+    @Test func visibleUpgradeCanEvictOffscreenResidentsWhenCacheIsFull() throws {
+        guard let cache = Self.makeCache(budget: GridTextureBudget(
+            maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 1_048_576,
+            maxCachedTextures: 100, maxResidentBytes: 20_480, overscanFraction: 1.0
+        )), let image = Self.makeImage(side: 64) else { return }
+        let visible = uid("visible-soft")
+        let offscreen = uid("offscreen-full")
+
+        cache.setEffectiveMaxTexturePixels(32)
+        cache.beginFrame(pinned: [visible])
+        cache.uploadVisible(wanted: [visible]) { _ in image }
+        #expect(cache.texture(for: visible).width == 32)
+
+        cache.setEffectiveMaxTexturePixels(64)
+        cache.beginFrame(pinned: [visible])
+        cache.uploadVisible(wanted: [offscreen]) { _ in image }
+        #expect(cache.residentBytes == cache.residentByteBudget)
+        #expect(cache.texture(for: offscreen).width == 64)
+        #expect(cache.residentTextureNeedsMeaningfulUpgrade(visible))
+
+        cache.beginFrame(pinned: [visible])
+        cache.upgradeUndersizedResident([visible]) { _ in image }
+        #expect(cache.upgradesThisFrame == 1)
+        #expect(cache.texture(for: visible).width == 64)
+        #expect(cache.byteBudgetOverflow)
+
+        cache.evictToBudget()
+        #expect(!cache.isResident(offscreen))
+        #expect(cache.isResident(visible))
+        #expect(!cache.byteBudgetOverflow)
+        #expect(cache.residentBytes == 16_384)
+    }
+
     @Test func upgradeRespectsPerFrameUploadByteBudgetAndSignalsPending() throws {
         guard let cache = Self.makeCache(budget: GridTextureBudget(
             maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 16_384,       // room for exactly one 64² upgrade/frame
