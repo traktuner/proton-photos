@@ -17,6 +17,11 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     private let device: MTLDevice
     private let glyphRasterizer: any MetalGridGlyphRasterizing
     private let budget: GridTextureBudget
+    /// Whether the GPU supports sampler channel swizzles (`MTLTextureSwizzleChannels`), required for the
+    /// direct-upload fast path on the common non-RGBA byte orders ImageIO hands back (a JPEG thumbnail decodes
+    /// to `noneSkipFirst`, i.e. memory `X,R,G,B`). Universally true on the supported Apple-Silicon / Mac-family-2
+    /// targets; a defensive gate so an exotic device simply keeps redrawing.
+    private let supportsTextureSwizzle: Bool
     private var lru: GridTextureResidencyPolicy<ID>
     private var textures: [ID: MTLTexture] = [:]
     package private(set) var placeholderTexture: MTLTexture
@@ -31,6 +36,14 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     /// In-place re-uploads this frame that grew an already-resident texture to the current effective cap
     /// (`upgradeUndersizedResident`) - a subset of `uploadsThisFrame`, surfaced separately for diagnostics.
     package private(set) var upgradesThisFrame = 0
+    /// Uploads this frame that skipped the main-thread CGContext normalization redraw and copied the decoded
+    /// image's bytes straight into the texture (a correctly-sized sRGB/DeviceRGB 8-bit RGB(A) source, corrected
+    /// by a GPU-side channel swizzle). A subset of `uploadsThisFrame`; its complement is `normalizedUploadsThisFrame`.
+    package private(set) var directUploadsThisFrame = 0
+    /// Uploads this frame that went through the CGContext RGBA8 normalization redraw - the always-correct
+    /// fallback for exotic formats (CMYK, grayscale, 16-bit, float), wide-gamut colorspaces, straight
+    /// (non-premultiplied) alpha, a source needing resampling, or a device without texture-swizzle support.
+    package private(set) var normalizedUploadsThisFrame = 0
     /// True once an upload was refused this frame because the resident byte/count budget cannot admit it
     /// even after evicting every non-pinned texture. That state only changes when the streaming window
     /// changes (scroll/zoom) or images arrive - both trigger their own redraw - so callers may stop
@@ -97,6 +110,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         self.budget = budget
         self.maxTexturePixels = maxTexturePixels
         self.effectiveMaxTexturePixels = maxTexturePixels
+        self.supportsTextureSwizzle = device.supportsFamily(.apple1) || device.supportsFamily(.mac2)
         self.lru = GridTextureResidencyPolicy(
             capacity: budget.maxCachedTextures,
             costCapacity: budget.maxResidentBytes,
@@ -117,6 +131,8 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         evictMsThisFrame = 0
         deferredUploadsThisFrame = 0
         upgradesThisFrame = 0
+        directUploadsThisFrame = 0
+        normalizedUploadsThisFrame = 0
         residencySaturatedThisFrame = false
         pendingUpgradesThisFrame = false
     }
@@ -295,11 +311,48 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     }
 
     /// Builds an upright RGBA8 texture from a decoded image at the pre-computed `uploadPixelSize`. A decoded
-    /// CGImage is already row-0-top, and `CGContext.draw` preserves that into the bitmap buffer, so texel
-    /// row 0 is the visual TOP - no context flip - and the renderer samples with straightforward UVs
-    /// (uv.y 0 = top), keeping thumbnails upright. (Synthetic tiles are generated `flipped: true` to match
-    /// this row-0-top convention.)
+    /// CGImage is already row-0-top, and both upload paths preserve that into the texture (`CGContext.draw`
+    /// keeps row-0-top; a direct byte copy is row-for-row), so texel row 0 is the visual TOP - no flip - and
+    /// the renderer samples with straightforward UVs (uv.y 0 = top), keeping thumbnails upright. (Synthetic
+    /// tiles are generated `flipped: true` to match this row-0-top convention.)
+    ///
+    /// Two paths: a direct byte-copy when the decoded image is already a correctly-sized, sRGB/DeviceRGB,
+    /// 8-bit RGB(A) source (the common production case - the feed decodes pre-sized ~320 px thumbnails), and
+    /// the always-correct CGContext normalization redraw otherwise. Only the *how* differs; the resulting
+    /// texture (rgba8Unorm, shaderRead, no mips, upright) is identical, and the byte/count/time budgets that
+    /// gate this call are unaffected.
     private func makeTexture(from image: CGImage, width w: Int, height h: Int) -> MTLTexture? {
+        if let texture = makeTextureDirect(from: image, width: w, height: h) {
+            directUploadsThisFrame += 1
+            return texture
+        }
+        normalizedUploadsThisFrame += 1
+        return makeTextureNormalized(from: image, width: w, height: h)
+    }
+
+    /// Copy the decoded image's bytes straight into the texture, skipping the main-thread CGContext redraw.
+    /// Returns `nil` (⇒ caller redraws) when the source is not verbatim-compatible: a resample is needed, an
+    /// exotic/wide-gamut format, straight alpha, or a device without swizzle support. Correctness for the
+    /// non-RGBA byte orders ImageIO emits is preserved by a GPU-side sampler swizzle (`CGImageDirectUpload`);
+    /// the copy honours the source `bytesPerRow` so row-padded providers upload correctly.
+    private func makeTextureDirect(from image: CGImage, width w: Int, height h: Int) -> MTLTexture? {
+        guard let swizzle = CGImageDirectUpload.swizzle(for: image, targetWidth: w, targetHeight: h) else {
+            return nil
+        }
+        // An identity layout (bytes already R,G,B,A) uploads anywhere; a remap needs GPU swizzle support.
+        guard swizzle.isIdentity || supportsTextureSwizzle else { return nil }
+        guard let provider = image.dataProvider, let data = provider.data else { return nil }
+        let bytesPerRow = image.bytesPerRow
+        guard CFDataGetLength(data) >= bytesPerRow * h, let bytes = CFDataGetBytePtr(data) else { return nil }
+        guard let texture = makeEmptyTexture(width: w, height: h, swizzle: swizzle.isIdentity ? nil : mtlSwizzle(swizzle))
+        else { return nil }
+        texture.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: bytes, bytesPerRow: bytesPerRow)
+        return texture
+    }
+
+    /// The CGContext RGBA8 normalization redraw - the always-correct fallback that resamples/format-converts
+    /// any source into an upright premultiplied RGBA8 buffer before upload.
+    private func makeTextureNormalized(from image: CGImage, width w: Int, height h: Int) -> MTLTexture? {
         let isDownsampling = w < image.width || h < image.height
         let bytesPerRow = w * 4
         var pixels = [UInt8](repeating: 0, count: bytesPerRow * h)
@@ -315,13 +368,36 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         ctx.interpolationQuality = isDownsampling ? .medium : .high
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
 
+        guard let texture = makeEmptyTexture(width: w, height: h, swizzle: nil) else { return nil }
+        texture.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: pixels, bytesPerRow: bytesPerRow)
+        return texture
+    }
+
+    /// A blank `rgba8Unorm`, shaderRead, non-mipmapped texture at `w×h`, optionally with a sampler swizzle so
+    /// a direct upload of non-RGBA-ordered bytes still samples as straight `(R,G,B,A)`.
+    private func makeEmptyTexture(width w: Int, height h: Int, swizzle: MTLTextureSwizzleChannels?) -> MTLTexture? {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm, width: w, height: h, mipmapped: false
         )
         descriptor.usage = [.shaderRead]
-        guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
-        texture.replace(region: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0, withBytes: pixels, bytesPerRow: bytesPerRow)
-        return texture
+        if let swizzle { descriptor.swizzle = swizzle }
+        return device.makeTexture(descriptor: descriptor)
+    }
+
+    /// Map the platform-neutral GridCore swizzle description onto `MTLTextureSwizzleChannels`.
+    private func mtlSwizzle(_ swizzle: CGImageDirectUpload.Swizzle) -> MTLTextureSwizzleChannels {
+        func map(_ channel: CGImageDirectUpload.Channel) -> MTLTextureSwizzle {
+            switch channel {
+            case .red: return .red
+            case .green: return .green
+            case .blue: return .blue
+            case .alpha: return .alpha
+            case .one: return .one
+            }
+        }
+        return MTLTextureSwizzleChannels(
+            red: map(swizzle.red), green: map(swizzle.green), blue: map(swizzle.blue), alpha: map(swizzle.alpha)
+        )
     }
 
     // MARK: - Glyph textures (badges) - resident, not LRU-managed

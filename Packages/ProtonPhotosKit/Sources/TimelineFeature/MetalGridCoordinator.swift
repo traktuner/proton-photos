@@ -2012,6 +2012,8 @@ extension MetalGridCoordinator {
             "residencySaturated": "\(stats.residencySaturated)",
             "effectivePixels": "\(cache.effectiveMaxTexturePixels)",
             "upgrades": "\(cache.upgradesThisFrame)",
+            "directUploads": "\(cache.directUploadsThisFrame)",
+            "normalizedUploads": "\(cache.normalizedUploadsThisFrame)",
         ])
     }
 
