@@ -1802,8 +1802,12 @@ extension MetalGridCoordinator {
     private func streamTextures(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID]) {
         // Pinning is clamped to what the byte budget can guarantee (visible first, then nearest overscan)
         // so dense zoom levels degrade to placeholders instead of pinning more than the budget can hold.
+        // While visible items are still missing, keep overscan uploadable/warmable but evictable: otherwise
+        // already-resident overscan can occupy the pinned byte floor and starve newly visible thumbnails.
+        let pinOverscan = visibleUIDs.allSatisfy { cache.isResident($0) }
         let window = GridTextureStreamingPolicy.window(visibleIDs: visibleUIDs, overscanIDs: overscanUIDs,
-                                                       maxPinned: cache.maxSafePinnedCount)
+                                                       maxPinned: cache.maxSafePinnedCount,
+                                                       pinOverscan: pinOverscan)
         cache.beginFrame(pinned: window.pinned)
         let priority = window.priority
         var wanted: [PhotoUID] = []

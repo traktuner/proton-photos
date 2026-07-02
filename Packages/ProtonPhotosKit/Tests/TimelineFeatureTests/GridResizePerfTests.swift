@@ -130,6 +130,20 @@ import GridCore
         #expect(dataSource.contains("self.onImagesAvailable?()"))
     }
 
+    @Test func thumbnailWarmPumpPreservesRemainderAcrossBatches() {
+        let dataSource = src("MetalGridDataSource.swift")
+        #expect(dataSource.contains("let batch = Array(pendingWarm.prefix(maxWarmBatch))"))
+        #expect(dataSource.contains("pendingWarm.removeFirst(min(maxWarmBatch, pendingWarm.count))"))
+        #expect(!dataSource.contains("pendingWarm.removeAll(keepingCapacity: true)"),
+                "warm pump must not discard still-visible IDs beyond the current decode batch")
+    }
+
+    @Test func overscanIsNotPinnedWhileVisibleThumbnailsAreCold() {
+        let coord = src("MetalGridCoordinator.swift")
+        #expect(coord.contains("let pinOverscan = visibleUIDs.allSatisfy { cache.isResident($0) }"))
+        #expect(coord.contains("pinOverscan: pinOverscan"))
+    }
+
     // 6 — no synchronous decode on the resize path: the rebase is pure geometry; texture work stays in the cache.
     @Test func noSynchronousDecodeOnResizePath() {
         let resizeSrc = src("GridViewportResizeRebase.swift")

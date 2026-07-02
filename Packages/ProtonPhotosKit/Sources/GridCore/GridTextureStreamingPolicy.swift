@@ -20,7 +20,8 @@ package enum GridTextureStreamingPolicy {
     package static func window<ID: Hashable & Sendable>(
         visibleIDs: [ID],
         overscanIDs: [ID],
-        maxPinned: Int
+        maxPinned: Int,
+        pinOverscan: Bool = true
     ) -> GridTextureStreamingWindow<ID> {
         var seen = Set<ID>()
         var priority: [ID] = []
@@ -28,7 +29,8 @@ package enum GridTextureStreamingPolicy {
         for id in visibleIDs + overscanIDs where seen.insert(id).inserted {
             priority.append(id)
         }
-        let pinned = priority.count <= maxPinned ? seen : Set(priority.prefix(max(0, maxPinned)))
+        let pinnedLimit = pinOverscan ? maxPinned : min(maxPinned, visibleIDs.count)
+        let pinned = priority.count <= pinnedLimit ? seen : Set(priority.prefix(max(0, pinnedLimit)))
         return GridTextureStreamingWindow(priority: priority, pinned: pinned)
     }
 }

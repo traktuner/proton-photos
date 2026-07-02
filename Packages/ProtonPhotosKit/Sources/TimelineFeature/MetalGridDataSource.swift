@@ -135,7 +135,7 @@ final class RealMetalGridDataSource: MetalGridDataSource {
         guard !warmInFlight, !pendingWarm.isEmpty else { return }
         warmInFlight = true
         let batch = Array(pendingWarm.prefix(maxWarmBatch))
-        pendingWarm.removeAll(keepingCapacity: true)
+        pendingWarm.removeFirst(min(maxWarmBatch, pendingWarm.count))
         Task { [feed] in
             _ = await feed.warmDecoded(batch, limit: batch.count)
             await MainActor.run {

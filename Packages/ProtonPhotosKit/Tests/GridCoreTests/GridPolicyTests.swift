@@ -241,6 +241,18 @@ import GridCore
         #expect(window.pinned == ["v0", "v1", "v2", "v3"])   // visible-first even when visible alone overflows
         #expect(window.priority == visible + ["o1"])
     }
+
+    @Test func overscanCanStayUploadPriorityWithoutBeingPinnedWhileVisibleIsCold() {
+        let window = GridTextureStreamingPolicy.window(
+            visibleIDs: ["v1", "v2"],
+            overscanIDs: ["o1", "o2"],
+            maxPinned: 4,
+            pinOverscan: false
+        )
+
+        #expect(window.priority == ["v1", "v2", "o1", "o2"])
+        #expect(window.pinned == ["v1", "v2"])
+    }
 }
 
 @Suite struct GridTextureBudgetTests {
