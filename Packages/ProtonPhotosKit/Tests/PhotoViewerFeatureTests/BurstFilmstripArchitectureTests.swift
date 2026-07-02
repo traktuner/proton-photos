@@ -5,6 +5,25 @@ import MediaCache
 @testable import PhotoViewerFeature
 
 final class BurstFilmstripArchitectureTests: XCTestCase {
+    func testViewerFullImageCacheIsCostBounded() throws {
+        let repo = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // PhotoViewerFeatureTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // ProtonPhotosKit
+            .deletingLastPathComponent()   // Packages
+            .deletingLastPathComponent()   // repo
+        let model = try String(
+            contentsOf: repo.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoViewerFeature/PhotoViewerModel.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(model.contains("private static let fullImageCacheByteLimit"))
+        XCTAssertTrue(model.contains("c.totalCostLimit = fullImageCacheByteLimit"))
+        XCTAssertTrue(model.contains("fullImageCache.setObject(image, forKey: cacheKey(uid), cost: decodedImageCost(image))"))
+        XCTAssertFalse(model.contains("countLimit = 40"), "viewer full-res cache must not be count-only")
+        XCTAssertFalse(model.contains("Self.fullImageCache.setObject(full"), "full-res inserts must include decoded byte cost")
+    }
+
     func testBurstFilmstripUsesSharedViewerModelAndDoesNotOwnBackendLoading() throws {
         let repo = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // PhotoViewerFeatureTests

@@ -306,10 +306,31 @@ public final class PhotoViewerModel {
 
     /// In-memory cache of already-loaded full-resolution images (shared across viewer instances) so
     /// reopening / re-navigating to a photo is instant and never re-shows the spinner.
+    private static let fullImageCacheCountLimit = 8
+    private static let fullImageCacheByteLimit = 512 * 1024 * 1024
     private static let fullImageCache: NSCache<NSString, NSImage> = {
-        let c = NSCache<NSString, NSImage>(); c.countLimit = 40; return c
+        let c = NSCache<NSString, NSImage>()
+        c.countLimit = fullImageCacheCountLimit
+        c.totalCostLimit = fullImageCacheByteLimit
+        return c
     }()
     private static func cacheKey(_ uid: PhotoUID) -> NSString { "\(uid.volumeID)~\(uid.nodeID)" as NSString }
+
+    private static func cacheFullImage(_ image: NSImage, for uid: PhotoUID) {
+        fullImageCache.setObject(image, forKey: cacheKey(uid), cost: decodedImageCost(image))
+    }
+
+    private static func decodedImageCost(_ image: NSImage) -> Int {
+        let representationCost = image.representations.map { rep -> Int in
+            if let bitmap = rep as? NSBitmapImageRep, bitmap.bytesPerRow > 0, bitmap.pixelsHigh > 0 {
+                return bitmap.bytesPerRow * bitmap.pixelsHigh
+            }
+            guard rep.pixelsWide > 0, rep.pixelsHigh > 0 else { return 0 }
+            return rep.pixelsWide * rep.pixelsHigh * 4
+        }.max() ?? 0
+        let fallbackCost = Int(max(1, image.size.width) * max(1, image.size.height) * 4)
+        return max(1, representationCost, fallbackCost)
+    }
 
     /// Wraps the Core `CGImage` decode as AppKit image. The heavy ImageIO decode still runs off the main actor.
     private nonisolated static func decodeFullImage(_ data: Data) -> NSImage? {
@@ -364,7 +385,7 @@ public final class PhotoViewerModel {
                     self.image = full
                     self.isSharp = true
                     oc.touch(uid)   // mark recently-used so the LRU cap keeps it
-                    Self.fullImageCache.setObject(full, forKey: Self.cacheKey(uid))
+                    Self.cacheFullImage(full, for: uid)
                     return
                 }
             }
@@ -471,7 +492,7 @@ public final class PhotoViewerModel {
                 image = full
                 isSharp = true
                 video.reset()
-                Self.fullImageCache.setObject(full, forKey: Self.cacheKey(item.uid))
+                Self.cacheFullImage(full, for: item.uid)
                 // Persist the original to the encrypted offline cache (off the main actor), then trim to the LRU
                 // budget. Gated on the Offline Photo Library switch; the read path above always tries the cache.
                 if cacheOriginals, let oc = originalsCache {
