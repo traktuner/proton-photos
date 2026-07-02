@@ -21,11 +21,11 @@ package enum AppKitMetalGridTexturePolicies {
     /// - `maxCachedTextures` is intentionally high enough that dense, level-aware 96–112 px thumbnails hit
     ///   the byte cap before the count cap. Keeping the old 4096 count cap after level-aware uploads limited
     ///   L5 to ~140–150 MiB and caused count-cap churn despite an idle byte budget.
-    /// - `maxUploadBytesPerFrame` 6 MiB ≈ ~15 worst-case 320 px uploads ≈ single-digit-ms of main-thread
-    ///   normalization + `replaceRegion` copy per frame (measured ~0.6 ms per 400 KiB upload), so a cold
-    ///   viewport fills over a few frames instead of stalling one frame for 40–60 ms.
+    /// - `maxUploadBytesPerFrame` 6 MiB ≈ ~15 worst-case 320 px uploads; `maxUploadMillisecondsPerFrame`
+    ///   then catches the real measured main-thread cost on the current Mac, so cold fills stay progressive
+    ///   even when a source format makes `CGContext` normalization unusually expensive.
     package static let `default` = AppKitMetalGridTexturePolicy(
-        budget: GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 16_384, maxResidentBytes: 536_870_912, overscanFraction: 1.2),
+        budget: GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 16_384, maxResidentBytes: 536_870_912, overscanFraction: 1.2, maxUploadMillisecondsPerFrame: 6.0),
         maxTexturePixels: defaultMaxTexturePixels
     )
 

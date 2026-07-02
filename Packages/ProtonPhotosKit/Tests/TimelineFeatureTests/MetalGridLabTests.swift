@@ -220,6 +220,28 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
         #expect(cache.residentCount == 4)
     }
 
+    @Test func perFrameUploadTimeBudgetDefersRemainderAfterFirstUpload() throws {
+        guard let cache = Self.makeCache(budget: GridTextureBudget(
+            maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 1_048_576,
+            maxCachedTextures: 100, maxResidentBytes: 1_048_576, overscanFraction: 1.0,
+            maxUploadMillisecondsPerFrame: 0
+        )), let image = Self.makeImage() else { return }
+
+        let wanted = (0 ..< 4).map { uid("time-\($0)") }
+        cache.beginFrame(pinned: Set(wanted))
+        cache.uploadVisible(wanted: wanted) { _ in image }
+
+        #expect(cache.uploadsThisFrame == 1)
+        #expect(cache.deferredUploadsThisFrame == 3)
+        #expect(cache.isResident(wanted[0]))
+        #expect(!cache.isResident(wanted[1]))
+
+        cache.beginFrame(pinned: Set(wanted))
+        cache.uploadVisible(wanted: wanted.filter { !cache.isResident($0) }) { _ in image }
+        #expect(cache.uploadsThisFrame == 1)
+        #expect(cache.isResident(wanted[1]))
+    }
+
     @Test func residentByteBudgetRefusesUploadsInsteadOfOverflowing() throws {
         guard let cache = Self.makeCache(budget: GridTextureBudget(
             maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 1_048_576,
@@ -375,6 +397,31 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
         #expect(cache.uploadBytesThisFrame == 16_384)
         #expect(cache.pendingUpgradesThisFrame)                           // more to do → coordinator keeps ticking
         #expect(cache.residentBytes <= cache.residentByteBudget)
+    }
+
+    @Test func upgradeRespectsPerFrameUploadTimeBudgetAndSignalsPending() throws {
+        guard let cache = Self.makeCache(budget: GridTextureBudget(
+            maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 1_048_576,
+            maxCachedTextures: 100, maxResidentBytes: 4_194_304, overscanFraction: 1.0,
+            maxUploadMillisecondsPerFrame: 0
+        )), let image = Self.makeImage(side: 64) else { return }
+        let items = (0 ..< 3).map { uid("time-carried-\($0)") }
+
+        cache.setEffectiveMaxTexturePixels(32)
+        for _ in items {
+            cache.beginFrame(pinned: Set(items))
+            cache.uploadVisible(wanted: items.filter { !cache.isResident($0) }) { _ in image }
+        }
+        #expect(items.allSatisfy { cache.texture(for: $0).width == 32 })
+
+        cache.setEffectiveMaxTexturePixels(64)
+        cache.beginFrame(pinned: Set(items))
+        cache.upgradeUndersizedResident(items) { _ in image }
+
+        #expect(cache.upgradesThisFrame == 1)
+        #expect(cache.pendingUpgradesThisFrame)
+        #expect(cache.texture(for: items[0]).width == 64)
+        #expect(cache.texture(for: items[1]).width == 32)
     }
 
     @Test func glyphSizingIgnoresEffectiveCap() throws {

@@ -840,7 +840,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         let budgetCode = stripCommentsAndStringLiterals(from: budgetSource)
         // The hybrid count + byte budget shape is load-bearing: byte fields bound real GPU memory and
         // per-frame upload copy cost. Removing them would silently reopen the unbounded-residency P0.
-        for symbol in ["GridTextureBudget", "maxUploadsPerFrame", "maxUploadBytesPerFrame", "maxCachedTextures", "maxResidentBytes", "overscanFraction"] {
+        for symbol in ["GridTextureBudget", "maxUploadsPerFrame", "maxUploadBytesPerFrame", "maxUploadMillisecondsPerFrame", "maxCachedTextures", "maxResidentBytes", "overscanFraction"] {
             if !budgetCode.contains(symbol) {
                 violations.append("GridCore/GridTextureBudget.swift: missing \(symbol)")
             }
@@ -868,7 +868,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             let appKitSource = try String(contentsOf: appKitPolicyFile, encoding: .utf8)
             for symbol in [
                 "AppKitMetalGridTexturePolicies",
-                "GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 16_384, maxResidentBytes: 536_870_912, overscanFraction: 1.2)",
+                "GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 16_384, maxResidentBytes: 536_870_912, overscanFraction: 1.2, maxUploadMillisecondsPerFrame: 6.0)",
                 "package extension GridTextureBudget",
                 "static let `default` = AppKitMetalGridTexturePolicies.default.budget"
             ] where !appKitSource.contains(symbol) {
@@ -1091,7 +1091,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             "AppKitMetalGridTexturePolicies",
             "defaultMaxTexturePixels",
             "maxTexturePixels",
-            "GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 16_384, maxResidentBytes: 536_870_912, overscanFraction: 1.2)",
+            "GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 16_384, maxResidentBytes: 536_870_912, overscanFraction: 1.2, maxUploadMillisecondsPerFrame: 6.0)",
             "maxTexturePixels: defaultMaxTexturePixels",
             "package extension GridTextureBudget",
             "static let `default` = AppKitMetalGridTexturePolicies.default.budget"
@@ -1288,6 +1288,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             "UIKitMetalGridTexturePolicies",
             "GridTextureBudget",
             "maxUploadBytesPerFrame",
+            "maxUploadMillisecondsPerFrame",
             "maxResidentBytes",
             "maxTexturePixels"
         ] where !code.contains(symbol) {

@@ -276,11 +276,13 @@ import GridCore
             maxUploadBytesPerFrame: 1_234,
             maxCachedTextures: 17,
             maxResidentBytes: 56_789,
-            overscanFraction: 0.75
+            overscanFraction: 0.75,
+            maxUploadMillisecondsPerFrame: 2.5
         )
 
         #expect(budget.maxUploadsPerFrame == 5)
         #expect(budget.maxUploadBytesPerFrame == 1_234)
+        #expect(budget.maxUploadMillisecondsPerFrame == 2.5)
         #expect(budget.maxCachedTextures == 17)
         #expect(budget.maxResidentBytes == 56_789)
         #expect(budget.overscanFraction == 0.75)

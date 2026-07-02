@@ -62,6 +62,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     package var residentBytes: Int { lru.residentCost }
     package var residentByteBudget: Int { budget.maxResidentBytes }
     package var uploadByteBudgetPerFrame: Int { budget.maxUploadBytesPerFrame }
+    package var uploadTimeBudgetPerFrame: Double { budget.maxUploadMillisecondsPerFrame }
     /// True when resident bytes exceed the budget — transiently possible inside a frame (uploads land
     /// before `evictToBudget`), never after eviction ran. Persistent `true` in logs signals a bug.
     package var byteBudgetOverflow: Bool { lru.residentCost > budget.maxResidentBytes }
@@ -142,18 +143,23 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         return effectiveMaxTexturePixels * 4 >= currentLongest * 5
     }
 
+    private var uploadTimeBudgetExhausted: Bool {
+        uploadsThisFrame > 0 && uploadMsThisFrame >= budget.maxUploadMillisecondsPerFrame
+    }
+
     /// Upload the chosen subset of `wanted` (visible-first priority order) from the supplied RAM images.
     /// Honours the per-frame count budget + in-flight dedup via the LRU policy (`provideImage` is only
     /// called for the IDs actually selected this frame, never for an already-resident/in-flight ID), the
-    /// per-frame byte budget (bounding the main-thread copy cost), and residency admission (a texture that
-    /// could not stay within the resident budget is never created). Everything refused for budget reasons
-    /// is reported in `deferredUploadsThisFrame` and retried on later frames.
+    /// per-frame byte and measured-time budgets (bounding the main-thread copy cost), and residency admission
+    /// (a texture that could not stay within the resident budget is never created). Everything refused for
+    /// budget reasons is reported in `deferredUploadsThisFrame` and retried on later frames.
     package func uploadVisible(wanted: [ID], provideImage: (ID) -> CGImage?) {
         let chosen = lru.selectUploads(wanted: wanted)
         var budgetDeferred = 0
         var frameByteBudgetExhausted = false
+        var frameTimeBudgetExhausted = false
         for id in chosen {
-            if frameByteBudgetExhausted {
+            if frameByteBudgetExhausted || frameTimeBudgetExhausted {
                 lru.abandonUpload(id)
                 budgetDeferred += 1
                 continue
@@ -186,6 +192,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
             textures[id] = texture
             uploadBytesThisFrame += bytes
             uploadsThisFrame += 1
+            frameTimeBudgetExhausted = uploadTimeBudgetExhausted
             lru.completeUpload(id, cost: bytes)
         }
         deferredUploadsThisFrame = max(0, wanted.count - chosen.count) + budgetDeferred
@@ -206,6 +213,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         let cap = effectiveMaxTexturePixels
         for id in ids {
             guard uploadsThisFrame < budget.maxUploadsPerFrame else { pendingUpgradesThisFrame = true; break }
+            guard !uploadTimeBudgetExhausted else { pendingUpgradesThisFrame = true; break }
             guard let current = textures[id] else { continue }        // non-resident → normal upload path handles it
             let currentLongest = max(current.width, current.height)
             guard currentLongest < cap else { continue }              // already at/above the cap → crisp, skip
