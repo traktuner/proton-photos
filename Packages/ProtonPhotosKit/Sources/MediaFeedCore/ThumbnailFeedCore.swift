@@ -322,6 +322,7 @@ public actor ThumbnailFeedCore {
             return nil
         }
         cache.storeToDisk(data, for: uid)
+        diskPresence.set(uid, present: true)
         guard let image = decode(data, for: uid) else { return nil }
         storeDecoded(image, for: uid)
         return image
@@ -333,7 +334,9 @@ public actor ThumbnailFeedCore {
         checkpointKey = Self.checkpointKey(for: uids)
         sequentialIndex = checkpointKey.flatMap { UserDefaults.standard.object(forKey: $0) as? Int } ?? 0
         sequentialIndex = min(max(sequentialIndex, 0), sequential.count)
+        diskPresence.beginTracking(uids)
         unfetchable.removeAll()   // a fresh crawl retries backend-refused items exactly once
+        lastRepassPercent = -1.0
         startWorkers()
     }
 
@@ -394,7 +397,7 @@ public actor ThumbnailFeedCore {
     }
 
     public func prefetchStatus() -> PrefetchStatus {
-        let coverage = cache.diskCoverage(for: sequential)
+        let coverage = diskPresence.coverage()
         let pausedReason: String
         if !prefetchEnabled {
             pausedReason = "disabled"
@@ -414,8 +417,8 @@ public actor ThumbnailFeedCore {
             downloadsInFlight: downloadInFlight,
             decodesInFlight: decodeInFlight,
             lastErrors: lastErrors,
-            cacheSizeBytes: cache.diskSizeBytes(),
-            diskFileCount: cache.diskFileCount(),
+            cacheSizeBytes: 0,
+            diskFileCount: coverage.present,
             activeJobs: downloadInFlight + decodeInFlight,
             completed: prefetchCompleted,
             failed: prefetchFailed,
@@ -458,8 +461,8 @@ public actor ThumbnailFeedCore {
             let chunk = takeBatch()
             if chunk.isEmpty {
                 if priority.isEmpty && sequentialIndex >= sequential.count {
-                    let percent = cache.diskCoverage(for: sequential).percent
-                    if percent < 99.5, percent > lastRepassPercent + 0.01 {
+                    let percent = refreshDiskCoverageFromCache().percent
+                    if percent < 0.995, percent > lastRepassPercent + 0.01 {
                         lastRepassPercent = percent
                         sequentialIndex = 0
                         try? await Task.sleep(for: .seconds(2))
@@ -638,6 +641,13 @@ public actor ThumbnailFeedCore {
         return out
     }
 
+    private func refreshDiskCoverageFromCache() -> (present: Int, total: Int, percent: Double) {
+        for uid in sequential {
+            diskPresence.set(uid, present: cache.has(uid))
+        }
+        return diskPresence.coverage()
+    }
+
     private func decode(_ data: Data, for uid: PhotoUID) -> DecodedThumbnail? {
         prefetchDecodeStarted += 1
         decodeInFlight += 1
@@ -798,9 +808,41 @@ private final class OnceFlag: @unchecked Sendable {
 private final class DiskPresenceCache: @unchecked Sendable {
     private let lock = NSLock()
     private var values: [String: Bool] = [:]
+    private var trackedKeys: Set<String> = []
+    private var trackedTotal = 0
+    private var trackedPresent = 0
+
+    func beginTracking(_ uids: [PhotoUID]) {
+        let keys = uids.map(Self.key)
+        lock.withLock {
+            trackedKeys = Set(keys)
+            trackedTotal = uids.count
+            trackedPresent = keys.reduce(0) { count, key in
+                count + (values[key] == true ? 1 : 0)
+            }
+        }
+    }
 
     func set(_ uid: PhotoUID, present: Bool) {
-        lock.withLock { values[Self.key(uid)] = present }
+        let key = Self.key(uid)
+        lock.withLock {
+            let old = values[key]
+            values[key] = present
+            guard trackedKeys.contains(key), old != present else { return }
+            if present {
+                trackedPresent += 1
+            } else if old == true {
+                trackedPresent = max(0, trackedPresent - 1)
+            }
+        }
+    }
+
+    func coverage() -> (present: Int, total: Int, percent: Double) {
+        lock.withLock {
+            guard trackedTotal > 0 else { return (0, 0, 1) }
+            let present = min(trackedPresent, trackedTotal)
+            return (present, trackedTotal, Double(present) / Double(trackedTotal))
+        }
     }
 
     private static func key(_ uid: PhotoUID) -> String {

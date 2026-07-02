@@ -247,6 +247,31 @@ struct ThumbnailFeedCoreTests {
         #expect(await loader.requestCount() == 0)
     }
 
+    @Test func prefetchStatusReportsIncrementalDiskCoverage() async throws {
+        let cached = (0 ..< 2).map { Self.uid("coverage-cached-\($0)") }
+        let missing = Self.uid("coverage-missing")
+        let cache = Self.cache("coverage")
+        for uid in cached { cache.storeToDisk(Self.pngData(width: 8, height: 8), for: uid) }
+        let loader = RecordingLoader(itemErrors: [missing: "no thumbnail for node"])
+        let feed = ThumbnailFeedCore(
+            cache: cache,
+            loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 1)
+        )
+
+        await feed.startPrefetch(cached + [missing])
+        try await Self.waitUntil {
+            let status = await feed.prefetchStatus()
+            return status.diskHit >= cached.count && status.failedItemError == 1
+        }
+
+        let status = await feed.prefetchStatus()
+        #expect(status.diskThumbnailTotal == 3)
+        #expect(status.diskFileCount == 2)
+        #expect(status.diskThumbnailCoverageFraction == 2.0 / 3.0)
+        #expect(await loader.requestCount() == 1)
+    }
+
     @Test func timeoutDoesNotDoubleCountCompletionOrFailure() async throws {
         let uid = Self.uid("timeout")
         let cache = Self.cache("timeout")
