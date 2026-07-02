@@ -206,6 +206,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     /// True when some VISIBLE cell still lacks a real texture — the host keeps ticking redraws while this
     /// holds (so placeholders swap to thumbnails without needing a scroll), and goes idle once false.
+    /// Forced false while the resident texture budget is saturated: those placeholders cannot fill until
+    /// the window changes, and scroll/zoom/image-arrival all trigger their own redraws, so ticking would
+    /// only busy-spin the display link.
     private(set) var hasPendingVisibleThumbnails = false
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
@@ -1133,7 +1136,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         }
         streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
         _ = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
-        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
+        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && visibleUIDs.contains { !cache.isResident($0) }
     }
 
     /// Max per-item rect delta (L1 of origin + size) between two index-keyed slot sets — 0 when every shared item
@@ -1504,7 +1507,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             renderer.renderLayerDissolve(in: view, viewportSize: viewportSize,
                                          sourceGroups: srcGroups, targetGroups: tgtGroups, t: Float(plan.targetOpacity))
         }
-        hasPendingVisibleThumbnails = uids.contains { !cache.isResident($0) }
+        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && uids.contains { !cache.isResident($0) }
         publishLightDiagnostics(phase: "overviewDissolve", visibleCount: uids.count, overscanCount: 0,
                                 realCount: srcRealCount + tgtRealCount,
                                 cellCount: srcSlots.count + tgtSlots.count,
@@ -1591,7 +1594,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         }
         streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
         let realCount = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
-        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
+        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && visibleUIDs.contains { !cache.isResident($0) }
         publishLightDiagnostics(phase: "commitBridge", visibleCount: visibleUIDs.count,
                                 overscanCount: overscanUIDs.count, realCount: realCount, cellCount: slots.count,
                                 visibleRect: CGRect(origin: scrollOffset, size: viewportSize),
@@ -1660,7 +1663,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         }
         streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
         let realCount = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
-        hasPendingVisibleThumbnails = visibleUIDs.contains { !cache.isResident($0) }
+        hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && visibleUIDs.contains { !cache.isResident($0) }
         publishLightDiagnostics(phase: zoomTransaction == nil ? "settled" : "liveZoom",
                                 visibleCount: visibleUIDs.count, overscanCount: overscanUIDs.count,
                                 realCount: realCount, cellCount: slots.count,
@@ -1797,7 +1800,10 @@ extension MetalGridCoordinator {
     // MARK: Texture streaming (visible-first upload + off-main warm)
 
     private func streamTextures(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID]) {
-        let window = GridTextureStreamingPolicy.window(visibleIDs: visibleUIDs, overscanIDs: overscanUIDs)
+        // Pinning is clamped to what the byte budget can guarantee (visible first, then nearest overscan)
+        // so dense zoom levels degrade to placeholders instead of pinning more than the budget can hold.
+        let window = GridTextureStreamingPolicy.window(visibleIDs: visibleUIDs, overscanIDs: overscanUIDs,
+                                                       maxPinned: cache.maxSafePinnedCount)
         cache.beginFrame(pinned: window.pinned)
         let priority = window.priority
         var wanted: [PhotoUID] = []
@@ -1842,6 +1848,10 @@ extension MetalGridCoordinator {
             pinnedTextureCount: cache.pinnedCount,
             textureCapacity: cache.residencyCapacity,
             pinnedTextureOverflow: cache.pinnedOverflow,
+            residentByteBudget: cache.residentByteBudget,
+            uploadByteBudget: cache.uploadByteBudgetPerFrame,
+            byteBudgetOverflow: cache.byteBudgetOverflow,
+            residencySaturated: cache.residencySaturatedThisFrame,
             drawCalls: renderer.lastDrawCalls,
             textureBinds: renderer.lastTextureBinds,
             instanceCount: renderer.lastInstanceCount,
@@ -1878,6 +1888,10 @@ extension MetalGridCoordinator {
             "pinnedOverflow": "\(stats.pinnedTextureOverflow)",
             "encodedSlots": "\(stats.encodedSlotItems)",
             "residentMB": String(format: "%.2f", Double(stats.memoryEstimateBytes) / 1_048_576),
+            "residentBudgetMB": String(format: "%.0f", Double(stats.residentByteBudget) / 1_048_576),
+            "uploadBudgetBytes": "\(stats.uploadByteBudget)",
+            "byteBudgetOverflow": "\(stats.byteBudgetOverflow)",
+            "residencySaturated": "\(stats.residencySaturated)",
         ])
     }
 

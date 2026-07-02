@@ -24,19 +24,23 @@ package struct UIKitMetalGridTexturePolicy: Equatable, Sendable {
     }
 }
 
+/// iOS/iPadOS budgets are far more conservative than macOS: GPU allocations count fully against the app
+/// footprint on Apple Silicon and jetsam limits on small devices sit near ~2 GB total, so the resident
+/// byte caps (64/96/192 MiB by surface class) leave room for the decoded-image and byte caches. Per-frame
+/// upload bytes are sized for a 120 Hz (8.3 ms) frame budget on A-series parts.
 package enum UIKitMetalGridTexturePolicies {
     package static let compact = UIKitMetalGridTexturePolicy(
-        budget: GridTextureBudget(maxUploadsPerFrame: 24, maxCachedTextures: 768, overscanFraction: 0.75),
+        budget: GridTextureBudget(maxUploadsPerFrame: 16, maxUploadBytesPerFrame: 2_097_152, maxCachedTextures: 512, maxResidentBytes: 67_108_864, overscanFraction: 0.75),
         maxTexturePixels: 224
     )
 
     package static let regular = UIKitMetalGridTexturePolicy(
-        budget: GridTextureBudget(maxUploadsPerFrame: 32, maxCachedTextures: 1024, overscanFraction: 0.9),
+        budget: GridTextureBudget(maxUploadsPerFrame: 24, maxUploadBytesPerFrame: 3_145_728, maxCachedTextures: 768, maxResidentBytes: 100_663_296, overscanFraction: 0.9),
         maxTexturePixels: 256
     )
 
     package static let expanded = UIKitMetalGridTexturePolicy(
-        budget: GridTextureBudget(maxUploadsPerFrame: 48, maxCachedTextures: 1536, overscanFraction: 1.0),
+        budget: GridTextureBudget(maxUploadsPerFrame: 32, maxUploadBytesPerFrame: 4_194_304, maxCachedTextures: 1024, maxResidentBytes: 201_326_592, overscanFraction: 1.0),
         maxTexturePixels: 288
     )
 

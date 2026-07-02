@@ -26,6 +26,10 @@ struct MetalGridStats: Equatable, Sendable {
     var pinnedTextureCount = 0
     var textureCapacity = 0
     var pinnedTextureOverflow = false
+    var residentByteBudget = 0
+    var uploadByteBudget = 0
+    var byteBudgetOverflow = false
+    var residencySaturated = false
     var encodedSlotItems = 0
     var drawCalls = 0
     var textureBinds = 0
@@ -44,6 +48,8 @@ struct MetalGridStats: Equatable, Sendable {
         + "evictions=\(evictions) evictMs=\(fmt(evictMs)) residentTextureCount=\(residentTextureCount) "
         + "pinnedTextureCount=\(pinnedTextureCount) textureCapacity=\(textureCapacity) "
         + "pinnedTextureOverflow=\(pinnedTextureOverflow) encodedSlotItems=\(encodedSlotItems) "
+        + "residentBudgetMB=\(fmt(Double(residentByteBudget) / 1_048_576)) uploadBudgetBytes=\(uploadByteBudget) "
+        + "byteBudgetOverflow=\(byteBudgetOverflow) residencySaturated=\(residencySaturated) "
         + "drawCalls=\(drawCalls) textureBinds=\(textureBinds) "
         + "instanceCount=\(instanceCount) cpuLayoutMs=\(fmt(cpuLayoutMs)) cpuInstanceMs=\(fmt(cpuInstanceMs)) "
         + "textureUploadMs=\(fmt(textureUploadMs)) gpuDrawMs=\(fmt(gpuDrawMs)) fpsEstimate=\(fmt(fpsEstimate)) "
@@ -82,6 +88,10 @@ struct MetalGridStats: Equatable, Sendable {
         pinnedTextureCount: Int,
         textureCapacity: Int,
         pinnedTextureOverflow: Bool,
+        residentByteBudget: Int,
+        uploadByteBudget: Int,
+        byteBudgetOverflow: Bool,
+        residencySaturated: Bool,
         drawCalls: Int,
         textureBinds: Int,
         instanceCount: Int,
@@ -104,6 +114,10 @@ struct MetalGridStats: Equatable, Sendable {
         stats.pinnedTextureCount = pinnedTextureCount
         stats.textureCapacity = textureCapacity
         stats.pinnedTextureOverflow = pinnedTextureOverflow
+        stats.residentByteBudget = residentByteBudget
+        stats.uploadByteBudget = uploadByteBudget
+        stats.byteBudgetOverflow = byteBudgetOverflow
+        stats.residencySaturated = residencySaturated
         stats.cacheHits = realCount
         stats.cacheMisses = stats.placeholderItems
         stats.drawCalls = drawCalls

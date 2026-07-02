@@ -106,7 +106,7 @@ let package = Package(
         .testTarget(name: "PhotoViewerFeatureTests", dependencies: ["PhotoViewerFeature", "PhotoViewerCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(
             name: "TimelineFeatureTests",
-            dependencies: ["TimelineFeature", "TimelineCore", "GridCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter", "MediaCache", "PhotosCore"],
+            dependencies: ["TimelineFeature", "TimelineCore", "GridCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter", "MetalGridTextureUIKitAdapter", "MediaCache", "PhotosCore"],
             swiftSettings: disableDynamicActorIsolation
         ),
         // Albums: universal management protocols + repository over an injected backend. The app's

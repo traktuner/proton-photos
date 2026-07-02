@@ -652,7 +652,18 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if FileManager.default.fileExists(atPath: cacheFile.path) {
             let source = try String(contentsOf: cacheFile, encoding: .utf8)
-            for symbol in ["package final class MetalGridTextureCache", "GridTextureResidencyPolicy<ID>", "GridTextureBudget", "uploadVisible(wanted: [ID]"] where !source.contains(symbol) {
+            // `canAdmitUpload` / `maxUploadBytesPerFrame` / `maxResidentBytes` pin the byte-budget
+            // enforcement seam: the cache must gate texture creation on the resident byte budget and
+            // bound per-frame upload bytes, not just texture counts.
+            for symbol in [
+                "package final class MetalGridTextureCache",
+                "GridTextureResidencyPolicy<ID>",
+                "GridTextureBudget",
+                "uploadVisible(wanted: [ID]",
+                "canAdmitUpload(",
+                "maxUploadBytesPerFrame",
+                "maxResidentBytes"
+            ] where !source.contains(symbol) {
                 violations.append("MetalGridTextureCore/MetalGridTextureCache.swift: missing \(symbol)")
             }
         }
@@ -827,7 +838,9 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         let budgetSource = try String(contentsOf: budgetFile, encoding: .utf8)
         let budgetCode = stripCommentsAndStringLiterals(from: budgetSource)
-        for symbol in ["GridTextureBudget", "maxUploadsPerFrame", "maxCachedTextures", "overscanFraction"] {
+        // The hybrid count + byte budget shape is load-bearing: byte fields bound real GPU memory and
+        // per-frame upload copy cost. Removing them would silently reopen the unbounded-residency P0.
+        for symbol in ["GridTextureBudget", "maxUploadsPerFrame", "maxUploadBytesPerFrame", "maxCachedTextures", "maxResidentBytes", "overscanFraction"] {
             if !budgetCode.contains(symbol) {
                 violations.append("GridCore/GridTextureBudget.swift: missing \(symbol)")
             }
@@ -855,7 +868,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             let appKitSource = try String(contentsOf: appKitPolicyFile, encoding: .utf8)
             for symbol in [
                 "AppKitMetalGridTexturePolicies",
-                "GridTextureBudget(maxUploadsPerFrame: 96, maxCachedTextures: 4096, overscanFraction: 1.2)",
+                "GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 4096, maxResidentBytes: 536_870_912, overscanFraction: 1.2)",
                 "package extension GridTextureBudget",
                 "static let `default` = AppKitMetalGridTexturePolicies.default.budget"
             ] where !appKitSource.contains(symbol) {
@@ -1078,7 +1091,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             "AppKitMetalGridTexturePolicies",
             "defaultMaxTexturePixels",
             "maxTexturePixels",
-            "GridTextureBudget(maxUploadsPerFrame: 96, maxCachedTextures: 4096, overscanFraction: 1.2)",
+            "GridTextureBudget(maxUploadsPerFrame: 48, maxUploadBytesPerFrame: 6_291_456, maxCachedTextures: 4096, maxResidentBytes: 536_870_912, overscanFraction: 1.2)",
             "maxTexturePixels: defaultMaxTexturePixels",
             "package extension GridTextureBudget",
             "static let `default` = AppKitMetalGridTexturePolicies.default.budget"
@@ -1274,6 +1287,8 @@ final class CoreArchitectureGateTests: XCTestCase {
             "UIKitMetalGridTexturePolicy",
             "UIKitMetalGridTexturePolicies",
             "GridTextureBudget",
+            "maxUploadBytesPerFrame",
+            "maxResidentBytes",
             "maxTexturePixels"
         ] where !code.contains(symbol) {
             violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridTexturePolicy.swift: missing \(symbol)")
@@ -1282,8 +1297,10 @@ final class CoreArchitectureGateTests: XCTestCase {
             violations.append("MetalGridTextureUIKitAdapter/UIKitMetalGridTexturePolicy.swift: budget policy must be viewport/capability injected, found \(forbidden)")
         }
         for macValue in [
-            "maxUploadsPerFrame: 96",
+            "maxUploadsPerFrame: 48",
+            "maxUploadBytesPerFrame: 6_291_456",
             "maxCachedTextures: 4096",
+            "maxResidentBytes: 536_870_912",
             "overscanFraction: 1.2",
             "maxTexturePixels: 320"
         ] where source.contains(macValue) {

@@ -227,6 +227,10 @@ struct AppInfrastructureTests {
             pinnedTextureCount: 4,
             textureCapacity: 10,
             pinnedTextureOverflow: false,
+            residentByteBudget: 65_536,
+            uploadByteBudget: 16_384,
+            byteBudgetOverflow: false,
+            residencySaturated: true,
             drawCalls: 6,
             textureBinds: 7,
             instanceCount: 5,
@@ -247,6 +251,10 @@ struct AppInfrastructureTests {
         #expect(stats.pinnedTextureCount == 4)
         #expect(stats.textureCapacity == 10)
         #expect(!stats.pinnedTextureOverflow)
+        #expect(stats.residentByteBudget == 65_536)
+        #expect(stats.uploadByteBudget == 16_384)
+        #expect(!stats.byteBudgetOverflow)
+        #expect(stats.residencySaturated)
         #expect(stats.encodedSlotItems == 8)
         #expect(stats.cacheHits == 5)
         #expect(stats.cacheMisses == 3)

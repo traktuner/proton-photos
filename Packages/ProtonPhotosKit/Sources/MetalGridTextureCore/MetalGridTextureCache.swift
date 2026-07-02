@@ -8,11 +8,15 @@ import GridCore
 /// resident so a missing thumbnail draws a stable card, never a transparent hole or black rectangle.
 ///
 /// All texture uploads happen on the render (main) thread from already-decoded RAM images. Disk/network decode
-/// belongs to the caller's feed layer, off-main. Uploads are bounded per frame.
+/// belongs to the caller's feed layer, off-main. Uploads are bounded per frame by count AND bytes, and
+/// residency is bounded by count AND bytes: the generic policy owns the bookkeeping, this cache supplies
+/// the real texture byte cost (the policy cannot know Metal texture sizes) and refuses to create a texture
+/// that could not stay resident within budget.
 @MainActor
 package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     private let device: MTLDevice
     private let glyphRasterizer: any MetalGridGlyphRasterizing
+    private let budget: GridTextureBudget
     private var lru: GridTextureResidencyPolicy<ID>
     private var textures: [ID: MTLTexture] = [:]
     package private(set) var placeholderTexture: MTLTexture
@@ -23,8 +27,12 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     package private(set) var uploadMsThisFrame: Double = 0
     package private(set) var evictionsThisFrame = 0
     package private(set) var evictMsThisFrame: Double = 0
-    package private(set) var residentBytes = 0
     package private(set) var deferredUploadsThisFrame = 0
+    /// True once an upload was refused this frame because the resident byte/count budget cannot admit it
+    /// even after evicting every non-pinned texture. That state only changes when the streaming window
+    /// changes (scroll/zoom) or images arrive — both trigger their own redraw — so callers may stop
+    /// display-link pumping on it instead of spinning on placeholders that can never fill.
+    package private(set) var residencySaturatedThisFrame = false
 
     /// Max pixel side a thumbnail is uploaded at (Retina-aware crispness without wasting VRAM).
     package let maxTexturePixels: Int
@@ -34,6 +42,20 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     package var inFlightCount: Int { lru.inFlightCount }
     package var residencyCapacity: Int { lru.capacity }
     package var pinnedOverflow: Bool { lru.pinnedCount > lru.capacity }
+    /// Exact resident GPU texture bytes (single source of truth: the policy's cost ledger).
+    package var residentBytes: Int { lru.residentCost }
+    package var residentByteBudget: Int { budget.maxResidentBytes }
+    package var uploadByteBudgetPerFrame: Int { budget.maxUploadBytesPerFrame }
+    /// True when resident bytes exceed the budget — transiently possible inside a frame (uploads land
+    /// before `evictToBudget`), never after eviction ran. Persistent `true` in logs signals a bug.
+    package var byteBudgetOverflow: Bool { lru.residentCost > budget.maxResidentBytes }
+    /// Largest pin set the byte budget can guarantee residency for, assuming worst-case (square,
+    /// `maxTexturePixels`-sided) uploads. The streaming window clamps pinning to this so visible-first
+    /// pinning degrades to placeholders at dense zoom levels instead of overflowing the budget.
+    package var maxSafePinnedCount: Int {
+        let worstCaseBytesPerTexture = max(1, maxTexturePixels * maxTexturePixels * 4)
+        return min(budget.maxCachedTextures, budget.maxResidentBytes / worstCaseBytesPerTexture)
+    }
 
     package init?(
         device: MTLDevice,
@@ -43,9 +65,11 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     ) {
         self.device = device
         self.glyphRasterizer = glyphRasterizer
+        self.budget = budget
         self.maxTexturePixels = maxTexturePixels
         self.lru = GridTextureResidencyPolicy(
             capacity: budget.maxCachedTextures,
+            costCapacity: budget.maxResidentBytes,
             uploadBudgetPerFrame: budget.maxUploadsPerFrame
         )
         guard let placeholder = Self.makePlaceholder(device: device) else { return nil }
@@ -62,6 +86,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         evictionsThisFrame = 0
         evictMsThisFrame = 0
         deferredUploadsThisFrame = 0
+        residencySaturatedThisFrame = false
     }
 
     package func noteUsed(_ id: ID) { lru.noteUsed(id) }
@@ -75,39 +100,60 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     }
 
     /// Upload the chosen subset of `wanted` (visible-first priority order) from the supplied RAM images.
-    /// Honours the per-frame budget + in-flight dedup via the LRU policy: `provideImage` is only called
-    /// for the IDs actually selected this frame, and never for an already-resident/in-flight ID.
+    /// Honours the per-frame count budget + in-flight dedup via the LRU policy (`provideImage` is only
+    /// called for the IDs actually selected this frame, never for an already-resident/in-flight ID), the
+    /// per-frame byte budget (bounding the main-thread copy cost), and residency admission (a texture that
+    /// could not stay within the resident budget is never created). Everything refused for budget reasons
+    /// is reported in `deferredUploadsThisFrame` and retried on later frames.
     package func uploadVisible(wanted: [ID], provideImage: (ID) -> CGImage?) {
         let chosen = lru.selectUploads(wanted: wanted)
-        deferredUploadsThisFrame = max(0, wanted.count - chosen.count)
+        var budgetDeferred = 0
+        var frameByteBudgetExhausted = false
         for id in chosen {
+            if frameByteBudgetExhausted {
+                lru.abandonUpload(id)
+                budgetDeferred += 1
+                continue
+            }
             guard let image = provideImage(id) else {
                 lru.abandonUpload(id)   // image vanished between selection and upload — retry later
                 continue
             }
+            let size = uploadPixelSize(for: image)
+            let bytes = size.width * size.height * 4
+            // The first upload of a frame always proceeds so one oversized image can never starve forever.
+            if uploadsThisFrame > 0, uploadBytesThisFrame + bytes > budget.maxUploadBytesPerFrame {
+                frameByteBudgetExhausted = true
+                lru.abandonUpload(id)
+                budgetDeferred += 1
+                continue
+            }
+            guard lru.canAdmitUpload(id, cost: bytes) else {
+                residencySaturatedThisFrame = true
+                lru.abandonUpload(id)
+                budgetDeferred += 1
+                continue
+            }
             let start = CFAbsoluteTimeGetCurrent()
-            guard let texture = makeTexture(from: image) else {
+            guard let texture = makeTexture(from: image, width: size.width, height: size.height) else {
                 lru.abandonUpload(id)
                 continue
             }
             uploadMsThisFrame += (CFAbsoluteTimeGetCurrent() - start) * 1000
-            let bytes = texture.width * texture.height * 4
             textures[id] = texture
-            residentBytes += bytes
             uploadBytesThisFrame += bytes
             uploadsThisFrame += 1
-            lru.completeUpload(id)
+            lru.completeUpload(id, cost: bytes)
         }
+        deferredUploadsThisFrame = max(0, wanted.count - chosen.count) + budgetDeferred
     }
 
-    /// Evict offscreen LRU textures down to the budget and release their GPU memory.
+    /// Evict offscreen LRU textures down to the count + byte budget and release their GPU memory.
     package func evictToBudget() {
         let start = CFAbsoluteTimeGetCurrent()
         let evicted = lru.evictToBudget()
         for id in evicted {
-            if let tex = textures.removeValue(forKey: id) {
-                residentBytes -= tex.width * tex.height * 4
-            }
+            textures.removeValue(forKey: id)
         }
         evictionsThisFrame = evicted.count
         evictMsThisFrame += (CFAbsoluteTimeGetCurrent() - start) * 1000
@@ -115,17 +161,23 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
 
     // MARK: - Texture creation
 
-    /// Builds an upright RGBA8 texture from a decoded image, downsampled to `maxTexturePixels`. A decoded
+    /// Pixel size a decoded image will be uploaded at (longest side clamped to `maxTexturePixels`) — the
+    /// texture byte cost (w·h·4) is derived from this BEFORE any normalization/upload work is spent, so
+    /// budget refusals cost nothing.
+    private func uploadPixelSize(for image: CGImage) -> (width: Int, height: Int) {
+        let srcW = max(image.width, 1), srcH = max(image.height, 1)
+        let longest = max(srcW, srcH)
+        let scale = longest > maxTexturePixels ? CGFloat(maxTexturePixels) / CGFloat(longest) : 1
+        return (max(1, Int((CGFloat(srcW) * scale).rounded())), max(1, Int((CGFloat(srcH) * scale).rounded())))
+    }
+
+    /// Builds an upright RGBA8 texture from a decoded image at the pre-computed `uploadPixelSize`. A decoded
     /// CGImage is already row-0-top, and `CGContext.draw` preserves that into the bitmap buffer, so texel
     /// row 0 is the visual TOP — no context flip — and the renderer samples with straightforward UVs
     /// (uv.y 0 = top), keeping thumbnails upright. (Synthetic tiles are generated `flipped: true` to match
     /// this row-0-top convention.)
-    private func makeTexture(from image: CGImage) -> MTLTexture? {
-        let srcW = max(image.width, 1), srcH = max(image.height, 1)
-        let longest = max(srcW, srcH)
-        let scale = longest > maxTexturePixels ? CGFloat(maxTexturePixels) / CGFloat(longest) : 1
-        let w = max(1, Int((CGFloat(srcW) * scale).rounded()))
-        let h = max(1, Int((CGFloat(srcH) * scale).rounded()))
+    private func makeTexture(from image: CGImage, width w: Int, height h: Int) -> MTLTexture? {
+        let isDownsampling = w < image.width || h < image.height
         let bytesPerRow = w * 4
         var pixels = [UInt8](repeating: 0, count: bytesPerRow * h)
         guard let ctx = CGContext(
@@ -137,7 +189,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         // `.medium` (bilinear) is materially cheaper on the render thread than `.high` (Lanczos) and
         // visually indistinguishable for grid thumbnails at these sizes; the full-res viewer decode
         // is a separate path that keeps high quality.
-        ctx.interpolationQuality = scale < 1 ? .medium : .high
+        ctx.interpolationQuality = isDownsampling ? .medium : .high
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
 
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -163,8 +215,9 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     ) -> MTLTexture? {
         let request = MetalGridGlyphRequest(symbol: symbol, pixelSize: pixelSize, weight: weight, color: color)
         if let cached = glyphs[request] { return cached }
-        guard let cg = glyphRasterizer.image(for: request),
-              let texture = makeTexture(from: cg) else { return nil }
+        guard let cg = glyphRasterizer.image(for: request) else { return nil }
+        let size = uploadPixelSize(for: cg)
+        guard let texture = makeTexture(from: cg, width: size.width, height: size.height) else { return nil }
         glyphs[request] = texture
         return texture
     }
