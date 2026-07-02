@@ -137,7 +137,9 @@ public enum GridZoomCommitBridge {
 
         let width = viewportSize.width
         var slots: [GridRenderSlot] = []
-        for index in Set(toRect.keys).union(fromRect.keys).sorted() {
+        let bridgedIndices = Set(toRect.keys).union(fromRect.keys).sorted()
+        slots.reserveCapacity(bridgedIndices.count)
+        for index in bridgedIndices {
             let from = fromRect[index] ?? tx.rect(
                 forGlobalIndex: index,
                 continuousLevel: CGFloat(lv),

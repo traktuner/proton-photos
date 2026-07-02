@@ -421,6 +421,8 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         func visibleSlots(in rect: CGRect, viewportOrigin: CGPoint) -> [GridSlot] {
             guard pitch > 0 else { return [] }
             var result: [GridSlot] = []
+            let estimatedRows = max(1, Int(ceil(rect.height / pitch)) + 3)
+            result.reserveCapacity(estimatedRows * columns)
             for (section, count) in sectionCounts.enumerated() where count > 0 {
                 let top = sectionHeaderTop[section]
                 let h = sectionHeight[section]
@@ -454,6 +456,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         /// 0) a header is "visible" when its top sits within the query band.
         func visibleHeaders(in rect: CGRect, viewportOrigin: CGPoint) -> [GridSectionHeader] {
             var result: [GridSectionHeader] = []
+            result.reserveCapacity(sectionCounts.count)
             for section in sectionCounts.indices where sectionCounts[section] > 0 {
                 let topY = sectionHeaderTop[section]
                 let headerRect = CGRect(x: 0, y: topY, width: width, height: headerHeight)

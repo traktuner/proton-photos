@@ -170,6 +170,8 @@ public struct GridZoomTransaction: Equatable, Sendable {
             return GridZoomTransactionFrame(columns: columns, slotSide: side, gap: gap, pitch: pitch,
                                             anchorColumn: cA, focusRow: [], visibleSlots: [])
         }
+        slots.reserveCapacity((lastRow - firstRow + 1) * columns)
+        focusRow.reserveCapacity(columns)
         for row in firstRow ... lastRow {
             for col in 0 ..< columns {
                 let delta = row * columns + col - cA          // offset from the anchor (anchor at row 0, col cA)
