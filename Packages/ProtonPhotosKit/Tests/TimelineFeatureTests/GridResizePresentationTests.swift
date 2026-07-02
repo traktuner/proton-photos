@@ -406,6 +406,29 @@ private final class PresentationTestDataSource: MetalGridDataSource {
                 "the display tick drives the sidebar scale")
     }
 
+    // 19b - A fresh pinch must not capture its L0/rubber-band transaction from a mixed geometry state. Sidebar
+    // open/close, resize-settle, and commit-bridge are presentation-only states; finish them before cursor/anchor
+    // capture so layout width + leading inset are already committed.
+    @Test func pinchStartFinishesInFlightGridPresentationBeforeAnchorCapture() {
+        let host = src("MetalGridScrollHost.swift")
+        guard let began = host.range(of: "case .began:"),
+              let anchor = host.range(of: "let cursorContent = cursorContentPoint(for: event)", range: began.lowerBound ..< host.endIndex),
+              let fence = host.range(of: "finishInFlightGridPresentationForGestureStart()", range: began.lowerBound ..< anchor.lowerBound) else {
+            Issue.record("pinch begin must finish in-flight grid presentations before cursor/anchor capture")
+            return
+        }
+        #expect(fence.lowerBound < anchor.lowerBound)
+        guard let helper = host.range(of: "private func finishInFlightGridPresentationForGestureStart()") else {
+            Issue.record("gesture-start geometry fence helper missing")
+            return
+        }
+        let body = String(host[helper.lowerBound ..< (host.index(helper.lowerBound, offsetBy: 1800, limitedBy: host.endIndex) ?? host.endIndex)])
+        #expect(body.contains("coordinator.endSidebarResize()"), "sidebar presentation must commit its target inset before pinch")
+        #expect(body.contains("coordinator.endResizeSettle()"), "resize settle must not overlap a fresh pinch transaction")
+        #expect(body.contains("coordinator.endCommitBridge()"), "commit bridge must not overlap a fresh pinch transaction")
+        #expect(body.contains("applyContentSize(coordinator.contentSize())"), "sidebar completion must refresh content geometry")
+    }
+
     // 20 - toolbar/keyboard +/- click transitions must be display-link paced. The transition plan itself is pure
     // GridCore; the AppKit host must keep requesting frames while a click plan is active, otherwise 7↔9 can build
     // a valid plan but show no visible animation.

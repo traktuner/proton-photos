@@ -382,6 +382,7 @@ final class MetalGridScrollHost: NSView {
         switch event.phase {
         case .began:
             finishInFlightPinchSettle()   // a quick re-pinch must not strand the previous settle's (frozen) plan on screen
+            finishInFlightGridPresentationForGestureStart()
             let cursorContent = cursorContentPoint(for: event)
             let viewportPoint = CGPoint(x: cursorContent.x, y: cursorContent.y - scrollView.contentView.bounds.origin.y)
             coordinator.beginLiveZoom(cursorContentPoint: cursorContent, viewportPoint: viewportPoint)   // keep the GridZoomTransaction anchor model
@@ -566,6 +567,35 @@ final class MetalGridScrollHost: NSView {
         }
         pinchDriver.advance(dt: 10)                 // jump the velocity-aware ramp straight to its settle detent
         if pinchDriver.isCommitted { commitLivePinch() }
+    }
+
+    /// A new pinch must capture cursor/anchor/layout from one committed geometry state. Sidebar and bridge
+    /// presentations are visual-only in-flight states; finish them before the next `GridZoomTransaction` begins.
+    private func finishInFlightGridPresentationForGestureStart() {
+        var didFinishPresentation = false
+        if coordinator.isSidebarResizing {
+            let (settleScroll, _) = coordinator.endSidebarResize()
+            stickToBottom = false
+            applyContentSize(coordinator.contentSize())
+            let maxScrollY = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
+            let settledY = min(max(0, settleScroll), maxScrollY)
+            if abs(settledY - scrollView.contentView.bounds.origin.y) > 0.5 {
+                scrollView.contentView.scroll(to: CGPoint(x: 0, y: settledY))
+                scrollView.reflectScrolledClipView(scrollView.contentView)
+            }
+            didFinishPresentation = true
+        }
+        if coordinator.isResizeSettling {
+            coordinator.endResizeSettle()
+            didFinishPresentation = true
+        }
+        if coordinator.isCommitBridging {
+            coordinator.endCommitBridge()
+            didFinishPresentation = true
+        }
+        guard didFinishPresentation else { return }
+        lastViewportScreenFrame = viewportScreenFrame()
+        requestFrame()
     }
 
     /// Advance the post-release settle on the display tick; push the new segmentQ into the plan; commit the
