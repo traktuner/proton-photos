@@ -11,6 +11,7 @@ import GridCore
 // step (reports/archive/PHASE_B_OVERVIEW_LAYER_DISSOLVE_REPORT.md).
 @Suite struct OverviewLayerDissolveTests {
     private let viewport = CGSize(width: 1000, height: 760)
+    private let normalLevelLeadingGap: CGFloat = 16
     private func engine(_ n: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [n]) }
 
     private func plan(_ s: Int, _ t: Int, mode: TileContentDisplayMode = .aspectFitInsideSquare,
@@ -31,6 +32,30 @@ import GridCore
             if let source = try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8) { return source }
         }
         return ""
+    }
+
+    private func renderBounds(profile: GridLevelProfile, level: Int, fullWidth: CGFloat, sidebarInset: CGFloat) -> GridRenderBounds {
+        let metrics = profile.levels[level]
+        let margin: CGFloat = metrics.monthLabels ? 0 : 12
+        let leadingGap: CGFloat = sidebarInset > 0 && !metrics.monthLabels ? normalLevelLeadingGap : 0
+        return GridRenderBounds(fullWidth: fullWidth, leadingInset: sidebarInset + leadingGap + margin, trailingInset: margin)
+    }
+
+    private func renderedRects(_ plan: GridFramePlan, bounds: GridRenderBounds) -> [Int: CGRect] {
+        Dictionary(uniqueKeysWithValues: bounds.translate(plan.visibleSlots.map {
+            GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect)
+        }).map { ($0.index, $0.rect) })
+    }
+
+    private func assertRectMapsEqual(_ lhs: [Int: CGRect], _ rhs: [Int: CGRect], context: String) {
+        #expect(Set(lhs.keys) == Set(rhs.keys), "\(context): endpoint slot identities differ")
+        for key in lhs.keys {
+            guard let a = lhs[key], let b = rhs[key] else { continue }
+            #expect(abs(a.minX - b.minX) < 0.001, "\(context): minX differs for \(key)")
+            #expect(abs(a.minY - b.minY) < 0.001, "\(context): minY differs for \(key)")
+            #expect(abs(a.width - b.width) < 0.001, "\(context): width differs for \(key)")
+            #expect(abs(a.height - b.height) < 0.001, "\(context): height differs for \(key)")
+        }
     }
 
     // Builds ONLY for the overview boundaries — never for the accepted normal-level (focusRowRelayout) steps.
@@ -71,6 +96,84 @@ import GridCore
         // L4 column count from the engine at this width rather than the old fixed literal (20).
         #expect(p.target.columns == e.resolvedMetrics(level: 4, width: viewport.width).columns)
         #expect(p.targetLevel == 4 && p.sourceLevel == 3)
+    }
+
+    // Render-space endpoint guarantee: every overview-boundary dissolve uses per-level bounds, so q=0 matches the
+    // settled source frame and q=1 matches the settled target frame even when normal levels have side gutters and
+    // overview levels are edge-to-edge. This is profile/semantic coverage, not an L3/L4 special case.
+    @Test func overviewBoundaryEndpointsUsePerLevelRenderBoundsForEveryProfile() {
+        let profiles: [GridLevelProfile] = [.testRegularTimeline, .testCompactTimeline]
+        let fullWidths: [String: CGFloat] = ["regularTimeline": 1000, "compactTimeline": 420]
+        let sidebarInsets: [CGFloat] = [0, 84]
+        let height: CGFloat = 760
+        let overscan: CGFloat = 220
+
+        for profile in profiles {
+            let fullWidth = fullWidths[profile.id] ?? 1000
+            for sidebarInset in sidebarInsets {
+                let engine = SquareTileGridEngine(sectionCounts: [6000], profile: profile)
+                for sourceLevel in profile.levels.indices {
+                    for targetLevel in [sourceLevel - 1, sourceLevel + 1] where targetLevel >= 0 && targetLevel < profile.levels.count {
+                        guard engine.isOverviewBoundary(sourceLevel, targetLevel) else { continue }
+                        let sourceBounds = renderBounds(profile: profile, level: sourceLevel, fullWidth: fullWidth, sidebarInset: sidebarInset)
+                        let targetBounds = renderBounds(profile: profile, level: targetLevel, fullWidth: fullWidth, sidebarInset: sidebarInset)
+                        let sourceViewport = sourceBounds.viewport(height: height)
+                        let targetViewport = targetBounds.viewport(height: height)
+                        let sourceMaxY = max(0, engine.contentSize(level: sourceLevel, width: sourceViewport.width).height - height)
+                        let sourceScrollY = sourceMaxY * 0.37
+                        let anchorViewportPoint = CGPoint(x: min(sourceViewport.width - 1, sourceViewport.width * 0.54), y: height * 0.48)
+                        let anchorContentPoint = CGPoint(x: anchorViewportPoint.x, y: sourceScrollY + anchorViewportPoint.y)
+                        guard let plan = engine.overviewLayerDissolvePlan(
+                            from: sourceLevel,
+                            to: targetLevel,
+                            viewportSize: sourceViewport,
+                            targetViewportSize: targetViewport,
+                            sourceScrollY: sourceScrollY,
+                            sourceColumnPhase: nil,
+                            preferredNormalMode: .aspectFitInsideSquare,
+                            anchorContentPoint: anchorContentPoint,
+                            anchorViewportPoint: anchorViewportPoint,
+                            overscan: overscan
+                        ) else {
+                            Issue.record("nil plan for \(profile.id) \(sourceLevel)->\(targetLevel)")
+                            continue
+                        }
+                        let sourceSettled = engine.framePlan(
+                            level: sourceLevel,
+                            viewportSize: sourceViewport,
+                            scrollOffset: CGPoint(x: 0, y: sourceScrollY),
+                            overscan: overscan,
+                            columnPhase: nil
+                        )
+                        let targetSettled = engine.framePlan(
+                            level: targetLevel,
+                            viewportSize: targetViewport,
+                            scrollOffset: CGPoint(x: 0, y: plan.targetScrollY),
+                            overscan: overscan,
+                            columnPhase: plan.targetColumnPhase
+                        )
+                        let context = "\(profile.id) \(sourceLevel)->\(targetLevel) sidebar=\(sidebarInset)"
+                        assertRectMapsEqual(renderedRects(plan.source, bounds: sourceBounds), renderedRects(sourceSettled, bounds: sourceBounds), context: "\(context) q0")
+                        assertRectMapsEqual(renderedRects(plan.target, bounds: targetBounds), renderedRects(targetSettled, bounds: targetBounds), context: "\(context) q1")
+                    }
+                }
+            }
+        }
+    }
+
+    @Test func coordinatorMapsOverviewTargetWithTargetBoundsWithoutScaling() {
+        let coord = source("MetalGridCoordinator.swift")
+        #expect(coord.contains("func renderBounds(forLevel lvl: Int) -> GridRenderBounds"))
+        #expect(coord.contains("targetBounds: renderBounds(forLevel: plan.targetLevel)"))
+        #expect(coord.contains("private func mapDissolveTargetLayer(_ slots: [GridRenderSlot], targetBounds: GridRenderBounds)"))
+        #expect(coord.contains("targetBounds.translate(slots)"))
+        guard let start = coord.range(of: "private func mapDissolveTargetLayer"),
+              let end = coord.range(of: "// MARK: - Live resize", range: start.upperBound ..< coord.endIndex) else {
+            Issue.record("missing mapDissolveTargetLayer body")
+            return
+        }
+        let body = String(coord[start.lowerBound ..< end.lowerBound])
+        #expect(!body.contains("scale"), "overview target mapping must not scale an already target-width plan")
     }
 
     // Source keeps its OWN display mode (NOT forced square); target is square because overview is square-only.

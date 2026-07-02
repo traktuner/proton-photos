@@ -417,7 +417,7 @@ private final class PresentationTestDataSource: MetalGridDataSource {
                 "active click transitions must keep the display link awake until they settle")
     }
 
-    // 22 — STANDARD OUTER MARGIN (= the level's inter-tile gap) so photos don't butt against the window edge: the
+    // 22 — STANDARD OUTER MARGIN so photos don't butt against the window edge: the
     // LEFT margin folds into the leading inset (render offset + hit-test), the RIGHT margin trims the layout width.
     // Applied at the coordinator (render inset + width trim) — the engine is untouched, so the lattice/seam hold.
     // The outer gutter is a CONSTANT (level-independent), so `layoutWidth` does NOT change between levels. This is
@@ -433,6 +433,8 @@ private final class PresentationTestDataSource: MetalGridDataSource {
         #expect(!coord.contains("monthLabels ? 0 : engine.metrics(level: lvl).gap"),
                 "the gutter must NOT be the per-level gap (that made layoutWidth level-dependent → the pinch/± commit jump)")
         #expect(coord.contains("sidebarObstructionInset + gap + gridHorizontalMargin(forLevel: lvl)"), "the LEFT margin folds into the leading inset")
-        #expect(coord.contains("fullViewportWidth - effectiveLeadingInset(forLevel: lvl) - gridHorizontalMargin(forLevel: lvl)"), "the RIGHT margin trims the (per-level) layout width")
+        #expect(coord.contains("GridRenderBounds("), "per-level render/layout bounds must be a named pure value")
+        #expect(coord.contains("trailingInset: gridHorizontalMargin(forLevel: lvl)"), "the RIGHT margin trims the (per-level) layout width")
+        #expect(coord.contains("renderBounds(forLevel: lvl).layoutWidth"), "layout width must come from the per-level bounds policy")
     }
 }

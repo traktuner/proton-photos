@@ -665,47 +665,42 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// The constant outer gutter (points) for the normal photo levels — see `gridHorizontalMargin` for why it must
     /// not vary by level.
     static let standardOuterMargin: CGFloat = 12
-    /// The effective inset at the CURRENT level — THE value every layout/render/input path reads (the dissolve,
-    /// which spans two levels, is rendered while `level` is still the source, an accepted ≤gap transient).
-    var leadingObstructionInset: CGFloat { effectiveLeadingInset(forLevel: level) }
+    /// Render/layout bounds for one level. The source of the insets stays adapter-owned; the mapping itself is a
+    /// pure GridCore value so overview boundaries can resolve source and target independently.
+    func renderBounds(forLevel lvl: Int) -> GridRenderBounds {
+        GridRenderBounds(
+            fullWidth: fullViewportWidth,
+            leadingInset: effectiveLeadingInset(forLevel: lvl),
+            trailingInset: gridHorizontalMargin(forLevel: lvl)
+        )
+    }
+    /// The effective inset at the CURRENT level — THE value every layout/render/input path reads.
+    var leadingObstructionInset: CGFloat { renderBounds(forLevel: level).leadingInset }
     /// The full on-screen viewport WIDTH (render space) — the MTKView's actual width (no inset removed).
     private var fullViewportWidth: CGFloat { metalView?.bounds.width ?? clipView?.bounds.width ?? 0 }
     /// The width the ENGINE lays out a GIVEN level in: full render width minus that level's leading inset + outer
     /// margin. Per-level because the overview levels are edge-to-edge (no margin/gap) while the normal levels carry
     /// the gutter — so a transition that crosses that boundary (L3↔L4) must lay each level out at its OWN width.
     func layoutWidth(forLevel lvl: Int) -> CGFloat {
-        max(1, fullViewportWidth - effectiveLeadingInset(forLevel: lvl) - gridHorizontalMargin(forLevel: lvl))
+        renderBounds(forLevel: lvl).layoutWidth
     }
     /// The width the ENGINE lays out the CURRENT level in. Every engine / anchor / phase / column calculation uses
     /// THIS — never the full width.
     var layoutWidth: CGFloat { layoutWidth(forLevel: level) }
     /// The viewport the engine lays out in: `layoutWidth` × full height.
-    var layoutViewportSize: CGSize { CGSize(width: layoutWidth, height: viewportSize.height) }
+    var layoutViewportSize: CGSize { renderBounds(forLevel: level).viewport(height: viewportSize.height) }
 
     /// Translate engine/layout-space render slots into RENDER space — the single, final draw chokepoint where
     /// the inset is applied (exactly once per path). A no-op at inset 0 (byte-identical full-width output).
     private func renderTranslate(_ slots: [GridRenderSlot]) -> [GridRenderSlot] {
-        let dx = leadingObstructionInset
-        guard dx != 0 else { return slots }
-        return slots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.rect.offsetBy(dx: dx, dy: 0)) }
+        renderBounds(forLevel: level).translate(slots)
     }
 
-    /// Map a dissolve's TARGET layer (laid out in the plan's build width = `fullWidth − sourceInset`) to ITS OWN
-    /// settled render bounds `[targetInset, fullWidth]`. The two overview-boundary levels may carry DIFFERENT
-    /// leading insets (the normal-level gap appears/disappears at L3↔L4), so without this the target would render
-    /// at the source's inset and the gap would POP at the pinch commit. Sliding + scaling the target onto its own
-    /// settled bounds makes the gap pinch continuously across the crossfade and the commit land exactly (no pop)
-    /// in either direction. Equal insets (e.g. L4↔L5) ⇒ identical to `renderTranslate`.
-    private func mapDissolveTargetLayer(_ slots: [GridRenderSlot], targetInset: CGFloat) -> [GridRenderSlot] {
-        let fullW = fullViewportWidth
-        let buildLayoutW = max(1, fullW - leadingObstructionInset)   // width the plan was laid out at (source inset)
-        let scale = (fullW - targetInset) / buildLayoutW
-        guard scale.isFinite, scale > 0 else { return renderTranslate(slots) }
-        return slots.map {
-            let r = $0.rect
-            return GridRenderSlot(index: $0.index, column: $0.column, row: $0.row,
-                                  rect: CGRect(x: targetInset + r.minX * scale, y: r.minY, width: r.width * scale, height: r.height))
-        }
+    /// Map a dissolve's TARGET layer into its own settled render bounds. The target plan is already built in
+    /// `renderBounds(forLevel: target).layoutWidth`; scaling it again reopens the L3/L4 edge pop. Rendering only
+    /// translates layout-space slots by the target's leading inset, exactly like a settled target frame.
+    private func mapDissolveTargetLayer(_ slots: [GridRenderSlot], targetBounds: GridRenderBounds) -> [GridRenderSlot] {
+        targetBounds.translate(slots)
     }
 
     /// Visible cells (flat index + content rect) for the accessibility provider / header positioning.
@@ -1526,8 +1521,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let flatUIDs = dataSource.flatUIDs
         let srcSlots = renderTranslate(plan.source.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) })
         // Target layer → its OWN settled bounds, so the L3↔L4 gap pinches continuously and the commit never pops.
-        let tgtSlots = mapDissolveTargetLayer(plan.target.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) },
-                                              targetInset: effectiveLeadingInset(forLevel: plan.targetLevel))
+        let tgtSlots = mapDissolveTargetLayer(
+            plan.target.visibleSlots.map { GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect) },
+            targetBounds: renderBounds(forLevel: plan.targetLevel)
+        )
         var uids: [PhotoUID] = []
         for s in srcSlots where s.index < flatUIDs.count { uids.append(flatUIDs[s.index]) }
         for s in tgtSlots where s.index < flatUIDs.count { uids.append(flatUIDs[s.index]) }

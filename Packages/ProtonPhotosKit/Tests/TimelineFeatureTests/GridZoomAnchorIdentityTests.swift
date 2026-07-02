@@ -312,8 +312,8 @@ import GridCore
         // Source guards: the host converts render→layout once; the coordinator's layout width removes the inset.
         #expect(hostSource().contains("CGPoint(x: raw.x - inset, y: raw.y)"),
                 "cursor x must be converted render→layout by subtracting the inset exactly once")
-        #expect(coordinatorSource().contains("fullViewportWidth - effectiveLeadingInset(forLevel: lvl)"),
-                "the engine layout width must remove the leading inset")
+        #expect(coordinatorSource().contains("renderBounds(forLevel: lvl).layoutWidth"),
+                "the engine layout width must come from the per-level bounds policy")
     }
 
     // MARK: GUARANTEE 5 — LatticeCommitScrollLockOrderingTest. The production lattice commit (`commitLivePinch`)
