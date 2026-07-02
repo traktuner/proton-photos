@@ -29,6 +29,48 @@ import GridCore
         #expect(evicted == ["b"])
     }
 
+    @Test func evictionSkipsPinnedAndKeepsNewestNonPinnedResidents() {
+        var policy = GridTextureResidencyPolicy<Int>(capacity: 4, uploadBudgetPerFrame: 10)
+        for id in 0 ..< 8 {
+            policy.beginFrame(pinned: [])
+            _ = policy.selectUploads(wanted: [id])
+            policy.completeUpload(id)
+        }
+
+        policy.beginFrame(pinned: [0, 2])
+        let evicted = policy.evictToBudget()
+
+        #expect(evicted == [1, 3, 4, 5])
+        #expect(policy.residentCount == 4)
+        #expect(policy.isResident(0))
+        #expect(policy.isResident(2))
+        #expect(policy.isResident(6))
+        #expect(policy.isResident(7))
+        #expect(policy.evictionCount == 4)
+    }
+
+    @Test func largeResidencyEvictsOnlyNeededOldestSubsetWithinFrameBudget() {
+        var policy = GridTextureResidencyPolicy<String>(capacity: 4_096, uploadBudgetPerFrame: 128)
+        let ids = (0 ..< 4_192).map { "photo-\($0)" }
+        for id in ids {
+            policy.beginFrame(pinned: [])
+            _ = policy.selectUploads(wanted: [id])
+            policy.completeUpload(id)
+        }
+
+        let pinned = Set(ids.prefix(256))
+        policy.beginFrame(pinned: pinned)
+        let clock = ContinuousClock()
+        let start = clock.now
+        let evicted = policy.evictToBudget()
+        let elapsed = start.duration(to: clock.now)
+
+        #expect(evicted == Array(ids[256 ..< 352]))
+        #expect(policy.residentCount == 4_096)
+        #expect(pinned.allSatisfy(policy.isResident))
+        #expect(elapsed < .milliseconds(50))
+    }
+
     @Test func placeholderAndUploadDedupAreStable() {
         var policy = GridTextureResidencyPolicy<String>(capacity: 10, uploadBudgetPerFrame: 10)
         #expect(policy.drawState("a") == .placeholder)

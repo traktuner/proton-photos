@@ -71,15 +71,54 @@ package struct GridTextureResidencyPolicy<ID: Hashable & Sendable>: Equatable {
     /// Evict least-recently-used non-pinned textures until residency fits the capacity budget.
     package mutating func evictToBudget() -> [ID] {
         guard resident.count > capacity else { return [] }
-        let evictable = resident.subtracting(pinned)
-        let ordered = evictable.sorted { (lastUsed[$0] ?? -1) < (lastUsed[$1] ?? -1) }
+        let evictionsNeeded = resident.count - capacity
+        var candidates: [(id: ID, tick: Int)] = []
+        candidates.reserveCapacity(min(evictionsNeeded, resident.count))
+
+        func siftUp(_ index: Int) {
+            var child = index
+            while child > 0 {
+                let parent = (child - 1) / 2
+                guard candidates[child].tick > candidates[parent].tick else { return }
+                candidates.swapAt(child, parent)
+                child = parent
+            }
+        }
+
+        func siftDown(from index: Int) {
+            var parent = index
+            while true {
+                let left = parent * 2 + 1
+                guard left < candidates.count else { return }
+                let right = left + 1
+                var largest = left
+                if right < candidates.count, candidates[right].tick > candidates[left].tick {
+                    largest = right
+                }
+                guard candidates[largest].tick > candidates[parent].tick else { return }
+                candidates.swapAt(largest, parent)
+                parent = largest
+            }
+        }
+
+        for id in resident where !pinned.contains(id) {
+            let usedTick = lastUsed[id] ?? -1
+            if candidates.count < evictionsNeeded {
+                candidates.append((id, usedTick))
+                siftUp(candidates.count - 1)
+            } else if let newestCandidate = candidates.first, usedTick < newestCandidate.tick {
+                candidates[0] = (id, usedTick)
+                siftDown(from: 0)
+            }
+        }
+
+        candidates.sort { $0.tick < $1.tick }
         var evicted: [ID] = []
-        var count = resident.count
-        for id in ordered where count > capacity {
-            resident.remove(id)
-            lastUsed.removeValue(forKey: id)
-            evicted.append(id)
-            count -= 1
+        evicted.reserveCapacity(candidates.count)
+        for candidate in candidates {
+            resident.remove(candidate.id)
+            lastUsed.removeValue(forKey: candidate.id)
+            evicted.append(candidate.id)
         }
         evictionCount += evicted.count
         return evicted
