@@ -24,6 +24,33 @@ final class BurstFilmstripArchitectureTests: XCTestCase {
         XCTAssertFalse(model.contains("Self.fullImageCache.setObject(full"), "full-res inserts must include decoded byte cost")
     }
 
+    func testViewerPreviewCacheReadAndDecodeStayOffMainActor() throws {
+        let repo = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()   // PhotoViewerFeatureTests
+            .deletingLastPathComponent()   // Tests
+            .deletingLastPathComponent()   // ProtonPhotosKit
+            .deletingLastPathComponent()   // Packages
+            .deletingLastPathComponent()   // repo
+        let model = try String(
+            contentsOf: repo.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoViewerFeature/PhotoViewerModel.swift"),
+            encoding: .utf8
+        )
+
+        guard let start = model.range(of: "private func loadPreviewImage(_ uid: PhotoUID) async -> NSImage?"),
+              let end = model.range(of: "    // MARK: - Media resolution", range: start.upperBound..<model.endIndex) else {
+            XCTFail("expected loadPreviewImage before media resolution")
+            return
+        }
+        let body = String(model[start.lowerBound..<end.lowerBound])
+
+        XCTAssertTrue(body.contains("Task.detached(priority: .userInitiated)"))
+        XCTAssertTrue(body.contains("cache.diskData(for: uid).flatMap { Self.decodePreviewImage($0) }"))
+        XCTAssertTrue(body.contains("Task.detached(priority: .utility)"))
+        XCTAssertFalse(model.contains("NSImage(data: previewData)"), "preview decode must not run in the MainActor load task")
+        XCTAssertFalse(body.contains("if let cache = previewCache, let data = cache.diskData"),
+                       "preview cache disk read/decrypt must not run synchronously on the MainActor")
+    }
+
     func testBurstFilmstripUsesSharedViewerModelAndDoesNotOwnBackendLoading() throws {
         let repo = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // PhotoViewerFeatureTests

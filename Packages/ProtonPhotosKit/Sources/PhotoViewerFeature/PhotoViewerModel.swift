@@ -340,6 +340,11 @@ public final class PhotoViewerModel {
         return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
     }
 
+    private nonisolated static func decodePreviewImage(_ data: Data) -> NSImage? {
+        guard let cg = ViewerFullImageDecoder.decodeCGImage(data) else { return NSImage(data: data) }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+    }
+
     private func loadCurrent() {
         burstTask?.cancel()
         burstSelection.reset()
@@ -394,8 +399,7 @@ public final class PhotoViewerModel {
                 self.image = thumb
             }
             // Larger preview for a crisper interim image (disk-cached for offline browsing).
-            if let previewData = await self.loadPreview(item.uid),
-               let preview = NSImage(data: previewData), !Task.isCancelled, self.isDisplaying(item) {
+            if let preview = await self.loadPreviewImage(item.uid), !Task.isCancelled, self.isDisplaying(item) {
                 self.image = preview
             }
             guard !Task.isCancelled, self.isDisplaying(item) else { return }
@@ -420,11 +424,23 @@ public final class PhotoViewerModel {
 
     /// Preview bytes, disk-cached: serves the offline `previews` derivative if present, else fetches
     /// and persists it. Keeps the viewer browseable offline and avoids re-downloading previews.
-    private func loadPreview(_ uid: PhotoUID) async -> Data? {
-        if let cache = previewCache, let data = cache.diskData(for: uid) { return data }
+    private func loadPreviewImage(_ uid: PhotoUID) async -> NSImage? {
+        if let cache = previewCache {
+            let cached = await Task.detached(priority: .userInitiated) {
+                cache.diskData(for: uid).flatMap { Self.decodePreviewImage($0) }
+            }.value
+            if let cached { return cached }
+        }
         guard let data = try? await media.preview(for: uid) else { return nil }
-        previewCache?.storeToDisk(data, for: uid)
-        return data
+        let preview = await Task.detached(priority: .userInitiated) {
+            Self.decodePreviewImage(data)
+        }.value
+        if let previewCache {
+            Task.detached(priority: .utility) {
+                previewCache.storeToDisk(data, for: uid)
+            }
+        }
+        return preview
     }
 
     // MARK: - Media resolution (image vs video)
