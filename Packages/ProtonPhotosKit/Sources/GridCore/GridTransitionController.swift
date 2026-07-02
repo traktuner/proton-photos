@@ -40,8 +40,8 @@ package final class GridTransitionController {
         let relocating = GridTransitionSelectionEligibility.relocatingIdentities(in: lat)
         guard GridTransitionSelectionEligibility.isEligible(selection: selection, relocatingIdentities: relocating)
         else { return fail(.selectionRelocates) }
-        guard let p = ClickZoomTransitionScheduler.makePlan(source: source, target: target, anchorIndex: anchorIndex,
-                                                            viewportSize: viewportSize, tuning: tuning)
+        guard let p = ClickZoomTransitionScheduler.makePlan(lattice: lat, sourceLevel: source.levelID,
+                                                            targetLevel: target.levelID, tuning: tuning)
         else { return fail(.scheduleDegenerate) }
         plan = p; q = 0; elapsed = 0; lastFallback = .none
         emit("GridTransition", [
@@ -64,8 +64,8 @@ package final class GridTransitionController {
         let relocating = GridTransitionSelectionEligibility.relocatingIdentities(in: lat)
         guard GridTransitionSelectionEligibility.isEligible(selection: selection, relocatingIdentities: relocating)
         else { return fail(.selectionRelocates) }
-        guard let p = PinchZoomTransitionScheduler.makePlan(source: source, target: target, anchorIndex: anchorIndex,
-                                                            viewportSize: viewportSize, tuning: tuning)
+        guard let p = PinchZoomTransitionScheduler.makePlan(lattice: lat, sourceLevel: source.levelID,
+                                                            targetLevel: target.levelID, tuning: tuning)
         else { return fail(.scheduleDegenerate) }
         plan = p; q = 0; elapsed = 0; lastFallback = .none
         emit("GridTransition", [
