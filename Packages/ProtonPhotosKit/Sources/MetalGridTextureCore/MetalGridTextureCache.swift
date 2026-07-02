@@ -29,20 +29,20 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     package private(set) var evictMsThisFrame: Double = 0
     package private(set) var deferredUploadsThisFrame = 0
     /// In-place re-uploads this frame that grew an already-resident texture to the current effective cap
-    /// (`upgradeUndersizedResident`) — a subset of `uploadsThisFrame`, surfaced separately for diagnostics.
+    /// (`upgradeUndersizedResident`) - a subset of `uploadsThisFrame`, surfaced separately for diagnostics.
     package private(set) var upgradesThisFrame = 0
     /// True once an upload was refused this frame because the resident byte/count budget cannot admit it
     /// even after evicting every non-pinned texture. That state only changes when the streaming window
-    /// changes (scroll/zoom) or images arrive — both trigger their own redraw — so callers may stop
+    /// changes (scroll/zoom) or images arrive - both trigger their own redraw - so callers may stop
     /// display-link pumping on it instead of spinning on placeholders that can never fill.
     package private(set) var residencySaturatedThisFrame = false
     /// True when at least one visible resident texture is still below the current effective cap because the
-    /// per-frame upload budget ran out (not because residency refused it — that never changes without a
+    /// per-frame upload budget ran out (not because residency refused it - that never changes without a
     /// window change). Callers keep the display link ticking on this so a soft carried-over texture finishes
     /// upgrading to full resolution over the next frames instead of freezing mid-upgrade on an idle grid.
     package private(set) var pendingUpgradesThisFrame = false
 
-    /// Absolute pixel side ceiling a thumbnail is uploaded at (platform adapter policy — Retina crispness
+    /// Absolute pixel side ceiling a thumbnail is uploaded at (platform adapter policy - Retina crispness
     /// without wasting VRAM). The per-frame *effective* cap (`effectiveMaxTexturePixels`) is derived from the
     /// on-screen slot size and can only ever be smaller, never larger, than this.
     package let maxTexturePixels: Int
@@ -63,7 +63,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     package var residentByteBudget: Int { budget.maxResidentBytes }
     package var uploadByteBudgetPerFrame: Int { budget.maxUploadBytesPerFrame }
     package var uploadTimeBudgetPerFrame: Double { budget.maxUploadMillisecondsPerFrame }
-    /// True when resident bytes exceed the budget — transiently possible inside a frame (uploads land
+    /// True when resident bytes exceed the budget - transiently possible inside a frame (uploads land
     /// before `evictToBudget`), never after eviction ran. Persistent `true` in logs signals a bug.
     package var byteBudgetOverflow: Bool { lru.residentCost > budget.maxResidentBytes }
     /// Largest pin set the byte budget can guarantee residency for, assuming worst-case (square,
@@ -71,8 +71,8 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     /// pinning degrades to placeholders instead of overflowing the budget.
     ///
     /// Using the *effective* cap (not the absolute `maxTexturePixels`) makes this accurate per zoom level: at
-    /// the dense overview levels — where the pin count explodes (viewport + 2× overscan can exceed the count
-    /// cap entirely) — the effective cap is small, so each texture is cheap and far more of the visible tiles
+    /// the dense overview levels - where the pin count explodes (viewport + 2× overscan can exceed the count
+    /// cap entirely) - the effective cap is small, so each texture is cheap and far more of the visible tiles
     /// can be pinned within the same byte budget instead of degrading to placeholders. Structural admission in
     /// the residency policy still enforces the byte ceiling regardless, so an over-optimistic estimate can only
     /// cost a transient placeholder, never a budget overflow.
@@ -128,7 +128,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
     package func isResident(_ id: ID) -> Bool { lru.isResident(id) }
     package func isInFlight(_ id: ID) -> Bool { lru.isInFlight(id) }
 
-    /// The texture to draw for `id` — real if resident, else the shared placeholder.
+    /// The texture to draw for `id` - real if resident, else the shared placeholder.
     package func texture(for id: ID) -> MTLTexture {
         textures[id] ?? placeholderTexture
     }
@@ -165,7 +165,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
                 continue
             }
             guard let image = provideImage(id) else {
-                lru.abandonUpload(id)   // image vanished between selection and upload — retry later
+                lru.abandonUpload(id)   // image vanished between selection and upload - retry later
                 continue
             }
             let size = uploadPixelSize(for: image, cap: effectiveMaxTexturePixels)
@@ -198,15 +198,15 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         deferredUploadsThisFrame = max(0, wanted.count - chosen.count) + budgetDeferred
     }
 
-    /// Re-upload, in place, visible resident textures that sit BELOW the current effective cap — carried over
-    /// from a denser zoom level where they were uploaded smaller — so zooming back out to a sparse level
+    /// Re-upload, in place, visible resident textures that sit BELOW the current effective cap - carried over
+    /// from a denser zoom level where they were uploaded smaller - so zooming back out to a sparse level
     /// restores full crispness instead of magnifying a small texture. The old texture stays on screen until
     /// the larger one is ready (a soft→sharp upgrade, never a placeholder gap).
     ///
     /// Bounded by the SAME per-frame upload count + byte budget as `uploadVisible`, and run AFTER it, so it
     /// only spends what fresh content left unused (new placeholders always win). Only meaningful growth is
     /// re-uploaded (a hysteresis margin avoids churn at size boundaries), and the replacement is refused if the
-    /// larger texture would push resident bytes over budget — the count is unchanged, so only the byte delta
+    /// larger texture would push resident bytes over budget - the count is unchanged, so only the byte delta
     /// matters. A budget-deferred upgrade sets `pendingUpgradesThisFrame` (retrying makes progress); a
     /// residency-refused or image-missing one does not (retrying would not).
     package func upgradeUndersizedResident(_ ids: [ID], provideImage: (ID) -> CGImage?) {
@@ -220,7 +220,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
             guard let image = provideImage(id) else { continue }      // decoded image gone from RAM → keep the soft one
             let size = uploadPixelSize(for: image, cap: cap)
             let targetLongest = max(size.width, size.height)
-            // Only on meaningful growth (≥ 1.25×) AND strictly larger — never re-upload a source-limited texture
+            // Only on meaningful growth (≥ 1.25×) AND strictly larger - never re-upload a source-limited texture
             // to the same size (that would churn every frame).
             guard targetLongest > currentLongest, targetLongest * 4 >= currentLongest * 5 else { continue }
             let newBytes = size.width * size.height * 4
@@ -257,7 +257,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
 
     // MARK: - Texture creation
 
-    /// Pixel size a decoded image will be uploaded at (longest side clamped to `cap`) — the texture byte cost
+    /// Pixel size a decoded image will be uploaded at (longest side clamped to `cap`) - the texture byte cost
     /// (w·h·4) is derived from this BEFORE any normalization/upload work is spent, so budget refusals cost
     /// nothing. `cap` is the effective per-frame cap for thumbnails and the absolute `maxTexturePixels` for
     /// glyphs; either way the aspect ratio is preserved and an image never upscales past its source.
@@ -271,7 +271,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
 
     /// Builds an upright RGBA8 texture from a decoded image at the pre-computed `uploadPixelSize`. A decoded
     /// CGImage is already row-0-top, and `CGContext.draw` preserves that into the bitmap buffer, so texel
-    /// row 0 is the visual TOP — no context flip — and the renderer samples with straightforward UVs
+    /// row 0 is the visual TOP - no context flip - and the renderer samples with straightforward UVs
     /// (uv.y 0 = top), keeping thumbnails upright. (Synthetic tiles are generated `flipped: true` to match
     /// this row-0-top convention.)
     private func makeTexture(from image: CGImage, width w: Int, height h: Int) -> MTLTexture? {
@@ -299,7 +299,7 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
         return texture
     }
 
-    // MARK: - Glyph textures (badges) — resident, not LRU-managed
+    // MARK: - Glyph textures (badges) - resident, not LRU-managed
 
     private var glyphs: [MetalGridGlyphRequest: MTLTexture] = [:]
 

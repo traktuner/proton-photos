@@ -6,7 +6,7 @@ import Foundation
 /// (`Sources/PhotosCore/Resources/Localizable.xcstrings`) and are resolved here against
 /// `Bundle.module`. Routing every package lookup through this one entry point means package
 /// views never accidentally fall back to `Bundle.main` (which is what a bare `Text("key")` /
-/// `String(localized:)` would do inside a Swift package) — the string is always read from the
+/// `String(localized:)` would do inside a Swift package) - the string is always read from the
 /// package's own catalog, regardless of which module the call site lives in.
 ///
 /// Keys are stable, human-readable, and dotted (e.g. `tag.favorites`, `upload.state_queued`).

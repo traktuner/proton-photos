@@ -25,14 +25,14 @@ import GridCore
     }
 
     // 1b. THE rubber band: over-zoom scales the level-0 grid GEOMETRICALLY (fixed columns, larger cells +
-    // pitch) — it does NOT reflow to fewer columns. This is what makes the elastic scale actually visible.
+    // pitch) - it does NOT reflow to fewer columns. This is what makes the elastic scale actually visible.
     @Test func overZoomScalesLevel0GridWithoutReflow() {
         let engine = SquareTileGridEngine.testRegular(sectionCounts: [4000])
         let tx = transaction()
         let viewport = CGSize(width: 1400, height: 900)
         let f0 = tx.frame(continuousLevel: 0, viewportSize: viewport, overscan: 0)
         let fOver = tx.frame(continuousLevel: -0.25, viewportSize: viewport, overscan: 0)
-        #expect(fOver.columns == f0.columns)                          // FIXED columns — scales, doesn't reflow
+        #expect(fOver.columns == f0.columns)                          // FIXED columns - scales, doesn't reflow
         #expect(fOver.columns == engine.levels[0].nominalColumns)
         #expect(fOver.slotSide > f0.slotSide)                         // cells geometrically larger
         #expect(fOver.pitch > f0.pitch)                               // whole grid (cell+gap) scales uniformly
@@ -43,7 +43,7 @@ import GridCore
         let lc = 6
         let cap = GridLiveZoomBounds.maxOverZoom
         let oneLevel = GridLiveZoomBounds.visualLevel(rawLevel: -0.42, levelCount: lc)
-        #expect(oneLevel < 0)                          // NOT clamped to 0 — the rubber-band shows
+        #expect(oneLevel < 0)                          // NOT clamped to 0 - the rubber-band shows
         #expect(oneLevel >= -cap)                      // …but bounded by the cap
         // Aggressive pinch is capped (cannot produce absurd tile sizes).
         let aggressive = GridLiveZoomBounds.visualLevel(rawLevel: -1000, levelCount: lc)

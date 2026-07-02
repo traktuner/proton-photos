@@ -2,17 +2,17 @@ import AppKit
 import PhotosCore
 import GridCore
 
-// MARK: - AspectSquareToggleModel — presentation model for the aspect/square toolbar toggle
+// MARK: - AspectSquareToggleModel - presentation model for the aspect/square toolbar toggle
 //
 // The toolbar button is a thin SwiftUI shell over this model so the symbol-resolution, vector-fallback and
 // accessibility logic is UNIT-TESTABLE without building the toolbar. STRICT asset policy (guarded by tests):
 //   • every glyph is an SF Symbol (system) probed via `NSImage(systemSymbolName:)`, OR an in-app CoreGraphics
-//     vector fallback — NEVER a bundled raster, asset-catalog image, or a copy of Apple's Photos icon.
+//     vector fallback - NEVER a bundled raster, asset-catalog image, or a copy of Apple's Photos icon.
 //   • the button shows the symbol for the CURRENT content mode; tapping switches to the other mode.
 @MainActor
 public enum AspectSquareToggleModel {
     /// Candidate SF Symbols per mode, best first (probed at runtime; first existing wins). All are SYSTEM
-    /// symbols — `aspectratio` reads as "show full aspect ratio", a filled square as "crop to square".
+    /// symbols - `aspectratio` reads as "show full aspect ratio", a filled square as "crop to square".
     public static let symbolCandidates: [TileContentDisplayMode: [String]] = [
         .squareFillCrop:        ["aspectratio", "rectangle.expand.vertical", "arrow.up.left.and.arrow.down.right"],
         .aspectFitInsideSquare: ["square.fill", "square", "arrow.down.right.and.arrow.up.left"],

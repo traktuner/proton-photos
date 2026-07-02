@@ -9,7 +9,7 @@ public struct TimelineView: View {
     @State private var model: TimelineViewModel
     @Binding private var level: Int
     /// Leading overlap of the floating sidebar (0 when collapsed). The grid lays its tiles out past this inset
-    /// itself, but the SwiftUI placeholder/empty/error states are plain centered views — without this they'd
+    /// itself, but the SwiftUI placeholder/empty/error states are plain centered views - without this they'd
     /// center over the FULL detail width (which runs under the sidebar) and read as shifted too far left.
     @Environment(\.gridLeadingEventInset) private var leadingInset: CGFloat
     private let onOpen: (PhotoItem, [PhotoItem]) -> Void
@@ -62,7 +62,7 @@ public struct TimelineView: View {
             switch model.state {
             case .loading:
                 // Route switches (RAW / album / trash …) show the same animated Proton mark as the app's launch
-                // veil — never a black surface, never a stale grid. The leading inset keeps the 64pt mark
+                // veil - never a black surface, never a stale grid. The leading inset keeps the 64pt mark
                 // centered in the VISIBLE area when the floating sidebar is open.
                 LoadingMark()
                     .frame(width: 64, height: 64)
@@ -83,7 +83,7 @@ public struct TimelineView: View {
                 )
                 // Production timeline is MetalGrid-ONLY: the canonical `SquareTileGridEngine` owns all
                 // geometry (square slots). No legacy-grid fallback, no aspect-driven justified layout,
-                // no silent feature-flag switch — media aspect never reaches the layout (it lives only in
+                // no silent feature-flag switch - media aspect never reaches the layout (it lives only in
                 // `TileContentFitter`, inside the renderer).
                 if visibleContent.isEmptySearchResult {
                     searchEmptyState

@@ -1,4 +1,4 @@
-# Phase B App Spike — PINCH071 + CLICKV2_420_FULLER_CORNER
+# Phase B App Spike - PINCH071 + CLICKV2_420_FULLER_CORNER
 
 Approval token verified: `APPROVE_APP_SPIKE candidate=PINCH071_CLICKV2_420_FULLER_CORNER`.
 Foundation tag `metalgrid-engine-v1` verified (annotated `a621109…` → commit `0e06e07…`).
@@ -15,17 +15,17 @@ pure function of `q` (reversible, no timers, no per-frame graph build). Feature-
 ## Files changed
 
 New source (`Packages/ProtonPhotosKit/Sources/TimelineFeature/`):
-- `LocalAlphaCurve.swift` — C1 slope-limited linear-core α (a=0.20, peak slope 1.25).
-- `GridTransitionTuning.swift` — centralized tunables + the feature flag.
-- `GridTransitionComponent.swift` — `RelativeSlotKey`, relocation component.
-- `GridTransitionPlan.swift` — immutable plan + `renderIntent(at q)` (full-slot mix).
-- `GridTransitionScheduler.swift` — click q(t), area-weighted allocation, centre-out, W071 windows.
-- `ClickZoomTransitionScheduler.swift` — CLICKV2_420_FULLER_CORNER plan builder.
-- `PinchZoomTransitionScheduler.swift` — PINCH071 (W071) plan builder.
-- `GridTransitionComponentBuilder.swift` — lattice + components from source/target frame plans.
-- `GridTransitionSelectionEligibility.swift` — conservative double-outline-safe rule.
-- `GridTransitionRendererInput.swift` — resolved slots → alpha-weighted draws.
-- `GridTransitionController.swift` — coordinator-side driver (build / eligibility / host-q / fallback / diagnostics).
+- `LocalAlphaCurve.swift` - C1 slope-limited linear-core α (a=0.20, peak slope 1.25).
+- `GridTransitionTuning.swift` - centralized tunables + the feature flag.
+- `GridTransitionComponent.swift` - `RelativeSlotKey`, relocation component.
+- `GridTransitionPlan.swift` - immutable plan + `renderIntent(at q)` (full-slot mix).
+- `GridTransitionScheduler.swift` - click q(t), area-weighted allocation, centre-out, W071 windows.
+- `ClickZoomTransitionScheduler.swift` - CLICKV2_420_FULLER_CORNER plan builder.
+- `PinchZoomTransitionScheduler.swift` - PINCH071 (W071) plan builder.
+- `GridTransitionComponentBuilder.swift` - lattice + components from source/target frame plans.
+- `GridTransitionSelectionEligibility.swift` - conservative double-outline-safe rule.
+- `GridTransitionRendererInput.swift` - resolved slots → alpha-weighted draws.
+- `GridTransitionController.swift` - coordinator-side driver (build / eligibility / host-q / fallback / diagnostics).
 
 Modified (additive, flag-gated):
 - `MetalGridCoordinator.swift` (+106): `gridTransition` member; `tryBeginClickTransition(...)`;
@@ -37,7 +37,7 @@ New tests (`Tests/TimelineFeatureTests/`): `GridTransitionScheduleTests.swift`, 
 
 ## Feature flag
 
-`MetalGridSingleLatticeTransitionFlag` — UserDefaults key **`MetalGrid.singleLatticeTransition`**,
+`MetalGridSingleLatticeTransitionFlag` - UserDefaults key **`MetalGrid.singleLatticeTransition`**,
 **default OFF**. When OFF, `tryBeginClickTransition` returns nil and `gridTransition` is never
 started, so `draw(in:)`'s transition branch is never entered ⇒ the accepted stable instant-snap
 behaviour is byte-for-byte unchanged (proven: all 254 pre-existing engine/contract tests still pass).
@@ -85,8 +85,8 @@ host uses the **stable instant snap** (`settleScrollOffsetY`, unchanged). The co
 2. **No on-device visual validation.** This was implemented + verified headlessly (unit tests only).
    The live GPU crossfade cadence, anchor/scroll alignment during the 420 ms click, and the manual
    review checklist (60 Hz click in/out, reverse mid-transition, corner behaviour, pinch) require
-   running the app — the prompt's separate manual-review step. **No visual/product acceptance is claimed.**
-3. ~~The two-texture α-over-background mix approximates full-slot mix~~ **[FIXED 2026-06-25]** —
+   running the app - the prompt's separate manual-review step. **No visual/product acceptance is claimed.**
+3. ~~The two-texture α-over-background mix approximates full-slot mix~~ **[FIXED 2026-06-25]** -
    QA found the two-translucent-layer blend bled background (≈25% bg at lp=0.5). A mixed source↔target
    dissolve now draws the **source occupant opaque** (alpha 1) as the base and the **target at alpha
    lp**, so premultiplied source-over composites to the exact full-slot mix `src·(1-lp)+tgt·lp` with no

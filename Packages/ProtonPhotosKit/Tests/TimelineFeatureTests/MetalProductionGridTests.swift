@@ -11,7 +11,7 @@ import TimelineCore
 /// selection-outline instances, marquee, drag-to-Finder) are covered by the manual acceptance video.
 ///
 /// (The legacy feature-flag/fallback and `MetalGridLayout` ↔ `JustifiedCollectionLayout` parity suites
-/// were removed with those types — production is MetalGrid-only and the geometry is the canonical
+/// were removed with those types - production is MetalGrid-only and the geometry is the canonical
 /// `SquareTileGridEngine`.)
 
 private func uids(_ n: Int) -> [PhotoUID] { (0 ..< n).map { PhotoUID(volumeID: "v", nodeID: "\($0)") } }

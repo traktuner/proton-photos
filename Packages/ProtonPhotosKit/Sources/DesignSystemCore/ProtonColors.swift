@@ -9,11 +9,11 @@ import UIKit
 /// Proton design tokens.
 ///
 /// Neutrals (backgrounds / text / borders) map to **semantic system colors**, so the whole app adapts to
-/// light/dark appearance, increased-contrast, and material vibrancy automatically — and inherits Apple's
+/// light/dark appearance, increased-contrast, and material vibrancy automatically - and inherits Apple's
 /// refined Liquid Glass on macOS 27 with no per-token work. Only the brand accent + signal hues stay fixed
 /// (they are brand identity and read correctly in both appearances). Call sites keep using these token names.
 public enum ProtonColor {
-    // Brand accent — legitimately custom (the only fixed brand hue; readable on light + dark).
+    // Brand accent - legitimately custom (the only fixed brand hue; readable on light + dark).
     public static let primary = Color(hex: 0x6D4AFF)
 
     // Backgrounds → semantic, appearance-adaptive. Prefer letting native materials/window background show;
@@ -33,7 +33,7 @@ public enum ProtonColor {
     public static let textHint = Color(uiColor: .tertiaryLabel)
     #endif
 
-    // Signal — brand-tuned, readable in both appearances.
+    // Signal - brand-tuned, readable in both appearances.
     public static let danger = Color(hex: 0xDC3251)
     public static let warning = Color(hex: 0xFF9900)
 }

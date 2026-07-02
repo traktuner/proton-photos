@@ -4,7 +4,7 @@ import PhotosCore
 /// The order in which the background thumbnail crawl walks the library.
 ///
 /// The timeline store delivers photos oldest-first (`TimelineMetadataStore.load()` is
-/// `ORDER BY t, vol, node`), and the grid bottom-pins to the newest photo — so the array the UI holds is
+/// `ORDER BY t, vol, node`), and the grid bottom-pins to the newest photo - so the array the UI holds is
 /// oldest → newest. Apple Photos (and this app) open scrolled to the BOTTOM, i.e. the newest photos,
 /// so the crawl should fetch newest → oldest: the photos the user is most likely to look at first are
 /// cached first.
@@ -25,7 +25,7 @@ public enum ThumbnailCrawlOrder {
     }
 
     /// Swift's `sorted(by:)` is not guaranteed stable, so we decorate with the original index and break
-    /// ties on it — giving a deterministic newest-first order even when many photos share a timestamp.
+    /// ties on it - giving a deterministic newest-first order even when many photos share a timestamp.
     private static func stableSortedNewestFirst(_ items: [PhotoItem]) -> [PhotoItem] {
         items.enumerated()
             .sorted { lhs, rhs in

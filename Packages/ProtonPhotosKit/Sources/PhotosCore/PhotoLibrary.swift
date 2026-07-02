@@ -34,7 +34,7 @@ public enum PhotoTag: Int, Sendable, CaseIterable, Codable {
         case .screenshots: "camera.viewfinder"
         case .videos: "video"
         case .livePhotos: "livephoto"
-        case .motionPhotos: "livephoto.play"   // was "circle.motionlines" — not a real SF Symbol, so it rendered blank
+        case .motionPhotos: "livephoto.play"   // was "circle.motionlines" - not a real SF Symbol, so it rendered blank
         case .selfies: "person.crop.square"
         case .portraits: "person.fill"
         case .bursts: "square.stack.3d.down.right"
@@ -44,13 +44,13 @@ public enum PhotoTag: Int, Sendable, CaseIterable, Codable {
     }
 }
 
-/// What the grid is currently showing — the whole library, a smart-filter tag, an album, or trash.
+/// What the grid is currently showing - the whole library, a smart-filter tag, an album, or trash.
 public enum PhotoFilter: Equatable, Hashable, Sendable {
     case all
     case tag(PhotoTag)
     case album(id: String, title: String)
     case trash
-    /// The whole-library Map view — no timeline load; the detail shows the map instead.
+    /// The whole-library Map view - no timeline load; the detail shows the map instead.
     case map
 
     /// Whether selecting this route should load timeline sections into the Metal grid.

@@ -24,7 +24,7 @@ final class MetalGridAccessibilityProvider {
     }
 
     // The full element rebuild (a framePlan + one NSAccessibilityElement per visible cell + coordinate
-    // conversions) is too heavy to run on EVERY viewport change — a live resize/scroll fires `invalidate()`
+    // conversions) is too heavy to run on EVERY viewport change - a live resize/scroll fires `invalidate()`
     // per frame, which was a real jank source. Coalesce to ~10 Hz with a guaranteed trailing rebuild so the
     // final state is always correct. VoiceOver does not need per-frame element frames.
     private var lastRebuild: Date = .distantPast
@@ -75,7 +75,7 @@ final class MetalGridAccessibilityProvider {
         host.setAccessibilityChildren(elements)
     }
 
-    /// Shared formatter — `DateFormatter()` is expensive to allocate, and `label(for:)` is called once per
+    /// Shared formatter - `DateFormatter()` is expensive to allocate, and `label(for:)` is called once per
     /// visible cell per rebuild, so a per-call instance was a real cost.
     private static let labelFormatter: DateFormatter = {
         let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .short; return df

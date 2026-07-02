@@ -60,7 +60,7 @@ window resize or sidebar toggle.
 
 The grid resize model must never squeeze or distort thumbnails:
 - A zoom level defines an Apple-like density / thumbnail-scale policy, not arbitrary per-frame stretching.
-- A window/sidebar width change SCALES the tile to fill the new width at the level's fixed column count — a smooth
+- A window/sidebar width change SCALES the tile to fill the new width at the level's fixed column count - a smooth
   uniform scale (Apple's "scale the surface like a photo"), not a column reflow and not a squeeze.
 - A vertical resize clips/reveals rows at a constant column count and constant tile size.
 - A corner resize composes the two: scale-to-fill horizontally, clip/reveal vertically; thumbnails are never
@@ -68,7 +68,7 @@ The grid resize model must never squeeze or distort thumbnails:
 - The grid FILLS the width (no trailing gutter); slots stay square; media aspect-fits inside the square slot.
 
 A **responsive level policy** (column caps / per-size-class scaling for very wide or future iOS/iPad displays)
-remains an **explicitly RESERVED future option** — see `GridSizePolicy` — but is **NOT the currently-adopted
+remains an **explicitly RESERVED future option** - see `GridSizePolicy` - but is **NOT the currently-adopted
 rule**. Today, on every desktop width, a level shows its fixed column count and scales the tile to fill. `L0 =
 Apple's largest-photo feel` is the product requirement; `L0 = 3 columns` holds at every desktop width today. Any
 future responsive policy must be explicit, platform-neutral, test-covered, and must still never breathe/squeeze

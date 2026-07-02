@@ -19,10 +19,10 @@ public typealias VideoPlaybackDiagnosticSink = @MainActor @Sendable (VideoPlayba
 
 /// Owns the single `AVPlayer` and every AVFoundation observation for the video path, and drives the
 /// `VideoViewerState` machine. Pulled out of `PhotoViewerModel` so the viewer no longer carries
-/// playback wiring — the model only decides *which* source to play; this decides *how it's going*.
+/// playback wiring - the model only decides *which* source to play; this decides *how it's going*.
 ///
 /// The one rule it enforces (the reason it exists): the UI never gets stuck. Every attached player is
-/// guarded by a watchdog — if it doesn't reach `.playing` within the deadline it fails or asks the
+/// guarded by a watchdog - if it doesn't reach `.playing` within the deadline it fails or asks the
 /// model to fall back to a full download (the native equivalent of Proton Drive Web's
 /// `FIRST_BLOCK_TIMEOUT`). Mid-stream stalls surface as `.buffering` (a real reason), not a frozen
 /// frame, and `failedToPlayToEndTime` maps to a readable error.
@@ -58,7 +58,7 @@ public final class VideoPlaybackController {
     public func setResolving() { transition(.resolving) }
     public func setDownloading(_ progress: Double) { transition(.downloading(progress)) }
 
-    /// Resets to idle and tears down any player — used when navigating to a new item or when a
+    /// Resets to idle and tears down any player - used when navigating to a new item or when a
     /// stream-resolve turns out to be an image.
     public func reset() { teardown(); transition(.idle) }
 
@@ -101,13 +101,13 @@ public final class VideoPlaybackController {
 
         let box = Weak(self)
 
-        // AVPlayerItem.status — the primary readiness signal.
+        // AVPlayerItem.status - the primary readiness signal.
         observations.append(item.observe(\.status, options: [.new, .initial]) { observed, _ in
             let raw = observed.status.rawValue
             let err = observed.error
             Task { @MainActor in box.value?.onStatus(raw, error: err, uid: uid) }
         })
-        // Buffer health — surfaces a real "buffering" reason instead of a frozen frame.
+        // Buffer health - surfaces a real "buffering" reason instead of a frozen frame.
         observations.append(item.observe(\.isPlaybackBufferEmpty, options: [.new]) { observed, _ in
             let empty = observed.isPlaybackBufferEmpty
             Task { @MainActor in box.value?.onBufferEmpty(empty, uid: uid) }
@@ -174,7 +174,7 @@ public final class VideoPlaybackController {
     }
 
     /// After the first frame, `timeControlStatus` is the authoritative "is it actually moving?"
-    /// signal — `.waitingToPlayAtSpecifiedRate` is a real stall (show buffering), `.playing` resumes,
+    /// signal - `.waitingToPlayAtSpecifiedRate` is a real stall (show buffering), `.playing` resumes,
     /// `.paused` is the user's own pause (clear any overlay; never a spinner). Before the first frame
     /// it's ignored so the status/likelyToKeepUp handoff isn't disturbed.
     private func onTimeControl(_ raw: Int, uid: PhotoUID) {

@@ -7,7 +7,7 @@ import GridCore
 /// Pins the Apple anchor rule for detent zoom: a discrete level change is directed toward the item UNDER THE
 /// CURSOR (the cursor item stays under the cursor), NOT the top-visible item. The engine owns the capture +
 /// rebase; gap cursors resolve the nearest item in the focus row. (Focus-row neighbourhood STABILITY during a
-/// live drag is the separate GridZoomTransaction step — see docs/grid-zoom-transaction.md — not tested here.)
+/// live drag is the separate GridZoomTransaction step - see docs/grid-zoom-transaction.md - not tested here.)
 @Suite struct CursorAnchorZoomTests {
     private let width: CGFloat = 1400
     private let eps: CGFloat = 1.0
@@ -31,7 +31,7 @@ import GridCore
         return frame.minY + a.localFraction.y * frame.height - ny
     }
 
-    // CursorAnchorItemRemainsUnderCursorAfterDiscreteZoomTest — the cursor item stays at the cursor's viewport
+    // CursorAnchorItemRemainsUnderCursorAfterDiscreteZoomTest - the cursor item stays at the cursor's viewport
     // Y after a discrete zoom (in and out).
     @Test func cursorAnchorItemRemainsUnderCursorAfterDiscreteZoom() {
         let e = engine()
@@ -44,7 +44,7 @@ import GridCore
         }
     }
 
-    // PinchZoomUsesCursorAnchorNotViewportTopTest — the cursor item (mid-viewport) is held; the top item is
+    // PinchZoomUsesCursorAnchorNotViewportTopTest - the cursor item (mid-viewport) is held; the top item is
     // NOT held (its viewport position changes), proving the anchor is the cursor, not the top.
     @Test func pinchZoomUsesCursorAnchorNotViewportTop() {
         let e = engine()
@@ -59,10 +59,10 @@ import GridCore
                                                cursorContentPoint: CGPoint(x: width / 2, y: scrollY + cursorY), sourceScrollOriginY: scrollY)!
         let topFrame4 = e.slotRect(flatIndex: topA.flatIndex, level: 4, width: width)!
         let topY4 = topFrame4.minY + topA.localFraction.y * topFrame4.height - ny
-        #expect(abs(topY4 - 2) > 30, "top item was held at the top — must not be (cursor anchor expected)")
+        #expect(abs(topY4 - 2) > 30, "top item was held at the top - must not be (cursor anchor expected)")
     }
 
-    // TopViewportAnchorIsNotUsedForTrackpadPinchTest — anchoring at the cursor produces a DIFFERENT scroll
+    // TopViewportAnchorIsNotUsedForTrackpadPinchTest - anchoring at the cursor produces a DIFFERENT scroll
     // offset than anchoring at the top would, and the host's pinch path passes the cursor (not top).
     @Test func topViewportAnchorIsNotUsedForTrackpadPinch() {
         let e = engine()
@@ -79,7 +79,7 @@ import GridCore
         #expect(!host.contains("anchorAtViewportTop"), "live zoom / +- must not use the top-viewport anchor")
     }
 
-    // SetLevelCanAnchorToExplicitItemTest — the engine can put an arbitrary explicit item under an arbitrary
+    // SetLevelCanAnchorToExplicitItemTest - the engine can put an arbitrary explicit item under an arbitrary
     // viewport point (the capability setLevel relies on).
     @Test func setLevelCanAnchorToExplicitItem() {
         let e = engine()
@@ -92,7 +92,7 @@ import GridCore
         }
     }
 
-    // GapCursorResolvesNearestFocusRowItemTest — a cursor over an inter-cell gap resolves to an adjacent item
+    // GapCursorResolvesNearestFocusRowItemTest - a cursor over an inter-cell gap resolves to an adjacent item
     // in the SAME row (the focus band), not nil.
     @Test func gapCursorResolvesNearestFocusRowItem() {
         let e = engine()

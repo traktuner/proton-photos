@@ -7,7 +7,7 @@ import PhotosCore
 /// Every blob is sealed with a FRESH random 96-bit nonce (CryptoKit's default when no nonce is supplied)
 /// and bound to Associated Authenticated Data (AAD) describing exactly where it belongs:
 ///   cache namespace | cache version | account UID | volume ID | node ID | derivative type
-/// The AAD is authenticated but NOT stored in the blob — decryption only succeeds when the reader
+/// The AAD is authenticated but NOT stored in the blob - decryption only succeeds when the reader
 /// reconstructs the identical context. So a blob cannot be moved between accounts, namespaces, derivative
 /// types, or photos: a mismatch fails the GCM tag check and reads as a cache miss, never as wrong bytes.
 ///
@@ -39,7 +39,7 @@ public struct SecureBlobCipher: Sendable {
     }
 
     /// Open a `nonce ‖ ciphertext ‖ tag` blob for `uid`. Returns `nil` on ANY failure (truncated blob,
-    /// wrong key, wrong account/namespace/derivative/uid, tampered bytes) — the caller treats `nil` as a
+    /// wrong key, wrong account/namespace/derivative/uid, tampered bytes) - the caller treats `nil` as a
     /// cache miss and deletes the corrupt blob. Never throws.
     public func open(_ blob: Data, uid: PhotoUID) -> Data? {
         guard let box = try? AES.GCM.SealedBox(combined: blob) else { return nil }

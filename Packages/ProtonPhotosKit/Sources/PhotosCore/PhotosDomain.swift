@@ -14,7 +14,7 @@ public struct PhotoUID: Hashable, Sendable, Codable {
 
 // MARK: - Models
 
-/// One item on the photo timeline. Kept intentionally lightweight — heavy data
+/// One item on the photo timeline. Kept intentionally lightweight - heavy data
 /// (full image/video) is loaded lazily through the providers below.
 public struct PhotoItem: Identifiable, Hashable, Sendable, Codable {
     public let uid: PhotoUID
@@ -117,7 +117,7 @@ public struct TimelineSection: Identifiable, Sendable, Codable {
 public protocol PhotosRepository: Sendable {
     func loadTimeline() async throws -> [TimelineSection]
     /// Last-known timeline persisted to disk, for instant startup (nil if none). `loadTimeline()`
-    /// then refreshes in the background — stale-while-revalidate, so there's no spinner on relaunch.
+    /// then refreshes in the background - stale-while-revalidate, so there's no spinner on relaunch.
     func cachedTimeline() async -> [TimelineSection]?
 }
 
@@ -150,7 +150,7 @@ public struct ThumbnailBatchLoadResult: Sendable, Equatable {
     public static let delivered = ThumbnailBatchLoadResult()
 }
 
-/// Bulk thumbnail loading — streams results as the SDK decrypts/downloads them, so the whole
+/// Bulk thumbnail loading - streams results as the SDK decrypts/downloads them, so the whole
 /// library can be filled in the background as fast as the connection allows. Returns a per-batch
 /// disposition so callers can explain (and stop retrying) items the backend refused.
 public protocol ThumbnailBatchLoader: Sendable {

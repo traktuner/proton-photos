@@ -22,7 +22,7 @@ struct ProductionRouteGuardTests {
 
     @Test func noRemovedProductionRoutesRemain() {
         // The spike tuning UI, the rejected focusRow crossfade flag, AND the single-lattice gating flag must
-        // all be gone — the accepted Phase-B effect path is the production default, with no flag of any kind.
+        // all be gone - the accepted Phase-B effect path is the production default, with no flag of any kind.
         let forbidden = ["anim-tuning", "TuningView", "AnimationTuning",
                          "MetalGrid.focusRowTransition", "MetalGridFocusRowTransitionFlag",
                          "MetalGrid.singleLatticeTransition", "MetalGridSingleLatticeTransitionFlag"]
@@ -38,7 +38,7 @@ struct ProductionRouteGuardTests {
                 }
             }
         }
-        #expect(scanned > 0, "Guard scanned no files — repoRoot path is wrong: \(Self.repoRoot.path)")
+        #expect(scanned > 0, "Guard scanned no files - repoRoot path is wrong: \(Self.repoRoot.path)")
     }
 
     @Test func gridFeedUsesSharedConfiguredCache() throws {
@@ -151,7 +151,7 @@ struct ProductionRouteGuardTests {
         #expect(text.contains("Task.sleep(for: .milliseconds(280))"))
         #expect(text.contains("searchText: committedSearchText"))
         #expect(text.contains(".ignoresSafeArea(.container"))            // detail extends under the floating sidebar
-        // The obstruction inset is derived from the KNOWN sidebar width gated on columnVisibility — SwiftUI
+        // The obstruction inset is derived from the KNOWN sidebar width gated on columnVisibility - SwiftUI
         // coordinate spaces / preferences don't bridge across NavigationSplitView's AppKit sidebar, so it can't be
         // measured. It must NOT wrap the grid in a GeometryReader (the per-tick resize throttle).
         #expect(text.contains("columnVisibility == .detailOnly ? 0 : sidebarWidth"))  // obstruction-inset source
@@ -239,7 +239,7 @@ struct ProductionRouteGuardTests {
 
     @Test func sidebarFilterChangesUseInitialViewportPolicy() throws {
         // A sidebar route switch opens the route via a ONE-SHOT INITIAL-VIEWPORT POLICY owned by the Metal grid
-        // host — restoring the route's remembered scroll position, or opening at newest on first visit — NEVER an
+        // host - restoring the route's remembered scroll position, or opening at newest on first visit - NEVER an
         // immediate / external / virtual scroll correction. These static guards pin that architecture (and the
         // gen-before-load ordering that makes it race-free) so the rejected immediate-scroll pattern cannot return.
         let mainView = Self.repoRoot.appendingPathComponent("App/Views/MainView.swift")
@@ -256,7 +256,7 @@ struct ProductionRouteGuardTests {
         #expect(!mainText.contains("if newValue =="))
         #expect(!mainText.contains("switch newValue"))
 
-        // The generation must be bumped SYNCHRONOUSLY, BEFORE the async `select(...)` load — this is the race fix
+        // The generation must be bumped SYNCHRONOUSLY, BEFORE the async `select(...)` load - this is the race fix
         // (the new data token must never arrive before the generation is pending). Pin the ordering inside the
         // route-change handler.
         let onChangeBody = try Self.body(of: mainText, from: ".onChange(of: selection)", to: ".onChange(of: timelineModel.allItems.count)")
@@ -268,7 +268,7 @@ struct ProductionRouteGuardTests {
         #expect(asyncSelect != nil, "the route-change handler must load the new route")
         if let g = genBump, let s = asyncSelect {
             #expect(g.upperBound <= s.lowerBound,
-                    "the generation must be bumped BEFORE the async select(...) — gen-after-load reintroduces the token/generation race")
+                    "the generation must be bumped BEFORE the async select(...) - gen-after-load reintroduces the token/generation race")
         }
 
         let timelineView = Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/TimelineView.swift")
@@ -293,13 +293,13 @@ struct ProductionRouteGuardTests {
         #expect(productionText.contains("appliedRouteScrollGeneration"))
         #expect(productionText.contains("proxy.scrollToFlatIndex"))
         // The route data-source switch installs the route's initial-viewport policy ALONGSIDE the new data,
-        // gated on a pending route generation (else `.preserve` — incremental updates never re-place).
+        // gated on a pending route generation (else `.preserve` - incremental updates never re-place).
         #expect(productionText.contains("initialViewport: routeChangePending ? routeInitialViewport : .preserve"))
         // The rejected immediate-scroll route hook must be gone everywhere.
         #expect(!productionText.contains("showNewestOnceForRouteChange"))
 
         // `makeNSView` couples "mark generation applied" to arming a REAL placement, gated on a generation
-        // mismatch — so host recreation installs a real placement rather than swallowing it. These are
+        // mismatch - so host recreation installs a real placement rather than swallowing it. These are
         // UNCONDITIONAL (a refactor that drops the coupling must fail the guard, not silently skip it).
         let makeBody = try Self.body(of: productionText, from: "func makeNSView(context: Context) -> NSView {", to: "func updateNSView")
         #expect(makeBody.contains("host.requestInitialViewport(routeInitialViewport)"),
@@ -307,7 +307,7 @@ struct ProductionRouteGuardTests {
         #expect(makeBody.contains("if routeScrollGeneration != coord.appliedRouteScrollGeneration"),
                 "makeNSView must gate the placement+mark on a generation mismatch (never unconditional)")
 
-        // Neither the makeNSView nor the updateNSView body may scroll the grid directly on a route change — the
+        // Neither the makeNSView nor the updateNSView body may scroll the grid directly on a route change - the
         // host owns placement. (The proxy wiring of scrollToLatest/currentScrollAnchor lives in `wireProxy`, out
         // of these bodies.)
         let updateBody = try Self.body(of: productionText, from: "func updateNSView(_ nsView: NSView, context: Context) {", to: "private var routeInitialViewport")
@@ -338,7 +338,7 @@ struct ProductionRouteGuardTests {
         #expect(!hostText.contains("convert(point, from: superview)"))
 
         // The pending policy is consumed from `applyContentSize`, only AFTER the geometry guard, and the clear is
-        // gated on a valid window + clip height — so an invalid-geometry pass NEVER clears the policy early.
+        // gated on a valid window + clip height - so an invalid-geometry pass NEVER clears the policy early.
         let applyBody = try Self.body(of: hostText, from: "private func applyContentSize(_ size: CGSize) {", to: "private func placeForInitialViewport")
         #expect(applyBody.contains("pendingInitialViewport != .preserve"))
         #expect(applyBody.contains("placeForInitialViewport(pendingInitialViewport, clipHeight: clipH)"))

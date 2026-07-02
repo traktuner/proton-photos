@@ -1,10 +1,10 @@
-# Library Map View — Design
+# Library Map View - Design
 
-**Status:** IN PROGRESS (Phase 1). **Goal:** an Apple-Photos-style map of the whole library — own sidebar route, clustered badges (count + hero photo) that subdivide on zoom.
+**Status:** IN PROGRESS (Phase 1). **Goal:** an Apple-Photos-style map of the whole library - own sidebar route, clustered badges (count + hero photo) that subdivide on zoom.
 
 ## Decisions (locked)
 - **Tiles/framework: MapKit** (`MKMapView`). Native, first-party, **no API key**, Apple-served tiles licensed for in-app use. Already used in `InfoPanelView`. No third-party tiles.
-- **Crawl: full library**, via a priority **scheduler** — thumbnails are P1, GPS is P2 (extensible). The map fills in live as the GPS job progresses.
+- **Crawl: full library**, via a priority **scheduler** - thumbnails are P1, GPS is P2 (extensible). The map fills in live as the GPS job progresses.
 - **Persistence: E2EE at-rest + decrypt-once-into-RAM.** GPS is sensitive PII → one AES-GCM blob on disk (per-account cache key, like the thumbnail caches); decrypted **once** into an in-memory index (~1 MB for 20k photos) → instant region queries, no per-view decode. Purged on sign-out.
 - **Route:** a `PhotoFilter.map` sidebar entry; the detail swaps `TimelineView` → `LibraryMapView`.
 - **Hero photo:** first photo in the cluster for now (best/cover heuristic later).
@@ -12,7 +12,7 @@
 ## Universal-binary architecture (load-bearing)
 Long-term: a universal binary for iPad/iOS without a rewrite (see memory `universal-binary-shared-core-vision`). So:
 - **Shared core (platform-agnostic, Foundation/CryptoKit):** `PhotoCoordinate` (PhotosCore); `PhotoLocationStore` + `PhotoLocationIndex` + `LocationCrawl` (MediaLocationCore). Reused as-is on iOS.
-- **Platform UI:** `MapFeature` module — the `MKMapView` wrapper (`NSViewRepresentable` on macOS; `UIViewRepresentable` later) + annotation views are the only platform-specific bits. All native + Liquid Glass.
+- **Platform UI:** `MapFeature` module - the `MKMapView` wrapper (`NSViewRepresentable` on macOS; `UIViewRepresentable` later) + annotation views are the only platform-specific bits. All native + Liquid Glass.
 
 ## Data source
 GPS = decrypted XAttr `Location` (Latitude/Longitude), already surfaced by `PhotoMetadataProvider.metadata(for:)` → `PhotoMetadata.latitude/longitude`. The crawl reuses this seam per photo (no new decode path).

@@ -12,7 +12,7 @@ import GridCore
 
 /// `.serialized`: reads `PhotoDiagnostics.shared` counter deltas, so it must not run in parallel with
 /// other suites that touch the same shared counters.
-@Suite("Perf small pass — counters", .serialized)
+@Suite("Perf small pass - counters", .serialized)
 @MainActor
 struct PerfSmallPassCounterTests {
 

@@ -35,7 +35,7 @@ final class AppModel {
     private(set) var libraryReady = false
 
     /// The launch veil covers the whole window while the app is still preparing the session/library (the
-    /// initial auth check, the backend build, or the first library load) — but NOT once a presentable
+    /// initial auth check, the backend build, or the first library load) - but NOT once a presentable
     /// terminal state is reached (the login screen, a backend error, or a loaded library).
     var isPreparing: Bool {
         switch auth {
@@ -117,7 +117,7 @@ final class AppModel {
         // thumbnail/preview/originals blobs + their account cache key and the streamed video blocks, the
         // encrypted account-data cache, AND the SDK metadata SQLite stores (entities + timeline). The
         // Settings "Delete Offline Cache" button is deliberately NARROWER (cached media only, keeps the key,
-        // stays signed in) — do not converge the two.
+        // stays signed in) - do not converge the two.
         OfflineLibraryManager.shared.purgeOnSignOut()
         if case .signedIn(let session) = auth {
             AccountDataCache.clear(uid: session.uid)

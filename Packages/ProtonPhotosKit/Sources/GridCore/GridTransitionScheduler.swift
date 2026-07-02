@@ -39,7 +39,7 @@ package enum GridTransitionScheduler {
                                        focusID: Int, focusMinFrames: Int) -> [Int: Int] {
         let n = components.count
         guard n > 0 else { return [:] }
-        if budget < n {  // degenerate: cannot give 1 each — area-weighted (caller will fall back)
+        if budget < n {  // degenerate: cannot give 1 each - area-weighted (caller will fall back)
             let total = max(1e-9, components.reduce(0) { $0 + $1.visibleAreaFraction })
             var a: [Int: Int] = [:]
             for c in components { a[c.id] = max(0, Int((Double(budget) * c.visibleAreaFraction / total).rounded())) }

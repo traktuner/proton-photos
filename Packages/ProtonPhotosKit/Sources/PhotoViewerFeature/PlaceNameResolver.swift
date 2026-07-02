@@ -1,7 +1,7 @@
 import Foundation
 import MapKit
 
-/// Reverse-geocodes a photo's GPS coordinate into a human place name for the viewer's top bar — the
+/// Reverse-geocodes a photo's GPS coordinate into a human place name for the viewer's top bar - the
 /// Apple-Photos "named location" headline (e.g. *Schlosspark Atzenbrugg*). Pure coordinate→name
 /// reverse geocoding needs no location authorization. Results are cached per (rounded) coordinate so
 /// re-viewing nearby photos is instant and we stay well under reverse-geocoding rate limits.
@@ -47,7 +47,7 @@ actor PlaceNameResolver {
         return address?.shortAddress ?? address?.fullAddress
     }
 
-    /// ~11 m precision — coalesces photos taken at essentially the same spot into one geocode.
+    /// ~11 m precision - coalesces photos taken at essentially the same spot into one geocode.
     private static func cacheKey(_ latitude: Double, _ longitude: Double) -> String {
         String(format: "%.4f,%.4f", latitude, longitude)
     }

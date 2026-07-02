@@ -3,14 +3,14 @@ import AlbumsFeature
 import UploadCore
 
 /// Central, honest record of what the wired Proton SDK / HTTP layer can actually do. Logged once at
-/// sign-in for diagnostics — nothing here currently gates UI.
+/// sign-in for diagnostics - nothing here currently gates UI.
 ///
 /// The album + upload sections are NOT hand-rolled here: they reference the same canonical capability
 /// presets the UI gates on (`AlbumCapabilities.httpReadAndCover`, `UploadBackendCapabilities.sdkUploader`),
 /// so the diagnostic can't drift from the real backend. When the SDK gains album APIs (or we implement
 /// album-write crypto), flip the preset and both the gating and the log follow.
 struct SDKCapabilities {
-    // ProtonPhotosClient — present and wrapped by `DriveSDKBridge`.
+    // ProtonPhotosClient - present and wrapped by `DriveSDKBridge`.
     var photosClientAvailable = true
     var enumerateTimeline = true
     var downloadThumbnails = true

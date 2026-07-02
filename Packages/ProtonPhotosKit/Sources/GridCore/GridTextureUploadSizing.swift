@@ -2,10 +2,10 @@ import CoreGraphics
 
 /// Pure, platform-neutral policy for the pixel side a grid thumbnail should be uploaded at.
 ///
-/// The Metal texture cache is level-blind on its own — it clamps every upload to a single `maxTexturePixels`
+/// The Metal texture cache is level-blind on its own - it clamps every upload to a single `maxTexturePixels`
 /// cap. That over-supplies texels for the dense overview levels (a 30-column tile is physically ~39–94 px yet
 /// still uploaded at 320 px = 11–33× the texels it can ever display), wasting GPU memory and upload bandwidth
-/// and — with no mipmaps — adding minification shimmer. This helper derives the *effective* cap for the
+/// and - with no mipmaps - adding minification shimmer. This helper derives the *effective* cap for the
 /// on-screen slot so dense levels upload small textures while sparse levels saturate at the platform cap and
 /// keep full quality.
 ///
@@ -17,7 +17,7 @@ package enum GridTextureUploadSizing {
     /// The upload pixel side for a slot: its native device pixels (`slotSidePoints × backingScale`) times a
     /// small supersampling `headroom`, clamped to `[floor, cap]`.
     ///
-    /// - Dense (small-slot) levels resolve well below `cap` — the memory/bandwidth win.
+    /// - Dense (small-slot) levels resolve well below `cap` - the memory/bandwidth win.
     /// - Sparse (large-slot) levels saturate at `cap`, so they upload exactly as before (no quality change).
     /// - `headroom` (≥ 1) trades a little VRAM for less minification shimmer on the mip-less grid textures.
     /// - `floor` guarantees a minimum crispness for physically tiny dense-overview slots.

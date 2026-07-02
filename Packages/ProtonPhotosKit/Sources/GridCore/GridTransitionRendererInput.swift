@@ -4,7 +4,7 @@
 // SOURCE-OVER blend (sourceRGB=.one, destRGB=.oneMinusSourceAlpha; MetalGridRenderer).
 //
 // A source↔target (mixed) dissolve must NOT draw both occupants translucent over the background:
-// under source-over that yields  tgt·lp + src·(1-lp)² + bg·lp·(1-lp)  — background bleed-through and an
+// under source-over that yields  tgt·lp + src·(1-lp)² + bg·lp·(1-lp)  - background bleed-through and an
 // under-weighted source (≈25% bg at lp=0.5), which is NOT the validated full-slot mix. Instead the
 // SOURCE occupant is the OPAQUE BASE (alpha 1, drawn first) and the TARGET is drawn OVER it at alpha
 // = lp, so source-over composites to the exact full-slot mix  src·(1-lp) + tgt·lp  with no bg bleed.
@@ -43,7 +43,7 @@ package enum GridTransitionRendererInput {
             case .dissolve:
                 // Mixed (source AND target present) ⇒ source is the opaque base, target over it at lp
                 // (source-over ⇒ src·(1-lp)+tgt·lp, no bg bleed). A single-sided dissolve to/from the
-                // background keeps its (1-lp)/lp weight — it really does fade against the uniform bg.
+                // background keeps its (1-lp)/lp weight - it really does fade against the uniform bg.
                 let mixed = slot.sourceIdentity != nil && slot.targetIdentity != nil
                 if let s = slot.sourceIdentity {
                     out.append(.init(index: s, rect: slot.rect, alpha: mixed ? 1.0 : slot.sourceWeight,

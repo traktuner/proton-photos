@@ -9,7 +9,7 @@ import GridCore
 /// committed integer level but differ in COLUMN PHASE. These tests quantify and bound that seam: the anchor's
 /// vertical position must coincide (the scroll is rebased from the anchor), the anchor item must be preserved,
 /// the focus band must stay in the same local neighborhood, and the residual horizontal phase shift must be
-/// bounded — so a regression that jumps to an unrelated neighborhood fails here.
+/// bounded - so a regression that jumps to an unrelated neighborhood fails here.
 @Suite struct GridZoomCommitSeamTests {
     private let viewport = CGSize(width: 1400, height: 900)
     private let width: CGFloat = 1400
@@ -30,7 +30,7 @@ import GridCore
         return (e, tx)
     }
 
-    // MARK: 1 — TransactionFinalAnchorMatchesSettledAnchorTest
+    // MARK: 1 - TransactionFinalAnchorMatchesSettledAnchorTest
     // The anchor's VERTICAL position coincides exactly at the committed level (the scroll is rebased from the
     // anchor); the horizontal difference is the bounded column-phase shift (≤ one row), never a wild jump.
     @Test func transactionFinalAnchorMatchesSettledAnchor() {
@@ -46,7 +46,7 @@ import GridCore
         }
     }
 
-    // MARK: 2 — TransactionToSettledFocusRowOverlapTest
+    // MARK: 2 - TransactionToSettledFocusRowOverlapTest
     // The final transaction focus row and the settled focus band overlap highly around the anchor (the anchor
     // itself is always in both); not required to be 100% when the phase differs, but clearly the same locality.
     @Test func transactionToSettledFocusRowOverlap() {
@@ -60,7 +60,7 @@ import GridCore
         }
     }
 
-    // MARK: 3 — CommitScrollOffsetRebasedFromAnchorTest
+    // MARK: 3 - CommitScrollOffsetRebasedFromAnchorTest
     // The settled scroll offset is computed from the anchor item + local fraction + target metrics, so the
     // anchor's settled cell lands back under the cursor's viewport Y. It is NOT a reused/stale scroll offset.
     @Test func commitScrollOffsetRebasedFromAnchor() {
@@ -80,7 +80,7 @@ import GridCore
         }
     }
 
-    // MARK: 4 — NoCommitJumpToUnrelatedNeighborhoodTest
+    // MARK: 4 - NoCommitJumpToUnrelatedNeighborhoodTest
     // The visible index sets of the transaction final frame and the settled plan overlap substantially: the
     // commit stays in the same local neighborhood (same photos ±), never a jump to unrelated indices.
     @Test func noCommitJumpToUnrelatedNeighborhood() {
@@ -92,7 +92,7 @@ import GridCore
         }
     }
 
-    // MARK: 5 — ReleaseDoesNotDiscardCursorAnchorTest
+    // MARK: 5 - ReleaseDoesNotDiscardCursorAnchorTest
     // The commit anchor is the item under the CURSOR (captured at gesture start), never a viewport-top / centre
     // fallback. The settled focus band is around the cursor's item, not row 0 of the viewport.
     @Test func releaseDoesNotDiscardCursorAnchor() {
@@ -106,7 +106,7 @@ import GridCore
                 "anchor not visible near the cursor after commit")
     }
 
-    // MARK: 6 — CommitDeltaIsMeasuredTest
+    // MARK: 6 - CommitDeltaIsMeasuredTest
     // The measurement helper returns finite, sane values across the whole ladder and logs the seam so it is
     // never hidden. Also pins the transaction-lattice rect ↔ live-frame rect consistency (seamless bridge start).
     @Test func commitDeltaIsMeasured() {
@@ -118,7 +118,7 @@ import GridCore
             #expect(d.focusRowOverlap >= 0 && d.focusRowOverlap <= 1)
             #expect(d.neighborhoodOverlap >= 0 && d.neighborhoodOverlap <= 1)
             let pitch = e.resolvedMetrics(level: target, width: width).pitch
-            // Phased (cursor-aligned) delta — the post-fix value.
+            // Phased (cursor-aligned) delta - the post-fix value.
             let desiredCol = e.cursorColumn(viewportX: tx.anchorViewportPoint.x, level: target, width: width)
             let phase = e.columnPhase(forItem: anchor, targetColumn: desiredCol, level: target, width: width)
             let phased = e.commitDelta(transaction: tx, targetLevel: target, viewportSize: viewport, columnPhase: phase)

@@ -128,7 +128,7 @@ struct ThumbnailCrawlYieldTests {
         cache.configure(accountUID: "acct-A")
         let uid = PhotoUID(volumeID: "v", nodeID: "corrupt")
         // A blob that EXISTS on disk but can't decrypt (as if left by a prior launch / wrong key). Written
-        // DIRECTLY to the on-disk path — not via storeToDisk — so it is NOT pre-marked decryptable.
+        // DIRECTLY to the on-disk path - not via storeToDisk - so it is NOT pre-marked decryptable.
         try Data(repeating: 0x09, count: 64).write(to: cache.diskURL(for: uid))
         #expect(cache.has(uid) == true)   // file exists → the old `has()` would have skipped the network
 

@@ -41,7 +41,7 @@ public struct ProtonAPIConfig: Sendable {
     }
 }
 
-/// Implements Proton's "sign in on the web" (session fork) flow — the same mechanism the
+/// Implements Proton's "sign in on the web" (session fork) flow - the same mechanism the
 /// official Drive CLI uses. No password/2FA UI is needed: the user authenticates in their
 /// browser and the resulting child session is pushed back to us.
 public actor ProtonForkAuthenticator {

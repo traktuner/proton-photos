@@ -33,7 +33,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             .appendingPathComponent("ProtonPhotos/sdk", isDirectory: true)
     }
 
-    /// macOS desktop SQLite tuning for the app-owned library DB — adapter-injected, mirroring the
+    /// macOS desktop SQLite tuning for the app-owned library DB - adapter-injected, mirroring the
     /// `GridTextureBudget` pattern. 256MB mmap + 8MiB page cache are fine on the Mac; iOS/iPadOS
     /// adapters must build their own conservative policy instead of inheriting these numbers. The WAL
     /// cap is still bounded so large refreshes cannot leave a permanently inflated sidecar behind.
@@ -46,7 +46,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     )
 
     /// Full sign-out / master-reset: erase the SDK metadata SQLite stores for `uid` (security
-    /// follow-up #2 — non-secret node metadata that must not survive sign-out) AND the app-owned
+    /// follow-up #2 - non-secret node metadata that must not survive sign-out) AND the app-owned
     /// `library-v1.sqlite` account directory. The encrypted caches, video blocks, and account-data
     /// cache are erased by their own paths; this covers the remaining account-tied data at rest.
     /// Wired from `AppModel.signOut`.
@@ -66,11 +66,11 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         let account: AccountData
         do {
             account = try await driveSession.fetchAccountData()
-            DebugLog.log("bridge: account ok — \(account.addresses.count) addresses, \(account.userKeys.count) user keys")
+            DebugLog.log("bridge: account ok - \(account.addresses.count) addresses, \(account.userKeys.count) user keys")
         } catch {
             guard let cached = driveSession.cachedAccountData() else { throw error }
             account = cached
-            DebugLog.log("bridge: OFFLINE — using cached account data (\(cached.addresses.count) addresses)")
+            DebugLog.log("bridge: OFFLINE - using cached account data (\(cached.addresses.count) addresses)")
         }
         let accountClient = try SDKAccountClientBuilder.build(account: account, keyPassword: session.keyPassword)
         DebugLog.log("bridge: account client built (\(accountClient.unlockedByKeyID.count) unlocked keys)")
@@ -87,7 +87,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         }
         // Persisted timeline (per account) for instant startup. DB v1 reset: the store lives in
         // PhotosCore at Application Support/ProtonPhotos/<uid>/library-v1.sqlite (backup-excluded,
-        // re-derivable). The superseded Caches-dir timeline-v3 store is deleted best-effort — no
+        // re-derivable). The superseded Caches-dir timeline-v3 store is deleted best-effort - no
         // data migration; the next refresh repopulates the new store.
         let libraryDirectory = LibraryDatabaseLocation.prepareAccountDirectory(uid: session.uid)
         self.timelineStore = TimelineMetadataStore(
@@ -99,7 +99,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         SDKMetadataStore.purgeOrphanedLegacyTimelineStores(in: caches)
 
         // SECURITY: the SDK secret cache holds DECRYPTED Proton key material (share/node/content keys). The
-        // SDK writes it UNENCRYPTED unless a `secretCacheEncryptionKey` is supplied — and the ProtonPhotos
+        // SDK writes it UNENCRYPTED unless a `secretCacheEncryptionKey` is supplied - and the ProtonPhotos
         // client create-path doesn't forward that key to the native core anyway. So we keep secrets
         // IN-MEMORY only (omit `secretCachePath`): nothing decryptable is persisted at rest. Cost: the
         // secret cache is re-derived on each cold start. `entityCachePath` (non-secret node metadata) stays
@@ -126,12 +126,12 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     func loadTimeline() async throws -> [TimelineSection] {
         do {
             let root = try await resolvePhotosRoot()
-            DebugLog.log("timeline: photos root \(root.volumeID.prefix(8))…/\(root.nodeID.prefix(8))… — enumerating")
-            // Loading path stays on the SDK's enumerateTimeline — it's SQLite-cached and fast. We
+            DebugLog.log("timeline: photos root \(root.volumeID.prefix(8))…/\(root.nodeID.prefix(8))… - enumerating")
+            // Loading path stays on the SDK's enumerateTimeline - it's SQLite-cached and fast. We
             // deliberately do NOT swap in the direct photos-listing endpoint here: that would do a
             // full uncached re-pagination every launch (a performance regression). The Live Photo
             // metadata (Tags/RelatedPhotos) the SDK currently drops will arrive natively once the
-            // SDK reaches feature parity — PhotoItem already carries `isLivePhoto`/`relatedVideoID`,
+            // SDK reaches feature parity - PhotoItem already carries `isLivePhoto`/`relatedVideoID`,
             // so that switch is zero-effort. `DriveSession.fetchPhotosList` stays available as the
             // ready fallback for when we want to enrich without waiting for the SDK.
             let items = try await photosClient.enumerateTimeline(in: root)
@@ -143,11 +143,11 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                 DebugLog.log("timeline: video tag enrichment found \(videoNodeIDs.count) videos")
             } catch {
                 videoNodeIDs = []
-                DebugLog.log("timeline: video tag enrichment skipped — \(error)")
+                DebugLog.log("timeline: video tag enrichment skipped - \(error)")
             }
             // Live Photos (server tag 3): the SDK's `enumerateTimeline` drops Tags/RelatedPhotos, so "Alle Fotos"
             // items would never be marked Live. Enrich here via the REST photos-listing (same pattern as the
-            // video tag-2 enrichment above) so the LIVE badge + motion work everywhere — not just the Live-Photos
+            // video tag-2 enrichment above) so the LIVE badge + motion work everywhere - not just the Live-Photos
             // filter. Map each live photo's node → its paired video link.
             let livePhotoVideoIDs: [String: String]
             do {
@@ -157,7 +157,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                 DebugLog.log("timeline: live-photo tag enrichment found \(livePhotoVideoIDs.count) live photos")
             } catch {
                 livePhotoVideoIDs = [:]
-                DebugLog.log("timeline: live-photo tag enrichment skipped — \(error)")
+                DebugLog.log("timeline: live-photo tag enrichment skipped - \(error)")
             }
             let burstMemberIDs: [String: [String]]
             do {
@@ -166,7 +166,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                 DebugLog.log("timeline: burst tag enrichment found \(burstMemberIDs.count) burst members")
             } catch {
                 burstMemberIDs = [:]
-                DebugLog.log("timeline: burst tag enrichment skipped — \(error)")
+                DebugLog.log("timeline: burst tag enrichment skipped - \(error)")
             }
             let sections = Self.group(
                 items,
@@ -177,12 +177,12 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             writeTimelineCache(sections)
             return sections
         } catch {
-            DebugLog.log("timeline: FAILED — \(error)")
+            DebugLog.log("timeline: FAILED - \(error)")
             throw error
         }
     }
 
-    /// Last-known timeline from disk, for instant startup (no spinner). Reads from SQLite — then
+    /// Last-known timeline from disk, for instant startup (no spinner). Reads from SQLite - then
     /// `loadTimeline()` refreshes in the background.
     func cachedTimeline() -> [TimelineSection]? {
         guard let items = timelineStore?.load(), !items.isEmpty else { return nil }
@@ -194,7 +194,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         guard let store = timelineStore else { return }
         let result = store.save(sections.flatMap(\.items))
         if result.skippedUnchanged {
-            DebugLog.log("timeline: cache unchanged — save skipped (digest match)")
+            DebugLog.log("timeline: cache unchanged - save skipped (digest match)")
         } else {
             DebugLog.log("timeline: cache saved gen=\(result.generation) upserts=\(result.upsertedRows) swept=\(result.sweptRows) ok=\(result.succeeded)")
         }
@@ -202,7 +202,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
 
     // MARK: - LibraryStatsProvider
 
-    /// Rows persisted in the local SQLite timeline store — surfaced as "metadata rows" in Settings.
+    /// Rows persisted in the local SQLite timeline store - surfaced as "metadata rows" in Settings.
     func metadataRowCount() async -> Int {
         timelineStore?.count() ?? 0
     }
@@ -237,7 +237,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                             failures.recordItem(uid, reason: error.localizedDescription)
                         }
                     case .success(nil):
-                        break   // yield without an attributable item (unparseable uid) — nothing to record
+                        break   // yield without an attributable item (unparseable uid) - nothing to record
                     case let .failure(error):
                         failures.recordStream(error.localizedDescription)
                     }
@@ -490,13 +490,13 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                                  relatedVideoID: relatedVideo,
                                  tags: tags,
                                  burstMemberIDs: burstMembers) }
-            // Ascending (oldest first): oldest at the top, newest at the BOTTOM — like Apple Photos.
+            // Ascending (oldest first): oldest at the top, newest at the BOTTOM - like Apple Photos.
             // The grid opens scrolled to the bottom so the newest photos are shown first. The
             // comparator is the canonical (t, vol, node) timeline order, matching the DB index, so
             // equal-second captures keep a stable position across refreshes and relaunches.
             .sorted(by: TimelineOrder.areInIncreasingOrder)
 
-        // ONE continuous section — no per-day/month breaks. Apple's "All Photos" is a single
+        // ONE continuous section - no per-day/month breaks. Apple's "All Photos" is a single
         // uninterrupted justified run, which also keeps pinch-zoom smooth (no divider lines to
         // disturb the re-justify) and makes thumbnail sizing consistent across the whole library.
         return [TimelineSection(id: "all", date: photos.first?.captureTime ?? .distantPast, title: "", items: photos)]

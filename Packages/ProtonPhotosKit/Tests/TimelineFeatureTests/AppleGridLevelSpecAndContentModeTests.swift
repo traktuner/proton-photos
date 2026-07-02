@@ -45,7 +45,7 @@ import TimelineCore
         #expect(engine().levelCount == 6)
     }
 
-    // 2 — FIXED-COLUMNS, WIDTH-FILLING: a level FILLS the width at every width (no trailing gutter); the COLUMN
+    // 2 - FIXED-COLUMNS, WIDTH-FILLING: a level FILLS the width at every width (no trailing gutter); the COLUMN
     // COUNT is CONSTANT (held at nominalColumns) and the tile SCALES with width (resize = scale, never reflow).
     // At the calibration width it reproduces nominalColumns.
     @Test func levelSpecsFillWidthFixedColumns() {
@@ -74,7 +74,7 @@ import TimelineCore
         }
     }
 
-    // 4 — gaps are defined (≥0) and monotonic non-increasing as density rises.
+    // 4 - gaps are defined (≥0) and monotonic non-increasing as density rises.
     @Test func levelGapsAreDefinedAndMonotonicOrIntentional() {
         for s in specs { #expect(s.gap >= 0) }
         for i in 1 ..< specs.count { #expect(specs[i].gap <= specs[i - 1].gap, "gap increased at L\(i)") }
@@ -195,7 +195,7 @@ import TimelineCore
         }
     }
 
-    // 11 — slotRect is mode-independent (the engine never sees a content mode): same slot, fit DIFFERS by mode.
+    // 11 - slotRect is mode-independent (the engine never sees a content mode): same slot, fit DIFFERS by mode.
     @Test func contentModeDoesNotChangeSlotRect() {
         let e = engine()
         let s1 = e.slotRect(flatIndex: 137, level: 2, width: width)!
@@ -207,7 +207,7 @@ import TimelineCore
         #expect(contained(a.contentRect, s1) && contained(b.contentRect, s1), "both fits stay inside the unchanged slot")
     }
 
-    // 12 — hit testing is mode-independent (engine.hitTest takes no content mode).
+    // 12 - hit testing is mode-independent (engine.hitTest takes no content mode).
     @Test func contentModeDoesNotChangeHitTesting() {
         let e = engine()
         let p = CGPoint(x: 430, y: 5123)
@@ -217,7 +217,7 @@ import TimelineCore
         #expect(!source("SquareTileGridEngine.swift").contains("displayMode"), "engine geometry must not take a displayMode")
     }
 
-    // 13 — visible slots are mode-independent.
+    // 13 - visible slots are mode-independent.
     @Test func contentModeDoesNotChangeVisibleSlots() {
         let e = engine()
         let plan1 = e.framePlan(level: 2, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: 4000), overscan: 0)
@@ -225,14 +225,14 @@ import TimelineCore
         #expect(plan1.visibleSlots == plan2.visibleSlots)
     }
 
-    // 14 — content size is mode-independent.
+    // 14 - content size is mode-independent.
     @Test func contentModeDoesNotChangeContentSize() {
         let e = engine()
         #expect(e.contentSize(level: 2, width: width) == e.contentSize(level: 2, width: width))
         #expect(e.contentSize(level: 4, width: width) == e.contentSize(level: 4, width: width))
     }
 
-    // 15 — a WIDE (16:9 video) aspectFit letterboxes inside the SAME square slot; squareFill fills it.
+    // 15 - a WIDE (16:9 video) aspectFit letterboxes inside the SAME square slot; squareFill fills it.
     @Test func wideVideoAspectFitDoesNotChangeOuterSlot() {
         let s = slot()
         let fit = TileContentFitter.fit(slotRect: s, mediaAspect: 16.0 / 9.0, displayMode: .aspectFitInsideSquare)
@@ -240,10 +240,10 @@ import TimelineCore
         #expect(fit.contentRect.height < s.height - eps, "wide media must letterbox (shorter than the square)")
         #expect(abs(fit.contentRect.width - s.width) < eps, "wide media spans the full square width")
         let fill = TileContentFitter.fit(slotRect: s, mediaAspect: 16.0 / 9.0, displayMode: .squareFillCrop)
-        #expect(fill.contentRect.equalTo(s), "squareFill keeps the slot square — outer slot unchanged")
+        #expect(fill.contentRect.equalTo(s), "squareFill keeps the slot square - outer slot unchanged")
     }
 
-    // 16 — a PORTRAIT (9:16) aspectFit pillarboxes inside the SAME square slot.
+    // 16 - a PORTRAIT (9:16) aspectFit pillarboxes inside the SAME square slot.
     @Test func portraitAspectFitDoesNotChangeOuterSlot() {
         let s = slot()
         let fit = TileContentFitter.fit(slotRect: s, mediaAspect: 9.0 / 16.0, displayMode: .aspectFitInsideSquare)
@@ -262,7 +262,7 @@ import TimelineCore
         for level in [4, 5] { #expect(!e.contentModeToggleAvailable(level: level)) }
     }
 
-    // 18 — toggling switches ONLY the fitter mode; the engine geometry is byte-identical.
+    // 18 - toggling switches ONLY the fitter mode; the engine geometry is byte-identical.
     @Test func aspectSquareToggleChangesOnlyTileContentFitterMode() {
         let e = engine()
         let before = e.framePlan(level: 1, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: 3000), overscan: 0)
@@ -278,7 +278,7 @@ import TimelineCore
                 != TileContentFitter.fit(slotRect: s, mediaAspect: 1.7, displayMode: modeB).contentRect)
     }
 
-    // 19 — the anchor item under a point is mode-independent (anchorItem takes no content mode).
+    // 19 - the anchor item under a point is mode-independent (anchorItem takes no content mode).
     @Test func aspectSquareTogglePreservesAnchorItem() {
         let e = engine()
         let p = CGPoint(x: 512, y: 6200)
@@ -287,7 +287,7 @@ import TimelineCore
         #expect(a1 != nil && a1 == a2)
     }
 
-    // 20 — overview levels force squareFillCrop even when the user prefers aspectFit.
+    // 20 - overview levels force squareFillCrop even when the user prefers aspectFit.
     @Test func overviewLevelsForceSquareFillCrop() {
         let e = engine()
         for level in [4, 5] {
@@ -296,7 +296,7 @@ import TimelineCore
         }
     }
 
-    // 21 — the normal-level preference is REMEMBERED across an overview round-trip (L2 → L4 → L2).
+    // 21 - the normal-level preference is REMEMBERED across an overview round-trip (L2 → L4 → L2).
     @Test func normalLevelContentModePreferenceRestoresAfterReturningFromOverview() {
         let e = engine()
         let preferred = TileContentDisplayMode.aspectFitInsideSquare   // user preference is held, not mutated
@@ -338,7 +338,7 @@ import TimelineCore
         #expect(mainViewSource().contains(".accessibilityLabel("), "the toolbar button must set an accessibility label")
     }
 
-    // 25 — no external/raster/Apple-icon asset: only SF Symbols + CoreGraphics vectors.
+    // 25 - no external/raster/Apple-icon asset: only SF Symbols + CoreGraphics vectors.
     @Test func toolbarAspectToggleDoesNotUseExternalRasterAsset() {
         let model = source("AspectSquareToggleModel.swift")
         #expect(model.contains("systemSymbolName"), "must use SF Symbols")
@@ -366,7 +366,7 @@ import TimelineCore
         }
     }
 
-    // 28 — the renderer composes square slot (engine) + content fit (fitter); it computes NO outer geometry from aspect.
+    // 28 - the renderer composes square slot (engine) + content fit (fitter); it computes NO outer geometry from aspect.
     @Test func rendererDoesNotComputeAspectGeometry() {
         let c = source("MetalGridCoordinator.swift")
         #expect(c.contains("let cell = s.rect"), "the renderer must take the square slot from the engine")
@@ -386,7 +386,7 @@ import TimelineCore
         #expect(source("MetalGridCoordinator.swift").contains("engine.framePlan") || source("MetalGridCoordinator.swift").contains("framePlan("))
     }
 
-    // 30 — content geometry comes only from TileContentFitter, always inside the slot.
+    // 30 - content geometry comes only from TileContentFitter, always inside the slot.
     @Test func tileContentFitterOwnsContentGeometry() {
         let s = slot()
         for mode in TileContentDisplayMode.allCases {
@@ -403,7 +403,7 @@ import TimelineCore
         e.hitTest(contentPoint: CGPoint(x: vp.x, y: vp.y + scrollY), level: level, width: width, columnPhase: phase)?.index
     }
 
-    // 31 — a trackpad pinch still keeps the item under the cursor through commit (6-level engine).
+    // 31 - a trackpad pinch still keeps the item under the cursor through commit (6-level engine).
     @Test func pinchStillAnchorsToCursorItem() {
         let e = engine()
         let cursorVP = CGPoint(x: 430, y: 360); let scrollY: CGFloat = 5000
@@ -425,7 +425,7 @@ import TimelineCore
         }
     }
 
-    // 32 — +/- still anchors at the viewport CENTRE.
+    // 32 - +/- still anchors at the viewport CENTRE.
     @Test func plusMinusStillAnchorsToViewportCenter() {
         let e = engine()
         let center = CGPoint(x: width / 2, y: viewport.height / 2); let scrollY: CGFloat = 5000
@@ -441,7 +441,7 @@ import TimelineCore
         }
     }
 
-    // 33 — changing the content mode must not touch the committed phase / scroll / level.
+    // 33 - changing the content mode must not touch the committed phase / scroll / level.
     @Test func toggleDoesNotBreakCommittedPhase() {
         let e = engine()
         // The engine's phased plan is identical regardless of any content mode (mode is never an input).

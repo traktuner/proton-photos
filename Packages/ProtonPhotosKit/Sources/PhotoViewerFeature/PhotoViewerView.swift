@@ -5,7 +5,7 @@ import PhotosCore
 import DesignSystem
 import PhotoViewerCore
 
-/// `AVPlayerView` that turns a pinch-OUT into the SAME "fly closed" dismiss the still image uses — so a PLAYING
+/// `AVPlayerView` that turns a pinch-OUT into the SAME "fly closed" dismiss the still image uses - so a PLAYING
 /// video can be pinched/swiped shut too (previously the gesture only existed on the image path, so it did nothing
 /// over a video). It only REPORTS progress; the host's shared zoom overlay renders the shrink into the exact grid
 /// cell, identical to the image path.
@@ -39,7 +39,7 @@ private final class DismissableAVPlayerView: AVPlayerView {
 }
 
 /// Native AppKit video view. SwiftUI's `VideoPlayer` crashes on this macOS (a `_AVKit_SwiftUI`
-/// generic-metadata fatalError), and `AVPlayerView` is the better macOS surface anyway — native
+/// generic-metadata fatalError), and `AVPlayerView` is the better macOS surface anyway - native
 /// floating controls, scrubbing, Picture-in-Picture.
 private struct PlayerView: NSViewRepresentable {
     let player: AVPlayer
@@ -74,7 +74,7 @@ private struct PlayerView: NSViewRepresentable {
     }
 }
 
-/// A bare `AVPlayerLayer` (NO controls, NO chrome) for the Live Photo motion clip — it's crossfaded over the
+/// A bare `AVPlayerLayer` (NO controls, NO chrome) for the Live Photo motion clip - it's crossfaded over the
 /// still by the SwiftUI `.opacity`, so there is no player overlay and no black load gap, just the "ghost" motion.
 private struct MotionPlayerLayerView: NSViewRepresentable {
     let player: AVPlayer
@@ -125,12 +125,12 @@ public struct PhotoViewerView: View {
     /// GeometryReader child value). Used ONLY to clamp the fixed-width info inspector; the media content fills
     /// the remaining width flexibly so it never depends on a not-yet-measured value. Keeping the `model`-reading
     /// body OFF a GeometryReader child value is what avoids the Swift-6 `swift_task_isCurrentExecutor`
-    /// false-positive SIGSEGV (#76804) on SwiftUI's `syncMainIfReferences` update path — see PhotoViewerModel.
+    /// false-positive SIGSEGV (#76804) on SwiftUI's `syncMainIfReferences` update path - see PhotoViewerModel.
     @State private var containerWidth: CGFloat = 0
     private let mediaTransition = ViewerMediaTransitionStyle.standard
 
     /// Measured size of the media (content) area, used to place the LIVE badge on the displayed image's
-    /// top-left CORNER — the image is aspect-fit (letterboxed), so a portrait photo in a wide window must show
+    /// top-left CORNER - the image is aspect-fit (letterboxed), so a portrait photo in a wide window must show
     /// the badge inset to the image edge, not at the window edge.
     @State private var contentSize: CGSize = .zero
 
@@ -176,11 +176,11 @@ public struct PhotoViewerView: View {
 
     /// The media + info inspector. This view does NOT ignore the top safe area: the native window toolbar
     /// is the viewer's opaque top bar, so SwiftUI already lays this region out *below* it. The media is
-    /// laid out in its final frame from the first frame — no extra toolbar offset, no shrink-then-settle,
+    /// laid out in its final frame from the first frame - no extra toolbar offset, no shrink-then-settle,
     /// no black top gap.
     private var viewerBody: some View {
         // The inspector is a FIXED-width panel (clamped to the window) that does NOT change the container width,
-        // so `containerWidth` is independent of whether the inspector is shown — no measurement feedback loop.
+        // so `containerWidth` is independent of whether the inspector is shown - no measurement feedback loop.
         let inspectorWidth = model.showInfo
             ? ViewerChromeLayout.clampedInspectorWidth(in: CGRect(x: 0, y: 0, width: containerWidth, height: 0))
             : 0
@@ -218,7 +218,7 @@ public struct PhotoViewerView: View {
         // `.onGeometryChange` runs its `action` as an after-layout EFFECT (onChange-style), NOT as a
         // `GeometryReader.Child` attribute value. Its `transform` reads ONLY `proxy.size.width` and returns a plain
         // `CGFloat` (no `model`, no reference capture), so the tracked value never routes through
-        // `Attribute.syncMainIfReferences` — the path that hits the #76804 executor-equality SIGSEGV. macOS 13+ for
+        // `Attribute.syncMainIfReferences` - the path that hits the #76804 executor-equality SIGSEGV. macOS 13+ for
         // this single-value variant, so unconditionally available on the macOS 26 target (no `#available` gate).
         .onGeometryChange(for: CGFloat.self) { proxy in
             proxy.size.width
@@ -276,7 +276,7 @@ public struct PhotoViewerView: View {
         }
     }
 
-    /// Apple-style LIVE indicator, top-left in full view. Hovering it plays the motion clip with sound (instant —
+    /// Apple-style LIVE indicator, top-left in full view. Hovering it plays the motion clip with sound (instant -
     /// it's preloaded); moving off stops it. Native Liquid Glass (a custom view OUTSIDE the toolbar, so
     /// `.glassEffect` applies). Force-click-and-hold anywhere on the photo plays it too; releasing stops it
     /// (see `onForceClick` / `onForceClickEnded`).
@@ -380,7 +380,7 @@ public struct PhotoViewerView: View {
     }
 
     /// Loading / error affordance for the media (image original or video). The cardinal rule: this is
-    /// driven entirely by `videoState`, so the UI is always in exactly one of — preparing, buffering
+    /// driven entirely by `videoState`, so the UI is always in exactly one of - preparing, buffering
     /// (with a real reason), playing (no overlay), or failed (readable error + Retry). There is no
     /// branch that can leave a spinner up forever.
     @ViewBuilder private var loadingOverlay: some View {

@@ -5,7 +5,7 @@ public enum GridClickType: Sendable, Equatable {
     case double
 }
 
-/// Modifier keys held during a grid click — drives whether a single click replaces, toggles, or
+/// Modifier keys held during a grid click - drives whether a single click replaces, toggles, or
 /// range-extends the selection (Apple-Photos behavior).
 public struct GridClickModifiers: OptionSet, Sendable {
     public let rawValue: Int

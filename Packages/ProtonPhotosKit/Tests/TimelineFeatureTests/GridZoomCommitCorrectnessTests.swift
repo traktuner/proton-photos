@@ -28,7 +28,7 @@ import GridCore
         return (e, tx, desiredCol, phase, scrollY, e.resolvedMetrics(level: target, width: width).pitch)
     }
 
-    // MARK: 1 — CommitDoesNotMoveAnchorAcrossColumnsTest
+    // MARK: 1 - CommitDoesNotMoveAnchorAcrossColumnsTest
     @Test func commitDoesNotMoveAnchorAcrossColumns() {
         for target in [0, 2, 3, 4, 5, 6] {           // dense + sparse targets (the original fly was at dense)
             let s = setup(target: target)
@@ -39,11 +39,11 @@ import GridCore
         }
     }
 
-    // MARK: 2 — CommitBridgeRejectsLargeMatchedIndexMovementTest
+    // MARK: 2 - CommitBridgeRejectsLargeMatchedIndexMovementTest
     @Test func commitBridgeRejectsLargeMatchedIndexMovement() {
         let target = 5
         let s = setup(target: target)
-        // WITHOUT the phase the canonical settled plan is a multi-column mismatch — the bridge must NOT lerp it.
+        // WITHOUT the phase the canonical settled plan is a multi-column mismatch - the bridge must NOT lerp it.
         let canonicalMove = GridZoomCommitBridge.maxMatchedIndexMoveX(transaction: s.tx, engine: s.e, targetLevel: target,
                                                                       viewportSize: viewport, scrollY: s.scrollY, overscan: 0, columnPhase: nil)
         #expect(canonicalMove > s.pitch, "test scenario must actually have a >1-column mismatch without the phase")
@@ -57,13 +57,13 @@ import GridCore
                 "bridge displayed a matched index mid-flight across columns instead of snapping to settled")
     }
 
-    // MARK: 3 — SelectedOrHoveredItemIsZoomAnchorTest
+    // MARK: 3 - SelectedOrHoveredItemIsZoomAnchorTest
     @Test func selectedOrHoveredItemIsZoomAnchor() {
         let e = SquareTileGridEngine.testRegular(sectionCounts: [count])
         let hoveredItem = 2500
         let rect = e.slotRect(flatIndex: hoveredItem, level: sourceLevel, width: width)!
         let hover = CGPoint(x: rect.midX, y: rect.midY)
-        // The engine anchor resolves to the item UNDER the cursor — not top, not centre, not a selected item.
+        // The engine anchor resolves to the item UNDER the cursor - not top, not centre, not a selected item.
         let a = e.anchorItem(nearContentPoint: hover, level: sourceLevel, width: width)
         #expect(a?.flatIndex == hoveredItem, "anchor must be the hovered item, got \(a?.flatIndex as Any)")
         let tx = e.beginZoomTransaction(cursorContentPoint: hover, viewportPoint: CGPoint(x: 200, y: 300), level: sourceLevel, width: width)!
@@ -74,7 +74,7 @@ import GridCore
         #expect(a2?.flatIndex == 80)
     }
 
-    // MARK: 4 — FocusRowCommitPhasePreservedTest
+    // MARK: 4 - FocusRowCommitPhasePreservedTest
     @Test func focusRowCommitPhasePreserved() {
         for target in [1, 2, 3, 4, 5] {
             let s = setup(target: target)
@@ -86,20 +86,20 @@ import GridCore
         }
     }
 
-    // MARK: 5 — SettledFrameUsesCommittedPhaseImmediatelyTest
+    // MARK: 5 - SettledFrameUsesCommittedPhaseImmediatelyTest
     @Test func settledFrameUsesCommittedPhaseImmediately() {
         let target = 5
         let s = setup(target: target)
         // The phased settled frame (what the coordinator renders post-commit) places the anchor in the cursor
-        // column; the canonical (snap-back) frame would NOT — proving the committed phase is used immediately.
+        // column; the canonical (snap-back) frame would NOT - proving the committed phase is used immediately.
         let phased = s.e.framePlan(level: target, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: s.scrollY), overscan: 0, columnPhase: s.phase)
         #expect(phased.visibleSlots.first { $0.index == anchor }?.column == s.desiredCol)
         let canonical = s.e.framePlan(level: target, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: s.scrollY), overscan: 0, columnPhase: nil)
         #expect(canonical.visibleSlots.first { $0.index == anchor }?.column != s.desiredCol,
-                "if the settled frame snapped back to canonical phase, the anchor would move — it must not")
+                "if the settled frame snapped back to canonical phase, the anchor would move - it must not")
     }
 
-    // MARK: 6 — NoMultiColumnMovementInCommitBridgeTest
+    // MARK: 6 - NoMultiColumnMovementInCommitBridgeTest
     @Test func noMultiColumnMovementInCommitBridge() {
         for target in [0, 2, 3, 5, 6] {
             let s = setup(target: target)
@@ -116,7 +116,7 @@ import GridCore
         }
     }
 
-    // MARK: 7 — BridgeOnlyHandlesResidualSubCellDeltaTest
+    // MARK: 7 - BridgeOnlyHandlesResidualSubCellDeltaTest
     @Test func bridgeOnlyHandlesResidualSubCellDelta() {
         for target in [0, 2, 3, 5, 6] {
             let s = setup(target: target)

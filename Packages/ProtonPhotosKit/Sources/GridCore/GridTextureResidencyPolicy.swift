@@ -3,7 +3,7 @@
 /// and eviction order.
 ///
 /// Residency is bounded by a hybrid budget: `capacity` (texture count) and `costCapacity` (an opaque cost
-/// unit — the Metal cache supplies real texture bytes). Both are enforced structurally: `canAdmitUpload`
+/// unit - the Metal cache supplies real texture bytes). Both are enforced structurally: `canAdmitUpload`
 /// refuses uploads that could not fit even after evicting every non-pinned resident, and `evictToBudget`
 /// evicts least-recently-used non-pinned entries until BOTH budgets are satisfied. Pinned entries are never
 /// evicted, so admission is what keeps the pinned working set from silently overflowing the budget.
@@ -28,7 +28,7 @@ package struct GridTextureResidencyPolicy<ID: Hashable & Sendable>: Equatable {
     private var tick = 0
     package private(set) var evictionCount = 0
     package private(set) var residentCost = 0
-    /// Cost/count of resident entries that are pinned this frame — the floor eviction can never go below.
+    /// Cost/count of resident entries that are pinned this frame - the floor eviction can never go below.
     package private(set) var pinnedResidentCost = 0
     package private(set) var pinnedResidentCount = 0
 
@@ -182,7 +182,7 @@ package struct GridTextureResidencyPolicy<ID: Hashable & Sendable>: Equatable {
                 }
             }
 
-            guard !candidates.isEmpty else { break }   // only pinned residents remain — nothing evictable
+            guard !candidates.isEmpty else { break }   // only pinned residents remain - nothing evictable
             let selectionExhaustedNonPinned = candidates.count < evictionsNeeded
             candidates.sort { $0.tick < $1.tick }
             for candidate in candidates {

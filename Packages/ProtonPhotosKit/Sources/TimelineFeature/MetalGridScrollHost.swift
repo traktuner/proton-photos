@@ -6,7 +6,7 @@ import MetalGridTextureAppKitAdapter
 import TimelineCore
 
 /// The one-shot viewport policy a data-source / route switch hands the host, consumed by the host's
-/// layout/content-size path only after layout geometry is valid — never as an immediate scroll from SwiftUI.
+/// layout/content-size path only after layout geometry is valid - never as an immediate scroll from SwiftUI.
 ///   - `.preserve`: keep the current scroll position (the default for incremental data updates).
 ///   - `.newest`: place the viewport at the newest (bottom) end exactly once (a route's first visit / launch).
 ///   - `.restore(anchor)`: re-pin a remembered photo anchor (returning to a previously-visited route so it
@@ -41,7 +41,7 @@ final class MetalGridScrollHost: NSView {
     /// Production click routing (content point, click count, modifiers).
     var onCellClick: ((CGPoint, Int, GridClickModifiers) -> Void)?
     /// Marquee (drag-rectangle) selection routing. `onMarqueeChanged` carries the rect in LAYOUT (engine) space
-    /// — the host already removes the leading-obstruction inset, exactly like `onCellClick`.
+    /// - the host already removes the leading-obstruction inset, exactly like `onCellClick`.
     var onMarqueeBegan: ((GridClickModifiers) -> Void)?
     var onMarqueeChanged: ((CGRect) -> Void)?
     var onMarqueeEnded: (() -> Void)?
@@ -50,14 +50,14 @@ final class MetalGridScrollHost: NSView {
     private let marqueeView = MetalGridMarqueeView()
     /// Fired on any viewport change (scroll / resize / level) so overlays (month labels, a11y) reposition.
     var onViewportChanged: (() -> Void)?
-    /// The level the live pinch settled on — so the SwiftUI `level` binding stays in sync after a commit.
+    /// The level the live pinch settled on - so the SwiftUI `level` binding stays in sync after a commit.
     var onZoomCommit: ((Int) -> Void)?
 
     /// The pre-commit level whose lingering SwiftUI `@Binding level` echo must be ignored after a host-led
     /// commit. A pinch advances `coordinator.level` to the settled level and pushes it to the binding; until
     /// SwiftUI propagates that write, an `updateNSView` pass driven by some OTHER coincident parent-state change
     /// can deliver the stale pre-commit value and (via the legacy reconciliation) re-issue a viewport-centre
-    /// zoom — jumping a different photo under the cursor. Armed at the commit sites only when the level actually
+    /// zoom - jumping a different photo under the cursor. Armed at the commit sites only when the level actually
     /// changed; consumed/cleared by `reconcileLevelBinding`. nil = no host-led commit awaiting binding sync.
     /// See `LevelBindingReconciler`.
     private var pendingLevelEcho: Int?
@@ -78,7 +78,7 @@ final class MetalGridScrollHost: NSView {
     /// The window's translucent toolbar height, plumbed from `MainView`. Mirrored to the coordinator/engine so the
     /// first row rests below the toolbar (the engine's `contentHeight` grows by it). Re-lays content unless a
     /// resize/sidebar/zoom presentation is mid-flight (those re-apply content size on their own settle). Set once
-    /// at open and effectively constant thereafter, so a plain relayout is enough — no anchor gymnastics.
+    /// at open and effectively constant thereafter, so a plain relayout is enough - no anchor gymnastics.
     var topBarInset: CGFloat = 0 {
         didSet {
             guard abs(topBarInset - oldValue) > 0.5 else { return }
@@ -103,19 +103,19 @@ final class MetalGridScrollHost: NSView {
     /// `applyContentSize` that runs with VALID layout geometry (in a window, content width + height + clip
     /// height all valid) places the viewport at the newest end exactly once, then clears the policy back to
     /// `.preserve` and leaves `stickToBottom == false` so the user scrolls freely. If geometry isn't valid yet
-    /// (e.g. the host was just recreated and not laid out), the policy STAYS pending — it is never consumed
+    /// (e.g. the host was just recreated and not laid out), the policy STAYS pending - it is never consumed
     /// early, and host recreation can't swallow it. NOT an immediate scroll from SwiftUI.
     private var pendingInitialViewport: GridInitialViewport = .preserve
 
-    /// The viewport size at the previous `layout()` — used to detect a window/sidebar resize and rebase the
+    /// The viewport size at the previous `layout()` - used to detect a window/sidebar resize and rebase the
     /// scroll so the SAME logical region stays visible (instead of reusing the raw scrollY after slotSide
     /// changes). `.zero` until the first layout.
-    /// The grid viewport's frame in SCREEN coords (y-up) at the previous `layout()` — lets the engine detect
+    /// The grid viewport's frame in SCREEN coords (y-up) at the previous `layout()` - lets the engine detect
     /// WHICH edge moved (window resize or sidebar) so the stationary edge holds the anchor and the moving edge
     /// clips/reveals. `.zero` until the first layout with a window.
     private var lastViewportScreenFrame: NSRect = .zero
 
-    /// The viewport screen frame captured at the START of the current live WINDOW resize — used for the single
+    /// The viewport screen frame captured at the START of the current live WINDOW resize - used for the single
     /// settle rebase on `didEndLiveResize`. `.zero` outside a live resize.
     private var liveResizeStartFrame: NSRect = .zero
     /// Release-settle (detent-crossing reflow) clock: the tiles fly from the scaled frame to the settled layout.
@@ -132,7 +132,7 @@ final class MetalGridScrollHost: NSView {
 
     // V3.9 CONTINUOUS MULTI-LEVEL LIVE-PINCH SCRUB DRIVER (single-presentation-lattice). When the first
     // resolved direction is an eligible in-band step, the pinch scrubs the V3.7 plan CONTINUOUSLY across
-    // detents via this pure driver (rebuilding the segment plan as the finger crosses each detent —
+    // detents via this pure driver (rebuilding the segment plan as the finger crosses each detent -
     // seam-continuous); otherwise it falls back to the legacy `GridZoomTransaction` reflow.
     private var pinchDriver = PinchLiveZoomDriver()
     /// Per-gesture routing: undecided until the first direction resolves, then lattice (in-band chain) or reflow.
@@ -159,12 +159,12 @@ final class MetalGridScrollHost: NSView {
     private var pinchReflowSettleFrom: CGFloat = 0
     private var pinchReflowSettleStart: CFTimeInterval = 0
     private let pinchReflowSettleDuration: CFTimeInterval = 0.18
-    /// Time of the last trackpad magnify event — arms a brief scroll-suppression grace window so the residual
+    /// Time of the last trackpad magnify event - arms a brief scroll-suppression grace window so the residual
     /// finger drift after a pinch (esp. pushing past the largest stage) can't leak into a wild scroll.
     private var lastMagnifyEventTime: CFTimeInterval = 0
     /// SCROLL LOCK: the scroll origin to hold while a pinch (or its grace) is active. Even if a scrollWheel
     /// leaks past both interception points (macOS responsive-scrolling / gesture disambiguation at the
-    /// extreme levels), `scrolled()` snaps the position straight back to this — so the grid CANNOT drift
+    /// extreme levels), `scrolled()` snaps the position straight back to this - so the grid CANNOT drift
     /// during a zoom. nil = not locked.
     private var scrollLockOrigin: CGPoint?
     /// Post-release commit-bridge timing (the geometry-only transaction→settled settle). Driven by the tick.
@@ -190,7 +190,7 @@ final class MetalGridScrollHost: NSView {
     required init?(coder: NSCoder) { fatalError() }
 
     /// Decline events under the translucent sidebar so they reach it (the grid renders full-width but must not
-    /// steal the sidebar's clicks/scroll). Hit-test only — coordinates for events to the RIGHT of the inset are
+    /// steal the sidebar's clicks/scroll). Hit-test only - coordinates for events to the RIGHT of the inset are
     /// unchanged, so click→photo routing and the pinch anchor stay correct.
     override func hitTest(_ point: NSPoint) -> NSView? {
         if eventLeadingInset > 0 {
@@ -200,9 +200,9 @@ final class MetalGridScrollHost: NSView {
     }
 
     private func setUp() {
-        // Metal view (back): ON-DEMAND rendering. It redraws only when `needsDisplay` is set — on scroll
+        // Metal view (back): ON-DEMAND rendering. It redraws only when `needsDisplay` is set - on scroll
         // (the clip-bounds observer below) and while thumbnails are still streaming (the display-link
-        // tick) — and is fully idle otherwise, so it never burns the main thread competing with the app.
+        // tick) - and is fully idle otherwise, so it never burns the main thread competing with the app.
         metalView.frame = bounds
         metalView.autoresizingMask = [.width, .height]
         metalView.colorPixelFormat = .bgra8Unorm
@@ -229,7 +229,7 @@ final class MetalGridScrollHost: NSView {
         // `origin.x = -inset`, which then double-applied with the coordinator's render translation (a huge leading
         // gap on open that "fixed itself" after the first scroll/zoom recomputed the inset). The grid is a plain
         // full-area scroll: it owns its leading-obstruction inset (render translate) and top frost (overlay), so
-        // the clip must stay at origin 0. Vertical/horizontal both — the grid never scrolls horizontally.
+        // the clip must stay at origin 0. Vertical/horizontal both - the grid never scrolls horizontally.
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.contentInsets = NSEdgeInsetsZero
         scrollView.contentView.drawsBackground = false
@@ -260,7 +260,7 @@ final class MetalGridScrollHost: NSView {
         }
         spacer.onMarqueeChanged = { [weak self] rawRect in
             guard let self else { return }
-            self.marqueeView.frame = rawRect                 // RAW spacer coords — where the user dragged on screen
+            self.marqueeView.frame = rawRect                 // RAW spacer coords - where the user dragged on screen
             self.marqueeView.needsDisplay = true
             let inset = self.coordinator.leadingObstructionInset
             self.onMarqueeChanged?(rawRect.offsetBy(dx: -inset, dy: 0))   // render → layout (same shift as onCellClick)
@@ -286,7 +286,7 @@ final class MetalGridScrollHost: NSView {
         spacer.shouldBlockScroll = block
         scrollView.shouldBlockScroll = block
 
-        // Redraw on EVERY scroll (incl. momentum / rubber-band) — the scroll itself paces the renderer.
+        // Redraw on EVERY scroll (incl. momentum / rubber-band) - the scroll itself paces the renderer.
         NotificationCenter.default.addObserver(
             self, selector: #selector(scrolled),
             name: NSView.boundsDidChangeNotification, object: scrollView.contentView
@@ -300,7 +300,7 @@ final class MetalGridScrollHost: NSView {
 
     @objc private func userWillScroll() { stickToBottom = false }
 
-    /// A manual WINDOW resize detaches the bottom-pin — EXACTLY like a scroll. Without this, resizing a
+    /// A manual WINDOW resize detaches the bottom-pin - EXACTLY like a scroll. Without this, resizing a
     /// freshly-opened grid (still `stickToBottom`) only ever bottom-pins and never runs the viewport-anchor
     /// camera rebase (the user's bug: fresh-open resize was wrong; one tiny scroll "fixed" it because that
     /// cleared `stickToBottom`). Fires only for USER-initiated live resizes (not the initial-open layout), so
@@ -309,26 +309,26 @@ final class MetalGridScrollHost: NSView {
         stickToBottom = false
         // Live resize presentation: snapshot the stable grid surface ONCE so the per-tick `layout()` presents it
         // uniformly scaled/slid (no rubber-band, no per-frame engine resolve). The axis is resolved per tick in
-        // `layout()` — a horizontal drag scales the snapshot, a vertical drag slides it (counter-scroll), a corner
+        // `layout()` - a horizontal drag scales the snapshot, a vertical drag slides it (counter-scroll), a corner
         // composes both. If the presentation can't run (zoom/transition in flight, no window) the path falls back
         // to `rebaseForResize`.
         liveResizeStartFrame = viewportScreenFrame()
         guard coordinator.canPresentResize else { return }
         coordinator.beginPresentationResize()
-        // NOTE: presentsWithTransaction is NOT used — it locks each present to the window transaction but its
+        // NOTE: presentsWithTransaction is NOT used - it locks each present to the window transaction but its
         // `waitUntilScheduled` blocks ~80ms/present, throttling the whole resize to ~10fps. The per-tick synchronous
         // `metalView.draw()` in layout() keeps content updating every tick; the async present's ~1-frame offset is
         // imperceptible and FAR better than a 10fps chunky resize.
     }
 
-    /// End of a live WINDOW resize: drop the presentation and SETTLE EXACTLY ONCE — resolve the real layout at the
+    /// End of a live WINDOW resize: drop the presentation and SETTLE EXACTLY ONCE - resolve the real layout at the
     /// final size, rebase the scroll once (item-identity, so the same region stays put), redraw normally. If the
     /// gesture had already fallen back (vertical/corner), the presentation is inactive and the normal `layout()`
     /// path already settled it, so this is a no-op beyond clearing the sync-present flag.
     @objc private func windowDidEndLiveResize() {
         guard coordinator.presentationResizeActive else { applyResolvedGridProfileAfterLiveResizeFallback(); return }
         // SETTLE = NO snap. The settle scroll depends on the axis: a WIDTH/corner change scales the tiles (fixed
-        // columns, no reflow), so the grid settles to the resize anchor — at the newest end the LAST row stays at the
+        // columns, no reflow), so the grid settles to the resize anchor - at the newest end the LAST row stays at the
         // viewport bottom, otherwise the centre item is re-centred (resolved ONCE here, not drifting per frame). A
         // pure VERTICAL change does NOT reflow, so it settles to the COUNTER-SCROLLED scroll the live frame slid to
         // (start scroll − the vertical slide) with no animation. No rebaseForResize (it re-anchored to the TOP).
@@ -371,12 +371,12 @@ final class MetalGridScrollHost: NSView {
 
     /// A trackpad pinch drives an engine-owned `GridZoomTransaction`: the item under the cursor is the anchor,
     /// the focus row keeps its photos as the level position glides, and on release we snap to the nearest
-    /// level (cursor re-anchored). NOT a per-frame stateless re-resolve — no focus-row rewrap.
+    /// level (cursor re-anchored). NOT a per-frame stateless re-resolve - no focus-row rewrap.
     ///
     /// The transaction is SINGLE-SECTION only (see `GridZoomTransaction`). Production uses one physical layout
     /// section by design (the flattened photo wall), so the pinch drives the transaction normally. If a grid
     /// ever had multiple physical sections, `beginLiveZoom` would start no transaction and the pinch would stay
-    /// inert here (zoom via the +/- controls instead) — a safety fallback, not a production path.
+    /// inert here (zoom via the +/- controls instead) - a safety fallback, not a production path.
     private func handleMagnify(_ event: NSEvent) {
         switch event.phase {
         case .began:
@@ -456,7 +456,7 @@ final class MetalGridScrollHost: NSView {
     }
 
     /// Apply one lattice sample: (re)build the segment plan when the active interval changes (each detent
-    /// crossing — seam-continuous), then scrub it to `segmentQ`.
+    /// crossing - seam-continuous), then scrub it to `segmentQ`.
     @discardableResult
     private func applyLatticeSegment(_ out: PinchLiveZoomDriver.Update) -> Bool {
         guard out.hasSegment else { return false }                  // pre-move rest dead-band ⇒ keep the start detent
@@ -553,9 +553,9 @@ final class MetalGridScrollHost: NSView {
     }
 
     /// If a previous lattice pinch is still running its post-release settle (the settle spans multiple display
-    /// ticks — q=0.5→0 at the floor is ~280 ms), a new pinch's `.began` would otherwise leave that plan
+    /// ticks - q=0.5→0 at the floor is ~280 ms), a new pinch's `.began` would otherwise leave that plan
     /// `isActive` with a frozen q: `draw(in:)` would keep rendering the stale crossfade frame. So force the
-    /// in-flight settle to its terminal and commit it NOW — on whichever detent it had decided — before the
+    /// in-flight settle to its terminal and commit it NOW - on whichever detent it had decided - before the
     /// new gesture starts clean.
     private func finishInFlightPinchSettle() {
         guard pinchSettling else { return }
@@ -581,7 +581,7 @@ final class MetalGridScrollHost: NSView {
 
     /// The settle reached a terminal state. Commit the chain to its final detent: apply that detent's anchored
     /// scroll (a no-op when it's the gesture-start detent). The settled frame matches the plan's final-detent
-    /// endpoint exactly — no hard snap, no flash.
+    /// endpoint exactly - no hard snap, no flash.
     private func commitLivePinch() {
         pinchSettling = false
         let previousLevel = coordinator.level
@@ -624,7 +624,7 @@ final class MetalGridScrollHost: NSView {
     // MARK: - Live overview layer dissolve (offscreen two-layer cross-dissolve)
 
     /// Map the pinch magnitude straight to dissolve progress (q=0 at the source level, q=1 at the adjacent
-    /// overview level). One boundary step — no detent hysteresis / chaining.
+    /// overview level). One boundary step - no detent hysteresis / chaining.
     private func driveOverviewDissolve(continuousLevel pos: CGFloat) {
         let s = CGFloat(pinchOverviewSource), t = CGFloat(pinchOverviewTarget)
         let raw = t > s ? (pos - s) : (s - pos)
@@ -694,7 +694,7 @@ final class MetalGridScrollHost: NSView {
         commitLevelToBinding(previousLevel: previousLevel)         // sync the SwiftUI level binding (+ arm echo guard)
     }
 
-    /// The cursor's CURRENT content-space point from a gesture event (fresh — never the stale last
+    /// The cursor's CURRENT content-space point from a gesture event (fresh - never the stale last
     /// mouse-moved position), clamped into the current viewport so a centroid just outside still anchors
     /// sensibly (falls back to the viewport centre).
     private func cursorContentPoint(for event: NSEvent) -> CGPoint {
@@ -736,7 +736,7 @@ final class MetalGridScrollHost: NSView {
 
     /// Push the settled level to the SwiftUI `level` binding AND arm the stale-echo guard, so a not-yet-
     /// propagated pre-commit binding value can't re-issue a viewport-centre zoom. The guard is armed ONLY when
-    /// the commit actually changed the level — a no-op commit can produce no echo, and arming it would wrongly
+    /// the commit actually changed the level - a no-op commit can produce no echo, and arming it would wrongly
     /// swallow the next genuine external change. Call at every host-led commit, in place of `onZoomCommit`.
     private func commitLevelToBinding(previousLevel: Int) {
         if coordinator.level != previousLevel { pendingLevelEcho = previousLevel }
@@ -951,7 +951,7 @@ final class MetalGridScrollHost: NSView {
     }
 
     /// Advance the sidebar open/close scale (right-anchored, the grid scaling like a left-edge drag). When the scale
-    /// completes, commit the engine inset and settle — instantly, or via the detent fly-into-place if the new width
+    /// completes, commit the engine inset and settle - instantly, or via the detent fly-into-place if the new width
     /// reflowed (until sticky columns make a width change reflow-free).
     private func advanceSidebarResize() {
         let t = sidebarResizeDuration > 0 ? min(1, (CACurrentMediaTime() - sidebarResizeStart) / sidebarResizeDuration) : 1
@@ -994,14 +994,14 @@ final class MetalGridScrollHost: NSView {
         let newFrame = viewportScreenFrame()
         let old = lastViewportScreenFrame
         // Live resize presentation: present the cached stable surface SCALED/slid to the new geometry about the
-        // stationary edge. NO engine resolve, NO content-size pass, NO scroll rebase this tick — the
+        // stationary edge. NO engine resolve, NO content-size pass, NO scroll rebase this tick - the
         // `onContentSizeChange` callback is gated off too (see init). The single settle happens on
         // `didEndLiveResize`.
         if inLiveResize, coordinator.presentationResizeActive, liveResizeStartFrame != .zero {
             // The presentation handles BOTH axes as ONE stable surface: HORIZONTAL scales the snapshot to the new
-            // width (in draw()); VERTICAL slides it — the dragging edge clips while the opposite edge gives up a
+            // width (in draw()); VERTICAL slides it - the dragging edge clips while the opposite edge gives up a
             // fraction (Apple's shared-loss counter-scroll). Present SYNCHRONOUSLY this tick: `needsDisplay` only
-            // schedules an ASYNC draw the live-resize (event-tracking) runloop COALESCES — that was the vertical
+            // schedules an ASYNC draw the live-resize (event-tracking) runloop COALESCES - that was the vertical
             // flicker (and the ~28%-of-ticks horizontal lag). `draw()` forces an immediate render+present locked to
             // the window border. The single settle happens on `didEndLiveResize`.
             // The vertical counter-scroll (shared-loss slide) applies ONLY to a PURE-height drag, where the tiles
@@ -1019,7 +1019,7 @@ final class MetalGridScrollHost: NSView {
             return
         }
         if old != .zero, viewportGeometryChanged(old, newFrame) {
-            rebaseForResize(oldFrame: old, newFrame: newFrame)  // window resize / sidebar toggle — NOT zoom
+            rebaseForResize(oldFrame: old, newFrame: newFrame)  // window resize / sidebar toggle - NOT zoom
         } else {
             applyContentSize(coordinator.contentSize())         // first layout / move-only (no size change)
         }
@@ -1027,7 +1027,7 @@ final class MetalGridScrollHost: NSView {
     }
 
     /// The VERTICAL counter-scroll (viewport pixels, y-down) for a window vertical resize: the dragging edge clips
-    /// the grid, and the OPPOSITE edge gives up a fraction `f` of the height change — Apple's shared-loss slide
+    /// the grid, and the OPPOSITE edge gives up a fraction `f` of the height change - Apple's shared-loss slide
     /// (the grid drifts toward the dragging edge instead of the dragging edge guillotining it). 0 when the height
     /// did not change (pure-horizontal). `f` ≈ ⅓ (the opposite edge's share; tunable).
     private func verticalCounterScroll(start: NSRect, current: NSRect) -> CGFloat {
@@ -1038,7 +1038,7 @@ final class MetalGridScrollHost: NSView {
         let topEdgeDrag = abs(current.maxY - start.maxY) > abs(current.minY - start.minY)
         let rawShift = MetalGridCoordinator.verticalCounterScrollShift(dH: dH, topEdgeDrag: topEdgeDrag, fraction: 1.0 / 3.0)
         // Clamp to the content bounds: at the very top/bottom of the library the dragging edge CANNOT pull empty
-        // space into view, so the reveal redirects to the opposite edge — the effective scroll clamps to
+        // space into view, so the reveal redirects to the opposite edge - the effective scroll clamps to
         // [0, maxScroll] at the NEW height. (At the bottom, growing pins the last row and reveals older rows at the
         // top instead of opening a void below; symmetric at the top.)
         let startScrollY = coordinator.presentationStartScrollY
@@ -1074,7 +1074,7 @@ final class MetalGridScrollHost: NSView {
         guard abs(eventLeadingInset - oldValue) > 0.5 else { return }
         let oldFrame = lastViewportScreenFrame
         // Sidebar open/close = a LEFT-edge resize of the grid: snapshot at the OLD inset (the engine inset is still
-        // `oldValue` here — do NOT commit it first) and SCALE the grid right-anchored to the new inset over the
+        // `oldValue` here - do NOT commit it first) and SCALE the grid right-anchored to the new inset over the
         // slide duration (a timed virtual drag), then settle. Instant fallback when the presentation can't run
         // (mid window live-resize, no window, zoom in flight, first layout).
         if window != nil, !inLiveResize, oldFrame != .zero, coordinator.beginSidebarResize(fromInset: oldValue, toInset: eventLeadingInset) {
@@ -1095,13 +1095,13 @@ final class MetalGridScrollHost: NSView {
     }
 
     /// Viewport resized (window or sidebar). Recompute content size from the new width and rebase the scroll
-    /// via the engine so the SAME logical region stays visible — the stationary edge holds the anchor, the
+    /// via the engine so the SAME logical region stays visible - the stationary edge holds the anchor, the
     /// moving edge clips/reveals. Never reuse the raw scrollY after slotSide changed, never start a zoom, never
     /// restore an old origin. Bottom-pinned stays pinned.
     private func rebaseForResize(oldFrame: NSRect, newFrame: NSRect) {
         let placingInitial = pendingInitialViewport != .preserve
         let oldScrollY = scrollView.contentView.bounds.origin.y
-        // At/below the newest end — scrolled to (or, after a pinch, past a partial last row at) the content bottom —
+        // At/below the newest end - scrolled to (or, after a pinch, past a partial last row at) the content bottom -
         // bottom-pin to the NEW content bottom. `stickToBottom` is false after a pinch, so without this a viewport
         // anchor resolved from a point at/in the trailing void lands on a stale item and jumps the grid far into the
         // past (and can leave the clip in the void → black). Bottom-pin keeps the newest at the bottom: no jump, no black.
@@ -1124,7 +1124,7 @@ final class MetalGridScrollHost: NSView {
 
     /// Set the document spacer to the current content height (width tracks the clip, no h-scroll). This is also
     /// the SINGLE consume point for a pending `.newest` initial-viewport policy: the placement happens here,
-    /// only after the spacer/document frame has been installed and the layout geometry is valid — so a route
+    /// only after the spacer/document frame has been installed and the layout geometry is valid - so a route
     /// switch never scrolls before content height + clip height are real.
     private func applyContentSize(_ size: CGSize) {
         let width = scrollView.contentView.bounds.width
@@ -1149,7 +1149,7 @@ final class MetalGridScrollHost: NSView {
 
     /// Consume a pending initial-viewport policy: place the viewport ONCE at the newest (bottom) end (`.newest`)
     /// or re-pin a remembered photo anchor (`.restore`). Unlike `scrollToBottom` / sticky pinning, this does NOT
-    /// re-arm bottom-pinning — it leaves `stickToBottom == false` so the user's first manual scroll is honoured
+    /// re-arm bottom-pinning - it leaves `stickToBottom == false` so the user's first manual scroll is honoured
     /// and never pulled back. `.restore` re-resolves the anchored photo's position in the CURRENT layout (so it
     /// is exact across any zoom/width/phase change while away); if that photo is gone (e.g. trashed meanwhile) it
     /// falls back to the newest end.
@@ -1178,7 +1178,7 @@ final class MetalGridScrollHost: NSView {
     /// Arm a one-shot initial-viewport policy: reset to the canonical bottom-right phase (so the content height
     /// matches what a remembered offset was captured against) and mark the policy pending. The actual placement
     /// is deferred to `applyContentSize` (called below and on every subsequent layout) once the geometry is
-    /// valid — never an immediate scroll. Used for sidebar route switches and for a freshly (re)created host.
+    /// valid - never an immediate scroll. Used for sidebar route switches and for a freshly (re)created host.
     func requestInitialViewport(_ policy: GridInitialViewport) {
         guard policy != .preserve else { return }
         pendingInitialViewport = policy
@@ -1186,11 +1186,11 @@ final class MetalGridScrollHost: NSView {
         applyContentSize(coordinator.contentSize())   // consume now if geometry is valid; else it stays pending
     }
 
-    /// A layout-invariant snapshot of the current scroll position — the photo at the viewport top plus its
-    /// sub-offset — or nil if the grid isn't laid out yet. The shell reads this when leaving a route so it can
+    /// A layout-invariant snapshot of the current scroll position - the photo at the viewport top plus its
+    /// sub-offset - or nil if the grid isn't laid out yet. The shell reads this when leaving a route so it can
     /// reopen the route EXACTLY here later (`.restore`), robust to any zoom/width/phase change while away.
     /// Derived from the existing visible-cell query (NOT the zoom anchor): this is route-scroll memory, not a
-    /// zoom anchor — the live pinch / +- path still anchors on the cursor item.
+    /// zoom anchor - the live pinch / +- path still anchors on the cursor item.
     func currentScrollAnchor() -> GridScrollAnchor<PhotoUID>? {
         let originY = scrollView.contentView.bounds.origin.y
         guard let top = coordinator.visibleCells().min(by: { $0.rect.minY < $1.rect.minY }),
@@ -1201,7 +1201,7 @@ final class MetalGridScrollHost: NSView {
     // MARK: - Public controls
 
     /// Change zoom level, holding an EXPLICIT anchor point under the same viewport position (zoom directed
-    /// toward that point — the Apple rule). `anchorContentPoint` is the cursor's content point for a trackpad
+    /// toward that point - the Apple rule). `anchorContentPoint` is the cursor's content point for a trackpad
     /// pinch; for +/- it's nil → the viewport centre is used. NEVER the top-visible item. Pinned-to-bottom
     /// (newest) stays pinned.
     func setLevel(_ newLevel: Int, anchorContentPoint: CGPoint? = nil) {
@@ -1210,12 +1210,12 @@ final class MetalGridScrollHost: NSView {
         let origin = scrollView.contentView.bounds.origin
         // +/- anchors at the GRID VIEWPORT CENTRE (never the toolbar-button mouse point, a stale hover, or the
         // top). The pinch path supplies an explicit cursor point instead.
-        // Layout-space viewport centre (the engine works in layout space; never add the inset back here — the
+        // Layout-space viewport centre (the engine works in layout space; never add the inset back here - the
         // render translation happens once at the coordinator's draw chokepoint).
         let anchorPoint = anchorContentPoint ?? CGPoint(x: max(1, bounds.width - coordinator.leadingObstructionInset) / 2, y: origin.y + vh / 2)
         let viewportPoint = CGPoint(x: anchorPoint.x, y: anchorPoint.y - origin.y)
         let trigger: GridZoomTrigger = newLevel < coordinator.level ? .toolbarPlus : .toolbarMinus   // plus = zoom in
-        // Try the single-lattice transition FIRST — including when the grid is freshly bottom-pinned
+        // Try the single-lattice transition FIRST - including when the grid is freshly bottom-pinned
         // (`stickToBottom`). Otherwise the early-return below would bypass it. It commits the settled target
         // + an anchored scroll itself; apply its scroll-Y and skip the snap. nil ⇒ unchanged snaps below.
         if let tY = coordinator.tryBeginClickTransition(toLevel: newLevel, anchorContentPoint: anchorPoint,
@@ -1258,7 +1258,7 @@ final class MetalGridScrollHost: NSView {
         requestFrame()
     }
 
-    /// A photo's cell frame in WINDOW content coordinates (top-left origin), or nil if it isn't visible —
+    /// A photo's cell frame in WINDOW content coordinates (top-left origin), or nil if it isn't visible -
     /// used by the shared-element zoom transition (window-coordinate frame of a visible cell).
     func windowFrame(forUID uid: PhotoUID) -> CGRect? {
         guard let win = window, let contentRect = coordinator.cellContentRect(forUID: uid) else { return nil }
@@ -1273,9 +1273,9 @@ final class MetalGridScrollHost: NSView {
         return CGRect(x: inWindow.minX, y: contentH - inWindow.maxY, width: inWindow.width, height: inWindow.height)
     }
 
-    /// Install a new data source. For an incremental data update pass `.preserve` (the default — the current
+    /// Install a new data source. For an incremental data update pass `.preserve` (the default - the current
     /// scroll position is kept). For a sidebar route switch pass `.newest`: the host arms the one-shot newest
-    /// placement (canonical bottom-right phase) and consumes it via `applyContentSize` once geometry is valid —
+    /// placement (canonical bottom-right phase) and consumes it via `applyContentSize` once geometry is valid -
     /// it does NOT scroll immediately, and it never arms sticky bottom-pinning.
     func setDataSource(_ source: MetalGridDataSource, initialViewport: GridInitialViewport = .preserve) {
         installImageAvailabilityCallback(on: source)
@@ -1295,7 +1295,7 @@ final class MetalGridScrollHost: NSView {
         applyContentSize(coordinator.contentSize())   // resize for the canonical phase, then pin to bottom
     }
 
-    /// Scroll a specific photo to vertical center (detaches the bottom pin — the user navigated to it).
+    /// Scroll a specific photo to vertical center (detaches the bottom pin - the user navigated to it).
     func scrollToItem(_ uid: PhotoUID) {
         stickToBottom = false
         guard let rect = coordinator.cellContentRect(forUID: uid) else { return }

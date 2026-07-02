@@ -14,7 +14,7 @@ struct AlbumAttachingAdapter: AlbumAttaching {
         case .library:
             return nil
         case let .existingAlbum(id, _):
-            // Fail fast (before any upload) if we can't actually add — never orphan photos in the library.
+            // Fail fast (before any upload) if we can't actually add - never orphan photos in the library.
             guard albums.capabilities.canAddPhotos else {
                 throw AlbumError.unsupported(
                     operation: "Add to album",

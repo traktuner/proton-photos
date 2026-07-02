@@ -5,7 +5,7 @@ import GridCore
 @testable import TimelineFeature
 
 /// THE FIXED-COLUMNS, WIDTH-FILLING resize contract (Apple parity). Each zoom level HOLDS its `nominalColumns`;
-/// the square slot is sized to FILL the viewport width exactly — so the grid NEVER leaves a trailing gutter, and a
+/// the square slot is sized to FILL the viewport width exactly - so the grid NEVER leaves a trailing gutter, and a
 /// width change SCALES the tile (same columns, larger/smaller tile), never a column reflow. The column count
 /// changes ONLY on a zoom. Pure-engine behavioral guards for the fixed-columns model in
 /// `docs/apple-photos-parity-master-spec.md` (and §6/§10 of `docs/metalgrid-engine-contract.md`).
@@ -15,7 +15,7 @@ import GridCore
 
     // FIXED-COLUMNS, WIDTH-FILLING: across a continuous width sweep the column count is CONSTANT (= the level's
     // `nominalColumns`, it never reflows), the slot content width equals the viewport (no gutter), and the tile
-    // SCALES with width (grows as the window widens) — Apple-parity "resize = scale, never reflow".
+    // SCALES with width (grows as the window widens) - Apple-parity "resize = scale, never reflow".
     @Test func fillsWidthFixedColumnsAcrossAWidthSweep() {
         let e = engine()
         for level in 0 ..< e.levelCount {
@@ -23,7 +23,7 @@ import GridCore
             var lastSide: CGFloat = 0
             for w in stride(from: CGFloat(500), through: 3000, by: 17) {
                 let m = e.resolvedMetrics(level: level, width: w)
-                #expect(m.columns == nominal, "L\(level) w\(w): fixed-columns — the count must hold at \(nominal) (got \(m.columns))")
+                #expect(m.columns == nominal, "L\(level) w\(w): fixed-columns - the count must hold at \(nominal) (got \(m.columns))")
                 let contentWidth = CGFloat(m.columns) * m.pitch - m.gap
                 #expect(abs(contentWidth - w) < 1.0, "L\(level) w\(w): grid must FILL the width (gutter \(w - contentWidth))")
                 #expect(m.slotSide >= lastSide - 0.001, "L\(level): the tile must SCALE up as width grows, never reflow (w=\(w))")
@@ -49,7 +49,7 @@ import GridCore
     }
 
     // SIDEBAR TOGGLE = a layout-width change (`layoutWidth = fullWidth − inset`). FIXED-COLUMNS: it must NOT reflow
-    // — the column count is unchanged and the tiles just SCALE (shrink) to fill the reduced width.
+    // - the column count is unchanged and the tiles just SCALE (shrink) to fill the reduced width.
     @Test func sidebarToggleScalesNoReflow() {
         let e = engine()
         let fullWidth: CGFloat = 1440
@@ -65,7 +65,7 @@ import GridCore
     }
 
     // The settled grid FILLS the width: leading-aligned, and the content width EQUALS the viewport at every level
-    // and (multi-column) width — NO trailing gutter (the rejected "huge blank margin" state is impossible).
+    // and (multi-column) width - NO trailing gutter (the rejected "huge blank margin" state is impossible).
     @Test func settledGridFillsWidthNoGutter() {
         let e = engine()
         for level in 0 ..< e.levelCount {
@@ -101,7 +101,7 @@ import GridCore
         for c in cases {
             let m = e.resolvedMetrics(level: c.level, width: c.width)
             let gutter = c.width - (CGFloat(m.columns) * m.pitch - m.gap)
-            #expect(gutter < 2.0, "L\(c.level) w\(c.width): gutter \(gutter)pt (must be ~0 — the rejected huge-margin state is gone)")
+            #expect(gutter < 2.0, "L\(c.level) w\(c.width): gutter \(gutter)pt (must be ~0 - the rejected huge-margin state is gone)")
         }
     }
 

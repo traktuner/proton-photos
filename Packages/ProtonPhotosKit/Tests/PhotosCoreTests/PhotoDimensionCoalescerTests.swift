@@ -23,7 +23,7 @@ final class PhotoDimensionCoalescerTests: XCTestCase {
         let coalescer = PhotoDimensionCoalescer(store: store, flushDelay: .seconds(600))
 
         await coalescer.enqueue(a, try XCTUnwrap(PhotoPixelDimensions(width: 320, height: 240)))
-        // Duplicate sighting of the same UID (a re-decode) — first one wins.
+        // Duplicate sighting of the same UID (a re-decode) - first one wins.
         await coalescer.enqueue(a, try XCTUnwrap(PhotoPixelDimensions(width: 999, height: 111)))
         await coalescer.enqueue(b, try XCTUnwrap(PhotoPixelDimensions(width: 100, height: 100)))
         await coalescer.flushNow()

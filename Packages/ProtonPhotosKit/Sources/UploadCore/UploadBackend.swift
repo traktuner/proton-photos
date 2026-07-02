@@ -22,7 +22,7 @@ public struct UploadProgress: Sendable, Equatable {
 
 // MARK: - Capabilities
 
-/// What the wired upload backend can do — surfaced to the UI and the `[SDKCapabilities]` log so the
+/// What the wired upload backend can do - surfaced to the UI and the `[SDKCapabilities]` log so the
 /// app never advertises (e.g.) resumable upload it can't deliver.
 public struct UploadBackendCapabilities: Sendable, Equatable {
     public var canUpload: Bool
@@ -88,7 +88,7 @@ public extension PhotoUploading {
 /// `UploadFeature` and album management stay independently removable.
 ///
 /// `resolveAlbum` runs once per batch *before* uploading, and must throw if the destination can't be
-/// honoured (e.g. album creation unsupported) — so the app never silently uploads to the library when
+/// honoured (e.g. album creation unsupported) - so the app never silently uploads to the library when
 /// the user picked an album.
 public protocol AlbumAttaching: Sendable {
     func resolveAlbum(for target: UploadDestination.Target) async throws -> String?

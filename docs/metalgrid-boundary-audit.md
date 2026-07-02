@@ -314,7 +314,7 @@ Render-boundary / adapter-boundary hardening. Audit + guards + doc sync only; no
   `MTKView` entry-point blocker for `MetalRenderingCore`; Phase 4.4 moved the draw primitive/drawable target
   types into that target, and Phase 4.5 moved the renderer/shader implementation itself. `TimelineFeature` now
   keeps only the `MTKView` adapter extension.
-- Core telemetry seam (commit 3f58dbc): `GridCore` owns `CoreTelemetry.swift` — `CoreTelemetryEvent` (name +
+- Core telemetry seam (commit 3f58dbc): `GridCore` owns `CoreTelemetry.swift` - `CoreTelemetryEvent` (name +
   `[String: String]` fields, `Sendable`) and `CoreTelemetrySink = (CoreTelemetryEvent) -> Void`.
   `GridTransitionController` emits string-keyed events through an injected optional sink; `MetalGridCoordinator`
   wires the platform diagnostics backend. `GridCore` stays free of `PhotosCore`.
@@ -328,7 +328,7 @@ Render-boundary / adapter-boundary hardening. Audit + guards + doc sync only; no
   allowed `GridCore` import, such a surface type could have entered `GridCore` undetected by both the import
   allowlist and the token gate. `CoreArchitectureGateTests` now bans the `Metal` import and those tokens
   (word-boundary matched), GridCore-scopes a ban on CoreGraphics drawing types
-  (`CGContext`/`CGImage`/`CGColorSpace`/`CGLayer` — `CGImage` stays legal in the decode Cores), and drops
+  (`CGContext`/`CGImage`/`CGColorSpace`/`CGLayer` - `CGImage` stays legal in the decode Cores), and drops
   `QuartzCore` from GridCore's import allowlist to close the hole structurally. A negative-control file confirmed
   every added guard fires; all current Core targets still pass the gate and build for iOS and macOS.
 - Dead import removed: `GridCore/GridScrollRebase.swift` imported `QuartzCore` but used only `CFTimeInterval`

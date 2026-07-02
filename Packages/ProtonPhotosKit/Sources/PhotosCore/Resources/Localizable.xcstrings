@@ -1063,7 +1063,7 @@
     },
     "error.album_action_unavailable": {
       "extractionState": "manual",
-      "comment": "Shown for unsupported album writes. The technical SDK-gap detail (AlbumError.unsupported's `gap`/`operation`) is intentionally NOT shown to users — it stays in the error's associated values for logs/diagnostics.",
+      "comment": "Shown for unsupported album writes. The technical SDK-gap detail (AlbumError.unsupported's `gap`/`operation`) is intentionally NOT shown to users - it stays in the error's associated values for logs/diagnostics.",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -1248,7 +1248,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Failed — %@"
+            "value": "Failed - %@"
           }
         },
         "de": {

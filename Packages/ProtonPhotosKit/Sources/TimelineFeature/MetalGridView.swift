@@ -13,7 +13,7 @@ final class MetalGridView: MTKView {
 
 /// The scroll view's `documentView`: a transparent, flipped spacer sized to the full content height. It
 /// provides the scrollable area (drives scrollbars / inertia / rubber-band) and, being the top-most view
-/// inside the clip, is where pointer events land — so it forwards clicks + magnify while letting
+/// inside the clip, is where pointer events land - so it forwards clicks + magnify while letting
 /// `scrollWheel` bubble to the enclosing scroll view for native scrolling.
 final class MetalGridDocumentSpacer: NSView {
     /// Reports a click in CONTENT coordinates with its click count + modifier keys.
@@ -21,7 +21,7 @@ final class MetalGridDocumentSpacer: NSView {
     /// Raw trackpad magnify events (for the continuous live-pinch lattice scrub; see `handleMagnify`).
     var onMagnify: ((NSEvent) -> Void)?
     /// While this returns true (a pinch / its settle / post-pinch grace is in flight) scrollWheel events are
-    /// SWALLOWED instead of bubbling to the enclosing scroll view — so a pinch whose fingers also drift can't
+    /// SWALLOWED instead of bubbling to the enclosing scroll view - so a pinch whose fingers also drift can't
     /// fire a wild concurrent scroll. Takes the event so momentum/inertia after a pinch can be caught too.
     var shouldBlockScroll: ((NSEvent) -> Bool)?
 
@@ -41,7 +41,7 @@ final class MetalGridDocumentSpacer: NSView {
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
-    override func draw(_ dirtyRect: NSRect) { /* transparent — the Metal view behind shows through */ }
+    override func draw(_ dirtyRect: NSRect) { /* transparent - the Metal view behind shows through */ }
 
     override func mouseDown(with event: NSEvent) {
         // Defer the click DECISION to mouse-up: a press that turns into a drag becomes a marquee, not a click.
@@ -94,7 +94,7 @@ final class MetalGridMarqueeView: NSView {
     }
 }
 
-/// The enclosing `NSScrollView`, subclassed so it ALSO swallows `scrollWheel` during a pinch / its grace —
+/// The enclosing `NSScrollView`, subclassed so it ALSO swallows `scrollWheel` during a pinch / its grace -
 /// a second interception point behind the document spacer. Trackpad scroll/inertia that bypasses the spacer
 /// (or arrives as post-gesture momentum) is the actual thing that scrolls the grid, so blocking it here is
 /// the reliable backstop against the "wild scroll while pinching at the extreme detents" bug.

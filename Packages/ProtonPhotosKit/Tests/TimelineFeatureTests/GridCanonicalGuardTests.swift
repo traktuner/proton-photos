@@ -30,7 +30,7 @@ import GridCore
     private func engine(_ count: Int = 1500) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
     private let viewport = CGSize(width: 1400, height: 900)
 
-    // NoProductionNSCollectionViewFallbackTest — the production timeline instantiates the Metal grid and
+    // NoProductionNSCollectionViewFallbackTest - the production timeline instantiates the Metal grid and
     // NEVER the legacy NSCollectionView grid (`PhotoGridView`).
     @Test func noProductionNSCollectionViewFallback() {
         let tv = source("TimelineView.swift")
@@ -38,12 +38,12 @@ import GridCore
         #expect(!tv.contains("PhotoGridView("), "production timeline must NOT fall back to the NSCollectionView grid")
     }
 
-    // NoProductionJustifiedAspectLayoutTest — production never feeds media aspect into the layout (no
+    // NoProductionJustifiedAspectLayoutTest - production never feeds media aspect into the layout (no
     // justified/aspect rows); the engine is square-only by construction.
     @Test func noProductionJustifiedAspectLayout() {
         let tv = source("TimelineView.swift")
         #expect(!tv.contains("sectionAspects(for:"), "production timeline must not feed aspect ratios into layout")
-        // Every engine slot is square at every level — the engine cannot produce a justified (aspect) cell.
+        // Every engine slot is square at every level - the engine cannot produce a justified (aspect) cell.
         let e = engine()
         for level in 0 ..< e.levelCount {
             let plan = e.framePlan(level: level, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: 2000), overscan: 0)
@@ -51,7 +51,7 @@ import GridCore
         }
     }
 
-    // NoEdgeFillHackAsLayoutSourceTest — the layout source of truth (SquareTileGridEngine) depends on NO
+    // NoEdgeFillHackAsLayoutSourceTest - the layout source of truth (SquareTileGridEngine) depends on NO
     // edge-fill / exposed-rect / replacement / wall machinery.
     @Test func noEdgeFillHackInEngine() {
         let engineSrc = source("SquareTileGridEngine.swift")
@@ -62,7 +62,7 @@ import GridCore
         }
     }
 
-    // MetalRendererReceivesSquareSlotQuadsTest — the outer quad rects the renderer is handed (the slots'
+    // MetalRendererReceivesSquareSlotQuadsTest - the outer quad rects the renderer is handed (the slots'
     // viewport rects) are square.
     @Test func rendererReceivesSquareSlotQuads() {
         let e = engine()
@@ -74,7 +74,7 @@ import GridCore
         }
     }
 
-    // GridZoomTransactionProductionPathTest — the live pinch is an engine-owned `GridZoomTransaction`
+    // GridZoomTransactionProductionPathTest - the live pinch is an engine-owned `GridZoomTransaction`
     // (focus-row stable), NOT a stateless per-frame re-resolve that rewraps columns, and NOT the deleted
     // detent/justified machinery.
     @Test func productionLiveZoomUsesEngineTransaction() {
@@ -87,7 +87,7 @@ import GridCore
         }
     }
 
-    // VideoThumbnailUsesSquareSlotTest — the engine has no media-type input, so a video occupies the same
+    // VideoThumbnailUsesSquareSlotTest - the engine has no media-type input, so a video occupies the same
     // square slot as a photo (the renderer would fit the video frame INSIDE the square via TileContentFitter).
     @Test func videoUsesSquareSlot() {
         let e = engine()

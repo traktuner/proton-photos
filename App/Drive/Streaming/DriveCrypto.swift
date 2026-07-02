@@ -3,7 +3,7 @@ import ProtonCoreDataModel
 import ProtonCoreCrypto
 import ProtonCoreCryptoGoInterface
 
-/// A private key plus the passphrase that unlocks it — enough to build a decryption key ring on
+/// A private key plus the passphrase that unlocks it - enough to build a decryption key ring on
 /// demand. (We rebuild rings per operation rather than holding live gopenpgp objects, so there's
 /// no shared mutable crypto state to guard.)
 struct UnlockableKey: Sendable {
@@ -20,7 +20,7 @@ enum DriveCryptoError: Error { case keyRing, badMessage, base64 }
 final class DriveCrypto: @unchecked Sendable {
     /// Address private keys, pre-resolved to (armored, passphrase) so a ring can be built any time.
     private let addressKeys: [UnlockableKey]
-    /// Serializes block decryption — AVFoundation can issue concurrent range requests, and a single
+    /// Serializes block decryption - AVFoundation can issue concurrent range requests, and a single
     /// gopenpgp session key isn't guaranteed safe to decrypt with from multiple threads at once.
     private let blockLock = NSLock()
 
@@ -56,7 +56,7 @@ final class DriveCrypto: @unchecked Sendable {
     }
 
     /// Decrypts an armored PGP message (a share/node passphrase, or XAttr) with the given keys.
-    /// `verifyKey: nil` — the reference clients treat signature verification as best-effort and
+    /// `verifyKey: nil` - the reference clients treat signature verification as best-effort and
     /// non-fatal, and for streaming we don't have the material to verify, so we skip it.
     private func decryptArmored(_ armored: String, with keys: [UnlockableKey]) throws -> CryptoPlainMessage {
         let ring = try ring(keys)
@@ -102,7 +102,7 @@ final class DriveCrypto: @unchecked Sendable {
     }
 
     /// Decrypts one block (an independent OpenPGP data packet) with the content session key.
-    /// No signature/manifest verification — streaming never downloads all blocks, matching web.
+    /// No signature/manifest verification - streaming never downloads all blocks, matching web.
     func decryptBlock(_ dataPacket: Data, sessionKey: CryptoSessionKey) throws -> Data {
         blockLock.lock()
         defer { blockLock.unlock() }

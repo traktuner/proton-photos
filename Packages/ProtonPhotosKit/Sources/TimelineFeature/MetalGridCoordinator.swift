@@ -12,7 +12,7 @@ import GridCore
 /// `MTKView` delegate: every frame it reads the clip view's scroll origin, queries the visible square
 /// slots from the canonical `SquareTileGridEngine`, uploads a bounded number of newly-available
 /// thumbnails, draws the viewport, and emits diagnostics. Only items intersecting the (overscan-expanded)
-/// visible rect are ever touched — never the whole library.
+/// visible rect are ever touched - never the whole library.
 @MainActor
 final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private let renderer: MetalGridRenderer
@@ -41,7 +41,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // `SquareTileGridEngine` owns ALL grid geometry: square slot rects, per-level gap/pitch, columns,
     // content size, the visible-slot query, hit testing, and the zoom frame plan (continuous apparent
     // metrics + anchor preservation). The coordinator ONLY converts the engine's `GridFramePlan` into Metal
-    // quads — it never invents layout, never computes edge-fill, never scales a second surface. THE
+    // quads - it never invents layout, never computes edge-fill, never scales a second surface. THE
     // canonical production path: input → engine → GridFramePlan → renderer draws exactly that plan.
     private(set) var engine: SquareTileGridEngine
 
@@ -58,7 +58,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// The live continuous level position (for the host's snap-on-release).
     var liveZoomLevel: CGFloat { zoomTransactionLevel }
 
-    // MARK: - Single presentation lattice transition (Phase-B — PRODUCTION DEFAULT)
+    // MARK: - Single presentation lattice transition (Phase-B - PRODUCTION DEFAULT)
     //
     // CLICKV2_420_FULLER_CORNER (click) / PINCH071 (pinch), per the V3.4–V3.6 offline evidence.
     // The transition layer is a SEPARATE module that consumes the engine's GridFramePlan; it never
@@ -88,7 +88,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     // OVERVIEW LAYER DISSOLVE (replaces the rejected warp): two COMPLETE settled grids blended by opacity via
     // the offscreen compositor. Active during L3↔L4 / L4↔L5 gestures and discrete +/- clicks. Separate from
-    // `gridTransition` — it NEVER uses the relocation lattice. nil ⇒ inactive.
+    // `gridTransition` - it NEVER uses the relocation lattice. nil ⇒ inactive.
     private(set) var overviewDissolve: OverviewLayerDissolvePlan?
     var isOverviewDissolving: Bool { overviewDissolve != nil }
     var isOverviewClickDissolving: Bool { overviewClickDissolveActive }
@@ -105,7 +105,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     //
     // The live transaction pins the anchor at the CURSOR column; the settled grid is BOTTOM-RIGHT anchored.
     // They share metrics at the committed level but differ in column PHASE, so the anchor's column (and the
-    // focus band's identities) shift on release — measured at up to ~9 columns. Committing directly would
+    // focus band's identities) shift on release - measured at up to ~9 columns. Committing directly would
     // SNAP. Instead a short (~160 ms) bridge interpolates every visible item's viewport rect from its
     // transaction-final position to its settled position (easeOut), so the phase reflow is a smooth SLIDE:
     // the anchor item stays itself and slides to its settled slot, no crossfade / no photo replacement.
@@ -132,7 +132,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     var isScrollRebasing: Bool { rebaseActive }
 
     /// Arm a scroll-rebase: the settled grid slides from `fromY` (gesture/anchored) to `toY` (legal clamped).
-    /// No-op (returns false) when the delta is imperceptible — the caller then settles instantly.
+    /// No-op (returns false) when the delta is imperceptible - the caller then settles instantly.
     @discardableResult
     func beginScrollRebase(fromY: CGFloat, toY: CGFloat) -> Bool {
         guard GridScrollRebase.shouldArm(fromY: fromY, toY: toY) else { rebaseActive = false; return false }
@@ -144,9 +144,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // MARK: - Camera column phase (persistent, cursor-anchor preserving)
     //
     // The persistent COLUMN PHASE the settled grid is rendered with (engine-owned; single continuous run). On
-    // a zoom commit it is set so the anchor item lands in the cursor's column — so the photo under the cursor
+    // a zoom commit it is set so the anchor item lands in the cursor's column - so the photo under the cursor
     // does NOT fly across the grid on release. It PERSISTS across scroll (the next frame keeps it, no snap back
-    // to canonical). nil = the default BOTTOM-RIGHT phase (newest in the corner) — used on open / bottom pin /
+    // to canonical). nil = the default BOTTOM-RIGHT phase (newest in the corner) - used on open / bottom pin /
     // data rebuild. Every settled query below threads `currentPhase()`.
     private var committedPhase: Int?
     func currentPhase() -> Int? { committedPhase }
@@ -159,7 +159,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var gestureCursorVP: CGPoint = .zero
     private var gestureAnchorIndex: Int?
 
-    // MARK: - Content display mode (aspect/square toggle) — fitting INSIDE the square slot ONLY.
+    // MARK: - Content display mode (aspect/square toggle) - fitting INSIDE the square slot ONLY.
     //
     // The toggle is a TileContentFitter mode switch, NOT a layout switch: it changes only the thumbnail's
     // contentRect/UV and NEVER the slot, columns, gap, pitch, content size, hit testing, anchor, or phase.
@@ -167,7 +167,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // forces squareFillCrop on the dense overview levels (L4–L5, which support only that). The preference is
     // remembered, so returning from an overview to a normal level restores the user's aspect/square choice.
     // INITIAL DEFAULT = aspectFitInsideSquare (explicit app choice; matches the normal levels in the reference
-    // clip — NOT a claim about Apple's own default).
+    // clip - NOT a claim about Apple's own default).
     private(set) var preferredNormalLevelContentMode: TileContentDisplayMode = .aspectFitInsideSquare
 
     /// The mode actually used to fit content at `level`: the preference where the level supports it, else
@@ -182,7 +182,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     var aspectToggleAvailable: Bool { aspectToggleAvailable(for: level) }
 
     /// Set the NORMAL-level content-mode preference (toolbar/keyboard/tests). Pure content-fit change: it does
-    /// NOT mutate level, zoom, scroll, phase, or any grid geometry — only the next frame's thumbnail fit.
+    /// NOT mutate level, zoom, scroll, phase, or any grid geometry - only the next frame's thumbnail fit.
     func setPreferredNormalLevelContentMode(_ mode: TileContentDisplayMode) {
         guard mode != preferredNormalLevelContentMode else { return }
         preferredNormalLevelContentMode = mode
@@ -204,7 +204,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var lastPerfDiagnosticsLog: CFTimeInterval = 0
     private var lastCommitFrameLog: CFTimeInterval = 0
 
-    /// True when some VISIBLE cell still lacks a real texture — the host keeps ticking redraws while this
+    /// True when some VISIBLE cell still lacks a real texture - the host keeps ticking redraws while this
     /// holds (so placeholders swap to thumbnails without needing a scroll), and goes idle once false.
     /// Forced false while the resident texture budget is saturated: those placeholders cannot fill until
     /// the window changes, and scroll/zoom/image-arrival all trigger their own redraws, so ticking would
@@ -214,7 +214,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // MARK: - Level-aware upload sizing
     //
     // Thumbnails upload at the on-screen slot's native pixel size (slot points × display backing scale),
-    // not a fixed 320 px, so the dense overview levels — where a tile is physically ~39–94 px — stop wasting
+    // not a fixed 320 px, so the dense overview levels - where a tile is physically ~39–94 px - stop wasting
     // 11–33× the texels they can display. Sparse levels saturate at the adapter's `maxTexturePixels`, so their
     // quality is unchanged. The pure sizing math lives in `GridCore.GridTextureUploadSizing`; here we only
     // supply the current level's slot side + the live backing scale.
@@ -226,7 +226,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// little VRAM to cut minification shimmer on the mip-less grid textures; at sparse levels the result
     /// saturates at `maxTexturePixels` anyway, so those keep full quality.
     private static let uploadPixelsHeadroom: CGFloat = 1.25
-    /// Never upload a thumbnail below this, even for a physically tiny dense-overview slot — a crispness floor.
+    /// Never upload a thumbnail below this, even for a physically tiny dense-overview slot - a crispness floor.
     private static let uploadPixelsFloor = 96
 
     /// The effective upload cap for the CURRENT settled level: native slot pixels clamped to the adapter cap.
@@ -344,7 +344,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return (slot.index, uid)
     }
 
-    /// The UIDs whose cells intersect a CONTENT-space rect — the marquee (drag-rectangle) selection set.
+    /// The UIDs whose cells intersect a CONTENT-space rect - the marquee (drag-rectangle) selection set.
     func uids(intersecting contentRect: CGRect) -> Set<PhotoUID> {
         let width = layoutWidth
         guard width > 1 else { return [] }
@@ -356,7 +356,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     func clampLevel(_ l: Int) -> Int { engine.clampLevel(l) }
 
     /// Scroll Y that keeps the item under `cursorContentPoint` at the same viewport position after changing
-    /// to `newLevel` (zoom toward the cursor — the Apple rule). The engine owns the capture + rebase; this
+    /// to `newLevel` (zoom toward the cursor - the Apple rule). The engine owns the capture + rebase; this
     /// just supplies the live view width + scroll origin. nil if no item resolvable.
     func cursorAnchoredScrollOffsetY(toLevel newLevel: Int, cursorContentPoint: CGPoint) -> CGFloat? {
         let width = layoutWidth
@@ -378,7 +378,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                                       viewportPoint: viewportPoint, level: level, width: width,
                                                       columnPhase: currentPhase())   // resolve in the DISPLAYED (phased) grid
         zoomTransactionLevel = CGFloat(level)
-        // V3.9: capture the gesture-start (actual) state — the start detent uses this frame in every segment.
+        // V3.9: capture the gesture-start (actual) state - the start detent uses this frame in every segment.
         pinchStartLevel = level
         pinchStartPhase = currentPhase()
         pinchStartScrollY = clipView?.bounds.origin.y ?? 0
@@ -397,7 +397,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         requestRedraw()
     }
 
-    /// The item under a viewport point in the CURRENT settled grid (current level + committed phase + scroll) —
+    /// The item under a viewport point in the CURRENT settled grid (current level + committed phase + scroll) -
     /// THE acceptance probe: it must equal the gesture anchor before and after commit.
     func indexUnderCursorViewport(_ vp: CGPoint) -> Int? {
         let width = layoutWidth
@@ -407,7 +407,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     }
 
     /// Update the live continuous level position (fractional = mid-pinch) from a RAW pinch level. Past the
-    /// largest detent (raw level < 0) the visual level carries a bounded ELASTIC overshoot — the rubber-band —
+    /// largest detent (raw level < 0) the visual level carries a bounded ELASTIC overshoot - the rubber-band -
     /// instead of being hard-clamped to 0. The committed level stays clamped to valid detents separately.
     func updateLiveZoom(continuousLevel x: CGFloat) {
         guard zoomTransaction != nil else { return }
@@ -432,7 +432,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let width = layoutWidth
         let lv = engine.clampLevel(finalLevel)
         // PHASE: land the anchor item in the CURSOR's column at the target level, so the photo under the cursor
-        // does not fly across the grid on release. This phase is committed NOW — every settled query (incl. the
+        // does not fly across the grid on release. This phase is committed NOW - every settled query (incl. the
         // first post-commit frame + all scroll frames) uses it immediately; it never snaps back to canonical.
         let metrics = engine.resolvedMetrics(level: lv, width: width)
         let desiredColumn = engine.cursorColumn(viewportX: tx.anchorViewportPoint.x, level: lv, width: width)
@@ -486,12 +486,12 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Override the bridge's settled scroll Y (e.g. when the host pins to the bottom instead of the rebased Y).
     func setCommitBridgeScrollY(_ y: CGFloat) { bridgeScrollY = y }
 
-    /// VIEWPORT-RESIZE REBASE (window resize / sidebar toggle — NOT zoom). Same level/phase/mode/columns/gap;
+    /// VIEWPORT-RESIZE REBASE (window resize / sidebar toggle - NOT zoom). Same level/phase/mode/columns/gap;
     /// only slotSide/pitch/contentSize recompute from the new width. Returns the rebased scroll Y so the SAME
     /// logical region stays visible; preserves `committedPhase` (never reset). The host applies the result
     /// BEFORE the first frame after resize. Logs `[GridResize]`.
     private var lastResizeDiagTime: Date = .distantPast
-    /// VIEWPORT-RESIZE REBASE (window resize / sidebar — NOT zoom). The host passes the grid viewport frame in
+    /// VIEWPORT-RESIZE REBASE (window resize / sidebar - NOT zoom). The host passes the grid viewport frame in
     /// SCREEN coords (old + new) so the engine can tell WHICH edge moved; the stationary edge holds the anchor.
     /// Preserves `committedPhase` (passed, never reset). Returns the rebased scroll Y; logs `[GridResize]`.
     func rebaseForViewportChange(oldFrame: CGRect, newFrame: CGRect, oldScrollY: CGFloat,
@@ -623,11 +623,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // unobscured area to its right. ONE value drives all three concerns: (1) the engine layout width, (2) the
     // render-space X translation of every emitted rect, (3) event exclusion (the host declines hit-testing for
     // x < inset). Set by the host from the sidebar's leading safe-area inset; mirrored from `eventLeadingInset`.
-    // There are two X spaces — LAYOUT space (engine/anchor/phase/column math, width = `layoutWidth`) and RENDER
+    // There are two X spaces - LAYOUT space (engine/anchor/phase/column math, width = `layoutWidth`) and RENDER
     // space (AppKit / on-screen, width = full viewport). All engine input + transition-plan construction use
     // layout space; rects are translated by `+inset` exactly once at the final draw chokepoint. At inset 0 the
     // grid is plain full-width and every path reduces to identity.
-    /// The sidebar obstruction width (points) — the floating sidebar's leading safe-area inset. Set by the host.
+    /// The sidebar obstruction width (points) - the floating sidebar's leading safe-area inset. Set by the host.
     var sidebarObstructionInset: CGFloat = 0 {
         didSet { if sidebarObstructionInset != oldValue { requestRedraw() } }
     }
@@ -652,17 +652,17 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return sidebarObstructionInset + gap + gridHorizontalMargin(forLevel: lvl)
     }
     /// Standard OUTER left/right margin (gutter) so the edge columns don't butt against the window edge / sidebar.
-    /// CONSTANT across the normal levels — deliberately NOT the per-level inter-tile gap. A LEVEL-DEPENDENT gutter
+    /// CONSTANT across the normal levels - deliberately NOT the per-level inter-tile gap. A LEVEL-DEPENDENT gutter
     /// makes `layoutWidth` level-dependent, and the pinch/± commit computes the anchored scroll at the gesture-START
     /// level's width while the settled grid renders at the TARGET level's width: that width gap accumulates over the
-    /// rows and drifts the anchor by many rows deep in the library (the reported release jump — tiny near the top,
+    /// rows and drifts the anchor by many rows deep in the library (the reported release jump - tiny near the top,
     /// large far down). A constant gutter keeps `layoutWidth` level-independent so the commit lands exactly. Applied
     /// to the NORMAL levels only (the dense square overviews L4–L5 stay edge-to-edge). The engine is unchanged: this
     /// is purely a render inset + width trim, so the live-zoom lattice, transitions, and settled grid stay lock-step.
     private func gridHorizontalMargin(forLevel lvl: Int) -> CGFloat {
         engine.metrics(level: lvl).monthLabels ? 0 : Self.standardOuterMargin
     }
-    /// The constant outer gutter (points) for the normal photo levels — see `gridHorizontalMargin` for why it must
+    /// The constant outer gutter (points) for the normal photo levels - see `gridHorizontalMargin` for why it must
     /// not vary by level.
     static let standardOuterMargin: CGFloat = 12
     /// Render/layout bounds for one level. The source of the insets stays adapter-owned; the mapping itself is a
@@ -674,23 +674,23 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             trailingInset: gridHorizontalMargin(forLevel: lvl)
         )
     }
-    /// The effective inset at the CURRENT level — THE value every layout/render/input path reads.
+    /// The effective inset at the CURRENT level - THE value every layout/render/input path reads.
     var leadingObstructionInset: CGFloat { renderBounds(forLevel: level).leadingInset }
-    /// The full on-screen viewport WIDTH (render space) — the MTKView's actual width (no inset removed).
+    /// The full on-screen viewport WIDTH (render space) - the MTKView's actual width (no inset removed).
     private var fullViewportWidth: CGFloat { metalView?.bounds.width ?? clipView?.bounds.width ?? 0 }
     /// The width the ENGINE lays out a GIVEN level in: full render width minus that level's leading inset + outer
     /// margin. Per-level because the overview levels are edge-to-edge (no margin/gap) while the normal levels carry
-    /// the gutter — so a transition that crosses that boundary (L3↔L4) must lay each level out at its OWN width.
+    /// the gutter - so a transition that crosses that boundary (L3↔L4) must lay each level out at its OWN width.
     func layoutWidth(forLevel lvl: Int) -> CGFloat {
         renderBounds(forLevel: lvl).layoutWidth
     }
     /// The width the ENGINE lays out the CURRENT level in. Every engine / anchor / phase / column calculation uses
-    /// THIS — never the full width.
+    /// THIS - never the full width.
     var layoutWidth: CGFloat { layoutWidth(forLevel: level) }
     /// The viewport the engine lays out in: `layoutWidth` × full height.
     var layoutViewportSize: CGSize { renderBounds(forLevel: level).viewport(height: viewportSize.height) }
 
-    /// Translate engine/layout-space render slots into RENDER space — the single, final draw chokepoint where
+    /// Translate engine/layout-space render slots into RENDER space - the single, final draw chokepoint where
     /// the inset is applied (exactly once per path). A no-op at inset 0 (byte-identical full-width output).
     private func renderTranslate(_ slots: [GridRenderSlot]) -> [GridRenderSlot] {
         renderBounds(forLevel: level).translate(slots)
@@ -710,7 +710,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return plan.visibleSlots.map { ($0.index, $0.slotRect) }
     }
 
-    /// The first visible cell + how far its top sits below the viewport top — captured before a level
+    /// The first visible cell + how far its top sits below the viewport top - captured before a level
     /// change so the same photo can be re-pinned afterward (anchor preservation).
     func anchorAtViewportTop() -> (uid: PhotoUID, offset: CGFloat)? {
         guard let clip = clipView, metalView != nil, layoutWidth > 1 else { return nil }
@@ -734,10 +734,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     //
     // During a live WINDOW resize the grid must behave like a STABLE rendered surface, not a per-frame
     // re-resolving grid (re-resolving recomputes every tile position each tick → the tiles REFLOW, which reads as
-    // rearranging — exactly what Apple does NOT do). On gesture begin we snapshot the settled render slots ONCE
+    // rearranging - exactly what Apple does NOT do). On gesture begin we snapshot the settled render slots ONCE
     // (generous overscan ABOVE so a narrow / scale-down reveals already-laid-out older rows, never blank), and each
     // frame we present that snapshot UNIFORMLY SCALED to the current width about the stationary LEFT edge + viewport
-    // BOTTOM — ONE coherent surface, square tiles preserved, no engine resolve / group rebuild / texture churn. On
+    // BOTTOM - ONE coherent surface, square tiles preserved, no engine resolve / group rebuild / texture churn. On
     // gesture end the host settles ONCE, bottom-anchored: under the accepted fixed-columns model the release-width
     // settled layout uses the same column count as the live snapshot, so no column reflow or detent correction is
     // expected.
@@ -748,7 +748,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var presentationStartInset: CGFloat = 0
     private var presentationStartLayoutWidth: CGFloat = 1
     /// The settled render slots snapshotted ONCE at gesture start (+ their display mode). Each frame these are
-    /// presented uniformly SCALED — one coherent surface — never re-resolved (re-resolving would reflow).
+    /// presented uniformly SCALED - one coherent surface - never re-resolved (re-resolving would reflow).
     private var presentationSnapshotSlots: [GridRenderSlot] = []
     private var presentationSnapshotDisplayMode: TileContentDisplayMode = .aspectFitInsideSquare
     /// The item pinned to the viewport BOTTOM (+ its in-cell Y fraction). Used by the SIDEBAR settle
@@ -763,7 +763,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// True for the duration of a window resize that began at the newest (bottom) end: the scale + settle then
     /// hold the LAST row at the viewport bottom instead of the centre, so scaling never opens an empty band below.
     private var presentationResizeBottomPinned = false
-    /// The clip scroll captured at gesture start — the reference the VERTICAL settle counter-scrolls from.
+    /// The clip scroll captured at gesture start - the reference the VERTICAL settle counter-scrolls from.
     private(set) var presentationStartScrollY: CGFloat = 0
     /// VERTICAL drag offset (viewport pixels, y-down) the host applies to the snapshot each tick: a vertical resize
     /// keeps the tile SIZE (no scale) and slides the grid so the dragging edge clips while the opposite edge gives
@@ -777,7 +777,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     /// Snapshot the settled render slots ONCE (generous overscan so a scale-down reveals real older rows) plus the
     /// box they were laid out in (layout width, inset) and the start scroll. A presentation/sidebar transition then
-    /// presents these SCALED — never re-resolved.
+    /// presents these SCALED - never re-resolved.
     private func captureSnapshot() {
         guard let clip = clipView, let view = metalView else { return }
         let viewportSize = view.bounds.size
@@ -860,7 +860,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     /// The settled scroll that re-centres the captured CENTRE anchor at the CURRENT layout width (clamped). Falls
     /// back to the gesture-start scroll when no anchor. The host applies this ONCE on release of a window resize, so
-    /// the item the user was looking at stays under the viewport centre — there is no per-frame re-anchor (which
+    /// the item the user was looking at stays under the viewport centre - there is no per-frame re-anchor (which
     /// drifted vertically as the tiles scaled with width).
     func centerAnchoredScroll() -> CGFloat {
         guard presentationCenterAnchorIndex >= 0, let view = metalView else { return presentationStartScrollY }
@@ -884,7 +884,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         presentationVerticalShift = 0
     }
 
-    // MARK: - Sidebar resize (open/close scales the grid like a left-edge resize — RIGHT-anchored, inset-driven)
+    // MARK: - Sidebar resize (open/close scales the grid like a left-edge resize - RIGHT-anchored, inset-driven)
     //
     // The floating sidebar is FIXED-width, so open/close changes the grid's leading inset by a known amount. Rather
     // than reflow, this presents the gesture-start snapshot SCALED right-anchored to fill [inset(t), V] as the inset
@@ -893,7 +893,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // width change reflow-free, after which the settle is a no-op).
     private(set) var presentationSidebarActive = false
     var isSidebarResizing: Bool { presentationSidebarActive }
-    /// from/to are LAYOUT insets (sidebar width + the normal-level gap) — what the scale fills to; `toEventInset`
+    /// from/to are LAYOUT insets (sidebar width + the normal-level gap) - what the scale fills to; `toEventInset`
     /// is the raw sidebar width committed to `sidebarObstructionInset` (the gap is re-added by the engine).
     private var presentationSidebarFromInset: CGFloat = 0
     private var presentationSidebarToInset: CGFloat = 0
@@ -904,7 +904,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     var presentationSidebarProgress: CGFloat = 0
 
     /// The LAYOUT inset (points) for a given sidebar obstruction width = the width plus, for a normal level with a
-    /// sidebar, the breathing gap, plus the standard outer LEFT margin — so the scale fills to EXACTLY where the
+    /// sidebar, the breathing gap, plus the standard outer LEFT margin - so the scale fills to EXACTLY where the
     /// engine will lay the grid out (mirrors `effectiveLeadingInset`). Omitting the margin here left a margin-sized
     /// re-alignment at the end of the slide.
     private func sidebarLayoutInset(forWidth sidebarInset: CGFloat) -> CGFloat {
@@ -951,7 +951,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let toLayoutW = max(1, V - presentationSidebarToInset)
         let k = toLayoutW / startLayoutW
         let anchorY = presentationSidebarBottomPinned ? H : H / 2
-        // SOURCE — the last scaled frame (q=1): the snapshot scaled right-anchored to [toInset, V].
+        // SOURCE - the last scaled frame (q=1): the snapshot scaled right-anchored to [toInset, V].
         let source = presentationSnapshotSlots.map { s in
             GridRenderSlot(index: s.index, column: s.column, row: s.row,
                            rect: Self.presentationScaledRectRightAnchored(s.rect, scale: k, rightX: V, anchorY: anchorY))
@@ -961,7 +961,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         // Match the presentation's vertical anchor: bottom only at the newest end, centre in the middle of the
         // timeline.
         let scroll = presentationSidebarBottomPinned ? bottomAnchoredScroll() : centerAnchoredScroll()
-        // TARGET — the settled layout (sticky columns ⇒ same count, tile filled) at the new inset + scroll.
+        // TARGET - the settled layout (sticky columns ⇒ same count, tile filled) at the new inset + scroll.
         let phase = currentPhase()
         let overscan = max(budget.overscanFraction, 1.5) * H
         let plan = engine.framePlan(level: level, viewportSize: CGSize(width: toLayoutW, height: H), scrollOffset: CGPoint(x: 0, y: scroll), overscan: overscan, columnPhase: phase)
@@ -980,7 +980,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return (scroll, true)
     }
 
-    /// Finalize an in-flight sidebar scale IMMEDIATELY — commit its target inset (engine re-adds the gap), drop the
+    /// Finalize an in-flight sidebar scale IMMEDIATELY - commit its target inset (engine re-adds the gap), drop the
     /// snapshot, and commit the inset. Used when a new toggle or a window resize supersedes it, so the engine inset
     /// can never end out of sync with the sidebar's actual state.
     func cancelSidebarResize() {
@@ -992,7 +992,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     }
 
     /// Present the snapshot SCALED right-anchored to fill [inset(t), V] for the current sidebar progress. Coherent
-    /// scale (one surface) — never re-resolved — so the grid scales exactly like a left-edge window drag.
+    /// scale (one surface) - never re-resolved - so the grid scales exactly like a left-edge window drag.
     private func drawSidebarResize(in view: MTKView, viewportSize: CGSize) {
         let scaled = sidebarPresentationSlots(viewportSize: viewportSize, progress: presentationSidebarProgress)
         let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
@@ -1008,7 +1008,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let scaled = resizePresentationSlots(viewportSize: viewportSize)
         let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
         renderer.render(in: view, viewportSize: viewportSize, groups: groups)
-        // The settle scroll is resolved ONCE on release (`windowResizeReleaseScrollY`), never re-anchored per frame —
+        // The settle scroll is resolved ONCE on release (`windowResizeReleaseScrollY`), never re-anchored per frame -
         // that bottom-anchored recompute drifted vertically as the tiles scaled with width.
     }
 
@@ -1058,7 +1058,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                height: r.height * k)
     }
 
-    /// Scale a viewport rect about the stationary RIGHT edge (x = rightX) and a vertical anchor line — for a sidebar
+    /// Scale a viewport rect about the stationary RIGHT edge (x = rightX) and a vertical anchor line - for a sidebar
     /// open/close (a LEFT-edge resize of the grid): the content's right edge stays put while its left edge moves to
     /// the new inset and the tiles scale (square). `k = 1` is the identity.
     nonisolated static func presentationScaledRectRightAnchored(_ r: CGRect, scale k: CGFloat, rightX V: CGFloat, anchorY: CGFloat) -> CGRect {
@@ -1078,7 +1078,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     /// A window resize is BOTTOM-PINNED when the grid is scrolled to within ~a row of the newest (bottom) end. There
     /// the scale + settle must hold the LAST row at the viewport bottom (anchorY = H, `bottomAnchoredScroll`) rather
-    /// than the centre — otherwise scaling about the centre opens an empty band below the last row. Pure + testable.
+    /// than the centre - otherwise scaling about the centre opens an empty band below the last row. Pure + testable.
     nonisolated static func resizeIsBottomPinned(scrollY: CGFloat, contentHeight: CGFloat, viewportHeight: CGFloat) -> Bool {
         let maxScroll = max(0, contentHeight - viewportHeight)
         return scrollY >= maxScroll - 2
@@ -1107,10 +1107,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let H = viewportSize.height
         let inset = presentationStartInset
         let curLayoutW = max(1, viewportSize.width - inset - gridHorizontalMargin(forLevel: level))   // right gutter too
-        // SOURCE — exactly the scaled + vertically-slid snapshot the last live frame presented (what the user sees);
+        // SOURCE - exactly the scaled + vertically-slid snapshot the last live frame presented (what the user sees);
         // same anchor as `drawPresentationResize` so the settle starts from the on-screen frame.
         let source = resizePresentationSlots(viewportSize: viewportSize)
-        // TARGET — the settled fixed-column layout at the release width + the scroll the host will apply.
+        // TARGET - the settled fixed-column layout at the release width + the scroll the host will apply.
         let phase = currentPhase()
         let overscan = max(budget.overscanFraction, 1.5) * H
         let lvp = CGSize(width: curLayoutW, height: H)
@@ -1164,7 +1164,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && hasRetryableMissingVisibleTexture(visibleUIDs)
     }
 
-    /// Max per-item rect delta (L1 of origin + size) between two index-keyed slot sets — 0 when every shared item
+    /// Max per-item rect delta (L1 of origin + size) between two index-keyed slot sets - 0 when every shared item
     /// sits in the same place, large when a future responsive policy reflows the same indexed items.
     nonisolated static func maxIndexedRectDelta(source: [GridRenderSlot], target: [GridRenderSlot]) -> CGFloat {
         var src: [Int: CGRect] = [:]
@@ -1179,10 +1179,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return maxD
     }
 
-    /// easeOutCubic — fast start, gentle landing: the "fly into place" the resize settle wants.
+    /// easeOutCubic - fast start, gentle landing: the "fly into place" the resize settle wants.
     nonisolated static func easeOutCubic(_ q: CGFloat) -> CGFloat { let p = 1 - q; return 1 - p * p * p }
 
-    /// easeInOutCubic — slow ends, fast middle: matches a sidebar slide's acceleration.
+    /// easeInOutCubic - slow ends, fast middle: matches a sidebar slide's acceleration.
     nonisolated static func easeInOutCubic(_ q: CGFloat) -> CGFloat {
         if q < 0.5 { return 4 * q * q * q }
         let u = -2 * q + 2
@@ -1199,20 +1199,20 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         guard let clip = clipView else { return }
         let viewportSize = view.bounds.size
         guard viewportSize.width > 1, viewportSize.height > 1 else { return }
-        // Refresh the display backing scale from the live drawable (invariant to window size — the ratio is the
+        // Refresh the display backing scale from the live drawable (invariant to window size - the ratio is the
         // Retina factor). Set before any early-returning branch so every path that reaches `streamTextures`
         // sizes uploads against the current display.
         if view.bounds.width > 0, view.drawableSize.width > 0 {
             backingScale = max(1, view.drawableSize.width / view.bounds.width)
         }
         // LIVE WINDOW RESIZE: scale the gesture-start snapshot about the viewport centre (fixed columns, no reflow;
-        // the clip is frozen — the host re-centres it ONCE on release). Armed for a horizontal/corner drag.
+        // the clip is frozen - the host re-centres it ONCE on release). Armed for a horizontal/corner drag.
         if presentationResizeActive {
             drawPresentationResize(in: view, viewportSize: viewportSize)
             return
         }
         // SIDEBAR open/close: present the snapshot SCALED right-anchored to the animating inset (a left-edge resize
-        // of the grid) — the same coherent scale as a window drag, host-driven over the slide duration.
+        // of the grid) - the same coherent scale as a window drag, host-driven over the slide duration.
         if presentationSidebarActive {
             drawSidebarResize(in: view, viewportSize: viewportSize)
             return
@@ -1224,7 +1224,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             drawResizeSettle(in: view, viewportSize: viewportSize, now: now)
             return
         }
-        // OVERVIEW LAYER DISSOLVE (offscreen two-layer mix) — active during L3↔L4 / L4↔L5 gestures and the
+        // OVERVIEW LAYER DISSOLVE (offscreen two-layer mix) - active during L3↔L4 / L4↔L5 gestures and the
         // discrete +/- overview click fade.
         if let plan = overviewDissolve {
             if overviewClickDissolveActive {
@@ -1245,7 +1245,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         // (the same host-clock model the commit bridge uses), NOT a component-local timer; component
         // localProgress is a pure function of q.
         if gridTransition.isActive {
-            // LIVE PINCH (V3.8): q is HOST-driven via `setPinchProgress` (the scrub driver), NOT a timer —
+            // LIVE PINCH (V3.8): q is HOST-driven via `setPinchProgress` (the scrub driver), NOT a timer -
             // render at the current q and stop. The host paces redraws (magnify events + the settle tick)
             // and ends the plan on commit; there is no self-looping setNeedsDisplay here.
             if gridTransition.activeKind == .pinch {
@@ -1364,7 +1364,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     }
 
     /// The presentation frame parameters for one detent in the current gesture: the gesture-START detent keeps
-    /// the ACTUAL on-screen (phase, scroll) — so q matches the live screen there and a return lands exactly —
+    /// the ACTUAL on-screen (phase, scroll) - so q matches the live screen there and a return lands exactly -
     /// while every OTHER detent is cursor-aligned (anchor pinned under the cursor). Because these are a pure
     /// function of the (fixed) anchor + the detent, ANY two adjacent segments sharing a detent get the IDENTICAL
     /// frame for it ⇒ the inter-segment seam (prev q=1 == next q=0) is exact by construction.
@@ -1384,7 +1384,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Build (or rebuild) the `.pinch` plan for one adjacent segment `[source → target]` (source = denser end).
     /// Both detents resolve through `pinchDetentParams`, so a rebuild at a detent crossing is seam-continuous
     /// with the previous segment. NOTHING is committed (level/phase/scroll stay at the gesture-start state; the
-    /// actual scroll view stays frozen) — the plan renders the crossfade in viewport space. Returns false ⇒
+    /// actual scroll view stays frozen) - the plan renders the crossfade in viewport space. Returns false ⇒
     /// the host uses the legacy reflow (only happens outside the eligible band).
     func tryBuildPinchSegment(source: Int, target: Int, viewportSize: CGSize) -> Bool {
         guard zoomTransaction != nil else { return false }
@@ -1407,7 +1407,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         guard began else { return false }
         pinchSegmentSource = s
         pinchSegmentTarget = t
-        // Anticipatory prefetch: decode the FULL target-level visible set NOW, at segment build — the decode
+        // Anticipatory prefetch: decode the FULL target-level visible set NOW, at segment build - the decode
         // pipeline then has the entire gesture as head-start, so the target tiles are RAM-resident by commit
         // instead of popping in black afterward (the banded fill). Independent of the per-frame warm pump, which
         // only streams the live crossfade subset (~50-60% of the committed viewport).
@@ -1430,7 +1430,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     /// Commit the chain to the settled detent `finalLevel` (the level the gesture landed on): adopt that
     /// detent's (phase, scroll), end the plan, clear the transaction. Returns the scroll-Y the host scrolls to
-    /// — the settled frame then matches the plan's `finalLevel` endpoint exactly (no seam). For the gesture
+    /// - the settled frame then matches the plan's `finalLevel` endpoint exactly (no seam). For the gesture
     /// START detent this is the actual scroll (a no-op return-to-start). `logPostCommitAnchor` after scrolling.
     @discardableResult
     func commitPinchChain(toLevel finalLevel: Int, viewportSize: CGSize) -> CGFloat {
@@ -1486,7 +1486,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         return true
     }
 
-    /// Update the dissolve progress (0 = source, 1 = target). Rebuilds nothing — only the blend moves.
+    /// Update the dissolve progress (0 = source, 1 = target). Rebuilds nothing - only the blend moves.
     func setOverviewDissolveProgress(_ q: Double) {
         guard let d = overviewDissolve else { return }
         overviewDissolve = d.withProgress(q)
@@ -1571,7 +1571,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// translucent and fade against the background.
     ///
     /// ONE uniform background: like the settled path's resident tiles, transition tiles are drawn
-    /// DIRECTLY on the render pass's clear colour (`MetalGridPalette.clearColor`) — NO per-slot
+    /// DIRECTLY on the render pass's clear colour (`MetalGridPalette.clearColor`) - NO per-slot
     /// background card. So gaps, aspectFit letterbox, and a tile fading to/from background all show the
     /// single constant grid surface (a per-slot placeholder card here gave a mismatched colour during
     /// the animation). Reuses the texture cache + TileContentFitter; geometry comes from the plan.
@@ -1648,7 +1648,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         let contentSizeForDiag: CGSize
         if let tx = zoomTransaction {
             // LIVE zoom: an engine-owned transaction with a STABLE focus row. The grid is laid out relative
-            // to the anchor under the cursor — NOT a per-frame stateless re-resolve — so the row under the
+            // to the anchor under the cursor - NOT a per-frame stateless re-resolve - so the row under the
             // cursor keeps its photos (zoom-in drops edge neighbours, zoom-out adds them), never re-wrapping.
             let frame = tx.frame(continuousLevel: zoomTransactionLevel, viewportSize: layoutViewportSize, overscan: overscan)
             slots = renderTranslate(frame.visibleSlots)               // layout-space frame → render space (chokepoint)
@@ -1713,7 +1713,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     }
 
     /// Real thumbnails: resident images are cover-filled INSIDE the square slot (aspect only via the UV window
-    /// — never changes the slot), directly over the single uniform grid background, plus production decorations.
+    /// - never changes the slot), directly over the single uniform grid background, plus production decorations.
     /// Missing thumbnails draw nothing, so the bottom-most clear surface remains one continuous field.
     nonisolated static func viewportDrawSlots(_ slots: [GridRenderSlot], viewportSize: CGSize) -> [GridRenderSlot] {
         let viewport = CGRect(origin: .zero, size: viewportSize)
@@ -1734,7 +1734,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Build the settled-grid render groups for a set of slots at an EXPLICIT display mode (the canonical
     /// settled appearance: rounded thumbnail cover-fit on the uniform bg + production decorations). Shared by
     /// `renderRealSlots` (settled, `effectiveDisplayMode`) and the overview layer dissolve (each layer with its
-    /// OWN mode). Pure builder — no eviction, no draw. Returns (groups, resident-texture count).
+    /// OWN mode). Pure builder - no eviction, no draw. Returns (groups, resident-texture count).
     private func buildRealGroups(slots: [GridRenderSlot], flatUIDs: [PhotoUID], viewportSize: CGSize,
                                  displayMode: TileContentDisplayMode) -> (groups: [MetalGridRenderGroup], realCount: Int) {
         let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
@@ -1838,7 +1838,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
 extension MetalGridCoordinator {
 
-    /// Clamp the card corner radius so it never exceeds half the (square) slot — keeps tiny dense cells round.
+    /// Clamp the card corner radius so it never exceeds half the (square) slot - keeps tiny dense cells round.
     private func cellRadius(_ base: Float, cell: CGRect) -> Float {
         min(base, Float(min(cell.width, cell.height) * 0.5))
     }
@@ -1874,7 +1874,7 @@ extension MetalGridCoordinator {
         }
         // Settled only: after fresh uploads spend their share of the budget, grow any visible texture still
         // below the current cap (carried over from a denser level) to full crispness, in place. Skipped during
-        // transitions/dissolve — the settle frame that follows handles it, and the apparent size is in flux.
+        // transitions/dissolve - the settle frame that follows handles it, and the apparent size is in flux.
         if allowUpgrade {
             PhotoPerformanceSignposts.grid.interval("streamTextures.upgrade") {
                 cache.upgradeUndersizedResident(upgradeCandidates) { [dataSource] uid in dataSource.image(for: uid) }

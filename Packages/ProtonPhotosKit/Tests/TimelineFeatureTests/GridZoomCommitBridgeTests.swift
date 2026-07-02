@@ -36,7 +36,7 @@ import GridCore
                                    viewportSize: viewport, scrollY: scrollY, overscan: overscan, progress: t, columnPhase: phase)
     }
 
-    // MARK: 1 — CommitBridgeMeasuresHorizontalPhaseShiftTest
+    // MARK: 1 - CommitBridgeMeasuresHorizontalPhaseShiftTest
     @Test func commitBridgeMeasuresHorizontalPhaseShift() {
         let (e, tx, _, _) = setup()
         let d = e.commitDelta(transaction: tx, targetLevel: targetLevel, viewportSize: viewport)   // canonical (no phase)
@@ -46,7 +46,7 @@ import GridCore
         #expect(d.anchorColumnShift(pitch: pitch) != 0, "the horizontal shift is a whole-column phase shift")
     }
 
-    // MARK: 2 — CommitBridgeInterpolatesMatchedGlobalIndexRectsTest
+    // MARK: 2 - CommitBridgeInterpolatesMatchedGlobalIndexRectsTest
     @Test func commitBridgeInterpolatesMatchedGlobalIndexRects() {
         let (e, tx, phase, scrollY) = setup()
         // The anchor is matched (present in both the transaction-final frame AND the phased settled plan); with
@@ -65,7 +65,7 @@ import GridCore
         }
     }
 
-    // MARK: 3 — CommitBridgeKeepsAnchorDeltaMonotonicTest
+    // MARK: 3 - CommitBridgeKeepsAnchorDeltaMonotonicTest
     @Test func commitBridgeKeepsAnchorDeltaMonotonic() {
         let (e, tx, phase, scrollY) = setup()
         let settled = e.framePlan(level: targetLevel, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: scrollY), overscan: overscan, columnPhase: phase)
@@ -80,7 +80,7 @@ import GridCore
         #expect(lastDistance < 0.01, "anchor must reach the settled position at t=1")
     }
 
-    // MARK: 4 — CommitBridgeDoesNotChangeGlobalIdentityTest
+    // MARK: 4 - CommitBridgeDoesNotChangeGlobalIdentityTest
     @Test func commitBridgeDoesNotChangeGlobalIdentity() {
         let (e, tx, phase, scrollY) = setup()
         let identitiesAt0 = bridge(e, tx, scrollY, phase, 0).map(\.index)
@@ -92,7 +92,7 @@ import GridCore
         }
     }
 
-    // MARK: 5 — CommitBridgeCompletesAtSettledGridFrameTest
+    // MARK: 5 - CommitBridgeCompletesAtSettledGridFrameTest
     @Test func commitBridgeCompletesAtSettledGridFrame() {
         let (e, tx, phase, scrollY) = setup()
         let settled = e.framePlan(level: targetLevel, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: scrollY), overscan: overscan, columnPhase: phase)
@@ -107,13 +107,13 @@ import GridCore
         }
     }
 
-    // MARK: 6 — CommitBridgeDurationIsBoundedTest
+    // MARK: 6 - CommitBridgeDurationIsBoundedTest
     @Test func commitBridgeDurationIsBounded() {
         #expect(GridZoomCommitBridge.duration >= 0.12 && GridZoomCommitBridge.duration <= 0.18,
                 "bridge duration must be 120–180 ms, got \(GridZoomCommitBridge.duration)")
     }
 
-    // MARK: 7 — CommitBridgeNoSpringNoBounceTest
+    // MARK: 7 - CommitBridgeNoSpringNoBounceTest
     @Test func commitBridgeNoSpringNoBounce() {
         #expect(GridZoomCommitBridge.easedProgress(0) == 0)
         #expect(abs(GridZoomCommitBridge.easedProgress(1) - 1) < 1e-9)

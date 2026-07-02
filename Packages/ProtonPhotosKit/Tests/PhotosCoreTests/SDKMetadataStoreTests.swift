@@ -6,8 +6,8 @@ import XCTest
 /// (cached media only, KEEPS the account key, stays signed in). `SDKMetadataStore` is the testable
 /// single source of truth for *which* files the sign-out purge removes; these tests pin that the
 /// purge (a) deletes the entity + per-account timeline stores and their WAL/SHM sidecars, and
-/// (b) leaves everything else in the same directory — other accounts' data, the encrypted caches,
-/// and the account-data cache — untouched, so the two erase actions stay distinct.
+/// (b) leaves everything else in the same directory - other accounts' data, the encrypted caches,
+/// and the account-data cache - untouched, so the two erase actions stay distinct.
 final class SDKMetadataStoreTests: XCTestCase {
 
     private let uid = "user-ABC123"
@@ -80,11 +80,11 @@ final class SDKMetadataStoreTests: XCTestCase {
         let dir = try makeTempDir()
         for name in SDKMetadataStore.metadataFileNames(uid: uid) { try write(name, in: dir) }
 
-        // Co-located artifacts that the metadata purge must NOT touch — they're erased (or kept) by
+        // Co-located artifacts that the metadata purge must NOT touch - they're erased (or kept) by
         // their own paths. This is what keeps sign-out's full purge distinct from cache-clear and
         // scoped per account.
         let bystanders = [
-            "account-users-\(uid).enc",        // AccountDataCache — cleared separately on sign-out
+            "account-users-\(uid).enc",        // AccountDataCache - cleared separately on sign-out
             "account-addresses-\(uid).enc",
             "timeline-v3-OTHER-UID.sqlite",    // a different account's timeline store
             "secrets.sqlite",                   // legacy secret cache (purged on bridge init, not here)

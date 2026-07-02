@@ -148,7 +148,7 @@ final class PhotosCorePlatformPurityTests: XCTestCase {
 
     /// Confirms the only frameworks imported by PhotosCore are the cross-platform
     /// allowlist: Foundation, CoreGraphics, AVFoundation, CryptoKit, OSLog, SQLite3. A new
-    /// import here is a review trigger — the change should be intentional and documented.
+    /// import here is a review trigger - the change should be intentional and documented.
     private static let allowedFrameworkImports: Set<String> = [
         "Foundation",
         "CoreGraphics",

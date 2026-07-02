@@ -11,7 +11,7 @@ import MediaCache
 @Suite("App infrastructure")
 struct AppInfrastructureTests {
 
-    // MARK: Deliverable 1 — settings persistence
+    // MARK: Deliverable 1 - settings persistence
 
     @Test func offlineToggleAndSidebarWidthPersist() {
         let suite = "tests-settings-\(UUID().uuidString)"
@@ -29,7 +29,7 @@ struct AppInfrastructureTests {
         #expect(SidebarMetrics.resolved(stored: CGFloat(defaults.double(forKey: AppSettingsKey.sidebarWidth))) == 300)
     }
 
-    // MARK: Deliverable 4 — sidebar metrics
+    // MARK: Deliverable 4 - sidebar metrics
 
     @Test func sidebarClampAndResolve() {
         #expect(SidebarMetrics.clamp(10) == SidebarMetrics.minWidth)
@@ -70,7 +70,7 @@ struct AppInfrastructureTests {
         #expect(SidebarMetrics.effectiveWidth(visible: true, width: 9_000) == SidebarMetrics.maxWidth)
     }
 
-    // MARK: Deliverable 6 — window frame validation
+    // MARK: Deliverable 6 - window frame validation
 
     @Test func windowFrameStaysOnScreen() {
         let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
@@ -111,7 +111,7 @@ struct AppInfrastructureTests {
         #expect(restored == finalFrame)
     }
 
-    // MARK: Deliverable 3 — cache status math
+    // MARK: Deliverable 3 - cache status math
 
     @Test func cacheCoverageMath() {
         var status = OfflineCacheStatus()
@@ -124,7 +124,7 @@ struct AppInfrastructureTests {
         #expect(status.totalCacheSizeBytes == 17)
     }
 
-    // MARK: Deliverable 5 — video state machine
+    // MARK: Deliverable 5 - video state machine
 
     @Test func videoStateMachineTransitions() {
         #expect(VideoPlayerItemStatus.readyToPlay.nextState(error: nil) == .playing)
@@ -160,7 +160,7 @@ struct AppInfrastructureTests {
         #expect(fields["error"] == "none")
     }
 
-    // MARK: Deliverable 2 — prefetch priority + pause
+    // MARK: Deliverable 2 - prefetch priority + pause
 
     @Test func thumbnailPriorityIsOrdered() {
         // Visible work outranks every background tier; idle crawl is last.
@@ -198,7 +198,7 @@ struct AppInfrastructureTests {
         #expect(status.pausedReason == "disabled")        // offline toggle off
     }
 
-    // MARK: Deliverable (DB) — timeline query plan
+    // MARK: Deliverable (DB) - timeline query plan
     //
     // The timeline query-plan guard moved to PhotosCoreTests/TimelineMetadataStoreTests: the DB v1
     // reset moved the store into PhotosCore (`TimelineMetadataStore`), and the guard there runs

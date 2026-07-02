@@ -27,7 +27,7 @@ public enum ViewerTitleFormatter {
     ///   - total: total item count.
     ///   - locationName: reverse-geocoded POI/location name, if already available (never blocks on it).
     ///   - filename: original filename, used only as a date-less fallback.
-    ///   - locale: user/app locale — drives date wording ("um") and the "von"/"of" connector.
+    ///   - locale: user/app locale - drives date wording ("um") and the "von"/"of" connector.
     public static func make(
         captureDate: Date?,
         index: Int,

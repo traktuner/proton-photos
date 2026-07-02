@@ -1,4 +1,4 @@
-# Rubber-band Over-Zoom at the Largest Grid Level — Fix Report
+# Rubber-band Over-Zoom at the Largest Grid Level - Fix Report
 
 Date: 2026-06-25 · Branch: `apple-normal-focusrow-transition`
 
@@ -6,8 +6,8 @@ Date: 2026-06-25 · Branch: `apple-normal-focusrow-transition`
 
 Pinching IN at the largest-thumbnail detent (level 0) drives the raw continuous level negative, which falls
 to the live `GridZoomTransaction` reflow path (correct). The apparent-metric model already contains the
-rubber-band — `GridZoomTransaction.apparentSlotSide(at:width:)` returns `side(0) * (1 - x * 0.6)` for `x <= 0`,
-which GROWS the tile — but `MetalGridCoordinator.updateLiveZoom(continuousLevel:)` hard-clamped the level:
+rubber-band - `GridZoomTransaction.apparentSlotSide(at:width:)` returns `side(0) * (1 - x * 0.6)` for `x <= 0`,
+which GROWS the tile - but `MetalGridCoordinator.updateLiveZoom(continuousLevel:)` hard-clamped the level:
 
 ```swift
 zoomTransactionLevel = min(max(x, 0), CGFloat(engine.levelCount - 1))   // max(x, 0) killed the overshoot
@@ -26,17 +26,17 @@ differs from level 0 by more than that, so releasing would have snapped.
 1. **`GridLiveZoomBounds.swift` (new, named + tested).** Maps the raw pinch level to the bounded visual level:
    in-band / densest passes through (clamped to the densest detent); the over-zoom region (`x < 0`) gets
    iOS-style elastic resistance `x / (1 - x/cap)` with diminishing return, asymptotically approaching
-   `-maxOverZoom` (`0.30` level units — a named constant, not an inline magic number) so an aggressive pinch
+   `-maxOverZoom` (`0.30` level units - a named constant, not an inline magic number) so an aggressive pinch
    cannot produce absurd tile sizes.
 2. **`MetalGridCoordinator.updateLiveZoom`** now uses `GridLiveZoomBounds.visualLevel(...)` instead of the
    `max(x, 0)` clamp, so a bounded negative visual level reaches `GridZoomTransaction.frame(...)` → the
    rubber-band renders, anchored under the cursor (the transaction pins the anchor at `anchorViewportPoint`
    at any level, including negative). Added `setLiveVisualLevel(_:)` for the spring-back. The COMMIT stays
    clamped: `finishLiveZoom` does `max(0, min(target, levelCount-1))` and `beginCommitBridge` does
-   `engine.clampLevel(...)` — a temporarily-negative visual level never commits a negative level.
-3. **`MetalGridScrollHost`** — release spring-back (no hard snap): when a `.reflow` gesture is released from an
+   `engine.clampLevel(...)` - a temporarily-negative visual level never commits a negative level.
+3. **`MetalGridScrollHost`** - release spring-back (no hard snap): when a `.reflow` gesture is released from an
    over-zoom (`liveZoomLevel < 0`), instead of an instant commit it runs a short (~0.18 s smoothstep) ramp of
-   the visual level back to 0 via the existing display tick, then `finishLiveZoom(target: 0)` — seamless,
+   the visual level back to 0 via the existing display tick, then `finishLiveZoom(target: 0)` - seamless,
    because at level 0 the live frame equals the settled frame. Contained to the `.reflow` over-zoom case;
    the accepted single-lattice / overview-dissolve / in-band pinch paths are untouched.
 
@@ -62,11 +62,11 @@ accepted `PinchLiveZoomDriverTests` / `GridTransitionControllerTests` / `GridTra
 `OverviewLayerDissolveTests` still pass (no regression to the Phase-B effects).
 
 `GridLiveZoomBoundsTests` proves the acceptance criteria:
-1. `overZoomGrowsTileBeyondLevel0` — `apparentSlotSide(at: negative)` > `side(at: 0)`.
-2. `visualLevelKeepsBoundedNegativeOverZoom` — negative visual level preserved (not clamped to 0), bounded by the cap, monotonic.
-3. `releaseFromOverZoomCommitsToLevel0` — a negative live level rounds/clamps to committed level 0.
-4. `anchorStaysUnderCursorDuringOverZoom` — the anchor item's rect centre stays at the cursor at `x = 0` and `x = -0.2`.
-5. `inBandLevelsPassThroughUnchanged` — positive levels unchanged (clamped only at the densest end).
+1. `overZoomGrowsTileBeyondLevel0` - `apparentSlotSide(at: negative)` > `side(at: 0)`.
+2. `visualLevelKeepsBoundedNegativeOverZoom` - negative visual level preserved (not clamped to 0), bounded by the cap, monotonic.
+3. `releaseFromOverZoomCommitsToLevel0` - a negative live level rounds/clamps to committed level 0.
+4. `anchorStaysUnderCursorDuringOverZoom` - the anchor item's rect centre stays at the cursor at `x = 0` and `x = -0.2`.
+5. `inBandLevelsPassThroughUnchanged` - positive levels unchanged (clamped only at the densest end).
 
 ## Manual QA checklist
 

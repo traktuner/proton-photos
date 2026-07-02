@@ -75,7 +75,7 @@ enum MetalGridProductionAdapter {
     }
 
     /// One configured formatter per (granularity, locale), built ONCE per `dateMarkers` call and reused for every
-    /// boundary — DateFormatter construction is expensive, so do not allocate one per marker.
+    /// boundary - DateFormatter construction is expensive, so do not allocate one per marker.
     private static func makeFormatter(granularity: TimelineDateMarker.Granularity, locale: Locale) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = locale

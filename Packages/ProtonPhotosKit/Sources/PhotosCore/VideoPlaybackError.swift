@@ -5,7 +5,7 @@ import Foundation
 /// failure surface Proton Drive Web reports for its streaming preview (broken-video / SW-timeout /
 /// first-block-timeout / decrypt failure), translated to AVFoundation terms.
 public enum VideoPlaybackError: Error, Equatable, Sendable {
-    /// The opened item turned out not to be a video (server/content says image) — caller falls back
+    /// The opened item turned out not to be a video (server/content says image) - caller falls back
     /// to the image path. Not user-visible.
     case notVideo
     /// File/link metadata (size, block map, content key) could not be resolved.
@@ -26,11 +26,11 @@ public enum VideoPlaybackError: Error, Equatable, Sendable {
     case quotaOrRateLimited
     /// A local cache/temp file could not be written or read.
     case localFileError
-    /// `AVPlayerItem.status` became `.failed` (generic player error) — `detail` carries the AVError.
+    /// `AVPlayerItem.status` became `.failed` (generic player error) - `detail` carries the AVError.
     case playerItemFailed(detail: String?)
     /// The player never became ready / stalled past the watchdog deadline with no recoverable reason.
     case timedOut
-    /// Anything not otherwise classified — `detail` carries the original description.
+    /// Anything not otherwise classified - `detail` carries the original description.
     case unknown(detail: String?)
 
     /// Readable, user-facing message, localized via the package String Catalog.

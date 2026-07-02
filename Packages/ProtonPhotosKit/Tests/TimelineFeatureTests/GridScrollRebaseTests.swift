@@ -5,7 +5,7 @@ import GridCore
 @testable import TimelineFeature
 
 /// The edge/corner scroll rebase must be a short, monotonic, no-bounce slide that ends EXACTLY at the legal
-/// settled scroll — never an instant jump, and a no-op for normal (in-bounds) commits.
+/// settled scroll - never an instant jump, and a no-op for normal (in-bounds) commits.
 @Suite struct GridScrollRebaseTests {
 
     // (2) Armed only when the gesture/anchored scroll differs from the legal settled scroll.

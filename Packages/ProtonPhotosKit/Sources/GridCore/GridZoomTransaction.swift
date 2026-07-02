@@ -1,13 +1,13 @@
 import CoreGraphics
 
-// MARK: - GridZoomTransaction — engine-owned LIVE zoom (focus-row stable)
+// MARK: - GridZoomTransaction - engine-owned LIVE zoom (focus-row stable)
 //
 // A settled `GridFramePlan` answers "where do items live at level N". It CANNOT be the live-zoom model:
 // re-resolving it per frame changes `columnCount`, and the placement `row = slot/cols, col = slot%cols`
-// rewraps every flat index — the row under the cursor becomes an unrelated row (the observed jump).
+// rewraps every flat index - the row under the cursor becomes an unrelated row (the observed jump).
 //
 // A live zoom is instead a TRANSACTION captured once at gesture start. The anchor item (the photo under the
-// cursor) is pinned under the cursor, and the whole grid is laid out RELATIVE TO THE ANCHOR — the anchor is
+// cursor) is pinned under the cursor, and the whole grid is laid out RELATIVE TO THE ANCHOR - the anchor is
 // placed at the cursor's column, and indices fan out from it. Therefore the FOCUS ROW (the row under the
 // cursor) is always a CONTIGUOUS run of global indices centred on the anchor by the cursor column:
 //   • zoom IN  → fewer columns → the run shrinks, dropping edge neighbours (the focus photos stay);
@@ -15,17 +15,17 @@ import CoreGraphics
 // It never snaps to a row-major boundary and never jumps to an unrelated row.
 //
 // The settled target grid is still normal row-major; the transaction only governs the LIVE drag until
-// commit. (No crossfade / opacity work here — identity + position continuity only.)
+// commit. (No crossfade / opacity work here - identity + position continuity only.)
 //
 // SINGLE-SECTION ONLY. The transaction treats the library as ONE contiguous run (`anchorGlobalIndex + delta`),
 // which matches the engine's geometry only when there is exactly one section. Production uses ONE physical
-// layout section by design — `RealMetalGridDataSource` flattens all `TimelineSection`s into a single
-// continuous photo wall — so the transaction drives the production live pinch. A genuinely multi-section
+// layout section by design - `RealMetalGridDataSource` flattens all `TimelineSection`s into a single
+// continuous photo wall - so the transaction drives the production live pinch. A genuinely multi-section
 // engine wraps each section independently (its own partial row + header offset), so the flat fan-out would be
 // wrong across section boundaries; `beginZoomTransaction` therefore returns nil for a multi-section engine (a
 // safety guard, not a production path).
 
-/// A renderable square slot in VIEWPORT coordinates — exactly what the Metal renderer draws. Produced both
+/// A renderable square slot in VIEWPORT coordinates - exactly what the Metal renderer draws. Produced both
 /// by the settled `GridFramePlan` (mapped from `GridSlot.viewportRect`) and by the live `GridZoomTransaction`.
 /// Deliberately distinct from the engine's `GridSlot`, whose `slotRect` is CONTENT-space: keeping a separate
 /// type means viewport-space and content-space rects are never conflated under one name.
@@ -52,7 +52,7 @@ public struct GridZoomTransactionFrame: Equatable, Sendable {
     public let pitch: CGFloat
     /// The anchor's column within the focus row.
     public let anchorColumn: Int
-    /// Ordered global indices in the row under the cursor — contiguous, always contains the anchor.
+    /// Ordered global indices in the row under the cursor - contiguous, always contains the anchor.
     public let focusRow: [Int]
     /// Every visible render slot (focus row + the rows above/below), viewport coords. `row` is RELATIVE to
     /// the anchor row (0 = focus row, negative = above).
@@ -61,7 +61,7 @@ public struct GridZoomTransactionFrame: Equatable, Sendable {
 
 public struct GridZoomTransaction: Equatable, Sendable {
     public let totalItems: Int
-    /// The anchor's identity — the item under the cursor at gesture start (section/global index). NEVER a
+    /// The anchor's identity - the item under the cursor at gesture start (section/global index). NEVER a
     /// raw y; this is what is pinned under the cursor through the whole gesture.
     public let anchorGlobalIndex: Int
     /// Where the anchor's local point is held fixed (the cursor, viewport coords).
@@ -94,13 +94,13 @@ public struct GridZoomTransaction: Equatable, Sendable {
     func lattice(continuousLevel x: CGFloat, width rawWidth: CGFloat) -> Lattice {
         let width = max(rawWidth, 1)
         // RUBBER-BAND over-zoom past the largest detent (x < 0): the level-0 grid is GEOMETRICALLY SCALED
-        // around the cursor (fixed columns, NO reflow) — "zooming the image", restoring the original working
+        // around the cursor (fixed columns, NO reflow) - "zooming the image", restoring the original working
         // rubber band. Cell, gap and pitch all scale by the same factor `f`, so the whole grid grows uniformly
         // about the anchor; the column reflow happens only on release (commit at level 0). For x ≥ 0 the
         // in-band / densest behaviour below is unchanged.
         if x < 0 {
             // Over-zoom past the largest level: geometrically SCALE the level-0 grid about the cursor. FIXED-COLUMNS,
-            // WIDTH-FILLING: L0 HOLDS its `nominalColumns` and the base side is the settled (width-FILLED) L0 side —
+            // WIDTH-FILLING: L0 HOLDS its `nominalColumns` and the base side is the settled (width-FILLED) L0 side -
             // so at x == 0 the scale factor is exactly 1 and this branch is continuous with the in-band branch, and
             // the over-zoom anchors on the same grid the settled L0 shows.
             let columns = levels[0].nominalColumns                       // FIXED-COLUMNS: L0 holds its count
@@ -118,8 +118,8 @@ public struct GridZoomTransaction: Equatable, Sendable {
         let gap = apparentGap(at: x)
         let target = apparentSlotSide(at: x, width: width)
         // FIXED-COLUMNS, WIDTH-FILLING: `apparentSlotSide` already returns the per-level FILLED side. At an integer
-        // detent the column count is that level's `nominalColumns` — the SAME fixed count the settled
-        // `resolvedForLevel` holds — so the transaction and the settled plan agree on (size, columns) at every
+        // detent the column count is that level's `nominalColumns` - the SAME fixed count the settled
+        // `resolvedForLevel` holds - so the transaction and the settled plan agree on (size, columns) at every
         // detent (the commit seam closes; no vertical OR size jump). BETWEEN detents (the continuous over-zoom)
         // the count comes from `columnsForFixedSide` on the apparent side; only this off-detent path is adaptive.
         let columns: Int
@@ -130,7 +130,7 @@ public struct GridZoomTransaction: Equatable, Sendable {
         } else {
             columns = SquareTileGridEngine.columnsForFixedSide(side: target, gap: gap, width: width)
         }
-        let side = target            // the apparent FILLED side — equals the settled side at every detent
+        let side = target            // the apparent FILLED side - equals the settled side at every detent
         let pitch = side + gap
         // Pin the anchor under the cursor: its cell's local point sits at `anchorViewportPoint`.
         let anchorCellX = anchorViewportPoint.x - anchorLocalFraction.x * side
@@ -143,7 +143,7 @@ public struct GridZoomTransaction: Equatable, Sendable {
     }
 
     /// The VIEWPORT rect of an arbitrary global index in the transaction lattice at `x` (nil if out of range).
-    /// The lattice is infinite, so this is valid even for items currently off-screen — used by the commit
+    /// The lattice is infinite, so this is valid even for items currently off-screen - used by the commit
     /// bridge + the commit-delta measurement.
     public func rect(forGlobalIndex g: Int, continuousLevel x: CGFloat, viewportSize: CGSize) -> CGRect? {
         guard g >= 0, g < totalItems else { return nil }
@@ -193,7 +193,7 @@ public struct GridZoomTransaction: Equatable, Sendable {
     // Apparent-metric interpolation (mirrors SquareTileGridEngine, with the soft rubber-band past the ends).
     public func apparentSlotSide(at x: CGFloat, width: CGFloat) -> CGFloat {
         let maxIndex = levels.count - 1
-        // The per-level WIDTH-FILLED side at this width — identical to the engine's settled `resolvedForLevel`,
+        // The per-level WIDTH-FILLED side at this width - identical to the engine's settled `resolvedForLevel`,
         // so an integer detent's apparent size equals the settled size and the commit seam closes at any width.
         func side(_ i: Int) -> CGFloat {
             SquareTileGridEngine.nominalSlotSide(columns: levels[i].nominalColumns, gap: levels[i].gap, width: width)
@@ -219,11 +219,11 @@ public extension SquareTileGridEngine {
     /// Capture a live-zoom transaction anchored at the item under (or nearest to) the cursor. `cursorContentPoint`
     /// is the cursor in CONTENT space at the current `level`; `viewportPoint` is where to hold it (the cursor in
     /// viewport space). Returns nil for an empty library OR a multi-section engine (the transaction's flat
-    /// single-run model is only valid for one section — see the file header; production uses one physical
+    /// single-run model is only valid for one section - see the file header; production uses one physical
     /// section by design, so it drives the transaction).
     func beginZoomTransaction(cursorContentPoint: CGPoint, viewportPoint: CGPoint, level: Int, width: CGFloat, columnPhase: Int? = nil) -> GridZoomTransaction? {
         guard sectionCounts.count <= 1 else { return nil }
-        // Resolve the anchor in the CURRENTLY-DISPLAYED grid — i.e. with the committed column phase. Without it
+        // Resolve the anchor in the CURRENTLY-DISPLAYED grid - i.e. with the committed column phase. Without it
         // the anchor would be read from the canonical layout, which (after a prior phased zoom) holds a DIFFERENT
         // item at the cursor's content point → the gesture would anchor the wrong item (the 24→18 swap).
         guard let a = anchorItem(nearContentPoint: cursorContentPoint, level: level, width: width, columnPhase: columnPhase) else { return nil }

@@ -207,7 +207,7 @@ public struct ThumbnailHealthCounters: Sendable, Equatable {
 public struct GridZoomHotPathCounters: Sendable, Equatable {
     public var dbQueryDuringPinch = 0
     public var diskReadDuringPinch = 0
-    /// Cheap `cache.has(_)` existence probes during a pinch — NOT actual byte reads. Split out from
+    /// Cheap `cache.has(_)` existence probes during a pinch - NOT actual byte reads. Split out from
     /// `diskReadDuringPinch` so the "disk read" stat reflects real `diskData(_)` reads only.
     public var diskPresenceCheckDuringPinch = 0
     public var decodeDuringPinch = 0

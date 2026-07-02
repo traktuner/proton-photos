@@ -1,6 +1,6 @@
 import CoreGraphics
 
-// MARK: - Viewport-resize camera rebase — engine-owned, AppKit-free, testable
+// MARK: - Viewport-resize camera rebase - engine-owned, AppKit-free, testable
 //
 // RESIZE IS NOT ZOOM. A window resize or sidebar toggle keeps the SAME level / committed phase / content mode /
 // nominalColumns / gap; only the square `slotSide` (→ pitch, content height) is recomputed from the new WIDTH.
@@ -9,7 +9,7 @@ import CoreGraphics
 // NORMALIZED viewport fraction (`anchorFractionY`, 0.5 = centre) is preserved across the resize. Because the grid
 // viewport's own frame also moves on screen (the view system repositions it), the SAME scroll formula yields the
 // per-edge feel: dragging the bottom edge up shifts content up while the bottom clips; dragging the top edge down
-// shifts content down while the top clips — with NO late jump. The viewport FRAMES (old/new, y-up screen space)
+// shifts content down while the top clips - with NO late jump. The viewport FRAMES (old/new, y-up screen space)
 // are carried so callers can label which edge moved; the scroll math itself is frame-position-independent (it
 // uses the heights + the anchor item), which is what keeps it correct across simultaneous width changes.
 //
@@ -100,7 +100,7 @@ public extension SquareTileGridEngine {
                                             newContentSize: newContent, anchorLocalFractionY: frac)
         }
 
-        // Bottom-pinned (newest end) wins — keep it pinned to the new bottom.
+        // Bottom-pinned (newest end) wins - keep it pinned to the new bottom.
         if input.wasBottomPinned { return make(maxY, anchor: nil, frac: nil, pinned: true) }
 
         // Capture the item at the OLD normalized viewport content point, preserve its in-slot point under the

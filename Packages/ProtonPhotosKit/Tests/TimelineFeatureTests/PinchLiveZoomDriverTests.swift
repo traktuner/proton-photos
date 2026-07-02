@@ -41,7 +41,7 @@ import GridCore
         #expect(seen == ["3->2", "2->1", "1->0"])    // passed continuously through every adjacent pair
         #expect(d.segmentTarget == 0)                // landed on the largest level
         #expect(abs(d.segmentQ - 1) < 1e-9)          // fully into L0
-        #expect(!d.isCommitted)                      // still live — no forced settle between levels
+        #expect(!d.isCommitted)                      // still live - no forced settle between levels
     }
 
     // ── 2. Reverse chains L0→L1→L2→L3 without a reset ──
@@ -111,7 +111,7 @@ import GridCore
         #expect(d.segmentSource == 2 && d.segmentTarget == 1)
         let flipped = d.update(continuousLevel: 2.20, dt: 0.05)  // crossed back above L2 ⇒ flips to [3→2]
         #expect(flipped.segmentSource == 3 && flipped.segmentTarget == 2)
-        #expect(flipped.segmentQ > 0.6 && flipped.segmentQ <= 1) // q bounded — no chaos at the flip
+        #expect(flipped.segmentQ > 0.6 && flipped.segmentQ <= 1) // q bounded - no chaos at the flip
     }
 
     // ── 8. Fast multi-level flick jumps straight to the final segment in one update ──
@@ -242,12 +242,12 @@ import GridCore
         #expect(d.finalLevel == 0 && abs(d.segmentQ - 1) < 1e-9)
     }
 
-    // ── 15d. A degenerate band (overview start) is inert — the driver never chains ──
+    // ── 15d. A degenerate band (overview start) is inert - the driver never chains ──
     @Test func degenerateBandIsInert() {
         var d = PinchLiveZoomDriver()
         d.begin(startLevel: 4, chainLo: 4, chainHi: 4)
         #expect(!d.chainable)
-        let out = d.update(continuousLevel: 3.0, dt: 0.05)      // attempt to chain — must stay inert
+        let out = d.update(continuousLevel: 3.0, dt: 0.05)      // attempt to chain - must stay inert
         #expect(!out.hasSegment)
         #expect(d.release() == 4)                                // commits the start level, no chaining
     }

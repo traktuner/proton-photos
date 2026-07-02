@@ -11,7 +11,7 @@ import GridCore
 @testable import TimelineFeature
 
 /// Pure-piece tests for the Metal grid's supporting machinery. They run headlessly (no window) so
-/// "build succeeded" is never the only evidence — coordinate transforms, LRU policy, placeholder
+/// "build succeeded" is never the only evidence - coordinate transforms, LRU policy, placeholder
 /// handling, upload dedup/budget, the renderer shader smoke test, and diagnostics counting are all
 /// proven in isolation.
 ///
@@ -21,7 +21,7 @@ import GridCore
 
 private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
 
-// MARK: 1 — Coordinate transform
+// MARK: 1 - Coordinate transform
 
 @Suite struct MetalGridCoordinateTransformTests {
     @Test func contentRectConvertsToViewportRect() {
@@ -32,7 +32,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
     }
 }
 
-// MARK: 2 — Texture LRU eviction / pinning
+// MARK: 2 - Texture LRU eviction / pinning
 
 @Suite struct GridTextureResidencyPolicyPhotoUIDTests {
     @Test func pinnedVisibleSurvivesEviction_offscreenEvicts() {
@@ -45,7 +45,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
             lru.completeUpload(u, cost: 1)
         }
         #expect(lru.residentCount == 3)
-        // New frame: a is visible (pinned) but NOT freshly used, so it's the LRU — pinning must save it.
+        // New frame: a is visible (pinned) but NOT freshly used, so it's the LRU - pinning must save it.
         lru.beginFrame(pinned: [a])
         let evicted = lru.evictToBudget()
         #expect(lru.isResident(a))         // pinned visible survives despite being least-recently-used
@@ -56,13 +56,13 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
     }
 }
 
-// MARK: 3 — Placeholder always available
+// MARK: 3 - Placeholder always available
 
 @Suite struct MetalGridPlaceholderTests {
     @Test func missingImageDrawsPlaceholderUntilResident() {
         var lru = GridTextureResidencyPolicy<PhotoUID>(capacity: 10, costCapacity: .max, uploadBudgetPerFrame: 10)
         let a = uid("a")
-        #expect(lru.drawState(a) == .placeholder)   // never a hole — always a placeholder
+        #expect(lru.drawState(a) == .placeholder)   // never a hole - always a placeholder
         lru.beginFrame(pinned: [])
         _ = lru.selectUploads(wanted: [a])
         lru.completeUpload(a, cost: 1)
@@ -70,7 +70,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
     }
 }
 
-// MARK: 4 — No duplicate concurrent uploads
+// MARK: 4 - No duplicate concurrent uploads
 
 @Suite struct MetalGridUploadDedupTests {
     @Test func sameUIDNotUploadedTwiceConcurrently() {
@@ -84,7 +84,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
     }
 }
 
-// MARK: 5 — Per-frame upload budget
+// MARK: 5 - Per-frame upload budget
 
 @Suite struct MetalGridUploadBudgetTests {
     @Test func perFrameUploadBudgetIsEnforced() {
@@ -175,7 +175,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
     }
 }
 
-// MARK: 5b — Cache-level byte budgets (real Metal textures; skipped on hosts with no GPU)
+// MARK: 5b - Cache-level byte budgets (real Metal textures; skipped on hosts with no GPU)
 
 @Suite @MainActor struct MetalGridTextureCacheByteBudgetTests {
     /// A decoded-image stand-in: a solid 64×64 CGImage → 64·64·4 = 16,384 texture bytes.
@@ -213,7 +213,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
         #expect(cache.deferredUploadsThisFrame == 3)                      // byte-deferred, retried next frame
         #expect(!cache.residencySaturatedThisFrame)                       // transient, not a residency refusal
 
-        // Next frame the deferred items are selected and uploaded — deferral is not permanent.
+        // Next frame the deferred items are selected and uploaded - deferral is not permanent.
         cache.beginFrame(pinned: Set(wanted))
         cache.uploadVisible(wanted: wanted.filter { !cache.isResident($0) }) { _ in image }
         #expect(cache.uploadsThisFrame == 2)
@@ -287,7 +287,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
         cache.beginFrame(pinned: [dense])
         cache.uploadVisible(wanted: [dense]) { _ in image }
         #expect(cache.uploadsThisFrame == 1)
-        #expect(cache.uploadBytesThisFrame == 4_096)                      // 32·32·4 — sized to the effective cap
+        #expect(cache.uploadBytesThisFrame == 4_096)                      // 32·32·4 - sized to the effective cap
         #expect(cache.residentBytes == 4_096)
         #expect(cache.texture(for: dense).width == 32)
         // The pin budget tracks the effective cap, so far more dense tiles can pin within the same byte budget.
@@ -300,7 +300,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
             maxCachedTextures: 100, maxResidentBytes: 1_048_576, overscanFraction: 1.0
         )), let image = Self.makeImage(side: 64) else { return }
 
-        // A sparse level asks for MORE than the cap (say 200) — the cap (64) still bounds it, so the upload is
+        // A sparse level asks for MORE than the cap (say 200) - the cap (64) still bounds it, so the upload is
         // identical to the fixed-size behaviour: no quality regression at large levels.
         cache.setEffectiveMaxTexturePixels(200)
         #expect(cache.effectiveMaxTexturePixels == 64)                    // clamped to maxTexturePixels
@@ -333,7 +333,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
         cache.upgradeUndersizedResident([item]) { _ in image }
         #expect(cache.texture(for: item).width == 64)                     // upgraded to full crispness
         #expect(cache.upgradesThisFrame == 1)
-        #expect(cache.residentCount == 1)                                 // in place — no extra resident
+        #expect(cache.residentCount == 1)                                 // in place - no extra resident
         #expect(cache.residentBytes == 16_384)                            // 64² now, not 32²
         #expect(!cache.byteBudgetOverflow)
 
@@ -461,7 +461,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
     }
 }
 
-// MARK: Metal smoke — the renderer's runtime shader actually compiles
+// MARK: Metal smoke - the renderer's runtime shader actually compiles
 
 @Suite struct MetalGridRendererSmokeTests {
     /// Catches MSL compile failures (e.g. reserved-keyword collisions) that otherwise only surface as the
@@ -472,7 +472,7 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
     }
 }
 
-// MARK: 6 — Diagnostics counters
+// MARK: 6 - Diagnostics counters
 
 @Suite struct MetalGridDiagnosticsTests {
     @Test func statsReflectRealVsPlaceholderCounts() {

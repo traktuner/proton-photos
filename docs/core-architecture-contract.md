@@ -8,7 +8,7 @@ Every agent working on Proton Photos architecture MUST follow this contract befo
 
 - [Configuring a multiplatform app target](https://developer.apple.com/documentation/xcode/configuring-a-multiplatform-app-target)
 - [Food Truck: Building a SwiftUI Multiplatform App](https://developer.apple.com/documentation/swiftui/food-truck-building-a-swiftui-multiplatform-app)
-- [HIG — Layout](https://developer.apple.com/design/human-interface-guidelines/layout)
+- [HIG - Layout](https://developer.apple.com/design/human-interface-guidelines/layout)
 - [TN3192: Migrating your app from the deprecated UIRequiresFullScreen key](https://developer.apple.com/documentation/technotes/tn3192-migrating-your-app-from-the-deprecated-uirequiresfullscreen-key)
 - [Adopting Liquid Glass](https://developer.apple.com/documentation/technologyoverviews/adopting-liquid-glass)
 - [UIKit and AppKit apps](https://developer.apple.com/documentation/technologyoverviews/uikit-appkit)
@@ -169,7 +169,7 @@ Rules:
   Core rewrites.
 - Optional features must fail closed with typed unsupported states, not silently fall back to desktop defaults.
 
-## Purity Rules — Enforced Boundary
+## Purity Rules - Enforced Boundary
 
 The `PhotosCore` target is the universal Core foundation. Its platform purity is enforced by `PhotosCorePlatformPurityTests` in `Packages/ProtonPhotosKit/Tests/PhotosCoreTests/PhotosCorePlatformPurityTests.swift`.
 
@@ -185,7 +185,7 @@ All universal Core targets are additionally covered by the shared `CoreArchitect
 | `CryptoKit` | Permitted | Cross-platform. Use when needed. |
 | `Security` | Permitted | Cross-platform. Use when needed. |
 | `ImageIO` | Permitted | Cross-platform. Use when needed. |
-| `SQLite3` | Permitted | System SQLite C API — public, supported on macOS/iOS/iPadOS (Apple QA1809), not a UI framework. Used by `PhotosCore/TimelineMetadataStore.swift` (`library-v1.sqlite`). Platform tuning (mmap/cache PRAGMAs) must be injected via `LibraryDatabasePolicy`, never hard-coded desktop values. |
+| `SQLite3` | Permitted | System SQLite C API - public, supported on macOS/iOS/iPadOS (Apple QA1809), not a UI framework. Used by `PhotosCore/TimelineMetadataStore.swift` (`library-v1.sqlite`). Platform tuning (mmap/cache PRAGMAs) must be injected via `LibraryDatabasePolicy`, never hard-coded desktop values. |
 
 ### Forbidden Imports in Core
 
@@ -215,7 +215,7 @@ These types must not appear anywhere in universal Core sources:
 - `ProcessInfo.processInfo.physicalMemory` (hardware sizing is platform-adapter policy)
 - `ProcessInfo.processInfo.activeProcessorCount` (hardware sizing is platform-adapter policy)
 
-Render/GPU-surface + presentation types (added in Phase 3.9 — kept out of Core even though the `CoreGraphics`
+Render/GPU-surface + presentation types (added in Phase 3.9 - kept out of Core even though the `CoreGraphics`
 value types and, where allowlisted, `QuartzCore` value math are permitted):
 
 - `CAMetalDrawable`, `CAMetalLayer`, `CAMetalDisplayLink` (QuartzCore-sourced Metal surfaces)
@@ -251,7 +251,7 @@ Flagged for potential future hardening: if Core should avoid all non-Foundation/
 
 ### PhotoDiagnostics.shared (grandfathered)
 
-`Diagnostics.swift` contains `public static let shared = PhotoDiagnostics()` — a singleton with a private `init()`. This pattern predates this contract and is grandfathered for now. Future phases should evaluate refactoring toward injected diagnostics sinks per the Core preference for "dependency injection and clocks over singletons."
+`Diagnostics.swift` contains `public static let shared = PhotoDiagnostics()` - a singleton with a private `init()`. This pattern predates this contract and is grandfathered for now. Future phases should evaluate refactoring toward injected diagnostics sinks per the Core preference for "dependency injection and clocks over singletons."
 
 ### SwiftPM Platform Declaration
 
@@ -273,7 +273,7 @@ Agents MUST:
 
 ## Phase Roadmap
 
-### Phase 1 — Universal Core (this phase)
+### Phase 1 - Universal Core (this phase)
 
 Make `PhotosCore` a strict universal Core target suitable for macOS 26+, iOS 26+, and iPadOS 26+ consumers without changing app behavior.
 
@@ -282,11 +282,11 @@ Make `PhotosCore` a strict universal Core target suitable for macOS 26+, iOS 26+
 - Document the Core contract (this file).
 - Verify: no forbidden imports/tokens, macOS tests pass, PhotosCore builds for `generic/platform=iOS`.
 
-### Phase 2 (recommended) — MediaCache byte-cache vs. image-decoding split
+### Phase 2 (recommended) - MediaCache byte-cache vs. image-decoding split
 
 Separate the platform-neutral byte-caching layer in `MediaCache` from platform-specific image decoding, so the byte cache can be consumed by iOS/iPadOS targets without dragging in AppKit/UIKit image representations.
 
-#### Phase 2.1 — MediaByteCache target
+#### Phase 2.1 - MediaByteCache target
 
 `MediaByteCache` is the universal byte-cache package boundary. It may depend on `PhotosCore`, `Foundation`, `CryptoKit`, and `Security`; it must not import UI, view-hosting, graphics-decoding, or rendering frameworks such as `AppKit`, `UIKit`, `SwiftUI`, `AVKit`, `MetalKit`, or `ImageIO`.
 
@@ -296,7 +296,7 @@ Separate the platform-neutral byte-caching layer in `MediaCache` from platform-s
 
 The performance contract from the existing feed remains unchanged: background coverage checks may use cheap file-existence probes (`has`) where decrypting every blob would block the feed actor, while network-skip decisions must use decryptable probes (`hasUsableDiskData`). Any future decoder split must preserve that distinction.
 
-#### Phase 2.2 — MediaDecodingCore target
+#### Phase 2.2 - MediaDecodingCore target
 
 `MediaDecodingCore` is the universal image-decoding boundary. It may depend on `Foundation`, `CoreGraphics`, and `ImageIO`; it must not import platform UI frameworks or expose platform UI image wrappers. The shared decode output is `DecodedThumbnail`, backed by `CGImage` plus pixel dimensions, aspect ratio, and decoded byte-cost metadata.
 
@@ -304,7 +304,7 @@ The performance contract from the existing feed remains unchanged: background co
 
 `ThumbnailFeed` must not own ImageIO primitives directly. It may continue to own queueing, priority, diagnostics, and macOS decoded-image RAM caching until the feed API is split, but decoder implementation changes belong in `MediaDecodingCore` plus thin platform adapters.
 
-#### Phase 2.3 — MediaFeedCore target
+#### Phase 2.3 - MediaFeedCore target
 
 `MediaFeedCore` is the universal thumbnail-feed pipeline. It may depend on `PhotosCore`, `MediaByteCache`, `MediaDecodingCore`, and `Foundation`; it must not import platform UI frameworks, expose platform image wrappers, or make direct hardware-policy decisions such as physical-RAM or CPU-count sizing. Platform targets inject those decisions through `ThumbnailFeedCoreConfiguration`.
 
@@ -314,13 +314,13 @@ The performance contract from the existing feed remains unchanged: background co
 
 The performance contract from the existing Metal grid is preserved and tightened: render/upload paths should read `CGImage` directly from the shared decoded core cache where possible. Platform image wrapper creation (`NSImage`, future `UIImage`) must stay in platform adapters and must not be required for Metal upload eligibility checks.
 
-#### Phase 2.4 — MediaLocationCore target
+#### Phase 2.4 - MediaLocationCore target
 
 `MediaLocationCore` is the universal location-index boundary. It may depend on `PhotosCore`, `Foundation`, `CryptoKit`, and `Observation`; it must not import platform UI frameworks, MapKit view-hosting code, platform image/view types, or direct hardware-policy sizing.
 
 `MediaLocationCore` owns the encrypted GPS index store, in-memory coordinate index, and low-priority GPS crawl scheduler. Platform map UI belongs outside this target: macOS uses `MapFeature`/MapKit/AppKit today, while future iOS/iPadOS map UI must consume the same `PhotoLocationIndex`, `PhotoLocationStore`, and `LocationCrawl`.
 
-#### Phase 2.5 — Universal Core regression gate
+#### Phase 2.5 - Universal Core regression gate
 
 `CoreArchitectureGateTests` is the shared no-regression gate for the current UI-free universal Core set:
 `PhotosCore`, `MediaByteCache`, `MediaDecodingCore`, `MediaFeedCore`, `MediaLocationCore`, `MediaCacheCore`,
@@ -335,21 +335,21 @@ iOS-family build is the package-level iPadOS compatibility check until separate 
 
 Agents MUST run `scripts/verify-universal-core.sh` before committing a change that modifies universal Core boundaries, package target dependencies, Core imports, platform purity rules, or cross-platform cache/feed/location behavior. If the gate cannot run, the final report must name the exact command, failure, and residual risk.
 
-### Phase 3 — MetalGrid boundary split
+### Phase 3 - MetalGrid boundary split
 
-#### Phase 3.1 — MetalGrid boundary audit
+#### Phase 3.1 - MetalGrid boundary audit
 
 The Phase 3.1 audit is recorded in `docs/metalgrid-boundary-audit.md`. It is audit-only: no production grid behavior changes, no file moves, and no renderer rewrites.
 
 Future MetalGrid extraction work MUST use that audit as input. Pure geometry/zoom/transition/value-policy code may move toward a future `GridCore`; `MTKView`, `NSView`/`UIView`, scroll physics, gesture intake, accessibility hosts, platform glyph rasterization, `MediaCache` feed adapters, and concrete platform texture-budget defaults must remain in platform adapters. Portable budget shapes may live in Core only when the adapter still injects the actual values.
 
-#### Phase 3.2 — Initial universal GridCore extraction
+#### Phase 3.2 - Initial universal GridCore extraction
 
 `GridCore` is the universal, UI-free grid model boundary. It owns square-slot geometry, zoom transaction math,
 viewport resize rebase math, scroll rebase easing, tile-content fitting, size-policy scaffolding, and the
 overview layer dissolve plan. It intentionally has no package dependencies and may import only portable Apple
 frameworks needed for value math (`CoreGraphics`, `simd`). (`QuartzCore` was dropped from the allowlist in
-Phase 3.9 — GridCore uses injected clocks rather than `CACurrentMediaTime`, so it needs no QuartzCore symbol,
+Phase 3.9 - GridCore uses injected clocks rather than `CACurrentMediaTime`, so it needs no QuartzCore symbol,
 and excluding it removes the QuartzCore-sourced Metal-surface entry path into Core.)
 
 `TimelineFeature` now depends on `GridCore` and remains the macOS adapter around it. The adapter owns
@@ -361,7 +361,7 @@ Moving additional grid code into `GridCore` requires the same gate as any other 
 `scripts/verify-universal-core.sh` must pass, including `GridCore` builds for `generic/platform=iOS` and
 `generic/platform=macOS`.
 
-#### Phase 3.3 — Viewport-scoped GridCore layout profiles
+#### Phase 3.3 - Viewport-scoped GridCore layout profiles
 
 `GridCore` may define reusable `GridLevelProfile` values, but their names and behavior must describe viewport
 classes rather than platforms. The current shared profiles are `regularTimeline` and `compactTimeline`.
@@ -373,7 +373,7 @@ default level `3`, normal levels `0...3`, and overview levels `4...5`. The compa
 transition topology but starts with a one-column large-thumbnail level for narrow scene surfaces. Renderer code
 must remain profile-agnostic and draw the `GridFramePlan` it receives.
 
-#### Phase 3.4 — Config-driven production grid profiles
+#### Phase 3.4 - Config-driven production grid profiles
 
 Production grid profiles are app/feature-core configuration, not renderer defaults. `TimelineCore` owns the
 bundled `Resources/GridProfiles.plist` and validates it at load time before constructing `GridLevelProfile`
@@ -393,7 +393,7 @@ The bundled plist is a build-time product resource. Do not present editing the s
 customization mechanism; if user-facing profile changes are added later, load them from a validated settings or
 support directory path and keep the same validation gate.
 
-#### Phase 3.5 — GridCore profile-change rebase
+#### Phase 3.5 - GridCore profile-change rebase
 
 `GridCore` owns `GridProfileRebase`, the pure camera rebase used when a viewport class switches from one
 `GridLevelProfile` ladder to another for the same logical timeline data. It maps the current source level to a
@@ -403,7 +403,7 @@ pinned to the target bottom.
 This is still Core math only. It must not decide when an app should use `regularTimeline`, `compactTimeline`,
 or any future profile. Platform adapters provide that policy from scene/viewport facts.
 
-#### Phase 3.6 — Viewport-resolved production profile selection
+#### Phase 3.6 - Viewport-resolved production profile selection
 
 `TimelineCore` resolves the active production grid profile from validated `GridProfiles.plist` selection rules.
 The current production rule is viewport-based: layout widths up to `640pt` use `compactTimeline`; wider layout
@@ -423,7 +423,7 @@ This pass intentionally leaves the macOS host in `TimelineFeature`; it does not 
 universal UI host. Future iOS/iPadOS hosts must reuse the same `GridCore` profile/rebase math and implement their
 own UIKit/SwiftUI scroll, gesture, safe-area, accessibility, and texture-budget policy.
 
-#### Phase 3.7 — Semantic grid transition derivation
+#### Phase 3.7 - Semantic grid transition derivation
 
 Grid transition classification is Core semantics, not platform UI policy. `GridCore` owns `GridLevelSemanticRole`
 and `GridTransitionKind.semantic(from:to:)`: adjacent aspect-thumbnail levels derive `focusRowRelayout`,
@@ -439,7 +439,7 @@ Normal-level click/pinch transition planning may use a single common presentatio
 when source/target slot sizes are known. This is required for some fixed-column phase changes, including the
 regular `9 ↔ 7` normal-level step, and keeps the fallback-to-snap path reserved for genuinely degenerate plans.
 
-#### Phase 3.8 — GridCore transition planning
+#### Phase 3.8 - GridCore transition planning
 
 `GridCore` owns the pure normal-level transition planning stack: `GridTransitionController`,
 `GridTransitionPlan`, `GridTransitionComponentBuilder`, `GridTransitionScheduler`,
@@ -456,14 +456,14 @@ real UID lookup, platform diagnostics wiring, and conversion of `GridTransitionD
 iOS/iPadOS adapters must use the same `GridCore` transition plan and provide their own host/renderer plumbing
 instead of forking transition math.
 
-#### Phase 3.9 — Render-boundary / adapter-boundary hardening
+#### Phase 3.9 - Render-boundary / adapter-boundary hardening
 
 Audit + guard hardening only; no production grid behavior changed.
 
 `MetalGridRenderer` now draws through a narrow `MetalGridDrawableTarget` (a `CAMetalDrawable`, an
 `MTLRenderPassDescriptor`, and a `presentsWithTransaction` flag). `render(to:)` / `renderLayerDissolve(to:)`
 take the target; the `MTKView`-taking methods are thin edge adapters that build it via
-`MetalGridDrawableTarget(view:)` — the single `MTKView` → draw seam. This removes the `MTKView` entry-point that
+`MetalGridDrawableTarget(view:)` - the single `MTKView` → draw seam. This removes the `MTKView` entry-point that
 previously blocked `MetalRenderingCore`. Phase 4.4 created the package gate and moved draw primitives; Phase 4.5
 moved the renderer/shader implementation behind that gate. The `MTKView` conversion remains adapter-owned in
 `TimelineFeature`.
@@ -489,9 +489,9 @@ GridCore-scopes a ban on CoreGraphics drawing types (`CGContext`/`CGImage`/`CGCo
 `QuartzCore` from GridCore's import allowlist (its one dead `import QuartzCore` was removed). Every current Core
 target still passes the gate and builds for iOS and macOS.
 
-### Phase 4 — Core-native architecture
+### Phase 4 - Core-native architecture
 
-#### Phase 4.0 — Core-native contract
+#### Phase 4.0 - Core-native contract
 
 Contract-only pass. No production behavior changed.
 
@@ -521,7 +521,7 @@ budgets and different renderer strategies, but those choices must not become Uni
 renderer optimization, draw-call strategy, texture arrays, argument buffers, and device-specific budget tuning
 are future measured tasks after the boundaries and gates exist.
 
-#### Phase 4.1 — Small pure GridCore extraction
+#### Phase 4.1 - Small pure GridCore extraction
 
 Small production-code move with no behavior change.
 
@@ -534,7 +534,7 @@ This pass deliberately did not move `MetalGridCoordinator`, `MetalGridScrollHost
 `MetalGridTextureCache`, AppKit accessibility/header code, gesture routing, texture budgets, or data-source/feed
 adapters. Those remain platform adapter or `MetalRenderingCore` work under the Phase 4.0 layer rules.
 
-#### Phase 4.2 — Pure zoom commit bridge extraction
+#### Phase 4.2 - Pure zoom commit bridge extraction
 
 Small production-code split with no behavior change.
 
@@ -549,7 +549,7 @@ those write through `PhotoDiagnostics`. This pass left `GridProxy` as adapter/sh
 classification. It deliberately did not move coordinators, hosts, renderer, cache, gesture intake, AppKit
 accessibility, or data-source/feed adapters into Core.
 
-#### Phase 4.3 — Generic shell/grid seam extraction
+#### Phase 4.3 - Generic shell/grid seam extraction
 
 Small API split with no intended behavior change.
 
@@ -564,7 +564,7 @@ leaving the Core seam generic and reusable for iOS/iPadOS. `TimelineFeature` sti
 native host placement, AppKit coordinate conversion, `MetalGridScrollHost`, data-source wiring, renderer/cache
 integration, diagnostics, gestures, and accessibility.
 
-#### Phase 4.4 — MetalRenderingCore package gate and draw primitives
+#### Phase 4.4 - MetalRenderingCore package gate and draw primitives
 
 Small rendering-boundary split with no intended behavior change.
 
@@ -580,7 +580,7 @@ descriptor while platform adapters continue to own view hosting. `MetalGridRende
 `TimelineFeature`; moving it is a later measured step after this gate proves the package boundary on macOS and
 iOS.
 
-#### Phase 4.5 — MetalGridRenderer into MetalRenderingCore
+#### Phase 4.5 - MetalGridRenderer into MetalRenderingCore
 
 Small renderer-boundary move with no intended behavior change.
 
@@ -595,7 +595,7 @@ state into `MetalGridDrawableTarget` and delegates to the rendering core. Produc
 `MetalGridPalette.clearColor` when constructing the renderer, keeping surface-color policy at the adapter edge
 while the shared renderer stores only the `MTLClearColor` value it receives.
 
-#### Phase 4.6 — Grid texture budget shape into GridCore
+#### Phase 4.6 - Grid texture budget shape into GridCore
 
 Small policy-boundary split with no intended behavior change.
 
@@ -609,7 +609,7 @@ preventing aggressive desktop RAM/GPU assumptions from becoming Universal Core o
 iOS/iPadOS adapters must construct their own measured `GridTextureBudget` values and inject them into the same
 coordinator/cache seam.
 
-#### Phase 4.7 — Metal grid glyph rasterizer seam
+#### Phase 4.7 - Metal grid glyph rasterizer seam
 
 Small adapter-boundary split with no intended behavior change.
 
@@ -623,7 +623,7 @@ At this phase, `AppKitMetalGridGlyphRasterizer` was the current macOS implementa
 It was the only Metal-grid glyph file that could use `NSImage`, `NSColor`, and `NSFont`. Phase 5.5 later moved
 that implementation into `MetalGridTextureAppKitAdapter`.
 
-#### Phase 4.8 — Generic texture-cache item identity
+#### Phase 4.8 - Generic texture-cache item identity
 
 Small cache-boundary split with no intended behavior change.
 
@@ -638,7 +638,7 @@ inject platform-appropriate `GridTextureBudget` values, and provide a UIKit glyp
 Metal cache implementation shared across Apple platforms while leaving concrete photo-domain identity and native
 policy at the adapter edge.
 
-#### Phase 5.0 — MetalGridTextureCore package gate
+#### Phase 5.0 - MetalGridTextureCore package gate
 
 Boundary-only split. No production behavior changed.
 
@@ -650,7 +650,7 @@ render command encoding.
 This phase intentionally moved no production cache code. It existed to prove the package boundary before moving
 runtime code.
 
-#### Phase 5.1 — Generic texture cache into MetalGridTextureCore
+#### Phase 5.1 - Generic texture cache into MetalGridTextureCore
 
 Small target-boundary extraction with no intended behavior change.
 
@@ -671,7 +671,7 @@ native badge path without forking the shared cache.
 accessibility, headers, and palette conversion. `MetalGridTextureAppKitAdapter` owns the concrete macOS texture
 policy default.
 
-#### Phase 5.2 — UIKit glyph adapter proof
+#### Phase 5.2 - UIKit glyph adapter proof
 
 Small platform-adapter addition with no macOS production behavior change.
 
@@ -685,7 +685,7 @@ This proves the 5.1 cache boundary is usable from a second Apple platform withou
 `MetalGridTextureCore` remains UIKit-free. The future iOS/iPadOS grid host still needs its own scroll/view
 adapter, texture budget values, safe-area/input policy, and explicit injection of `UIKitMetalGridGlyphRasterizer`.
 
-#### Phase 5.3 — UIKit texture budget policy proof
+#### Phase 5.3 - UIKit texture budget policy proof
 
 Small platform-adapter addition with no macOS production behavior change.
 
@@ -697,7 +697,7 @@ These values intentionally do not copy macOS `MetalGridBudget.default` (`96` upl
 textures, `1.2` overscan, `320` pixels). They are adapter-owned starting values for future iOS/iPadOS hosts and
 must be tuned with Instruments on real hardware before release.
 
-#### Phase 5.4 — UIKit texture cache factory proof
+#### Phase 5.4 - UIKit texture cache factory proof
 
 Small platform-adapter addition with no macOS production behavior change.
 
@@ -708,7 +708,7 @@ is still generic over item identity and does not reference `PhotoUID`, media fee
 This is the injection proof for a future iOS/iPadOS grid host: the host can choose viewport policy, pass its item
 ID type, and receive the same shared texture cache implementation used by macOS.
 
-#### Phase 5.5 — AppKit glyph adapter split
+#### Phase 5.5 - AppKit glyph adapter split
 
 Small platform-adapter extraction with no intended visual behavior change on macOS.
 
@@ -722,7 +722,7 @@ adapter and injected `AppKitMetalGridGlyphRasterizer()` into `MetalGridTextureCa
 This makes macOS and iOS/iPadOS symmetric at the texture-adapter boundary: platform glyph rasterizers live in
 platform texture adapter targets; `MetalGridTextureCore` owns only the shared cache and glyph request contract.
 
-#### Phase 5.6 — AppKit texture budget policy split
+#### Phase 5.6 - AppKit texture budget policy split
 
 Small platform-adapter policy move with no intended macOS runtime behavior change.
 
@@ -735,7 +735,7 @@ This keeps the aggressive desktop policy at the macOS adapter edge while leaving
 portable budget shape. iOS/iPadOS continue to use `UIKitMetalGridTexturePolicies` and must not inherit macOS
 cache/upload defaults.
 
-#### Phase 5.7 — AppKit texture cache factory wiring
+#### Phase 5.7 - AppKit texture cache factory wiring
 
 Small macOS construction-seam move with no intended cache, visual, or scroll behavior change.
 

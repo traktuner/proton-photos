@@ -12,7 +12,7 @@ public typealias UploadQueueItemID = UUID
 /// (that's all the SDK supports); album membership is applied afterwards via `AlbumAttaching`.
 public struct UploadDestination: Sendable, Equatable {
     public enum Target: Sendable, Equatable {
-        /// Upload to the photo library only — no album.
+        /// Upload to the photo library only - no album.
         case library
         /// Add to an existing album after upload.
         case existingAlbum(id: String, title: String)
@@ -102,7 +102,7 @@ public enum UploadItemState: Sendable, Equatable {
 /// An immutable snapshot of a queue item, handed to the UI. `UploadManager` owns the mutable truth.
 public struct UploadItem: Identifiable, Sendable, Equatable {
     public let id: UploadQueueItemID
-    /// Enqueue order — preserved across snapshots so the list never reshuffles.
+    /// Enqueue order - preserved across snapshots so the list never reshuffles.
     public let ordinal: Int
     public let fileURL: URL
     public let displayName: String
@@ -111,7 +111,7 @@ public struct UploadItem: Identifiable, Sendable, Equatable {
     public var state: UploadItemState
     /// The uploaded photo's identifier once the library upload succeeds (set before album add).
     public var uploadedUID: PhotoUID?
-    /// Set when the file uploaded to the library but a later step (album add / cover) failed — the
+    /// Set when the file uploaded to the library but a later step (album add / cover) failed - the
     /// photo is NOT lost; the failure is recoverable by retrying just the album step.
     public var partialSuccess: Bool
 

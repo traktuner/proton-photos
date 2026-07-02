@@ -9,7 +9,7 @@ import GridCore
     private let slot = CGRect(x: 100, y: 200, width: 140, height: 140)   // a square slot
     private let eps: CGFloat = 0.001
 
-    // ContentRectContainedInSlotRect — every mode/aspect produces a rect inside the slot.
+    // ContentRectContainedInSlotRect - every mode/aspect produces a rect inside the slot.
     @Test func contentRectContainedInSlot() {
         for aspect in [CGFloat(0.2), 0.6, 1.0, 1.5, 3.0, 5.0] {
             for mode in [TileContentMode.aspectFill, .aspectFit] {

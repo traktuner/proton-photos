@@ -3,8 +3,8 @@ import PhotosCore
 
 /// Persists + restores the main window's frame across launches (Deliverable 6). We drive this
 /// manually (rather than `setFrameAutosaveName`) so restoration always runs through
-/// `WindowFramePolicy` — which validates the saved frame against the *current* screens and re-centres
-/// safely if the old display is gone — and so the save/restore math stays unit-testable. System
+/// `WindowFramePolicy` - which validates the saved frame against the *current* screens and re-centres
+/// safely if the old display is gone - and so the save/restore math stays unit-testable. System
 /// state restoration is disabled on the window to avoid a double-restore fighting ours.
 @MainActor
 final class MainWindowFrameController {

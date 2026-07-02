@@ -141,7 +141,7 @@ import GridCore
         let evicted = policy.evictToBudget()
 
         #expect(evicted.isEmpty)                       // pinned is never evicted
-        #expect(policy.residentCost == 1_800)          // still over — admission is what prevents this state
+        #expect(policy.residentCost == 1_800)          // still over - admission is what prevents this state
     }
 
     @Test func admissionRefusesPinnedUploadBeyondPinnedResidentByteFloor() {
@@ -151,7 +151,7 @@ import GridCore
         policy.beginFrame(pinned: ["visible-a", "visible-b"])
         #expect(policy.pinnedResidentCost == 600)
         #expect(policy.canAdmitUpload("visible-b", cost: 400))     // 600 + 400 fits exactly
-        #expect(!policy.canAdmitUpload("visible-b", cost: 500))    // 600 + 500 can never fit — refuse
+        #expect(!policy.canAdmitUpload("visible-b", cost: 500))    // 600 + 500 can never fit - refuse
     }
 
     @Test func admissionRefusesUnpinnedUploadThatWouldOvershootTotals() {
@@ -210,7 +210,7 @@ import GridCore
             _ = policy.evictToBudget()
             #expect(policy.residentCost <= 2_000)
             #expect(policy.residentCount <= 50)
-            // The pinned floor never exceeds the byte budget — the structural P0 guarantee.
+            // The pinned floor never exceeds the byte budget - the structural P0 guarantee.
             #expect(policy.pinnedResidentCost <= 2_000)
         }
     }
@@ -305,7 +305,7 @@ import GridCore
     }
 
     @Test func sparseSlotSaturatesAtCapSoLargeLevelsKeepQuality() {
-        // A 389 pt L0 tile @2× wants ~973 px — clamped to the cap, i.e. IDENTICAL to the fixed-320 behaviour.
+        // A 389 pt L0 tile @2× wants ~973 px - clamped to the cap, i.e. IDENTICAL to the fixed-320 behaviour.
         #expect(pixels(slot: 389) == 320)
         #expect(pixels(slot: 163) == 320)         // L2 (163 pt) also saturates
         // The result can never exceed the cap regardless of slot size / scale.

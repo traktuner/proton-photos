@@ -10,7 +10,7 @@ final class MetalGridSelectionController {
     private var core = GridSelectionController<PhotoUID>()
 
     var selected: Set<PhotoUID> { core.selected }
-    /// The flat index of the last replace/toggle click — the origin for a subsequent ⇧-range select.
+    /// The flat index of the last replace/toggle click - the origin for a subsequent ⇧-range select.
     var anchorIndex: Int? { core.anchorIndex }
 
     /// Called whenever the selection changes (drives the toolbar count + the coordinator outline).
@@ -31,7 +31,7 @@ final class MetalGridSelectionController {
     /// A click on empty space (gap) clears the selection (Apple-Photos behavior).
     func clickBackground() { clear() }
 
-    // MARK: Marquee (drag-rectangle) selection — replaces ⇧-click for multi-select.
+    // MARK: Marquee (drag-rectangle) selection - replaces ⇧-click for multi-select.
 
     /// Begin a marquee drag. `additive` (⇧ held at drag start) keeps the existing selection and adds to it;
     /// otherwise the drag REPLACES the selection with whatever the rectangle covers.

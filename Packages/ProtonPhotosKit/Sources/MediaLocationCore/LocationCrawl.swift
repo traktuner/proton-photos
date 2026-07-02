@@ -9,7 +9,7 @@ import PhotosCore
 ///
 /// **Priority:** this is LOWER priority than the thumbnail crawl (the user-facing grid). It runs a single
 /// worker with a small throttle and checks `shouldYield` before each fetch, backing off while higher-
-/// priority work is active — so it never competes for the backend. It is resumable: re-running only fills
+/// priority work is active - so it never competes for the backend. It is resumable: re-running only fills
 /// the gaps (uids already in the index are skipped). Platform-agnostic (Foundation).
 public actor LocationCrawl {
     private var task: Task<Void, Never>?

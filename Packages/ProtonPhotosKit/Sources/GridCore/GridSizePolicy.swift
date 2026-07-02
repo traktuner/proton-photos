@@ -1,6 +1,6 @@
 import CoreGraphics
 
-// MARK: - GridSizePolicy — platform-neutral level → reference photo size (SIZE-BASED SCAFFOLDING, NOT adopted)
+// MARK: - GridSizePolicy - platform-neutral level → reference photo size (SIZE-BASED SCAFFOLDING, NOT adopted)
 //
 // NOTE: this maps a level to a per-level REFERENCE photo size for a SIZE-BASED / ADAPTIVE-COLUMNS model that was
 // explored but is NOT the adopted runtime rule. The shipping grid is FIXED-COLUMNS: the settled resolve HOLDS
@@ -17,13 +17,13 @@ import CoreGraphics
 public enum GridSizePolicy {
 
     /// Discrete viewport size classes. Desktop ships `.regular`; iOS can later select `.compact` by idiom.
-    /// Crossing a breakpoint is ONE discrete size step (allowed) — never a continuous rescale.
+    /// Crossing a breakpoint is ONE discrete size step (allowed) - never a continuous rescale.
     public enum SizeClass: String, Equatable, Sendable, CaseIterable {
         case compact, regular, wide, ultra
     }
 
     /// The density-anchor width at which the `.regular` class reproduces today's column-derived sizes. A
-    /// CALIBRATION SEED (tunable), NOT product law — the responsive policy may override per class.
+    /// CALIBRATION SEED (tunable), NOT product law - the responsive policy may override per class.
     public static let referenceWidth: CGFloat = 1280
 
     /// Sub-pixel nudge so the exact-fill side does not FP-floor-truncate to `nominalColumns − 1` at the
@@ -49,11 +49,11 @@ public enum GridSizePolicy {
         return max(1, base * scale(sizeClass))
     }
 
-    /// The size class for a desktop viewport width. Desktop ships `.regular` ONLY for now — responsive
+    /// The size class for a desktop viewport width. Desktop ships `.regular` ONLY for now - responsive
     /// breakpoints are reserved so that enabling them is a deliberate, isolated change, never a silent jump.
     public static func sizeClass(forWidth width: CGFloat) -> SizeClass { .regular }
 
-    /// Optional per-level hard column cap. When it binds the surplus width becomes margin (clip/reveal) — NEVER
+    /// Optional per-level hard column cap. When it binds the surplus width becomes margin (clip/reveal) - NEVER
     /// a tile stretch. `nil` by default: the largest level shows MORE big photos on a wide display (the chosen
     /// responsive product behavior); the cap seam exists to bound ultra-wide spread later if wanted.
     public static func maxColumns(forLevelID levelID: Int) -> Int? { nil }

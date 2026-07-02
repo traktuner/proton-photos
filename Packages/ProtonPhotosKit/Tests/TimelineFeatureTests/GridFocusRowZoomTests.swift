@@ -5,7 +5,7 @@ import GridCore
 @testable import TimelineFeature
 
 /// Focus-row stability for the engine-owned `GridZoomTransaction`, using REAL global indices (the lab's
-/// numeric labels wrap mod 96 — never assert on those). The row under the cursor must stay the same
+/// numeric labels wrap mod 96 - never assert on those). The row under the cursor must stay the same
 /// contiguous neighbourhood as zoom metrics change: zoom-in drops edge neighbours, zoom-out adds them; the
 /// row never re-wraps into unrelated indices. Plus the new largest level + monotonic ladder.
 @Suite struct GridFocusRowZoomTests {
@@ -23,7 +23,7 @@ import GridCore
     }
     private func isContiguous(_ a: [Int]) -> Bool { !a.isEmpty && a.max()! - a.min()! == a.count - 1 }
 
-    // FocusRowIdentitiesStableOnZoomInTest — zooming in keeps a contiguous subset of the SAME neighbourhood
+    // FocusRowIdentitiesStableOnZoomInTest - zooming in keeps a contiguous subset of the SAME neighbourhood
     // around the anchor; it must not show unrelated indices.
     @Test func focusRowIdentitiesStableOnZoomIn() {
         let t = tx()
@@ -39,7 +39,7 @@ import GridCore
         }
     }
 
-    // FocusRowExpandsOnZoomOutTest — zooming out keeps the source neighbourhood and ADDS neighbours left/right.
+    // FocusRowExpandsOnZoomOutTest - zooming out keeps the source neighbourhood and ADDS neighbours left/right.
     @Test func focusRowExpandsOnZoomOut() {
         let t = tx()
         let source = Set(focusRow(t, 3))
@@ -51,7 +51,7 @@ import GridCore
         }
     }
 
-    // FocusRowDoesNotSplitAcrossRowsTest — the focus row is one contiguous run; no focus-row item appears in
+    // FocusRowDoesNotSplitAcrossRowsTest - the focus row is one contiguous run; no focus-row item appears in
     // another y-band, and the row-0 slots equal the focus row exactly.
     @Test func focusRowDoesNotSplitAcrossRows() {
         let t = tx()
@@ -63,7 +63,7 @@ import GridCore
         }
     }
 
-    // CursorAnchorItemRemainsInFocusRowTest — across the whole ladder the anchor stays in the focus row AND
+    // CursorAnchorItemRemainsInFocusRowTest - across the whole ladder the anchor stays in the focus row AND
     // its slot stays under the cursor.
     @Test func cursorAnchorItemRemainsInFocusRow() {
         let t = tx()
@@ -78,7 +78,7 @@ import GridCore
         }
     }
 
-    // ZoomDirectionUsesCursorItemTest — the transaction anchors on the item UNDER THE CURSOR (engine resolves
+    // ZoomDirectionUsesCursorItemTest - the transaction anchors on the item UNDER THE CURSOR (engine resolves
     // it), and the host captures it from the cursor (not viewport top).
     @Test func zoomDirectionUsesCursorItem() {
         let e = SquareTileGridEngine.testRegular(sectionCounts: [3000])
@@ -95,7 +95,7 @@ import GridCore
         #expect(!host.contains("anchorAtViewportTop()"), "live zoom must not use the top-viewport anchor")
     }
 
-    // GapCursorResolvesNearestFocusRowItemTest — a cursor over a gap still yields a valid adjacent anchor.
+    // GapCursorResolvesNearestFocusRowItemTest - a cursor over a gap still yields a valid adjacent anchor.
     @Test func gapCursorResolvesNearestFocusRowItem() {
         let e = SquareTileGridEngine.testRegular(sectionCounts: [3000])
         let width: CGFloat = 1400
@@ -108,7 +108,7 @@ import GridCore
         #expect(t!.anchorGlobalIndex == row[0].index || t!.anchorGlobalIndex == row[1].index)
     }
 
-    // FocusRowNeighborhoodOverlapTest — over a fine continuous sweep, consecutive focus rows overlap highly
+    // FocusRowNeighborhoodOverlapTest - over a fine continuous sweep, consecutive focus rows overlap highly
     // and always contain the anchor (no per-frame jump).
     @Test func focusRowNeighborhoodOverlap() {
         let t = tx()
@@ -126,7 +126,7 @@ import GridCore
         }
     }
 
-    // NoStatelessContinuousRewrapInProductionTest — production live zoom uses the transaction, not a
+    // NoStatelessContinuousRewrapInProductionTest - production live zoom uses the transaction, not a
     // per-frame stateless `engine.zoomFramePlan(continuousLevel:)`.
     @Test func noStatelessContinuousRewrapInProduction() {
         let coord = coordinatorSource()
@@ -134,7 +134,7 @@ import GridCore
         #expect(!coord.contains("engine.zoomFramePlan("), "production must not re-resolve a stateless plan per frame")
     }
 
-    // LargerZoomLevelExistsTest — the largest level (L0) is the lowest density (fewest columns, biggest tiles).
+    // LargerZoomLevelExistsTest - the largest level (L0) is the lowest density (fewest columns, biggest tiles).
     @Test func largerZoomLevelExists() {
         let levels = SquareTileGridEngine.testRegularLevels
         #expect(levels.count == 6, "expected exactly six Apple-like levels")
@@ -146,7 +146,7 @@ import GridCore
         #expect(s0 > s1, "L0 tiles must be physically larger than L1 at a fixed width")
     }
 
-    // LevelMetricsMonotonicTest — zooming out (rising level): nominalColumns strictly increases (density up),
+    // LevelMetricsMonotonicTest - zooming out (rising level): nominalColumns strictly increases (density up),
     // the derived slot side strictly decreases, gap does not increase.
     @Test func levelMetricsMonotonic() {
         let levels = SquareTileGridEngine.testRegularLevels
@@ -159,7 +159,7 @@ import GridCore
         }
     }
 
-    // TransactionIsSingleSectionOnlyTest — the live transaction's flat single-run model is valid only for one
+    // TransactionIsSingleSectionOnlyTest - the live transaction's flat single-run model is valid only for one
     // section; `beginZoomTransaction` returns nil for a multi-section engine (production keeps live continuous
     // zoom OFF there and zooms via the section-aware +/- path), and nil for an empty library.
     @Test func transactionIsSingleSectionOnly() {

@@ -17,14 +17,14 @@
 name: Localization (disabled)
 
 on:
-  workflow_dispatch: {}   # manual only — never runs automatically, never on push/PR
+  workflow_dispatch: {}   # manual only - never runs automatically, never on push/PR
 
 permissions:
   contents: read
 
 jobs:
   info:
-    name: Localization sync (placeholder — disabled)
+    name: Localization sync (placeholder - disabled)
     runs-on: macos-latest
     steps:
       - name: Explain that this workflow is a disabled skeleton

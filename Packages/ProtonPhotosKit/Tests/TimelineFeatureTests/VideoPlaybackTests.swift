@@ -3,7 +3,7 @@ import Testing
 import PhotosCore
 
 /// Tests for the native video playback pipeline (detection, byte-range math, cache merge, error
-/// mapping, state-machine liveness). All pure — no AVFoundation / network — so they're deterministic.
+/// mapping, state-machine liveness). All pure - no AVFoundation / network - so they're deterministic.
 @Suite("Video playback")
 struct VideoPlaybackTests {
 
@@ -21,7 +21,7 @@ struct VideoPlaybackTests {
     @Test func detectsByMime() {
         #expect(VideoContentSniffer.kind(mimeType: "video/quicktime") == .video)
         #expect(VideoContentSniffer.kind(mimeType: "image/png") == .image)
-        // The timeline's generic placeholder must NOT short-circuit to image — it's untrustworthy.
+        // The timeline's generic placeholder must NOT short-circuit to image - it's untrustworthy.
         #expect(VideoContentSniffer.kind(mimeType: "") == .unknown)
     }
 
@@ -58,7 +58,7 @@ struct VideoPlaybackTests {
     }
 
     @Test func sliceWithinSingleBlock() {
-        let slices = map.slices(offset: 10, length: 20)   // [10,30) — all inside block 1
+        let slices = map.slices(offset: 10, length: 20)   // [10,30) - all inside block 1
         #expect(slices.count == 1)
         #expect(slices[0].blockIndex == 1)
         #expect(slices[0].inBlock == ByteRange(lower: 10, upper: 30))
@@ -66,7 +66,7 @@ struct VideoPlaybackTests {
     }
 
     @Test func sliceSpanningBlocks() {
-        let slices = map.slices(offset: 90, length: 120)   // [90,210) — blocks 1,2,3
+        let slices = map.slices(offset: 90, length: 120)   // [90,210) - blocks 1,2,3
         #expect(slices.map(\.blockIndex) == [1, 2, 3])
         // Contiguity: concatenated slice lengths == requested length.
         #expect(slices.reduce(0) { $0 + $1.inBlock.length } == 120)
@@ -83,7 +83,7 @@ struct VideoPlaybackTests {
     }
 
     @Test func repeatedAndOverlappingRequestsAreDeterministic() {
-        // Asking twice (overlapping) yields identical slices — the loader can dedup against its cache.
+        // Asking twice (overlapping) yields identical slices - the loader can dedup against its cache.
         #expect(map.slices(offset: 50, length: 100) == map.slices(offset: 50, length: 100))
         let a = map.slices(offset: 0, length: 150)
         let b = map.slices(offset: 100, length: 50)

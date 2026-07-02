@@ -2,7 +2,7 @@ import CoreGraphics
 
 /// Pure content↔viewport coordinate conversion for the Metal grid (unit-tested by
 /// `MetalGridCoordinateTransformTests`). Item rects live in content coordinates (origin at the top of
-/// the whole library, y increasing downward — matching the flipped scroll document). The MTKView draws
+/// the whole library, y increasing downward - matching the flipped scroll document). The MTKView draws
 /// in viewport coordinates (origin at the top-left of the visible clip area), so each item is offset by
 /// the scroll origin.
 package enum MetalGridGeometry {

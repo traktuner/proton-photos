@@ -72,7 +72,7 @@ struct ProtonPhotosApp: App {
 }
 
 /// Makes the window title bar transparent + full-size, so content (the photo grid) extends up under
-/// the translucent Liquid-Glass toolbar — you see photos scroll through behind it, like Apple Photos.
+/// the translucent Liquid-Glass toolbar - you see photos scroll through behind it, like Apple Photos.
 /// Also installs the frame save/restore controller (Deliverable 6).
 private struct WindowConfigurator: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -101,7 +101,7 @@ private struct WindowConfigurator: NSViewRepresentable {
 // MARK: - Launch veil
 //
 // While the app is preparing the session/library, the WHOLE window becomes a frosted, behind-window
-// Liquid-Glass surface you see straight through to the desktop / other windows — the app shell is not drawn
+// Liquid-Glass surface you see straight through to the desktop / other windows - the app shell is not drawn
 // behind it. When preparation finishes, the veil quickly crossfades to reveal the real library window.
 
 private extension View {
@@ -135,7 +135,7 @@ private struct LaunchVeilModifier: ViewModifier {
             }
             .onAppear {
                 // A window born already-ready (a second window, or relaunch after the library loaded) must
-                // never go transparent — only veil when there is genuinely something to prepare.
+                // never go transparent - only veil when there is genuinely something to prepare.
                 if !active { visible = false; dismissScheduled = true }
                 scheduleDismissIfReady()
                 if visible { scheduleHardDismiss() }

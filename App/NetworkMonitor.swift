@@ -4,7 +4,7 @@ import Observation
 
 /// The app's single source of online/offline truth (NWPathMonitor). There is no other reachability code; this
 /// is purely additive. It drives the offline indicator and lets network-only actions present an honest offline
-/// state instead of silently failing. We do NOT infer offline from request failures — those can't be told apart
+/// state instead of silently failing. We do NOT infer offline from request failures - those can't be told apart
 /// from auth/server errors.
 @MainActor
 @Observable

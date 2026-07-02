@@ -4,22 +4,22 @@ import DesignSystemCore
 
 // MARK: - Loading veil building blocks
 //
-// A native, macOS-style "launch veil" for the brief initial library/session preparation — NOT a branded
+// A native, macOS-style "launch veil" for the brief initial library/session preparation - NOT a branded
 // splash and NOT an opaque/black screen. The model is Apple's own startup veil: the whole window becomes a
 // frosted Liquid-Glass surface that you see straight through to the desktop / other windows behind it (the
 // app shell is NOT drawn yet), with a small semi-transparent mark breathing in the center; once the library
 // is ready the veil quickly fades into the real UI.
 //
-//   • `FrostedGlassBackground` — a behind-window `NSVisualEffectView` (sees the desktop through a
+//   • `FrostedGlassBackground` - a behind-window `NSVisualEffectView` (sees the desktop through a
 //                                transparent window). The window must be non-opaque for the desktop to show.
-//   • `LoadingMark`            — the single-ink ProtonPhotos logo with a diagonal highlight that flows
+//   • `LoadingMark`            - the single-ink ProtonPhotos logo with a diagonal highlight that flows
 //                                inside the logo strokes only (masked); honors Reduce Motion.
 //
 // The window-transparency toggle + min-on-screen + crossfade-out live next to the app's window setup, where
 // the `NSWindow` is owned.
 
 /// Behind-window frosted glass. With the host window made non-opaque, this samples and blurs whatever is
-/// *behind the window* — the desktop and other apps — for a true frosted-glass veil (Liquid-Glass material,
+/// *behind the window* - the desktop and other apps - for a true frosted-glass veil (Liquid-Glass material,
 /// public AppKit API, never an opaque rectangle).
 public struct FrostedGlassBackground: NSViewRepresentable {
     private let material: NSVisualEffectView.Material
@@ -44,7 +44,7 @@ public struct FrostedGlassBackground: NSViewRepresentable {
 /// The loading mark: the single-ink ProtonPhotos logo (`ProtonPhotosMono`, a template vector PDF) rendered as
 /// a subtle low-opacity ink, with a soft bright highlight that flows diagonally (top-left → bottom-right)
 /// **inside the logo strokes only**. The highlight is a moving `LinearGradient` masked by the logo's own
-/// alpha — no outer glow, halo, drop shadow, or blurred aura, and no visible rectangle sweeping the screen.
+/// alpha - no outer glow, halo, drop shadow, or blurred aura, and no visible rectangle sweeping the screen.
 /// Honors Reduce Motion (static ink, no shimmer). The ink is a template, so its color adapts to light/dark.
 public struct LoadingMark: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

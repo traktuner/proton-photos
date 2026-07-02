@@ -10,7 +10,7 @@ import PhotosCore
 /// use). The AAD binds the blob to the account + a format version, so it can't be moved between accounts
 /// and an old format is rejected (→ empty load, re-crawl). Erased on sign-out (`clear()`).
 ///
-/// Platform-agnostic (Foundation + CryptoKit) — reused as-is by a future iOS/iPad build.
+/// Platform-agnostic (Foundation + CryptoKit) - reused as-is by a future iOS/iPad build.
 public final class PhotoLocationStore: @unchecked Sendable {
     /// Bump when the on-disk format changes (older blobs then fail AAD and are dropped + re-crawled).
     private static let version = 1
@@ -37,7 +37,7 @@ public final class PhotoLocationStore: @unchecked Sendable {
         lock.withLock { self.accountUID = accountUID; self.key = key }
     }
 
-    /// Persist the full coordinate set (encrypted, atomic). Best-effort — a failure just means the next
+    /// Persist the full coordinate set (encrypted, atomic). Best-effort - a failure just means the next
     /// launch re-crawls the gap, never a crash or a plaintext write.
     public func save(_ coordinates: [PhotoCoordinate]) {
         guard let (key, account) = credentials(),

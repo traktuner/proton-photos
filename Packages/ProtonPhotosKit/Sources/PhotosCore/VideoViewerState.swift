@@ -5,7 +5,7 @@ import Foundation
 /// becomes an observable, loggable state with a reason.
 ///
 /// The cardinal rule (mirrors Proton Drive Web's `isLoading` + broken-video guards): a video is
-/// always in exactly one of — preparing, buffering *with a real reason*, playing, or failed *with a
+/// always in exactly one of - preparing, buffering *with a real reason*, playing, or failed *with a
 /// readable error*. There is no path that leaves the UI loading forever.
 public enum VideoViewerState: Equatable, Sendable {
     case idle                       // not a video / nothing to play yet
@@ -16,7 +16,7 @@ public enum VideoViewerState: Equatable, Sendable {
     case ready                      // a playable AVPlayer exists, awaiting first frame
     case playing                    // AVPlayerItem reached .readyToPlay and playback started
     case seeking                    // user scrubbed; waiting for the new position to buffer
-    case failed(VideoPlaybackError) // gave up — message is shown to the user + logged
+    case failed(VideoPlaybackError) // gave up - message is shown to the user + logged
 
     public var label: String {
         switch self {

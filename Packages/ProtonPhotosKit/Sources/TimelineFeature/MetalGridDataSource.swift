@@ -11,7 +11,7 @@ protocol MetalGridDataSource: AnyObject {
     var label: String { get }            // "real" (the only production source)
     var sectionCounts: [Int] { get }
     var flatUIDs: [PhotoUID] { get }
-    /// Cheap "is a RAM image ready?" check (no decode/conversion) — drives upload selection.
+    /// Cheap "is a RAM image ready?" check (no decode/conversion) - drives upload selection.
     func hasImage(for uid: PhotoUID) -> Bool
     /// True when a missing thumbnail can still make progress through disk/network/decode. Backend-refused
     /// thumbnails draw as stable placeholders and must not keep the display link or warm queue alive.
@@ -40,11 +40,11 @@ extension MetalGridDataSource {
 
 /// Reads the live library: decoded images come from the shared `ThumbnailFeed` (RAM-hit only on the render
 /// thread; disk/network decode stays on the feed actor). `warm` drives the feed's bounded priority pipeline
-/// — no architecture change to the feed.
+/// - no architecture change to the feed.
 ///
 /// Production geometry is ONE continuous square-tile photo wall: all `TimelineSection`s are flattened into a
 /// single ordered run, so `sectionCounts` is always `[flatUIDs.count]` (or `[]` when empty). The date-grouped
-/// `TimelineSection`s are NOT used as physical grid layout sections — they only feed the month/date label
+/// `TimelineSection`s are NOT used as physical grid layout sections - they only feed the month/date label
 /// overlay, via `MetalGridProductionAdapter.monthMarkers(sections:)`. (Multi-section layout stays supported by
 /// `SquareTileGridEngine` + its tests; production just never uses more than one section.)
 @MainActor
@@ -105,18 +105,18 @@ final class RealMetalGridDataSource: MetalGridDataSource {
         let uids = uids.filter { !feed.isKnownUnfetchable($0) }
         guard !uids.isEmpty else { return }
         // Latest viewport wins (the coordinator passes the still-missing cells in visible-first order each
-        // frame). No permanent suppression — a cell evicted from the RAM cache must be able to re-warm.
+        // frame). No permanent suppression - a cell evicted from the RAM cache must be able to re-warm.
         pendingWarm = uids
         pumpWarm()
         // Reprioritise the background crawl toward what's on screen, but only once the viewport has been
-        // stable for ~100 ms — so a fast scroll doesn't re-enqueue the visible set every frame.
+        // stable for ~100 ms - so a fast scroll doesn't re-enqueue the visible set every frame.
         networkDebouncer.note(uids, at: CACurrentMediaTime())
         scheduleSettleCheck()
     }
 
     /// After the debounce window, if the viewport has settled, enqueue the still-missing visible cells at
     /// `.visibleNow` so they interrupt the crawl. Self-terminating: re-arms only while the viewport is still
-    /// in flux. The decode pump above is unaffected — on-screen cells already on disk fill immediately.
+    /// in flux. The decode pump above is unaffected - on-screen cells already on disk fill immediately.
     private func scheduleSettleCheck() {
         guard !settleCheckScheduled else { return }
         settleCheckScheduled = true
@@ -127,7 +127,7 @@ final class RealMetalGridDataSource: MetalGridDataSource {
             self.settleCheckScheduled = false
             guard let settled = self.networkDebouncer.flushIfStable(at: CACurrentMediaTime()) else {
                 // Re-arm off the DEBOUNCER's own pending state, not `pendingWarm` (which `pumpWarm` clears
-                // immediately) — otherwise a fast scroll's final viewport would never get emitted.
+                // immediately) - otherwise a fast scroll's final viewport would never get emitted.
                 if self.networkDebouncer.hasPendingUnflushed() { self.scheduleSettleCheck() }
                 return
             }

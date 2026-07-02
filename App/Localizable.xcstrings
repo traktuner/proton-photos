@@ -1209,7 +1209,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Opened photos are stored locally (encrypted) and stay available offline. Offline you only get thumbnails and photos you already opened — no videos."
+            "value": "Opened photos are stored locally (encrypted) and stay available offline. Offline you only get thumbnails and photos you already opened - no videos."
           }
         },
         "de": {
@@ -1281,13 +1281,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Deletes everything cached on disk — thumbnails, previews, and originals — for the current account, as if you just signed in. Thumbnails re-crawl automatically."
+            "value": "Deletes everything cached on disk - thumbnails, previews, and originals - for the current account, as if you just signed in. Thumbnails re-crawl automatically."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Löscht alles lokal Gecachte — Thumbnails, Vorschauen und Originale — für den aktuellen Account, wie frisch eingeloggt. Thumbnails werden automatisch neu geladen."
+            "value": "Löscht alles lokal Gecachte - Thumbnails, Vorschauen und Originale - für den aktuellen Account, wie frisch eingeloggt. Thumbnails werden automatisch neu geladen."
           }
         }
       }
@@ -1317,13 +1317,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Everything cached on disk (%@) — thumbnails, previews, and originals — will be removed for this account. Thumbnails re-crawl automatically."
+            "value": "Everything cached on disk (%@) - thumbnails, previews, and originals - will be removed for this account. Thumbnails re-crawl automatically."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Alles lokal Gecachte (%@) — Thumbnails, Vorschauen und Originale — wird für diesen Account entfernt. Thumbnails werden automatisch neu geladen."
+            "value": "Alles lokal Gecachte (%@) - Thumbnails, Vorschauen und Originale - wird für diesen Account entfernt. Thumbnails werden automatisch neu geladen."
           }
         }
       }

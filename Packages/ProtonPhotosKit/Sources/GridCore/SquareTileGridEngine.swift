@@ -1,6 +1,6 @@
 import CoreGraphics
 
-// MARK: - SquareTileGridEngine — the single canonical owner of ALL timeline grid geometry
+// MARK: - SquareTileGridEngine - the single canonical owner of ALL timeline grid geometry
 //
 // THE GRID IS THE PRODUCT. Photos/videos are payload inside grid slots.
 //
@@ -15,16 +15,16 @@ import CoreGraphics
 //   • hit testing
 //   • zoom metrics (continuous apparent slot size / gap) + anchor preservation
 //   • resize behaviour (FIXED-COLUMNS + WIDTH-FILL: each level HOLDS its `nominalColumns`; the square tile is
-//     sized to FILL the viewport width exactly (no trailing gutter), so a width change SCALES the tile — a wider
+//     sized to FILL the viewport width exactly (no trailing gutter), so a width change SCALES the tile - a wider
 //     window shows the SAME columns at a LARGER tile. The column count changes ONLY on a zoom, NEVER on resize.
 //     A live resize/sidebar drag presents this as a uniform snapshot scale in the platform presentation layer.)
 //
 // No coordinator, renderer, thumbnail loader, or transition code may compute independent grid positions,
 // gaps, pitch, columns, or section offsets. If a visible cell, header, or gap is wrong, the fix is HERE or
-// in the level metrics — never in the renderer. The renderer only converts the returned `GridFramePlan`
+// in the level metrics - never in the renderer. The renderer only converts the returned `GridFramePlan`
 // into quads.
 //
-// The thumbnail DISPLAY mode (how a photo fills its square) is explicitly NOT here — that is `TileContentFitter`.
+// The thumbnail DISPLAY mode (how a photo fills its square) is explicitly NOT here - that is `TileContentFitter`.
 // The engine never sees media aspect; a slot's geometry is identical regardless of payload.
 //
 // Geometry is self-contained (pure value-type math), so the whole grid is unit-testable without a GPU.
@@ -33,7 +33,7 @@ import CoreGraphics
 /// recomputed per width so the grid fills the viewport exactly. `gap` is the inter-slot spacing and may
 /// differ per level (dynamic gap). `headerHeight`/`interSectionSpacing` let the engine reserve section
 /// header space + spacing (0 = labels float over the grid, the production default). `pitch == slotSide + gap`.
-/// How two adjacent levels transition. STORED CLASSIFICATION ONLY — the engine stays pure geometry; the visual
+/// How two adjacent levels transition. STORED CLASSIFICATION ONLY - the engine stays pure geometry; the visual
 /// transition EFFECTS that consume this classification live OUTSIDE the engine (the continuous-pinch transition
 /// layer + the overview dissolve). The engine itself animates nothing.
 public enum GridTransitionKind: String, Equatable, Sendable {
@@ -70,8 +70,8 @@ public extension GridTransitionKind {
 /// One Apple-like zoom level. FIXED-COLUMNS MODEL: each level HOLDS its `nominalColumns` as the runtime column
 /// count; the square slot is sized to FILL the width, so a wider viewport shows the SAME columns at a LARGER
 /// tile (a uniform width-scale, not a column reflow). `nominalColumns` is the runtime column source AND the
-/// density seed. (A size-based / adaptive-columns variant was explored — see `GridSizePolicy` /
-/// `referenceSlotSide` — but is NOT the adopted runtime rule; the settled resolve forces `nominalColumns`.)
+/// density seed. (A size-based / adaptive-columns variant was explored - see `GridSizePolicy` /
+/// `referenceSlotSide` - but is NOT the adopted runtime rule; the settled resolve forces `nominalColumns`.)
 public struct AppleGridLevelSpec: Equatable, Sendable {
     public let id: Int
     public let nominalColumns: Int
@@ -104,8 +104,8 @@ public struct GridLevelMetrics: Equatable, Sendable {
     public let transitionKindToNext: GridTransitionKind?
 
     /// SIZE-BASED SCAFFOLDING (NOT the adopted model): a per-level reference photo side for an adaptive-columns
-    /// model that was explored but NOT adopted. The shipping settled resolve is FIXED-COLUMNS — `resolvedForLevel`
-    /// passes `fixedColumns: nominalColumns`, which OVERRIDES this `targetSide` — so this value is computed and
+    /// model that was explored but NOT adopted. The shipping settled resolve is FIXED-COLUMNS - `resolvedForLevel`
+    /// passes `fixedColumns: nominalColumns`, which OVERRIDES this `targetSide` - so this value is computed and
     /// passed but does NOT drive the settled column count. Retained as calibration + the seam for a possible
     /// future responsive size-class pass; `GridSizePolicy` documents the same.
     public var referenceSlotSide: CGFloat {
@@ -157,7 +157,7 @@ public struct GridLevelProfile: Equatable, Sendable {
 /// One square slot in the resolved grid. The OUTER rect (`slotRect` / `viewportRect`) is ALWAYS square and
 /// is the single authority for layout, outer-tile rendering, hit testing, selection, visible queries,
 /// scroll/content size and zoom geometry. `row` is the slot's row WITHIN its section; `column` is the grid
-/// column (shared across sections). Media aspect must never change any of this — the thumbnail fits INSIDE
+/// column (shared across sections). Media aspect must never change any of this - the thumbnail fits INSIDE
 /// `slotRect` via `TileContentFitter`.
 public struct GridSlot: Equatable, Sendable {
     public let index: Int          // flat / global (library-order) index
@@ -181,7 +181,7 @@ public struct GridSlot: Equatable, Sendable {
 
 /// A section's header (supplementary) geometry. `headerRect` spans the full width at the section's top; its
 /// height is the level's `headerHeight` (0 when labels float over the grid). The label TEXT is a data
-/// concern supplied by the app — the engine owns only the rect.
+/// concern supplied by the app - the engine owns only the rect.
 public struct GridSectionHeader: Equatable, Sendable {
     public let section: Int
     public let headerRect: CGRect     // content space
@@ -231,7 +231,7 @@ public struct GridZoomAnchor: Equatable, Sendable {
 public struct SquareTileGridEngine: Equatable, Sendable {
     /// Section order is the array order; element = that section's item count (section 0 first/top).
     public let sectionCounts: [Int]
-    /// The SINGLE source of truth for grid density — one square ladder, one place to retune.
+    /// The SINGLE source of truth for grid density - one square ladder, one place to retune.
     public let levels: [GridLevelMetrics]
     private let configuredDefaultLevel: Int
 
@@ -241,7 +241,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
 
     /// A top layout margin (points) added ABOVE the first section so the first row rests below the window's
     /// translucent toolbar instead of being tucked under it. Baked into the layout ORIGIN (every section / slot /
-    /// header Y shifts down by it) AND into `contentHeight`, so the scroll coordinate stays natural — the host's
+    /// header Y shifts down by it) AND into `contentHeight`, so the scroll coordinate stays natural - the host's
     /// existing `max(0, …)` pin/clamp math is untouched; the first row simply lands at viewport-y `topInset` when
     /// scrolled to the top. Default 0 (engine geometry tests + standalone callers are unaffected); production
     /// adapters set it to the toolbar/safe-area height plumbed from their host view.
@@ -302,7 +302,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
 
     /// THE content-mode policy (single source of truth, used by the coordinator AND tests): the user's
     /// preferred mode where the level supports it, else the forced `squareFillCrop` (the only mode the dense
-    /// overview levels L4–L5 offer). Pure — it reads only the level's `supportedContentModes`.
+    /// overview levels L4–L5 offer). Pure - it reads only the level's `supportedContentModes`.
     public func effectiveContentMode(preferred: TileContentDisplayMode, level: Int) -> TileContentDisplayMode {
         metrics(level: level).supportedContentModes.contains(preferred) ? preferred : .squareFillCrop
     }
@@ -310,12 +310,12 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// Whether the aspect/square toggle is meaningful at a level (both modes supported → the normal levels L0–L3).
     public func contentModeToggleAvailable(level: Int) -> Bool { metrics(level: level).supportedContentModes.count > 1 }
 
-    /// The SIX Apple-like zoom levels, keyed by density (nominalColumns) — the canonical spec (video + the
+    /// The SIX Apple-like zoom levels, keyed by density (nominalColumns) - the canonical spec (video + the
     /// user-confirmed macOS-Photos ladder ~3/5/7/9/20+/30+). L0–L3 are normal photo levels (both content modes
     /// supported; default `aspectFitInsideSquare` = media preserves aspect INSIDE the square slot, the observed
-    /// Apple "All Photos" look — toggleable to squareFillCrop); L4–L5 are dense square overviews (squareFillCrop
+    /// Apple "All Photos" look - toggleable to squareFillCrop); L4–L5 are dense square overviews (squareFillCrop
     /// only, month/year labels). The SLOTS are always square. FIXED-COLUMNS, WIDTH-FILLING: each level HOLDS its
-    /// `nominalColumns` and the square slot is sized to FILL the width — so a width change SCALES the tile (same
+    /// `nominalColumns` and the square slot is sized to FILL the width - so a width change SCALES the tile (same
     /// columns, larger tile when wider), never a gutter and never a column reflow. Transition kinds are a stored
     /// classification consumed by the transition-effect layer outside the engine; the engine animates nothing.
     public static let appleLevelSpecs: [AppleGridLevelSpec] = [
@@ -327,7 +327,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         AppleGridLevelSpec(id: 5, nominalColumns: 30, gap: 1,  supportedContentModes: [.squareFillCrop],                         defaultContentMode: .squareFillCrop,        transitionKindToNext: nil,                 monthLabels: true),
     ]
 
-    /// The width-filling square side for a column count + gap — the resolution-independent slot size. Levels
+    /// The width-filling square side for a column count + gap - the resolution-independent slot size. Levels
     /// are defined by columns; this derives the pixel side at the CURRENT width: `(width − gap·(cols−1))/cols`.
     /// Feeding this back into the column-from-side resolve returns exactly `columns`, so the live-zoom lattice
     /// is unchanged while levels become resolution-independent.
@@ -337,15 +337,15 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     }
 
     /// Pick the column count whose width-FILLING tile size is CLOSEST to the target `side` (round to nearest),
-    /// with an optional hard cap. NOTE: this is NOT the settled production rule — the settled resolve AND the live
+    /// with an optional hard cap. NOTE: this is NOT the settled production rule - the settled resolve AND the live
     /// lattice's integer DETENTS both HOLD each level's `nominalColumns` (fixed-columns). This round rule runs
     /// ONLY for the live pinch OVER-ZOOM (the between-detent / past-the-end extrapolation), where the column count
     /// is genuinely derived from the apparent size.
     ///
-    /// ROUND (nearest), not floor: where this rule IS used the grid FILLS the width — the sub-column remainder is
+    /// ROUND (nearest), not floor: where this rule IS used the grid FILLS the width - the sub-column remainder is
     /// re-distributed INTO the tiles (a small size change), never left as a trailing gutter. Floor would keep the
     /// tile at exactly `side` and leak the remainder as blank up to one whole pitch (≈ a full empty tile at the
-    /// largest levels — the rejected "huge gutter" state). See `nominalSlotSide`, which `resolved()` pairs with
+    /// largest levels - the rejected "huge gutter" state). See `nominalSlotSide`, which `resolved()` pairs with
     /// this to size the tile. Min 1 column. When `maxColumns` binds, the surplus width is margin, never a stretch.
     public static func columnsForFixedSide(side: CGFloat, gap: CGFloat, width: CGFloat, maxColumns: Int? = nil) -> Int {
         let s = max(1, side), g = max(0, gap), w = max(1, width)
@@ -370,7 +370,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         return (section, flat - sectionFlatStart[section])
     }
 
-    // MARK: - Resolved section layout (the geometry kernel — pure)
+    // MARK: - Resolved section layout (the geometry kernel - pure)
 
     /// The fully-resolved grid for one set of metrics + width: column count, exact (width-filling) square
     /// side, and per-section top offsets / header rects / rows. Everything else is a query against this.
@@ -488,7 +488,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// across the grid on release (`SquareTileGridEngine.columnPhase(forItem:targetColumn:…)` derives it).
     /// `nil` = the default BOTTOM-RIGHT anchoring: newest item in the corner, the only partial row is the
     /// OLDEST at the top-left, no black on the right of the last row. With a cursor-aligned phase the partial
-    /// row instead splits between the oldest (top-left) and newest (bottom-right) ends — see the report.
+    /// row instead splits between the oldest (top-left) and newest (bottom-right) ends - see the report.
     func resolved(targetSide: CGFloat, gap: CGFloat, headerHeight: CGFloat, interSectionSpacing: CGFloat,
                   width: CGFloat, columnPhase: Int? = nil, fixedColumns: Int? = nil, maxColumns: Int? = nil) -> ResolvedGrid {
         let w = max(width, 1)
@@ -496,12 +496,12 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         let target = max(targetSide, 1)
         // WIDTH-FILLING resolve with two column-source branches:
         //  • `fixedColumns` given (the SETTLED + live-detent path): hold that column count and size the square slot
-        //    to FILL the width (`nominalSlotSide` = `(w − gap·(cols−1))/cols`). This is the PRODUCTION model —
+        //    to FILL the width (`nominalSlotSide` = `(w − gap·(cols−1))/cols`). This is the PRODUCTION model -
         //    `resolvedForLevel` passes `fixedColumns: nominalColumns`, so a width change SCALES the tile (same
         //    columns), never a column reflow.
         //  • `fixedColumns == nil` (the live pinch OVER-ZOOM only): the count is `columnsForFixedSide` (round to
         //    the nearest count whose width-filling tile is closest to `target`). NO settled caller takes this
-        //    branch — it exists for the lattice's past-the-end extrapolation.
+        //    branch - it exists for the lattice's past-the-end extrapolation.
         // Either branch fills the width exactly (no trailing gutter).
         let columns: Int
         let side: CGFloat
@@ -548,7 +548,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     private func resolvedForLevel(_ level: Int, width: CGFloat, columnPhase: Int? = nil) -> ResolvedGrid {
         let m = metrics(level: level)
         // FIXED-COLUMNS model: each level HOLDS its `nominalColumns` and the tile FILLS the width. So a width
-        // change (window resize / sidebar) SCALES the tiles and NEVER reflows — the column count changes ONLY on
+        // change (window resize / sidebar) SCALES the tiles and NEVER reflows - the column count changes ONLY on
         // a zoom (level change). The pinch lattice (`apparentSlotSide`) routes through the same `nominalColumns`,
         // so the live + settled grids stay in lock-step at every detent (the commit seam closes, no size pop).
         return resolved(targetSide: m.referenceSlotSide, gap: m.gap, headerHeight: m.headerHeight,
@@ -567,7 +567,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     }
 
     /// Apparent-metrics plan for a fractional level. NOTE: this RE-RESOLVES columns from the apparent slot
-    /// size every call, so a continuous sweep rewraps flat indices at every column-count threshold — visually
+    /// size every call, so a continuous sweep rewraps flat indices at every column-count threshold - visually
     /// discontinuous. It is therefore NOT used by the production pinch. The engine-owned live zoom
     /// (`GridZoomTransaction`) already exists and computes its own anchor-relative layout WITHOUT calling this;
     /// this method is now exercised only by engine unit tests.
@@ -642,7 +642,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         resolvedForLevel(level, width: width, columnPhase: columnPhase).hitTest(contentPoint)
     }
 
-    /// Every slot whose SQUARE cell INTERSECTS a CONTENT-space rect — drives marquee (drag-rectangle) selection.
+    /// Every slot whose SQUARE cell INTERSECTS a CONTENT-space rect - drives marquee (drag-rectangle) selection.
     public func slots(intersecting contentRect: CGRect, level: Int, width: CGFloat, columnPhase: Int? = nil) -> [GridSlot] {
         resolvedForLevel(level, width: width, columnPhase: columnPhase)
             .visibleSlots(in: contentRect, viewportOrigin: .zero)
@@ -669,14 +669,14 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         return sectionFlatStart[section] + item
     }
 
-    // MARK: Apparent metrics (continuous zoom — engine-owned)
+    // MARK: Apparent metrics (continuous zoom - engine-owned)
 
     /// The apparent square slot size for a continuous level position `x`, including the soft rubber-band:
     /// within the ladder it interpolates the bracketing detents; past the largest end it grows with
     /// diminishing return; past the densest end it clamps (never over-shrink below fill).
     public func apparentSlotSide(at x: CGFloat, width: CGFloat) -> CGFloat {
         let maxIndex = levels.count - 1
-        // The per-level WIDTH-FILLED side at this width — the EXACT side the settled grid resolves to for that
+        // The per-level WIDTH-FILLED side at this width - the EXACT side the settled grid resolves to for that
         // level (`resolvedForLevel`, FIXED-COLUMNS). Interpolating these makes an integer detent's apparent size
         // equal the settled size, so the pinch commit lands with no size pop (the seam closes at every width).
         func side(_ i: Int) -> CGFloat {
@@ -729,7 +729,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// over a gap/header. Returns the item's global index, its (section, item), its slot rect at the current
     /// metrics, and the point's local fraction within that slot (0…1). nil only for an empty library.
     ///
-    /// The anchor IDENTITY is the ITEM (section + item / global index), never a raw y — so it survives
+    /// The anchor IDENTITY is the ITEM (section + item / global index), never a raw y - so it survives
     /// slotSide / gap / column-count / row / section-offset changes during a zoom. The engine rebases the
     /// scroll offset from this item's NEW slot rect at every apparent metric.
     public func anchorItem(nearContentPoint point: CGPoint, level: Int, width: CGFloat, columnPhase: Int? = nil)
@@ -748,7 +748,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     }
 
     /// The scroll offset that places anchor item `flatIndex`'s local point back under `viewportPoint` at the
-    /// given metrics — the explicit "rebase from the item, never from raw scrollOffset" used by the
+    /// given metrics - the explicit "rebase from the item, never from raw scrollOffset" used by the
     /// coordinator + tests. Vertical grid: x scroll is always 0 (the grid fills the width).
     public func anchoredScrollOffset(flatIndex: Int, localFraction: CGPoint, viewportPoint: CGPoint, level: Int, width: CGFloat, columnPhase: Int? = nil) -> CGPoint {
         let grid = resolvedForLevel(level, width: width, columnPhase: columnPhase)
@@ -760,7 +760,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     // MARK: Column phase (cursor-anchor-preserving commit)
 
     /// The COLUMN PHASE (leading-empty-slot count) that lands global index `item` in `targetColumn` at the
-    /// given level/width — single continuous run only. Feed the result as `columnPhase:` to the settled
+    /// given level/width - single continuous run only. Feed the result as `columnPhase:` to the settled
     /// queries so the committed grid keeps the anchor in the cursor's column (no horizontal fly on release).
     public func columnPhase(forItem item: Int, targetColumn: Int, level: Int, width: CGFloat) -> Int {
         let cols = resolvedMetrics(level: level, width: width).columns
@@ -768,7 +768,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     }
 
     /// The column the cursor's viewport x falls in at a settled level (clamped to the grid). The phase a zoom
-    /// commits to is `columnPhase(forItem: anchor, targetColumn: cursorColumn(...))` — so the anchor settles
+    /// commits to is `columnPhase(forItem: anchor, targetColumn: cursorColumn(...))` - so the anchor settles
     /// exactly where the live transaction held it.
     public func cursorColumn(viewportX: CGFloat, level: Int, width: CGFloat) -> Int {
         let m = resolvedMetrics(level: level, width: width)
@@ -778,7 +778,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
 
     /// THE engine-owned anchor-capture + rebase for a DISCRETE level change: resolve the item under the
     /// cursor at `sourceLevel`, then return the scroll Y at `targetLevel` that keeps that SAME item under the
-    /// SAME viewport point (zoom directed toward the cursor — the Apple rule). This is NOT a top-viewport
+    /// SAME viewport point (zoom directed toward the cursor - the Apple rule). This is NOT a top-viewport
     /// anchor; the cursor's item is held, wherever it is in the viewport. nil only for an empty library.
     /// (The coordinator passes view width + the current scroll origin; the engine owns the logic.)
     public func cursorAnchoredScrollOffsetY(levelChangeFrom sourceLevel: Int, to targetLevel: Int, width: CGFloat,

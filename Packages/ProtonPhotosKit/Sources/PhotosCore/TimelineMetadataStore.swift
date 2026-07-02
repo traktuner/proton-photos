@@ -8,7 +8,7 @@ import SQLite3
 /// SAME order the database index `idx_photos_timeline(t, vol, node)` produces, so in-memory sorts,
 /// persisted rows, and grid identity agree deterministically across launches, devices, and
 /// platforms. String keys compare as UTF-8 bytes (SQLite's BINARY collation), and capture times
-/// compare in the `timeIntervalSince1970` projection that is actually stored in the `t` column —
+/// compare in the `timeIntervalSince1970` projection that is actually stored in the `t` column -
 /// never diverge from either, or equal-time rows can silently swap grid positions between runs.
 public enum TimelineOrder {
     public static func areInIncreasingOrder(_ a: PhotoItem, _ b: PhotoItem) -> Bool {
@@ -31,7 +31,7 @@ public enum TimelineOrder {
 
 // MARK: - Platform policy
 
-/// SQLite tuning injected by the platform adapter — Core ships only a conservative cross-platform
+/// SQLite tuning injected by the platform adapter - Core ships only a conservative cross-platform
 /// default. macOS may raise mmap/cache generously; iOS/iPadOS must stay small: mmap I/O errors
 /// surface as SIGBUS (not `SQLITE_IOERR`, see sqlite.org/mmap.html) and mapped pages count against
 /// the jetsam budget, so the desktop numbers must never become Core defaults (same rule as
@@ -69,15 +69,15 @@ public struct LibraryDatabasePolicy: Sendable, Equatable {
 // MARK: - On-disk location
 
 /// Path policy for the app-owned per-account library database:
-/// `Application Support/ProtonPhotos/<uid>/library-v1.sqlite`. Application Support (not Caches —
+/// `Application Support/ProtonPhotos/<uid>/library-v1.sqlite`. Application Support (not Caches -
 /// iOS may purge Caches under storage pressure) with backup exclusion (the contents are
 /// re-derivable from the server). The whole `<uid>` directory is account-scoped, so sign-out purge
-/// removes the directory wholesale — any future side database added next to `library-v1.sqlite`
+/// removes the directory wholesale - any future side database added next to `library-v1.sqlite`
 /// is automatically covered.
 public enum LibraryDatabaseLocation {
     public static let databaseFileName = "library-v1.sqlite"
 
-    /// Main file plus the WAL sidecars — the three must be treated as one unit for purge/backup.
+    /// Main file plus the WAL sidecars - the three must be treated as one unit for purge/backup.
     public static func databaseFileNames() -> [String] {
         [databaseFileName, databaseFileName + "-wal", databaseFileName + "-shm"]
     }
@@ -127,14 +127,14 @@ public struct TimelineDimensionUpdateResult: Sendable, Equatable {
     public let succeeded: Bool
 }
 
-/// Structural outcome of a `TimelineMetadataStore.save` — tests and `[DBHealth]` logging assert on
+/// Structural outcome of a `TimelineMetadataStore.save` - tests and `[DBHealth]` logging assert on
 /// this instead of on flaky timings.
 public struct TimelineSaveResult: Sendable, Equatable {
-    /// The incoming timeline's digest matched the persisted one — nothing was written.
+    /// The incoming timeline's digest matched the persisted one - nothing was written.
     public let skippedUnchanged: Bool
     /// Refresh generation stamped on this save (unchanged when skipped).
     public let generation: Int
-    /// Rows actually written by the upsert — inserts plus real content updates, NOT unchanged
+    /// Rows actually written by the upsert - inserts plus real content updates, NOT unchanged
     /// survivors (0 when skipped). This is the O(changes) signal the guard tests assert on.
     public let upsertedRows: Int
     /// Rows removed by the anti-join sweep because they vanished from this full enumeration.
@@ -151,11 +151,11 @@ public struct TimelineSaveResult: Sendable, Equatable {
 ///
 /// Schema rules (see docs + PERF_DB_METAL_AUDIT_2026-07-01.md §5):
 /// - `photos` is the hot path and carries ONLY what the timeline needs; feature data lives in
-///   feature-owned tables (`photo_tags`, `burst_members`) — never serialized blobs.
+///   feature-owned tables (`photo_tags`, `burst_members`) - never serialized blobs.
 /// - Timeline order is `(t, vol, node)` everywhere; `idx_photos_timeline` serves the ordered scan.
 /// - Saves are O(changes): a digest no-op short-circuit skips unchanged refreshes; a changed
 ///   refresh upserts only rows whose content actually differs and anti-joins the enumerated key
-///   set to sweep vanished rows — never a full-table rewrite.
+///   set to sweep vanished rows - never a full-table rewrite.
 /// - `schema_info` versions each feature's tables explicitly; an unknown newer version fails
 ///   closed by resetting the (re-derivable) database rather than guessing.
 ///
@@ -180,7 +180,7 @@ public final class TimelineMetadataStore {
     /// for the incremental save's anti-join sweep (see `ensureIncomingKeyTable`).
     private static let incomingKeyTable = "save_incoming_keys"
 
-    /// Single source of truth for the ordered hot-path scan — the query-plan guard test explains
+    /// Single source of truth for the ordered hot-path scan - the query-plan guard test explains
     /// exactly this statement, so plan and load can never drift apart.
     private static let timelineLoadSQL =
         "SELECT vol, node, t, mime, live, relvid, dur FROM photos ORDER BY t, vol, node;"
@@ -269,7 +269,7 @@ public final class TimelineMetadataStore {
     }
 
     /// True when every known feature's on-disk version is at most the supported one (stamping
-    /// absent rows at the current version); false — reset required — when the store comes from a
+    /// absent rows at the current version); false - reset required - when the store comes from a
     /// newer build.
     private static func verifyAndStampFeatureVersions(_ handle: OpaquePointer?) -> Bool {
         var onDisk: [String: Int] = [:]
@@ -322,7 +322,7 @@ public final class TimelineMetadataStore {
 
     /// Ordered timeline load. The hot path is one indexed scan of `photos`; tags and burst
     /// membership are reconstructed from their feature tables with one full pass each (dictionary
-    /// join in memory — no per-row queries, no blob decoding).
+    /// join in memory - no per-row queries, no blob decoding).
     public func load() -> [PhotoItem] {
         PhotoPerformanceSignposts.database.interval("db.load") {
             loadInstrumented()
@@ -399,13 +399,13 @@ public final class TimelineMetadataStore {
     /// Incremental, O(changes) save of a FULL timeline enumeration.
     ///
     /// 1. No-op short-circuit: a deterministic digest of the (canonically ordered) input is
-    ///    compared against the persisted one — an unchanged refresh writes nothing at all.
+    ///    compared against the persisted one - an unchanged refresh writes nothing at all.
     /// 2. Otherwise each incoming row is upserted with a NULL-safe change guard, so only rows whose
     ///    persisted fields actually differ are written; unchanged survivors are left untouched (no
     ///    page churn, no WAL frames). Rows the enumeration no longer contains are removed by an
     ///    anti-join against the recorded key set. There is deliberately no full-table rewrite.
     ///
-    /// The `generation` counter still advances once per changed save (diagnostics only — it no
+    /// The `generation` counter still advances once per changed save (diagnostics only - it no
     /// longer stamps rows). `w`/`h` (learned dimensions) are never referenced by the upsert, so a
     /// future dimension writer's values survive every refresh.
     @discardableResult
@@ -450,7 +450,7 @@ public final class TimelineMetadataStore {
         var swept = 0
         let ok: Bool = {
             // Record every incoming key, then upsert only the rows whose persisted content actually
-            // changed (unchanged rows write nothing — no page churn, no WAL frames).
+            // changed (unchanged rows write nothing - no page churn, no WAL frames).
             guard sqlite3_exec(db, "DELETE FROM \(Self.incomingKeyTable);", nil, nil, nil) == SQLITE_OK,
                   upsertChangedPhotos(ordered, upserted: &upserted) else { return false }
             // Sweep: delete exactly the rows this full enumeration no longer contains (an anti-join
@@ -548,7 +548,7 @@ public final class TimelineMetadataStore {
         return true
     }
 
-    /// Connection-scoped scratch table holding the current enumeration's `(vol, node)` keys — it
+    /// Connection-scoped scratch table holding the current enumeration's `(vol, node)` keys - it
     /// backs the incremental save's anti-join sweep. It lives in SQLite's TEMP store, so filling it
     /// never appends to the durable WAL; `WITHOUT ROWID` + the composite PK give the anti-join a
     /// covering index and make duplicate keys in one enumeration a harmless no-op (`INSERT OR IGNORE`).
@@ -561,7 +561,7 @@ public final class TimelineMetadataStore {
         ) == SQLITE_OK
     }
 
-    /// True when `items` is already in canonical `(t, vol, node)` order — the common case, because
+    /// True when `items` is already in canonical `(t, vol, node)` order - the common case, because
     /// the enumeration feeding `save` is pre-sorted by the bridge. Lets `save` skip a redundant
     /// O(n log n) resort via an O(n) scan; any out-of-order input falls back to a full sort.
     private static func isTimelineOrdered(_ items: [PhotoItem]) -> Bool {
@@ -574,7 +574,7 @@ public final class TimelineMetadataStore {
     }
 
     /// Feature tables are rewritten wholesale inside the save transaction. Their row counts scale
-    /// with tagged/burst items (a small fraction of the library), not with library size — the
+    /// with tagged/burst items (a small fraction of the library), not with library size - the
     /// digest short-circuit already spares the common unchanged refresh entirely.
     private func rewriteTags(_ items: [PhotoItem]) -> Bool {
         guard sqlite3_exec(db, "DELETE FROM photo_tags;", nil, nil, nil) == SQLITE_OK else { return false }
@@ -619,12 +619,12 @@ public final class TimelineMetadataStore {
     /// Batched write of learned dimensions into `photos.w`/`photos.h`, independent of timeline
     /// saves: dimensions arrive from decode/metadata paths on their own schedule and are
     /// deliberately NOT part of the timeline digest, so recording them never invalidates the
-    /// no-op save short-circuit — and a timeline refresh never touches `w`/`h` (its upsert omits
+    /// no-op save short-circuit - and a timeline refresh never touches `w`/`h` (its upsert omits
     /// them), so learned values survive every refresh.
     ///
     /// Default (`overwrite: false`) is first-seen-wins: only rows with NULL dimensions are
     /// filled. That keeps thumbnail-scale dimensions from clobbering true dimensions a future
-    /// metadata writer may have stored. `overwrite: true` is that future writer's mode — it
+    /// metadata writer may have stored. `overwrite: true` is that future writer's mode - it
     /// rewrites rows whose values actually differ (NULL-safe compare), so an unchanged batch is
     /// still a no-op. Rows for unknown `(vol, node)` keys are ignored, never invented.
     @discardableResult
@@ -673,7 +673,7 @@ public final class TimelineMetadataStore {
         return TimelineDimensionUpdateResult(updatedRows: updated, succeeded: true)
     }
 
-    /// Bulk dictionary read of every known dimension — one pass, for grid/timeline planning to
+    /// Bulk dictionary read of every known dimension - one pass, for grid/timeline planning to
     /// consume alongside `load()` instead of a separate aspect file. Rows without learned
     /// dimensions are simply absent.
     public func loadDimensions() -> [PhotoUID: PhotoPixelDimensions] {
@@ -758,7 +758,7 @@ public final class TimelineMetadataStore {
 
     // MARK: Test seams (internal)
 
-    /// EXPLAIN QUERY PLAN of the exact hot-path load statement — the guard test asserts it rides
+    /// EXPLAIN QUERY PLAN of the exact hot-path load statement - the guard test asserts it rides
     /// `idx_photos_timeline` with no temp b-tree. Internal: reachable via `@testable import`.
     func timelineLoadQueryPlan() -> String {
         var stmt: OpaquePointer?

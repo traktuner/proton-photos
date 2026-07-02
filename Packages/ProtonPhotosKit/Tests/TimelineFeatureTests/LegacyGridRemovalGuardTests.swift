@@ -36,7 +36,7 @@ import GridCore
 
     // MARK: - NoProductionPhotoGridView / Justified / ZoomMath / detent references (#3, #4, #5)
 
-    /// No production source may reference any removed legacy grid symbol — not even in a comment, so the
+    /// No production source may reference any removed legacy grid symbol - not even in a comment, so the
     /// names cannot creep back. Bare-identifier scan (none of these is a substring of a kept symbol).
     @Test func noProductionReferenceToRemovedLegacySymbols() {
         let banned = [

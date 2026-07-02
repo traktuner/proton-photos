@@ -1,4 +1,4 @@
-# Resize/Sidebar — Apple-Parity Live Presentation Layer (IMPLEMENTED SPEC)
+# Resize/Sidebar - Apple-Parity Live Presentation Layer (IMPLEMENTED SPEC)
 
 **Status:** IMPLEMENTED. The live resize/sidebar presentation layer shipped on this branch
 (`MetalGridCoordinator.captureSnapshot` / `beginPresentationResize` / `drawPresentationResize` /
@@ -24,7 +24,7 @@ NOT re-lay-out per frame). Hand-verified A/B:
   **identical tile size**). Clip/reveal at constant size; content bottom-anchored, top counter-scrolls ~1:1.
 
 Caveat (carried, not hidden): some windows reported "column reflow at constant tile size"; on re-read those were
-artifacts of a simultaneous **zoom-level switch** to the dense "Alle Fotos 2" view + 10fps mislabeling — NOT a
+artifacts of a simultaneous **zoom-level switch** to the dense "Alle Fotos 2" view + 10fps mislabeling - NOT a
 resize reflow. No pure width-constant sidebar toggle exists in the corpus, so sidebar is inferred from compound
 gestures (high but not direct confidence).
 
@@ -35,7 +35,7 @@ gestures (high but not direct confidence).
 | **Horizontal edge** (width) | **uniform surface SCALE** (grid scales like a photo) | the **stationary** edge (grid origin pinned to it; left in all captured drags) | **held** | **tracks width** (scales) | **instant** (0–1 frame); no column snap |
 | **Vertical edge** (height) | **CLIP / REVEAL** at constant size (add/remove rows) | the **stationary** edge | constant | **constant** | instant (~1 frame) |
 | **Corner** | horizontal SCALE **and** vertical CLIP/REVEAL, independent + simultaneous | width→stationary-x, height→stationary-y | held | scales with width only | instant |
-| **Sidebar open/close** | **like horizontal** — grid uniform-scales to the new content width; **no separate fade/slide/snapshot** of the grid (sidebar panel fades its own labels) | content left origin | held | scales with content width | instant |
+| **Sidebar open/close** | **like horizontal** - grid uniform-scales to the new content width; **no separate fade/slide/snapshot** of the grid (sidebar panel fades its own labels) | content left origin | held | scales with content width | instant |
 
 **Vertical counter-scroll:** the content stays anchored to the **stationary** edge, so the opposite side
 counter-scrolls **~1:1** with the height delta. Direction depends on the anchored edge: bottom-edge drag with
@@ -51,7 +51,7 @@ gap delta as a fake reflow.
 ## 2. What happens DURING a live resize/sidebar gesture
 
 Capture the resolved visible slots once at gesture start with generous overscan. Each frame, the coordinator maps
-that captured slot snapshot through a uniform transform — **no engine resolve, no content-size pass, no SwiftUI
+that captured slot snapshot through a uniform transform - **no engine resolve, no content-size pass, no SwiftUI
 relayout, and no texture/cache/decode churn.**
 
 1. **Gesture start** (`willStartLiveResize`; or sidebar-inset-change start):
@@ -84,53 +84,53 @@ relayout, and no texture/cache/decode churn.**
 | **`MTKView` draw** | present synchronously from `layout()` using the scaled slot snapshot | keeps the Metal frame moving with the window border without per-frame engine resolve |
 | **`MetalGridCoordinator` draw / engine resolve** | **BYPASS** engine resolve during gesture: draw the captured slot snapshot with a transform; resolve only at start and settle | per-frame engine resolve + content-size is the main-thread cost |
 | **`MetalGridScrollHost.layout()`** | **BYPASS** the resolve/content-size/scroll-rebase path while `inLiveResize`; only update the transform | same |
-| **`MetalProductionGridView.updateNSView`** | **GATE** on `inLiveResize` — skip the heavy reconcile while a gesture is active (the host owns the transform) | stops SwiftUI churn re-entering the host per frame |
-| **`GeometryReader` (MainView detail)** | **HOIST** the O(library) work out of `TimelineView.body` (`filteredSections` / `flatMap(\.items)` / `dateMarkers` — TimelineView.swift:67–80) so a geometry re-eval can't recompute the whole library per frame; compute on `sections`-change only | a per-frame full-library recompute is the "pre-Metal" feeling; must not run during resize |
-| **Glass — `GridTopFrost` within-window `NSVisualEffectView`** (MainView:895) | **SYNCHRONIZE / lever:** with the Metal side now a cheap canvas-transform the compositor should keep up; if QA still shows jank, **suspend GridTopFrost while `inLiveResize`** and restore on end | it blurs the live Metal layer every frame at changing geometry; it is the one *within-window* vibrancy we control |
-| **Glass — native toolbar + floating sidebar** | leave to the system; their cost drops once the Metal content is cheap to produce | system-managed Liquid Glass; not ours to freeze |
+| **`MetalProductionGridView.updateNSView`** | **GATE** on `inLiveResize` - skip the heavy reconcile while a gesture is active (the host owns the transform) | stops SwiftUI churn re-entering the host per frame |
+| **`GeometryReader` (MainView detail)** | **HOIST** the O(library) work out of `TimelineView.body` (`filteredSections` / `flatMap(\.items)` / `dateMarkers` - TimelineView.swift:67–80) so a geometry re-eval can't recompute the whole library per frame; compute on `sections`-change only | a per-frame full-library recompute is the "pre-Metal" feeling; must not run during resize |
+| **Glass - `GridTopFrost` within-window `NSVisualEffectView`** (MainView:895) | **SYNCHRONIZE / lever:** with the Metal side now a cheap canvas-transform the compositor should keep up; if QA still shows jank, **suspend GridTopFrost while `inLiveResize`** and restore on end | it blurs the live Metal layer every frame at changing geometry; it is the one *within-window* vibrancy we control |
+| **Glass - native toolbar + floating sidebar** | leave to the system; their cost drops once the Metal content is cheap to produce | system-managed Liquid Glass; not ours to freeze |
 | **Sidebar inset path (`applyLeadingInsetChange`)** | route through the SAME presentation lifecycle, driven by the 0.22s sidebar animation start/end (not per inset tick) | sidebar = a horizontal width change of the content area |
 
 ## 5. Which current dirty changes to REVERT vs KEEP
 
-- **KEEP** — fixed-columns + width-fill (`resolvedForLevel` passes `fixedColumns: nominalColumns`) and its tests.
+- **KEEP** - fixed-columns + width-fill (`resolvedForLevel` passes `fixedColumns: nominalColumns`) and its tests.
   `columnsForFixedSide` remains only for live over-zoom / future responsive scaffolding, not the settled resize rule.
-- **KEEP** — L0–L3 default `aspectFitInsideSquare` (your screenshot call). Orthogonal to resize.
-- **ALREADY REVERTED** (done, no dead code) — `suppressContentSizeCallback` (coordinator + host) and the
+- **KEEP** - L0–L3 default `aspectFitInsideSquare` (your screenshot call). Orthogonal to resize.
+- **ALREADY REVERTED** (done, no dead code) - `suppressContentSizeCallback` (coordinator + host) and the
   `isProgrammaticResizeScroll` reentrancy guard + their perf-guard tests. They were the wrong fix (host-internal,
   imperceptible) and are fully superseded by this presentation layer.
-- **NOTE (stale):** this line predated implementation — the presentation layer described here is now implemented
+- **NOTE (stale):** this line predated implementation - the presentation layer described here is now implemented
   and committed, so "the dirty diff is only round+fill + tests + this doc" no longer holds.
 
 ## 6. Exact tests to add (with the implementation)
 
 Pure-logic (engine/host helpers, no UI):
-1. `presentationScaleEqualsWidthRatio` — for a horizontal step W0→W, the transform scale == W/W0 about the
+1. `presentationScaleEqualsWidthRatio` - for a horizontal step W0→W, the transform scale == W/W0 about the
    stationary edge.
-2. `scaledSurfaceEqualsFixedColumnsAtReleaseWidth` — the scaled layout at W (held columns n) equals `resolved()` at
+2. `scaledSurfaceEqualsFixedColumnsAtReleaseWidth` - the scaled layout at W (held columns n) equals `resolved()` at
    W for the same n, modulo the constant-gap delta.
-3. `fixedColumnResizeDoesNotArmColumnReflowSettle` — release settle remains dormant while columns are unchanged.
-4. `verticalGestureAppliesNoScaleOnlyTranslate` — height-only step ⇒ scale==1; translate == counter-scroll;
+3. `fixedColumnResizeDoesNotArmColumnReflowSettle` - release settle remains dormant while columns are unchanged.
+4. `verticalGestureAppliesNoScaleOnlyTranslate` - height-only step ⇒ scale==1; translate == counter-scroll;
    counter-scroll fraction == the engine's `resizeAnchorFraction` for the moved edge (bottom→1.0 top-counter,
    top→0).
-5. `cornerComposesScaleAndTranslateIndependently` — width drives scale, height drives translate, no cross-term.
-6. `settleResolvesFixedColumnsOncePerGesture` — exactly one `resolved()` at `didEndLiveResize`; zero during
+5. `cornerComposesScaleAndTranslateIndependently` - width drives scale, height drives translate, no cross-term.
+6. `settleResolvesFixedColumnsOncePerGesture` - exactly one `resolved()` at `didEndLiveResize`; zero during
    `inLiveResize`.
-7. `sidebarToggleUsesHorizontalScalePath` — the sidebar inset change enters the presentation lifecycle and scales
+7. `sidebarToggleUsesHorizontalScalePath` - the sidebar inset change enters the presentation lifecycle and scales
    (no separate transition path).
 
 Source/structure guards:
-8. `noEngineResolvePerFrameDuringLiveResize` — host `layout()` while `inLiveResize` does not call the
+8. `noEngineResolvePerFrameDuringLiveResize` - host `layout()` while `inLiveResize` does not call the
    resolve/content-size path (only the transform).
-9. `timelineBodyDoesNotRecomputeLibraryPerGeometry` — `filteredSections`/`flatMap(\.items)`/`dateMarkers` are
+9. `timelineBodyDoesNotRecomputeLibraryPerGeometry` - `filteredSections`/`flatMap(\.items)`/`dateMarkers` are
    hoisted out of `TimelineView.body` (computed on a `sections`/`filter` change, not on every geometry eval).
-10. `synchronousDrawDuringResize` — the gesture path presents from `layout()` without waiting for async redraw
+10. `synchronousDrawDuringResize` - the gesture path presents from `layout()` without waiting for async redraw
     coalescing.
 
 Forbidden regressions (must stay green): all pinch/scroll/binding-echo suites; fixed-column fill-width + seam
 invariants; pure-height-resize-changes-no-width-metric.
 
 QA matrix (manual, after build): left edge, right edge, top edge, bottom edge, all four corners, sidebar
-open/close, fast drag, drag while thumbnails still stream — each must be smooth, no rubber-band, no blank, no
+open/close, fast drag, drag while thumbnails still stream - each must be smooth, no rubber-band, no blank, no
 gutter, no pop; settle instant; pinch/click zoom unaffected.
 
 ## 7. Phasing (each independently testable + QA-able)

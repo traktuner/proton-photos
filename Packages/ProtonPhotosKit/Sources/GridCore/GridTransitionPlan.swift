@@ -11,10 +11,10 @@ import CoreGraphics
 package enum GridTransitionKindTag: String, Sendable { case click, pinch }
 
 package enum TransitionSlotRole: String, Sendable, Equatable {
-    case stable     // same occupant both ends — drawn once
-    case source     // mixed key, before window — source occupant
-    case target     // mixed key, after window — target occupant
-    case dissolve   // mixed/relocating key, inside window — source⇄target full-slot mix
+    case stable     // same occupant both ends - drawn once
+    case source     // mixed key, before window - source occupant
+    case target     // mixed key, after window - target occupant
+    case dissolve   // mixed/relocating key, inside window - source⇄target full-slot mix
     case entry      // target-only occupant arriving (no crossfade partner)
     case exit       // source-only occupant departing
 }
@@ -51,7 +51,7 @@ package struct GridTransitionPlan: Sendable {
     package let targetOcc: [RelativeSlotKey: Int]
     package let sourceRect: [RelativeSlotKey: CGRect]  // REAL viewport rect at q=0 (nil for entries)
     package let targetRect: [RelativeSlotKey: CGRect]  // REAL viewport rect at q=1 (nil for exits)
-    // V3.7 presentation geometry — filled for EVERY key. Mixed/stable: real source/target. Entries:
+    // V3.7 presentation geometry - filled for EVERY key. Mixed/stable: real source/target. Entries:
     // a SYNTHESIZED source-side endpoint (so they slide/scale IN). Exits: a synthesized target-side
     // endpoint (so they slide/scale OUT). Identity/role decisions still use sourceOcc/targetOcc +
     // the REAL source/targetRect; only the spatial path uses these.
@@ -65,7 +65,7 @@ package struct GridTransitionPlan: Sendable {
 
     /// Continuous spatial path for a key: interpolate its PRESENTATION endpoints (defined for every
     /// key). Mixed/stable keys move real source → real target; entries/exits move along their
-    /// synthesized off-grid endpoint — so side/new images participate in the grid motion, not fade.
+    /// synthesized off-grid endpoint - so side/new images participate in the grid motion, not fade.
     private func rect(for key: RelativeSlotKey, gp: Double) -> CGRect {
         let s = presentationSourceRect[key] ?? sourceRect[key] ?? targetRect[key] ?? .zero
         let t = presentationTargetRect[key] ?? targetRect[key] ?? sourceRect[key] ?? .zero

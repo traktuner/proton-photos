@@ -1,6 +1,6 @@
 import Foundation
 
-/// How an item was classified, and by which signal — so the viewer can decide stream-vs-image and
+/// How an item was classified, and by which signal - so the viewer can decide stream-vs-image and
 /// diagnostics can record *why*. The main "All Photos" timeline reports everything as `image/jpeg`
 /// (the SDK doesn't surface the real type), so the viewer can't trust `mediaType` alone; this folds
 /// MIME + filename extension + a content sniff into one decision.
@@ -10,7 +10,7 @@ public enum MediaKind: String, Sendable, Equatable {
     case unknown
 }
 
-/// Pure content/type detection. No file I/O — callers pass the leading bytes — so it's fully
+/// Pure content/type detection. No file I/O - callers pass the leading bytes - so it's fully
 /// unit-testable (ExtensionSniffingTest / VideoDetectionTest).
 public enum VideoContentSniffer {
     /// Known video filename extensions (lowercased, no dot).
@@ -72,7 +72,7 @@ public enum VideoContentSniffer {
     }
 
     /// Classifies by MIME type alone (when trustworthy). Returns `.unknown` for the generic
-    /// `image/jpeg` placeholder the timeline stamps on every item — forcing a content check.
+    /// `image/jpeg` placeholder the timeline stamps on every item - forcing a content check.
     public static func kind(mimeType: String?) -> MediaKind {
         guard let m = mimeType?.lowercased(), !m.isEmpty else { return .unknown }
         if m.hasPrefix("video/") { return .video }

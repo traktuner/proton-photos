@@ -6,11 +6,11 @@ import PackageDescription
 // `AVPlayer`'s CoreMedia threads corrupt the main-thread executor's PAC state. It fires on EVERY `@MainActor`
 // SwiftUI body / Cocoa-callback update that reads our `@Observable` model, so structural fixes only RELOCATE
 // the crash (GeometryReader child → plain body → …). This frontend flag stops the compiler EMITTING those
-// dynamic checks at all — it removes the faulting CALL (unlike the env-var override, which only changed the
+// dynamic checks at all - it removes the faulting CALL (unlike the env-var override, which only changed the
 // call's decision while the computation still segfaulted). Safe here: static Swift-6 isolation already proves
 // these run on the main actor; the dynamic check was pure belt-and-suspenders and is currently a liability.
 // `.unsafeFlags` is fine because this package is consumed as a LOCAL PATH dependency, never version-resolved.
-// REMOVE once the toolchain ships the #76804 fix (Xcode 26.2 line) — re-test the live AVPlayer path first.
+// REMOVE once the toolchain ships the #76804 fix (Xcode 26.2 line) - re-test the live AVPlayer path first.
 let disableDynamicActorIsolation: [SwiftSetting] = [
     .unsafeFlags(["-Xfrontend", "-disable-dynamic-actor-isolation"])
 ]
@@ -56,7 +56,7 @@ let package = Package(
         .library(name: "UploadCore", targets: ["UploadCore"]),
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
         // Library map: MapKit (native Apple Maps) view over the shared encrypted location index.
-        // Platform UI layer — macOS now; an iOS/iPad UIKit variant reuses the same MediaLocationCore.
+        // Platform UI layer - macOS now; an iOS/iPad UIKit variant reuses the same MediaLocationCore.
         .library(name: "MapUIKitAdapter", targets: ["MapUIKitAdapter"]),
         .library(name: "MapFeature", targets: ["MapFeature"]),
     ],

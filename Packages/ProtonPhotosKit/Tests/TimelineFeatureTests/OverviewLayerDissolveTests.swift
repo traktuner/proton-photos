@@ -58,7 +58,7 @@ import GridCore
         }
     }
 
-    // Builds ONLY for the overview boundaries — never for the accepted normal-level (focusRowRelayout) steps.
+    // Builds ONLY for the overview boundaries - never for the accepted normal-level (focusRowRelayout) steps.
     @Test func buildsOnlyForOverviewBoundaries() {
         let e = engine()
         #expect(plan(3, 4, e) != nil)
@@ -92,7 +92,7 @@ import GridCore
         for step in 0 ... 10 {
             #expect(p.withProgress(Double(step) / 10).target.visibleSlots.map(\.viewportRect) == finalRects)
         }
-        // SIZE-BASED (D2): the overview adopts the fixed-size / adaptive-column model too — derive the expected
+        // SIZE-BASED (D2): the overview adopts the fixed-size / adaptive-column model too - derive the expected
         // L4 column count from the engine at this width rather than the old fixed literal (20).
         #expect(p.target.columns == e.resolvedMetrics(level: 4, width: viewport.width).columns)
         #expect(p.targetLevel == 4 && p.sourceLevel == 3)
@@ -204,10 +204,10 @@ import GridCore
         }
     }
 
-    // MATH PROOF: the composite mix is a true LINEAR cross-dissolve — `a·(1−t) + b·t` — with NO `(1−t)²` source
+    // MATH PROOF: the composite mix is a true LINEAR cross-dissolve - `a·(1−t) + b·t` - with NO `(1−t)²` source
     // under-weighting and NO background term. (Mirrors `metalGridCompositeFragment`'s `mix(a,b,t)`.)
     @Test func compositeMixIsLinearWithNoBackgroundBleed() {
-        // The mix is independent of any background value — it has no bg argument at all.
+        // The mix is independent of any background value - it has no bg argument at all.
         for (a, b) in [(0.8, 0.2), (0.1, 0.9), (0.5, 0.5), (1.0, 0.0)] {
             #expect(abs(overviewDissolveMix(a, b, 0) - a) < 1e-12)
             #expect(abs(overviewDissolveMix(a, b, 1) - b) < 1e-12)
@@ -224,7 +224,7 @@ import GridCore
     // which darkens the mid-fade toward the background via the `(1−t)²` term.
     @Test func midFadeHasNoQSquaredDarkeningVsSinglePass() {
         let a = 0.8, b = 0.2, bg = 0.05      // bright source, dark target, dark bg (overlap region)
-        let linearMid = overviewDissolveMix(a, b, 0.5)               // 0.5 — true average
+        let linearMid = overviewDissolveMix(a, b, 0.5)               // 0.5 - true average
         let bleedMid = overviewDissolveSinglePassBleed(a, b, bg, 0.5) // 0.2·.5 + 0.8·.25 + 0.05·.25 = 0.3125
         #expect(abs(linearMid - 0.5) < 1e-12)
         #expect(bleedMid < linearMid - 0.1)                          // the single-pass result is visibly darker
@@ -262,10 +262,10 @@ import GridCore
         }
     }
 
-    // GUARD: the overview layer dissolve must NOT touch the relocation lattice / transition controller — that
+    // GUARD: the overview layer dissolve must NOT touch the relocation lattice / transition controller - that
     // reuse is exactly what was rejected. (Source-scan guard, matching the suite's existing guard-test style.)
     @Test func dissolveModelDoesNotUseRelocationMachinery() {
-        // Scan CODE only — the file's prose deliberately names these to explain what it does NOT use.
+        // Scan CODE only - the file's prose deliberately names these to explain what it does NOT use.
         let code = source("OverviewLayerDissolve.swift")
             .split(separator: "\n", omittingEmptySubsequences: false)
             .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
@@ -277,7 +277,7 @@ import GridCore
         }
     }
 
-    // MARK: V3.12 — bottom-pin / clamp of the target scroll (no settle jump)
+    // MARK: V3.12 - bottom-pin / clamp of the target scroll (no settle jump)
 
     private func dissolveAtBottom(_ s: Int, _ t: Int, _ e: SquareTileGridEngine) -> OverviewLayerDissolvePlan? {
         let sourceMaxY = max(0, e.contentSize(level: s, width: viewport.width).height - viewport.height)
@@ -290,7 +290,7 @@ import GridCore
         max(0, e.contentSize(level: t, width: viewport.width, columnPhase: phase).height - viewport.height)
     }
 
-    // 1 — a bottom-pinned source forces the target to its bottom-filled scroll (not the raw anchored scroll).
+    // 1 - a bottom-pinned source forces the target to its bottom-filled scroll (not the raw anchored scroll).
     @Test func bottomPinnedSourceTargetsTargetBottom() {
         let e = engine(6000)
         guard let p = dissolveAtBottom(3, 4, e) else { Issue.record("nil"); return }
@@ -299,7 +299,7 @@ import GridCore
         #expect(abs(p.targetScrollY - tMax) < 1e-6)               // bottom-filled, not raw anchored
     }
 
-    // 2 — the stored target plan is built from EXACTLY the (clamped) scroll commit will use.
+    // 2 - the stored target plan is built from EXACTLY the (clamped) scroll commit will use.
     @Test func targetPlanBuiltFromCommitScroll() {
         let e = engine(6000)
         guard let p = dissolveAtBottom(3, 4, e) else { Issue.record("nil"); return }
@@ -308,7 +308,7 @@ import GridCore
         #expect(rebuilt == p.target)                              // target layer == settled plan at p.targetScrollY
     }
 
-    // 3 — raw anchored target scroll out of bounds is clamped into [0, targetMaxY].
+    // 3 - raw anchored target scroll out of bounds is clamped into [0, targetMaxY].
     @Test func rawTargetScrollIsClampedIntoBounds() {
         let e = engine(6000)
         // anchor + source near the TOP ⇒ raw anchored target scroll ≤ 0 ⇒ clamps to 0.
@@ -330,7 +330,7 @@ import GridCore
         }
     }
 
-    // 4 — a NON-bottom-pinned mid-library anchor settles mid-content, NOT snapped to the bottom.
+    // 4 - a NON-bottom-pinned mid-library anchor settles mid-content, NOT snapped to the bottom.
     @Test func nonBottomPinnedDoesNotSnapToBottom() {
         let e = engine(6000)
         let sMax = max(0, e.contentSize(level: 3, width: viewport.width).height - viewport.height)
@@ -345,7 +345,7 @@ import GridCore
         #expect(p.targetScrollY < tMax - viewport.height)        // clearly not the bottom
     }
 
-    // 5 — target content shorter than the viewport ⇒ targetScrollY == 0 (never stretched/faked), even at bottom.
+    // 5 - target content shorter than the viewport ⇒ targetScrollY == 0 (never stretched/faked), even at bottom.
     // (SIZE-BASED: L4 now shows ~15 columns at this width, so a smaller count is needed for a short overview.)
     @Test func targetShorterThanViewportSettlesAtZero() {
         let e = engine(100)
@@ -354,7 +354,7 @@ import GridCore
         #expect(p.targetScrollY == 0)
     }
 
-    // MARK: V3.13 — direction-aware anchor (cursor wins on pinch-IN; bottom-fill is zoom-OUT-only)
+    // MARK: V3.13 - direction-aware anchor (cursor wins on pinch-IN; bottom-fill is zoom-OUT-only)
 
     /// Build a dissolve for an explicit source scroll + cursor (viewport y), and return the plan alongside the
     /// independently-recomputed cursor-anchored clamped scroll / target phase / targetMaxY for exact comparison.
@@ -376,7 +376,7 @@ import GridCore
         return (plan, min(max(0, rawY), tMax), tphase, tMax)
     }
 
-    // 1 — pinch-IN from a BOTTOM-PINNED overview uses the CURSOR anchor, NOT the overview bottom.
+    // 1 - pinch-IN from a BOTTOM-PINNED overview uses the CURSOR anchor, NOT the overview bottom.
     @Test func overviewPinchInUsesCursorAnchorNotBottomPin() {
         let e = engine(6000)
         let sMax = max(0, e.contentSize(level: 4, width: viewport.width).height - viewport.height)   // L4 bottom
@@ -386,14 +386,14 @@ import GridCore
         #expect(abs(r.plan.targetScrollY - r.tMax) > viewport.height)   // emphatically NOT the bottom (old origin)
     }
 
-    // 2 — zoom-OUT from a bottom-pinned source still bottom-fills (V3.12 protection preserved).
+    // 2 - zoom-OUT from a bottom-pinned source still bottom-fills (V3.12 protection preserved).
     @Test func overviewPinchOutFromBottomStillBottomFills() {
         let e = engine(6000)
         guard let p = dissolveAtBottom(3, 4, e) else { Issue.record("nil"); return }     // s=3 → t=4 = zoom out
         #expect(abs(p.targetScrollY - targetMaxYFor(4, phase: p.targetColumnPhase, e)) < 1e-6)
     }
 
-    // 3 — the pinch-IN target layer is built from EXACTLY the (level, phase, scroll) commit will adopt.
+    // 3 - the pinch-IN target layer is built from EXACTLY the (level, phase, scroll) commit will adopt.
     @Test func overviewPinchInCommitMatchesDissolveEndpoint() {
         let e = engine(6000)
         let sMax = max(0, e.contentSize(level: 4, width: viewport.width).height - viewport.height)
@@ -405,7 +405,7 @@ import GridCore
         #expect(rebuilt == p.target)   // commit uses p.targetScrollY + p.targetColumnPhase ⇒ identical to the dissolve layer
     }
 
-    // 4 — pinch-IN clamps ONLY when the cursor-anchored scroll exceeds bounds; otherwise it stays anchored.
+    // 4 - pinch-IN clamps ONLY when the cursor-anchored scroll exceeds bounds; otherwise it stays anchored.
     @Test func overviewPinchInClampsOnlyWhenAnchorExceedsBounds() {
         let e = engine(6000)
         // (a) in-bounds mid anchor ⇒ stays strictly interior (no clamp at either bound), == raw.
@@ -426,7 +426,7 @@ import GridCore
         #expect(abs(p.targetScrollY - tMax) < 1e-6)   // clamped to the bound because the anchor exceeded it
     }
 
-    // 5 — regression: a NON-bottom pinch-IN still anchors to the cursor (unchanged by the direction-aware rule).
+    // 5 - regression: a NON-bottom pinch-IN still anchors to the cursor (unchanged by the direction-aware rule).
     @Test func nonBottomPinchInStaysAnchored() {
         let e = engine(6000)
         let sMaxL4 = max(0, e.contentSize(level: 4, width: viewport.width).height - viewport.height)

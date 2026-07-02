@@ -66,7 +66,7 @@ private struct LibrarySettingsTab: View {
                 Text("settings.library_offline_section")
             }
 
-            // 2) Originals cache budget — Unbounded or a slider-set cap (LRU purge of the oldest). Only meaningful
+            // 2) Originals cache budget - Unbounded or a slider-set cap (LRU purge of the oldest). Only meaningful
             //    while the offline library is on, so the whole section greys out otherwise.
             Section {
                 Picker("settings.cache_limit_section", selection: $capUnlimited) {
@@ -137,7 +137,7 @@ private struct LibrarySettingsTab: View {
 
     /// Turning ON is immediate. Turning OFF must ALWAYS purge the originals (the OFF contract is "nothing kept");
     /// the `originalsSize` snapshot can lag (another window, or status not yet refreshed), so it only gates whether
-    /// to confirm first — never whether to purge.
+    /// to confirm first - never whether to purge.
     private func setOffline(_ on: Bool) {
         if on { offline.setOfflineEnabled(true); return }
         if originalsSize > 0 {
@@ -196,7 +196,7 @@ private struct CacheStatusTab: View {
                 row(String(localized: "settings.dev_cache_size_disk"), byteString(status.cacheSizeBytes))
                 row(String(localized: "settings.dev_preview_cache_disk"), byteString(status.previewCacheSizeBytes))
                 row(String(localized: "settings.dev_originals_cache_disk"), byteString(status.originalsCacheSizeBytes))
-                row(String(localized: "settings.dev_last_error"), status.lastError ?? "—")
+                row(String(localized: "settings.dev_last_error"), status.lastError ?? "-")
             } header: { Text("settings.storage_section") }
 
             Section {

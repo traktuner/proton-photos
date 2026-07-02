@@ -15,7 +15,7 @@ package enum AppKitMetalGridTexturePolicies {
     package static let defaultMaxTexturePixels = 320
 
     /// macOS desktop budget. Bytes are the binding limits; counts are only structural backstops:
-    /// - `maxResidentBytes` 512 MiB ≈ 1,310 worst-case (320×320) textures — several visible+overscan
+    /// - `maxResidentBytes` 512 MiB ≈ 1,310 worst-case (320×320) textures - several visible+overscan
     ///   bands at the normal zoom levels for scroll-reversal reuse, but far below the unbounded ~1.15 GB
     ///   the count-only budget allowed in practice.
     /// - `maxCachedTextures` is intentionally high enough that dense, level-aware 96–112 px thumbnails hit

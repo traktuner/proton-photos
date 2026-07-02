@@ -21,7 +21,7 @@ import GridCore
         (try? String(contentsOf: repoRoot().appendingPathComponent("App/\(path)"), encoding: .utf8)) ?? ""
     }
 
-    // 1 — pure-height resize: width-derived metrics + contentSize are unchanged (no recompute needed).
+    // 1 - pure-height resize: width-derived metrics + contentSize are unchanged (no recompute needed).
     @Test func pureHeightResizeDoesNotRecomputeWidthMetrics() {
         let e = engine()
         let before = e.resolvedMetrics(level: 2, width: 1000)
@@ -37,13 +37,13 @@ import GridCore
         #expect(src("MetalGridCoordinator.swift").contains("metricsRecomputed: delta.widthChanged"))
     }
 
-    // 2 — the resize path requests a redraw only; it must not reload textures / touch the cache.
+    // 2 - the resize path requests a redraw only; it must not reload textures / touch the cache.
     @Test func resizeDoesNotTriggerTextureReload() {
         let host = src("MetalGridScrollHost.swift")
         guard let range = host.range(of: "private func rebaseForResize") else { Issue.record("rebaseForResize missing"); return }
         let body = String(host[range.lowerBound ..< (host.index(range.lowerBound, offsetBy: 1100, limitedBy: host.endIndex) ?? host.endIndex)])
         #expect(!body.contains("cache") && !body.contains("streamTextures") && !body.contains("reload") && !body.contains("upload"),
-                "resize must not reload textures — redraw only")
+                "resize must not reload textures - redraw only")
         // The coordinator's resize rebase likewise does no texture work (it only reads uploadsThisFrame for the signpost).
         let coord = src("MetalGridCoordinator.swift")
         if let cr = coord.range(of: "func rebaseForViewportChange") {
@@ -52,7 +52,7 @@ import GridCore
         }
     }
 
-    // 3 — the visible-slot query is bounded to viewport+overscan, NOT the whole library.
+    // 3 - the visible-slot query is bounded to viewport+overscan, NOT the whole library.
     @Test func visibleSlotQueryBoundedToViewportOverscan() {
         let e = engine(20000)
         let plan = e.framePlan(level: 2, viewportSize: CGSize(width: 1000, height: 800), scrollOffset: CGPoint(x: 0, y: 50000), overscan: 200, columnPhase: nil)
@@ -60,7 +60,7 @@ import GridCore
         #expect(!plan.visibleSlots.isEmpty)
     }
 
-    // 4 — the render pipeline is created ONCE (in init), never per render/resize frame.
+    // 4 - the render pipeline is created ONCE (in init), never per render/resize frame.
     @Test func rendererDoesNotRecreatePipelineOnResize() {
         let r = src("MetalGridRenderer.swift")
         guard let initRange = r.range(of: "init"), let renderRange = r.range(of: "func render") else { Issue.record("renderer shape"); return }
@@ -72,7 +72,7 @@ import GridCore
         #expect(!renderBody.contains("makeRenderPipelineState"), "render() must NOT recreate the pipeline")
     }
 
-    // 4b — renderer internals take a drawable boundary, not an MTKView. This keeps the MTKView/AppKit edge
+    // 4b - renderer internals take a drawable boundary, not an MTKView. This keeps the MTKView/AppKit edge
     // thin so the Metal renderer can later move behind a platform-neutral adapter.
     @Test func rendererUsesDrawableTargetBoundary() {
         let r = src("MetalGridRenderer.swift")
@@ -96,14 +96,14 @@ import GridCore
         #expect(!r.contains("import MetalKit"), "shared renderer must not import the view-hosting MetalKit layer")
     }
 
-    // 5 — resize/perf diagnostics are throttled (a live drag fires per frame; DEBUG emit prints synchronously).
+    // 5 - resize/perf diagnostics are throttled (a live drag fires per frame; DEBUG emit prints synchronously).
     @Test func resizeDiagnosticsThrottled() {
         let coord = src("MetalGridCoordinator.swift")
         #expect(coord.contains("lastResizeDiagTime") && coord.contains("> 0.33"), "GridResize logs must be time-throttled")
         #expect(src("GridZoomCommit.swift").contains("throttleSeconds: 0.5"), "MetalGridPerf signposts must be throttled")
     }
 
-    // 5b — the old STEP-1 sidebar probe printed/logged every safe-area animation frame. That synchronous DEBUG
+    // 5b - the old STEP-1 sidebar probe printed/logged every safe-area animation frame. That synchronous DEBUG
     // IO sits directly in the sidebar-toggle hot path and must not come back.
     @Test func sidebarAnimationHasNoPerFrameProbeLogging() {
         let main = appSrc("Views/MainView.swift")
@@ -113,7 +113,7 @@ import GridCore
         #expect(!main.contains(".onChange(of: geo.size.width)"))
     }
 
-    // 5c — the host must not run a permanent display link. It wakes for real animation/streaming work and
+    // 5c - the host must not run a permanent display link. It wakes for real animation/streaming work and
     // pauses again once the viewport is idle and the visible thumbnails are resident.
     @Test func displayLinkIdlesAndWakesForThumbnailArrival() {
         let host = src("MetalGridScrollHost.swift")
@@ -155,11 +155,11 @@ import GridCore
                 "pending visible work must ignore backend-refused, non-retryable thumbnails")
     }
 
-    // 6 — no synchronous decode on the resize path: the rebase is pure geometry; texture work stays in the cache.
+    // 6 - no synchronous decode on the resize path: the rebase is pure geometry; texture work stays in the cache.
     @Test func noSynchronousDecodeOnResizePath() {
         let resizeSrc = src("GridViewportResizeRebase.swift")
         #expect(!resizeSrc.contains("decode") && !resizeSrc.contains("NSImage") && !resizeSrc.contains("CGImage")
-                && !resizeSrc.contains("texture"), "the resize rebase must be pure geometry — no decode/texture work")
+                && !resizeSrc.contains("texture"), "the resize rebase must be pure geometry - no decode/texture work")
         // It only depends on CoreGraphics geometry (no AppKit / image APIs).
         #expect(resizeSrc.contains("import CoreGraphics") && !resizeSrc.contains("import AppKit") && !resizeSrc.contains("import MetalKit"))
     }

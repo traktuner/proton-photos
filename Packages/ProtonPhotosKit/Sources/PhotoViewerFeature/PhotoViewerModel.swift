@@ -6,7 +6,7 @@ import MediaCache
 import PhotoViewerCore
 
 /// Drives the full-screen viewer with progressive quality (thumbnail → preview → original):
-///  1. show the grid thumbnail instantly (soft — small image scaled up for full-screen),
+///  1. show the grid thumbnail instantly (soft - small image scaled up for full-screen),
 ///  2. swap to the larger preview when it arrives (disk-cached for offline),
 ///  3. crossfade to the full original (sharp) once decrypted into RAM.
 ///
@@ -24,27 +24,27 @@ public final class PhotoViewerModel {
 
     /// Best image available so far for the current item.
     public private(set) var image: NSImage?
-    /// True once the original (full-res) is shown — drives the crossfade reveal from the interim image.
+    /// True once the original (full-res) is shown - drives the crossfade reveal from the interim image.
     public private(set) var isSharp = false
     /// Owns the AVPlayer + the video state machine (streaming, watchdog, stall/buffer handling). The
     /// model decides *which* source to play; the controller decides *how it's going*.
     public let video: VideoPlaybackController
     /// The single AVPlayer used for video (streaming or downloaded). `nil` for images.
     public var player: AVPlayer? { video.player }
-    /// Explicit video lifecycle — the view shows progress / error from this.
+    /// Explicit video lifecycle - the view shows progress / error from this.
     public var videoState: VideoViewerState { video.state }
-    /// Download progress (0…1) of the full original — used to show a progress indicator for big
+    /// Download progress (0…1) of the full original - used to show a progress indicator for big
     /// downloads instead of an indefinite spinner.
     public private(set) var originalProgress: Double = 0
     public private(set) var isLoadingOriginal = false
 
     // MARK: Live Photo motion clip
     // E2EE-safe: the paired motion clip streams through the SAME encrypted resource-loader path as regular video
-    // (ENCRYPTED blocks cached locally, decrypted ONLY in RAM — never a plaintext file). UNLIKE timeline videos,
+    // (ENCRYPTED blocks cached locally, decrypted ONLY in RAM - never a plaintext file). UNLIKE timeline videos,
     // the clip is FULLY pre-downloaded (encrypted) before `motionPlayer` is exposed, so hover/force-click plays
     // instantly. Without a `motionPlayer` (still loading / disabled), hover/force-click are no-ops.
     public private(set) var motionPlayer: AVPlayer?
-    /// True while the motion clip is playing — the view crossfades the motion layer in/out on this.
+    /// True while the motion clip is playing - the view crossfades the motion layer in/out on this.
     public private(set) var isMotionPlaying = false
     private var motionTask: Task<Void, Never>?
     private var motionAsset: StreamingVideoAsset?   // retains the streaming resource loader (AVFoundation holds it weakly)
@@ -54,7 +54,7 @@ public final class PhotoViewerModel {
     public var showInfo = false
     public private(set) var metadata: PhotoMetadata?
 
-    /// Reverse-geocoded place/POI name for the current item's GPS, if any — drives the viewer top-bar
+    /// Reverse-geocoded place/POI name for the current item's GPS, if any - drives the viewer top-bar
     /// "named location" headline. Resolved lazily (debounced) so flicking past photos doesn't geocode.
     public private(set) var placeName: String?
 
@@ -69,7 +69,7 @@ public final class PhotoViewerModel {
     /// on, then trimmed to `originalsCapBytes` (LRU). `nil` disables it entirely.
     private let originalsCache: ThumbnailCache?
     /// Whether to PERSIST newly-downloaded originals (the Offline Photo Library master switch). Reads always try
-    /// the disk cache regardless — purging on disable is what removes them.
+    /// the disk cache regardless - purging on disable is what removes them.
     private let cacheOriginals: Bool
     private let originalsCapBytes: Int64?
     private var loadTask: Task<Void, Never>?
@@ -191,7 +191,7 @@ public final class PhotoViewerModel {
     /// the Swift-6.2 #76804 executor crash on this toolchain); the UI stays stable (hover/force-click no-op).
     static let livePhotoMotionPlaybackEnabled = true
 
-    /// Preloads the paired motion clip — E2EE-safe. It streams through the SAME encrypted resource-loader path as
+    /// Preloads the paired motion clip - E2EE-safe. It streams through the SAME encrypted resource-loader path as
     /// regular video (`makeStreamingAsset` → `protonvideo://`): the ENCRYPTED blocks are cached locally and
     /// decrypted ONLY in RAM, so plaintext local motion-video files are forbidden by the local E2EE contract and
     /// never written. UNLIKE timeline videos (which stream as they play), the clip is FULLY pre-downloaded
@@ -205,13 +205,13 @@ public final class PhotoViewerModel {
             // 1) Fully download the ENCRYPTED clip into the local encrypted block cache (no plaintext on disk).
             try? await streamer.prefetchEncrypted(for: motionUID)
             guard !Task.isCancelled, self.isDisplaying(item) else { return }
-            // 2) Build the streaming player — its resource loader now serves entirely from the local encrypted cache.
+            // 2) Build the streaming player - its resource loader now serves entirely from the local encrypted cache.
             guard let stream = try? await streamer.makeStreamingAsset(for: motionUID),
                   !Task.isCancelled, self.isDisplaying(item) else { return }
             let player = AVPlayer(playerItem: AVPlayerItem(asset: stream.asset))
             player.actionAtItemEnd = .pause
             player.automaticallyWaitsToMinimizeStalling = false
-            // Wait until ready, then preroll — the clip is local + encrypted-cached, so this is fast.
+            // Wait until ready, then preroll - the clip is local + encrypted-cached, so this is fast.
             if let pi = player.currentItem {
                 var tries = 0
                 while pi.status == .unknown, !Task.isCancelled, tries < 100 {
@@ -220,7 +220,7 @@ public final class PhotoViewerModel {
                 guard pi.status == .readyToPlay, !Task.isCancelled, self.isDisplaying(item) else { return }
                 player.preroll(atRate: 1) { _ in }
             }
-            // 3) Expose only now — hover/force-click is a no-op until the clip is 100% ready (then plays instantly).
+            // 3) Expose only now - hover/force-click is a no-op until the clip is 100% ready (then plays instantly).
             self.motionAsset = stream
             self.motionPlayer = player
         }
@@ -228,14 +228,14 @@ public final class PhotoViewerModel {
 
     /// Plays the motion clip ONCE from the start, WITH sound. Idempotent while playing.
     ///
-    /// Both triggers — a HOVER of the LIVE badge and a FORCE-CLICK on the photo — call this one function, so the
+    /// Both triggers - a HOVER of the LIVE badge and a FORCE-CLICK on the photo - call this one function, so the
     /// clip always comes alive with its audio (no silent/audible split). `isMuted`/`volume` are reset here every
     /// call (not once at preroll) because they persist on the AVPlayer instance, so a prior `stopMotion()` fade
     /// can never leave the next play muted.
     ///
     /// Non-interruption guarantee: macOS has NO `AVAudioSession`, so a plain `AVPlayer` mixes with all other
     /// system audio by default and NEVER ducks, pauses, or takes exclusive control. Unmuting therefore cannot
-    /// interrupt anything else playing on the Mac — DO NOT add any session / `audiovisualBackgroundPlaybackPolicy`
+    /// interrupt anything else playing on the Mac - DO NOT add any session / `audiovisualBackgroundPlaybackPolicy`
     /// / audio-category configuration here; that is iOS-think and is the one thing that WOULD cause ducking.
     public func playMotion() {
         guard let player = motionPlayer, !isMotionPlaying else { return }
@@ -320,6 +320,16 @@ public final class PhotoViewerModel {
         fullImageCache.setObject(image, forKey: cacheKey(uid), cost: decodedImageCost(image))
     }
 
+    /// Governor-driven memory-pressure response for the shared full-resolution viewer cache - the
+    /// single most jetsam-prone RAM consumer. `scale` lowers the cost limit; `purge` drops every held
+    /// decode now (a revisit re-decodes from disk/network - never a crash). Static + thread-safe
+    /// NSCache, callable from the governor without touching a viewer instance.
+    public static func applyMemoryPressure(scale: Double, purge: Bool) {
+        let clamped = min(1, max(0, scale))
+        fullImageCache.totalCostLimit = max(1, Int(Double(fullImageCacheByteLimit) * clamped))
+        if purge { fullImageCache.removeAllObjects() }
+    }
+
     private static func decodedImageCost(_ image: NSImage) -> Int {
         let representationCost = image.representations.map { rep -> Int in
             if let bitmap = rep as? NSBitmapImageRep, bitmap.bytesPerRow > 0, bitmap.pixelsHigh > 0 {
@@ -363,7 +373,7 @@ public final class PhotoViewerModel {
         resolvePlaceName(for: item)      // top-bar POI headline (debounced; skips photos flicked past)
         prepareMotion(for: item)         // preload the Live Photo motion clip so hover/force-click is instant
 
-        // Instant: if we already have the sharp original cached, show it — no spinner, no network.
+        // Instant: if we already have the sharp original cached, show it - no spinner, no network.
         if let cached = Self.fullImageCache.object(forKey: Self.cacheKey(item.uid)) {
             image = cached
             isSharp = true
@@ -371,7 +381,7 @@ public final class PhotoViewerModel {
         }
         // Otherwise show the thumbnail synchronously (so rapid arrow navigation always shows SOMETHING
         // immediately), and defer the heavy load so flicking past photos doesn't fire a network
-        // storm — only the photo you actually land on loads its preview/original.
+        // storm - only the photo you actually land on loads its preview/original.
         image = feed.memoryImage(for: item.uid)
         isSharp = false
 
@@ -450,7 +460,7 @@ public final class PhotoViewerModel {
     /// image-vs-video detection (a cheap link-metadata fetch that throws `.notAVideo` for images
     /// before any key work). This is the fix for the reported bug: the main "All Photos" timeline
     /// reports every item as `image/jpeg` (the SDK doesn't surface the type), so the old `if
-    /// item.isVideo` gate never streamed those videos — it force-downloaded the whole file and then
+    /// item.isVideo` gate never streamed those videos - it force-downloaded the whole file and then
     /// got stuck. Now real videos stream regardless of the timeline's lie, and images fall straight
     /// through to the (unchanged) image path.
     private func resolveMedia(for item: PhotoItem) async {

@@ -9,23 +9,23 @@ import Foundation
 // delivered carrying the PRE-commit binding value S (≠ N).
 //
 // The legacy reconciliation `if level != coordinator.level { animateToLevel(level) }` would then re-issue a
-// `setLevel(S)` — which, with no explicit anchor, re-anchors at the VIEWPORT CENTRE (`MetalGridScrollHost`),
+// `setLevel(S)` - which, with no explicit anchor, re-anchors at the VIEWPORT CENTRE (`MetalGridScrollHost`),
 // pinning the centre item under the cursor instead of the cursor item. The grid visibly jumps to a different
 // photo; worse, that spurious zoom drives `coordinator.level` back to S without re-syncing the binding, so the
-// genuine `binding == N` pass then re-drives `animateToLevel(N)` — an N→S→N oscillation that matches the
+// genuine `binding == N` pass then re-drives `animateToLevel(N)` - an N→S→N oscillation that matches the
 // reported "reverse lands on yet another photo".
 //
 // THE RULE (pure, headless, unit-tested): after a host-led commit that actually CHANGED the level, remember the
 // pre-commit level as a one-shot "stale echo". While that echo is armed, ignore exactly that stale binding
 // value (more than one such pass may arrive before the committed value lands); the instant the binding agrees
 // with the host (`binding == hostLevel`), clear the latch. Any OTHER binding value is a genuine external
-// (+/- / keyboard / programmatic) change and is honoured immediately — which also clears the latch, so a
+// (+/- / keyboard / programmatic) change and is honoured immediately - which also clears the latch, so a
 // legitimate change can never be swallowed for more than the single stale value, and the latch can never stick.
 package enum LevelBindingReconciler {
     package enum Action: Equatable {
-        case ignore            // already in sync, or a stale post-commit echo — do nothing
-        case clearLatch        // the binding caught up to the host level — clear the echo guard, do nothing else
-        case reDrive(Int)      // a genuine external level change — drive `animateToLevel(_)` (and clear the guard)
+        case ignore            // already in sync, or a stale post-commit echo - do nothing
+        case clearLatch        // the binding caught up to the host level - clear the echo guard, do nothing else
+        case reDrive(Int)      // a genuine external level change - drive `animateToLevel(_)` (and clear the guard)
     }
 
     /// Decide what an `updateNSView` pass should do with a delivered `level`-binding value.

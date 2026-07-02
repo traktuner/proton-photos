@@ -5,7 +5,7 @@ import GridCore
 @testable import TimelineFeature
 
 /// Stronger-than-anchor stability guards for the DETENT-ONLY model (Option A): a discrete, anchor-preserved
-/// level change must keep the visible index NEIGHBOURHOOD centred on the anchor — it must not jump to an
+/// level change must keep the visible index NEIGHBOURHOOD centred on the anchor - it must not jump to an
 /// unrelated global-index region, and within a level nothing rewraps. These pin the property the live video
 /// violated (continuous per-frame rewrap), proven against the geometry the production grid actually renders:
 /// settled `framePlan` at integer levels, re-anchored across a level change via `anchoredScrollOffsetY`.
@@ -32,14 +32,14 @@ import GridCore
         ny = min(max(0, ny), maxY)
         return (ny, a.flatIndex)
     }
-    /// Fraction of the SMALLER set retained by the other (continuity metric — 1.0 = the sparser view's items
+    /// Fraction of the SMALLER set retained by the other (continuity metric - 1.0 = the sparser view's items
     /// are all still shown).
     private func retained(_ a: Set<Int>, _ b: Set<Int>) -> Double {
         let small = a.count <= b.count ? a : b, big = a.count <= b.count ? b : a
         return small.isEmpty ? 1 : Double(small.intersection(big).count) / Double(small.count)
     }
 
-    // DetentOnlyZoomPreservesLogicalViewportTest — a discrete level change keeps the anchor + its
+    // DetentOnlyZoomPreservesLogicalViewportTest - a discrete level change keeps the anchor + its
     // neighbourhood near the viewport.
     @Test func detentOnlyZoomPreservesLogicalViewport() {
         let e = engine()
@@ -53,7 +53,7 @@ import GridCore
         }
     }
 
-    // ZoomVisibleNeighborhoodDoesNotJumpTest — the visible index window stays centred on the anchor; it must
+    // ZoomVisibleNeighborhoodDoesNotJumpTest - the visible index window stays centred on the anchor; it must
     // not become a disjoint range (e.g. 0–50 → 80–95).
     @Test func zoomVisibleNeighborhoodDoesNotJump() {
         let e = engine()
@@ -67,7 +67,7 @@ import GridCore
         #expect(after.min()! <= before.max()! && after.max()! >= before.min()!, "index ranges disjoint = jump")
     }
 
-    // ConsecutiveZoomFramesHaveHighIndexOverlapTest — a sequence of discrete level changes keeps consecutive
+    // ConsecutiveZoomFramesHaveHighIndexOverlapTest - a sequence of discrete level changes keeps consecutive
     // visible sets highly overlapping around the anchor.
     @Test func consecutiveZoomFramesHaveHighIndexOverlap() {
         let e = engine()
@@ -81,7 +81,7 @@ import GridCore
         }
     }
 
-    // AnchorItemAndNeighborhoodStableTest — the anchor AND its immediate flat-index neighbours stay visible
+    // AnchorItemAndNeighborhoodStableTest - the anchor AND its immediate flat-index neighbours stay visible
     // across a discrete step (not just the single anchor item).
     @Test func anchorItemAndNeighborhoodStable() {
         let e = engine()
@@ -93,7 +93,7 @@ import GridCore
         #expect(kept >= 9, "anchor neighbourhood not retained: \(kept)/11")
     }
 
-    // ZoomDoesNotRewrapWholeGridEveryTickTest — within a level nothing rewraps: column count + an item's
+    // ZoomDoesNotRewrapWholeGridEveryTickTest - within a level nothing rewraps: column count + an item's
     // (row,column) are functions of (level,width) only, independent of scroll. Only a deliberate LEVEL change
     // alters columns (a controlled topology transition, never a per-tick rewrap).
     @Test func zoomDoesNotRewrapWholeGridEveryTick() {

@@ -4,7 +4,7 @@ import UploadCore
 
 /// Lets the user pick where a queued batch lands: the library, an existing album, or a new album,
 /// with an optional "use first uploaded photo as cover". Album options are disabled (with an honest
-/// caption) when the wired backend can't perform that write — never silently degraded.
+/// caption) when the wired backend can't perform that write - never silently degraded.
 public struct UploadDestinationSheet: View {
     @Bindable private var coordinator: UploadCoordinator
     @Environment(\.dismiss) private var dismiss

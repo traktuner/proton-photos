@@ -116,6 +116,18 @@ public actor ThumbnailFeedCore {
         targetConcurrency = configuration.initialDownloadConcurrency
     }
 
+    /// Governor-driven memory-pressure response for the decoded-thumbnail RAM tier. `scale` lowers the
+    /// NSCache cost limit (future decodes are bounded smaller); `purge` drops everything held now (the
+    /// UIKit `didReceiveMemoryWarning` / critical semantic). `nonisolated` + thread-safe NSCache, so the
+    /// governor calls it without hopping the feed actor (never blocks visible-tile decodes). Restoring
+    /// `scale: 1.0, purge: false` returns the full budget. The disk tier is untouched - nothing is lost,
+    /// only re-decoded on demand.
+    public nonisolated func applyDecodedMemoryPressure(scale: Double, purge: Bool) {
+        let clamped = min(1, max(0, scale))
+        decoded.totalCostLimit = max(1, Int(Double(configuration.decodedMemoryBudgetBytes) * clamped))
+        if purge { decoded.removeAllObjects() }
+    }
+
     public func cachedDecoded(for uid: PhotoUID) -> DecodedThumbnail? {
         let key = Self.key(uid)
         if let cached = decoded.object(forKey: key)?.value {
@@ -554,7 +566,7 @@ public actor ThumbnailFeedCore {
     /// Runs one loader batch against a real wall-clock timeout. The loader await is not
     /// cancellable (the SDK's FFI continuation ignores task cancellation), so on timeout the
     /// loader is left running detached: late deliveries still land in the disk cache (a later
-    /// pass counts them as disk hits), but counters snapshot exactly once here — an item is
+    /// pass counts them as disk hits), but counters snapshot exactly once here - an item is
     /// either delivered-by-resolution or failed, never both.
     private nonisolated static func loadBatch(
         _ chunk: [PhotoUID],

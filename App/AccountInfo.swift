@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Account-level info surfaced in Settings — currently the Proton storage quota. Populated from the
+/// Account-level info surfaced in Settings - currently the Proton storage quota. Populated from the
 /// `/core/v4/users` response that `DriveSession.fetchAccountData()` already fetches (and caches), so it's
 /// available offline too (last-known values from the encrypted account cache). No extra network call.
 @MainActor

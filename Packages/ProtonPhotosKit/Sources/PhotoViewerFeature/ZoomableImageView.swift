@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 /// AppKit-backed zoomable image. `NSScrollView.allowsMagnification` gives us exactly the native
-/// behaviour: pinch-to-zoom centred on the cursor and two-finger pan — smooth, no SwiftUI hacks.
+/// behaviour: pinch-to-zoom centred on the cursor and two-finger pan - smooth, no SwiftUI hacks.
 /// A pinch-OUT while already at fit-scale flies the photo closed (live shrink + fade feedback).
 struct ZoomableImageView: NSViewRepresentable {
     let image: NSImage
@@ -22,9 +22,9 @@ struct ZoomableImageView: NSViewRepresentable {
     var onPinchDismissBegan: () -> Void = {}
     var onPinchDismissChanged: (CGFloat) -> Void = { _ in }
     var onPinchDismissEnded: (Bool) -> Void = { _ in }
-    /// Force-click (trackpad deep press) over the photo — starts a Live Photo's motion clip.
+    /// Force-click (trackpad deep press) over the photo - starts a Live Photo's motion clip.
     var onForceClick: () -> Void = {}
-    /// The force-click was released (finger lifted) — stops the motion clip, crossfading back to the still.
+    /// The force-click was released (finger lifted) - stops the motion clip, crossfading back to the still.
     var onForceClickEnded: () -> Void = {}
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -142,7 +142,7 @@ private final class ZoomScrollView: NSScrollView {
 
     /// Trackpad deep press = hold-to-play: stage ≥ 2 starts the motion; releasing the finger (pressure relaxes
     /// below stage 2) stops it. The trackpad streams decreasing-stage events as the finger lifts, so this is the
-    /// reliable release signal — no `mouseUp` override needed.
+    /// reliable release signal - no `mouseUp` override needed.
     override func pressureChange(with event: NSEvent) {
         super.pressureChange(with: event)
         if event.stage >= 2 {
@@ -165,12 +165,12 @@ private final class ZoomScrollView: NSScrollView {
 
     override func magnify(with event: NSEvent) {
         let atBase = magnification <= minMagnification + 0.001
-        // Intercept only a pinch-OUT that starts at fit-scale — otherwise let the scroll view zoom.
+        // Intercept only a pinch-OUT that starts at fit-scale - otherwise let the scroll view zoom.
         guard atBase, dismissing || event.magnification < 0 else {
             super.magnify(with: event)
             return
         }
-        // This view does NOT animate itself — it just REPORTS progress. The host renders the live shrink into the
+        // This view does NOT animate itself - it just REPORTS progress. The host renders the live shrink into the
         // EXACT grid cell + the grid fade behind, via the shared zoom overlay (the gesture keeps being delivered
         // here while the host renders the viewer invisible).
         switch event.phase {

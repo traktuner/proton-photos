@@ -4,7 +4,7 @@ import XCTest
 /// Localization regression coverage for the English (source) + German String Catalogs.
 ///
 /// The catalog-content checks parse the `.xcstrings` JSON directly from the source tree (located via
-/// `#filePath`), so they are deterministic regardless of the host's language — they validate the
+/// `#filePath`), so they are deterministic regardless of the host's language - they validate the
 /// *translations that ship*, not whatever language the test process happens to run in. The runtime
 /// checks additionally prove the package bundle advertises both languages and falls back to English.
 final class LocalizationTests: XCTestCase {
@@ -29,7 +29,7 @@ final class LocalizationTests: XCTestCase {
         let coverage: [String: Set<String>]
     }
 
-    /// True if a localization node ("en"/"de" value) carries at least one non-empty string — either a
+    /// True if a localization node ("en"/"de" value) carries at least one non-empty string - either a
     /// direct `stringUnit` or any `variations` leaf (plurals/device/width).
     private func hasNonEmptyValue(_ node: Any) -> Bool {
         guard let dict = node as? [String: Any] else { return false }
@@ -98,7 +98,7 @@ final class LocalizationTests: XCTestCase {
         }
     }
 
-    // MARK: Full coverage — every key carries both languages (no half-translated entries)
+    // MARK: Full coverage - every key carries both languages (no half-translated entries)
 
     func testEveryKeyHasEnglishAndGerman() throws {
         for (name, url) in [("App", appCatalog), ("Package", packageCatalog)] {
@@ -111,7 +111,7 @@ final class LocalizationTests: XCTestCase {
         }
     }
 
-    // MARK: Runtime — bundle advertises both languages and falls back to English
+    // MARK: Runtime - bundle advertises both languages and falls back to English
     //
     // NOTE: String Catalogs are compiled to `.lproj/.strings` by Xcode's build system (xcstringstool).
     // Plain command-line SwiftPM (`swift build`/`swift test`) copies the raw `.xcstrings` into the bundle
@@ -129,7 +129,7 @@ final class LocalizationTests: XCTestCase {
 
     func testPackageBundleAdvertisesEnglishAndGerman() throws {
         try XCTSkipUnless(catalogCompiledIntoBundle,
-                          "String Catalog not compiled (plain SwiftPM build) — validated under xcodebuild.")
+                          "String Catalog not compiled (plain SwiftPM build) - validated under xcodebuild.")
         let available = Set(L10n.resourceBundle.localizations)
         XCTAssertTrue(available.contains("en"), "package bundle should advertise English")
         XCTAssertTrue(available.contains("de"), "package bundle should advertise German")
@@ -145,14 +145,14 @@ final class LocalizationTests: XCTestCase {
 
     func testFacadeResolvesAKnownKey() throws {
         try XCTSkipUnless(catalogCompiledIntoBundle,
-                          "String Catalog not compiled (plain SwiftPM build) — validated under xcodebuild.")
+                          "String Catalog not compiled (plain SwiftPM build) - validated under xcodebuild.")
         // The facade returns a real translation, not the raw key.
         let favorites = L10n.string("tag.favorites")
         XCTAssertFalse(favorites.isEmpty)
         XCTAssertNotEqual(favorites, "tag.favorites")
     }
 
-    // MARK: Static guard — migrated German UI strings must not be reintroduced hardcoded in source
+    // MARK: Static guard - migrated German UI strings must not be reintroduced hardcoded in source
 
     func testNoReintroducedHardcodedGermanUIStrings() {
         // Specific phrases that used to be hardcoded German in UI source and now live only in the

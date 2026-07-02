@@ -5,7 +5,7 @@ import GridCore
 @testable import TimelineFeature
 
 // Viewport-resize CAMERA rebase. RESIZE IS NOT ZOOM. Vertical resize preserves the content at a NORMALIZED
-// viewport anchor (anchorFractionY = 0.5 = centre) — a continuous camera rebase, NOT a rigid one-edge pin.
+// viewport anchor (anchorFractionY = 0.5 = centre) - a continuous camera rebase, NOT a rigid one-edge pin.
 // Width keys nominalColumns (resolution-independent). Frames are y-UP screen space (maxY=top, minY=bottom).
 @Suite struct GridViewportResizeTests {
     private let eps: CGFloat = 0.5
@@ -36,8 +36,8 @@ import GridCore
         return ""
     }
 
-    // 1 — vertical resize uses the NORMALIZED viewport anchor: rebased (not raw), and strictly between the
-    // strict-top (f=0) and strict-bottom (f=1) results — i.e. neither edge is rigidly pinned.
+    // 1 - vertical resize uses the NORMALIZED viewport anchor: rebased (not raw), and strictly between the
+    // strict-top (f=0) and strict-bottom (f=1) results - i.e. neither edge is rigidly pinned.
     @Test func verticalResizeUsesNormalizedViewportAnchor() {
         let e = engine()
         let old = CGRect(x: 0, y: 0, width: 1000, height: 1000), new = CGRect(x: 0, y: 200, width: 1000, height: 800)
@@ -56,7 +56,7 @@ import GridCore
         }
     }
 
-    // 2 — bottom edge up: height shrinks, scrollY rebased per centre anchor, lower content clipped, no jump.
+    // 2 - bottom edge up: height shrinks, scrollY rebased per centre anchor, lower content clipped, no jump.
     @Test func bottomEdgeShrinkClipsAndRebasesContinuously() {
         let e = engine()
         let old = CGRect(x: 0, y: 0, width: 1000, height: 1000), new = CGRect(x: 0, y: 200, width: 1000, height: 800)
@@ -69,7 +69,7 @@ import GridCore
         #expect(after.intersection(before).count >= after.count / 2, "no jump to unrelated indices")
     }
 
-    // 3 — bottom edge down (expand): more content revealed, smooth, no jump.
+    // 3 - bottom edge down (expand): more content revealed, smooth, no jump.
     @Test func bottomEdgeExpandRevealsAndRebasesContinuously() {
         let e = engine()
         let old = CGRect(x: 0, y: 200, width: 1000, height: 800), new = CGRect(x: 0, y: 0, width: 1000, height: 1000)
@@ -80,7 +80,7 @@ import GridCore
                 > visibleSet(e, width: 1000, vh: 800, scrollY: 6000, level: 2, phase: nil).count, "expand reveals more")
     }
 
-    // 4 — top edge down (shrink): centre held, content rebased; upper rows clipped (host moves the frame).
+    // 4 - top edge down (shrink): centre held, content rebased; upper rows clipped (host moves the frame).
     @Test func topEdgeShrinkClipsAndRebasesContinuously() {
         let e = engine()
         let old = CGRect(x: 0, y: 0, width: 1000, height: 1000), new = CGRect(x: 0, y: 0, width: 1000, height: 800) // maxY ↓
@@ -90,7 +90,7 @@ import GridCore
         #expect(anchorAt(e, width: 1000, scrollY: r.newScrollY, vh: 800, level: 2, phase: nil) == centerBefore, "centre jumped")
     }
 
-    // 5 — top edge up (expand): centre held, more content revealed at the top.
+    // 5 - top edge up (expand): centre held, more content revealed at the top.
     @Test func topEdgeExpandRevealsAndRebasesContinuously() {
         let e = engine()
         let old = CGRect(x: 0, y: 0, width: 1000, height: 800), new = CGRect(x: 0, y: 0, width: 1000, height: 1000) // maxY ↑
@@ -101,7 +101,7 @@ import GridCore
                 > visibleSet(e, width: 1000, vh: 800, scrollY: 6000, level: 2, phase: nil).count)
     }
 
-    // 6 — width unchanged → no width-derived metric change at all (pure height clips/reveals only).
+    // 6 - width unchanged → no width-derived metric change at all (pure height clips/reveals only).
     @Test func pureHeightResizeDoesNotChangeGridMetrics() {
         let e = engine()
         // Pure height rebase reports identical width-derived metrics + unchanged content height.
@@ -112,7 +112,7 @@ import GridCore
         #expect(before.columns == after.columns && abs(before.slotSide - after.slotSide) < eps, "pure height must not change width-derived metrics")
     }
 
-    // 7 — FIXED-COLUMNS, WIDTH-FILLING width change: the grid FILLS the width (no gutter), the column count is
+    // 7 - FIXED-COLUMNS, WIDTH-FILLING width change: the grid FILLS the width (no gutter), the column count is
     // CONSTANT (never reflows), the tile SCALES with width, the gap is unchanged, and because the columns don't
     // change the centre anchor item is preserved EXACTLY (no row shift).
     @Test func pureWidthResizeFillsWidthScalesTileNoReflow() {
@@ -136,7 +136,7 @@ import GridCore
         #expect(after == centerBefore, "centre item must be preserved exactly on a fixed-columns resize (\(after) vs \(centerBefore))")
     }
 
-    // 8 — combined width + height: metrics from new width, anchor preserved, no jump.
+    // 8 - combined width + height: metrics from new width, anchor preserved, no jump.
     @Test func combinedResizeRebasesFromLogicalAnchor() {
         let e = engine()
         let old = CGRect(x: 0, y: 0, width: 1000, height: 800), new = CGRect(x: 0, y: 0, width: 1300, height: 1000)
@@ -152,7 +152,7 @@ import GridCore
         #expect(abs(after - centerBefore) <= newCols, "centre item must stay within one row of the preserved anchor (got \(after) vs \(centerBefore))")
     }
 
-    // 9 — sidebar toggle = width change → same helper/path.
+    // 9 - sidebar toggle = width change → same helper/path.
     @Test func sidebarToggleUsesWidthResizeRebasePath() {
         let e = engine()
         let wide = CGRect(x: 0, y: 0, width: 1280, height: 860), narrow = CGRect(x: 300, y: 0, width: 980, height: 860)
@@ -168,7 +168,7 @@ import GridCore
         #expect(!host.contains("restoreScroll") && !host.contains("oldScrollOrigin"))
     }
 
-    // 9b — sidebar animation changes the LAYOUT viewport width, even though the MTKView keeps rendering
+    // 9b - sidebar animation changes the LAYOUT viewport width, even though the MTKView keeps rendering
     // full-width under the translucent sidebar. The resize camera must therefore measure and rebase in
     // layout-space (`full.width - leadingObstructionInset`) and must react to safe-area inset changes directly
     // instead of waiting for a later AppKit layout/scroll tick.
@@ -182,7 +182,7 @@ import GridCore
         #expect(host.contains("lastViewportScreenFrame = newFrame"))
     }
 
-    // 9c — runtime host policy holds the stationary vertical edge: bottom-edge drags preserve the top,
+    // 9c - runtime host policy holds the stationary vertical edge: bottom-edge drags preserve the top,
     // top-edge drags preserve the bottom, and width-only/sidebar changes preserve the top. The engine stays
     // generic; this guard only constrains the production coordinator policy.
     @Test func coordinatorUsesStationaryEdgeResizeAnchors() {
@@ -268,7 +268,7 @@ import GridCore
         }
     }
 
-    // 15b — fresh-open fix: a manual window resize must detach the bottom-pin (like a scroll) so the rebase
+    // 15b - fresh-open fix: a manual window resize must detach the bottom-pin (like a scroll) so the rebase
     // runs even on a freshly-opened (bottom-pinned) grid. Guard the host wiring + the rebase-bypass condition.
     @Test func liveWindowResizeDetachesBottomPinSoRebaseRuns() {
         let host = src("MetalGridScrollHost.swift")
@@ -279,11 +279,11 @@ import GridCore
             let body = String(host[r.lowerBound ..< (host.index(r.lowerBound, offsetBy: 220, limitedBy: host.endIndex) ?? host.endIndex)])
             #expect(body.contains("stickToBottom = false"), "a live window resize must clear stickToBottom (like a scroll)")
         } else { Issue.record("windowWillLiveResize missing") }
-        // And the rebase IS bypassed while stuck to bottom (so detaching is what makes it run) — documents the cause.
+        // And the rebase IS bypassed while stuck to bottom (so detaching is what makes it run) - documents the cause.
         #expect(host.contains("guard !stickToBottom, let r = result else { return }"))
     }
 
-    // 16 — Apple-like regression: a continuous sequence of height steps each rebases smoothly (centre held),
+    // 16 - Apple-like regression: a continuous sequence of height steps each rebases smoothly (centre held),
     // scrollY moves monotonically (NOT a strict-edge pin where it would be constant), and no late jump.
     @Test func appleResizeReferenceRegression() {
         let e = engine()
@@ -301,6 +301,6 @@ import GridCore
             if abs(r.newScrollY - lastScrollY) > eps { moved = true }
             lastScrollY = r.newScrollY; scrollY = r.newScrollY; vh = newVH
         }
-        #expect(moved, "a strict-edge pin would never move scrollY — the camera must rebase")
+        #expect(moved, "a strict-edge pin would never move scrollY - the camera must rebase")
     }
 }

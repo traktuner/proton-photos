@@ -1,6 +1,6 @@
 #!/bin/bash
 # Check out a Proton Drive SDK tag in Vendor/sdk-swift and report the ProtonCore version that
-# project.yml must be set to. Does NOT edit project.yml or build — review the printed pin, update
+# project.yml must be set to. Does NOT edit project.yml or build - review the printed pin, update
 # project.yml's ProtonCore exactVersion to match, then run scripts/rebuild.sh.
 #
 # Usage: scripts/update-proton-sdk.sh [<tag>]   (defaults to latest upstream tag)

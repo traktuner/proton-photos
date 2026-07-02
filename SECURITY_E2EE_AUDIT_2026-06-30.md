@@ -1,4 +1,4 @@
-# Security / E2EE Audit — 2026-06-30
+# Security / E2EE Audit - 2026-06-30
 
 Scope: local session handling, SDK secret cache, account-data cache, thumbnails, previews, originals, video block cache, export path, sign-out purge, and cold-start behavior.
 

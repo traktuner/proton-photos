@@ -11,7 +11,7 @@ import GridCore
 
 @Suite struct GridTransitionScheduleTests {
 
-    // Calibrated component areas (band/alloc-area fractions) — the production reference set.
+    // Calibrated component areas (band/alloc-area fractions) - the production reference set.
     private func v36Components() -> [GridTransitionComponent] {
         func c(_ id: Int, _ area: Double, fd: Int) -> GridTransitionComponent {
             .init(id: id, keys: [RelativeSlotKey(dr: fd == 0 ? 0 : (id % 2 == 0 ? -fd : fd), dc: id)],
@@ -118,7 +118,7 @@ import GridCore
         #expect(a360[0] == 5)
         #expect(a360.values.reduce(0, +) == 19)
         #expect(a360.values.filter { $0 >= 3 }.count == 3)      // focus + 2 largest reach 3
-        // 450 ms: budget 23 ⇒ {5,3,3,3,3,3,3} — every component ≥3 (2 interior)
+        // 450 ms: budget 23 ⇒ {5,3,3,3,3,3,3} - every component ≥3 (2 interior)
         let a450 = GridTransitionScheduler.allocateFrames(components: comps, budget: 23, focusID: 0, focusMinFrames: 5)
         #expect(a450[0] == 5)
         #expect([1, 2, 3, 4, 5, 6].allSatisfy { a450[$0]! == 3 })
@@ -249,7 +249,7 @@ import GridCore
     // ── 4b. Full-slot mix render fidelity (premultiplied source-over) ──
 
     /// A relocating-common identity that DEPARTS one key (source-only) and ARRIVES at another
-    /// (target-only) — both dissolve against the uniform BACKGROUND, so both stay translucent.
+    /// (target-only) - both dissolve against the uniform BACKGROUND, so both stay translucent.
     private func makeBackgroundDissolvePlan(window: ClosedRange<Double> = 0.3 ... 0.7) -> GridTransitionPlan {
         let kS = RelativeSlotKey(dr: 1, dc: 0)   // source-only (id 300 departs to bg)
         let kT = RelativeSlotKey(dr: 2, dc: 0)   // target-only (id 300 arrives from bg)
@@ -401,7 +401,7 @@ import GridCore
     }
 
     // (feature-flag default-OFF + gating tests live in the .serialized GridTransitionControllerTests
-    //  suite — the flag is global UserDefaults state, so those tests must not run in parallel.)
+    //  suite - the flag is global UserDefaults state, so those tests must not run in parallel.)
 
     // ── 7. Builder on real engine geometry: focus row stable, components exist ──
     @Test func builderOnEngineGeometryFocusRowStable() {
@@ -443,7 +443,7 @@ import GridCore
     // ── 8b. V3.8 pinch seam: plan q=0 reproduces the SOURCE frame, q=1 the TARGET frame ──
     // This is the central "no release pop / no flash" guarantee. The coordinator builds the pinch plan from
     // engine.framePlan(source) + engine.framePlan(target-at-committed-state) and, on release, commits to that
-    // SAME (level/phase/scroll) — so the settled source == plan@q=0 and settled target == plan@q=1. Here we
+    // SAME (level/phase/scroll) - so the settled source == plan@q=0 and settled target == plan@q=1. Here we
     // prove the plan-endpoint half purely (every drawn occupant sits exactly on its source/target frame slot).
     @Test func pinchPlanEndpointsReproduceSourceAndTargetFrames() {
         let viewport = CGSize(width: 1400, height: 900)

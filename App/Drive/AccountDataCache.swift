@@ -4,10 +4,10 @@ import CryptoKit
 /// Encrypted on-disk cache of the account data (`/core/v4/users` + `/core/v4/addresses`) needed to build the
 /// Drive crypto + SDK account client. It exists so the app can COLD-START OFFLINE: when those two GETs can't be
 /// fetched, `DriveSDKBridge.init` rebuilds the (pure) crypto from this cache instead of failing the whole
-/// library — which then makes the already-offline-capable SQLite timeline + encrypted thumbnail caches reachable.
+/// library - which then makes the already-offline-capable SQLite timeline + encrypted thumbnail caches reachable.
 ///
-/// Encrypted at rest with AES-GCM under a key derived from the session `keyPassword` (HKDF-SHA256) — the same
-/// approach as the thumbnail/preview cache — so nothing usable persists without the user's secret. (The user-key
+/// Encrypted at rest with AES-GCM under a key derived from the session `keyPassword` (HKDF-SHA256) - the same
+/// approach as the thumbnail/preview cache - so nothing usable persists without the user's secret. (The user-key
 /// blobs are PGP-locked by the mailbox passphrase anyway; this is belt-and-suspenders + consistency.)
 enum AccountDataCache {
     private static func dir() -> URL {

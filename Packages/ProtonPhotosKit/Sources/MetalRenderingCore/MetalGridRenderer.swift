@@ -130,10 +130,10 @@ package final class MetalGridRenderer {
     }
 
     /// Encode all groups (back → front) onto an already-configured encoder. Returns (drawCalls, instances).
-    /// Pure w.r.t. the encoder — identical work whether the target is the drawable or an offscreen texture.
+    /// Pure w.r.t. the encoder - identical work whether the target is the drawable or an offscreen texture.
     ///
     /// `pooledSlot` selects how the vertex storage is sourced: a non-nil slot packs every group's vertices
-    /// into one reused ring buffer (the steady `render(...)` path — no per-frame allocation); `nil` allocates
+    /// into one reused ring buffer (the steady `render(...)` path - no per-frame allocation); `nil` allocates
     /// a fresh shared buffer per group (the transient offscreen dissolve path, where pooling buys nothing).
     @discardableResult
     private func encode(groups: [MetalGridRenderGroup], into encoder: MTLRenderCommandEncoder, pooledSlot: Int? = nil) -> (Int, Int, Int) {
@@ -283,7 +283,7 @@ package final class MetalGridRenderer {
     private func present(_ commandBuffer: MTLCommandBuffer, to target: MetalGridDrawableTarget) {
         if target.presentsWithTransaction {
             // LIVE-RESIZE SYNC: when the host has armed `presentsWithTransaction` (during a live window resize),
-            // present the drawable INSIDE the window's current CATransaction — commit, wait until scheduled, then
+            // present the drawable INSIDE the window's current CATransaction - commit, wait until scheduled, then
             // present explicitly. This locks the Metal frame to the window border for that tick, killing the
             // "rubber-band / content trails the cursor" lag. The normal (settled / scroll / zoom) path keeps the
             // cheaper async `commandBuffer.present(drawable)` below.
@@ -398,7 +398,7 @@ package final class MetalGridRenderer {
     }
 
     // Overview layer dissolve composite: fullscreen triangle that LINEARLY mixes two opaque layer textures
-    // (each already a complete grid over the SAME bg). out = mix(A, B, t) = A·(1−t) + B·t — no background bleed.
+    // (each already a complete grid over the SAME bg). out = mix(A, B, t) = A·(1−t) + B·t - no background bleed.
     struct CompositeOut { float4 position [[position]]; float2 uv; };
     vertex CompositeOut metalGridCompositeVertex(uint vid [[vertex_id]]) {
         float2 pos[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };

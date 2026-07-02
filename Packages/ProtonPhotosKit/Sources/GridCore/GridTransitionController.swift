@@ -4,7 +4,7 @@
 // levels (any lo→lo+1 in the focusRowRelayout band [0,3]; pinch chains across the band). It is the single
 // integration point: builds the immutable plan from engine frame plans, enforces selection eligibility
 // (else reports a fallback reason and the host uses the stable instant snap),
-// holds the HOST-OWNED canonical q (the coordinator's display-link advances it — there is NO
+// holds the HOST-OWNED canonical q (the coordinator's display-link advances it - there is NO
 // component-local timer here), and produces per-frame draw intent. Reversible: setting q backward
 // reverses the presentation exactly. Building happens ONCE per gesture; per frame is read-only.
 
@@ -53,7 +53,7 @@ package final class GridTransitionController {
 
     /// Try to begin a LIVE pinch (PINCH071) transition. Same eligibility gate as the click, but the plan's
     /// progress `q` is then HOST-DRIVEN via `setProgress` (the V3.8 scrub driver) instead of the trapezoidal
-    /// time profile — there is no `advanceClick`/timer for a pinch plan. Returns true iff a plan was built
+    /// time profile - there is no `advanceClick`/timer for a pinch plan. Returns true iff a plan was built
     /// and is eligible; false ⇒ the host uses the legacy geometry-only `GridZoomTransaction` reflow.
     @discardableResult
     package func beginPinch(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,
@@ -97,7 +97,7 @@ package final class GridTransitionController {
         return true
     }
 
-    /// Directly set host-owned q (used by live pinch / reverse — q is authoritative, lp follows it).
+    /// Directly set host-owned q (used by live pinch / reverse - q is authoritative, lp follows it).
     package func setProgress(_ value: Double) { q = min(1, max(0, value)) }
 
     package func end() { let was = plan != nil; plan = nil; q = 0; elapsed = 0

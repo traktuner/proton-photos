@@ -1,4 +1,4 @@
-# Liquid Glass UI/UX Rebase — 2026-06-30
+# Liquid Glass UI/UX Rebase - 2026-06-30
 
 Scope: current app state after the grid/cache/security cleanup. This is a UIUX-only rebase of the older
 Liquid Glass audit docs; it does not change grid geometry, cache policy, E2EE storage, upload/download,

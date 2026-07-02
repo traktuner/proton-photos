@@ -1,4 +1,4 @@
-# GridZoomTransaction — engine-owned live zoom
+# GridZoomTransaction - engine-owned live zoom
 
 Status: **IMPLEMENTED.** `GridZoomTransaction` is the engine-owned live-pinch / cursor-anchor transaction in
 production, and continuous live pinch is the production default (driven via `PinchLiveZoomDriver` /
@@ -14,7 +14,7 @@ formula
     slot = emptyTopLeft + item ; row = slot / columns ; column = slot % columns
 
 **rewraps every flat index** (and `emptyTopLeft` shifts each section's phase). Result: the thumbnails at every
-screen position shuffle — the "jumps to unrelated index regions" failure seen on video. Holding one anchor
+screen position shuffle - the "jumps to unrelated index regions" failure seen on video. Holding one anchor
 item does not help, because the whole neighbourhood rewraps around it.
 
 ## The model (owned by the engine)
@@ -26,13 +26,13 @@ Captured state:
 - `sourceGrid: ResolvedGrid`, `targetGrid: ResolvedGrid` (both fixed for the gesture)
 - `sourceFramePlan`, `targetFramePlan`
 - `anchorItem` (global index) + `anchorLocalFraction`
-- `anchorViewportPoint` (held fixed — zoom is directed here, the cursor)
+- `anchorViewportPoint` (held fixed - zoom is directed here, the cursor)
 - `focusRow`: the row under the cursor in the SOURCE grid
 - `sourceFocusRowItems`: the global indices occupying that focus row at gesture start
 
 Per-frame output (progress `t` in 0…1 toward the target detent):
 - Interpolate apparent slot size / gap between source and target (visual scale only).
-- Position cells from the FIXED source topology, scaled around `anchorViewportPoint` — **no re-wrap**.
+- Position cells from the FIXED source topology, scaled around `anchorViewportPoint` - **no re-wrap**.
 - Only at a committed level boundary do we adopt `targetGrid`'s topology (one controlled transition).
 
 ## The focus-row rule (the hard requirement)
@@ -44,13 +44,13 @@ makes the zoom read as "directed toward the photo under the cursor" rather than 
 
 Concretely, a transition plan assigns each visible cell a source-identity and a target-identity plus a
 per-cell progress that is **gated by focus distance**: focus-row cells reach the target topology last; far
-cells first. (No crossfade/opacity work yet — identity/position continuity first.)
+cells first. (No crossfade/opacity work yet - identity/position continuity first.)
 
 ## Hard constraints (carried over from the canonical-engine rules)
 
 - The engine owns ALL of this. The coordinator/renderer must not compute positions, gaps, columns, or
   edge-fill. No `sourcePlate` / `targetWall` / `exposedLeft/RightRect` coordinator hacks.
-- No Apple-style crossfade and no thumbnail-transition work in this step — identity/position continuity only.
+- No Apple-style crossfade and no thumbnail-transition work in this step - identity/position continuity only.
 - `zoomFramePlan(continuousLevel:)` stays as a building block but must be wrapped by the transaction's
   source/target topology continuity, never called raw per frame.
 

@@ -8,12 +8,12 @@ import CoreGraphics
 //   • the TARGET settled grid (the adjacent level, anchored scroll, square display mode)
 // are BOTH fully resolved ONCE at gesture start. Rendering blends the two complete rasters by opacity
 // (source fades out, target fades in). There is NO `GridTransitionComponentBuilder`, NO relocation lattice,
-// NO entry/exit endpoints, NO identity handoff — a source cell and a target cell never need to share identity.
+// NO entry/exit endpoints, NO identity handoff - a source cell and a target cell never need to share identity.
 //
 // The source keeps its OWN display mode (it must NOT be forced to square just because the target is an overview);
 // the target is `squareFillCrop` because the overview levels L4/L5 are square-only.
 //
-// IMPORTANT — renderer requirement: correctly blending two partially-covered rasters over the shared dark
+// IMPORTANT - renderer requirement: correctly blending two partially-covered rasters over the shared dark
 // background CANNOT be done by the current single-pass premultiplied source-over renderer without a mid-fade
 // background-bleed artifact (proof in reports/archive/PHASE_B_OVERVIEW_LAYER_DISSOLVE_REPORT.md). It needs OFFSCREEN
 // layer compositing (render each layer to its own texture, then blend the two textures). This type is the
@@ -26,12 +26,12 @@ public func overviewDissolveEase(_ q: Double) -> Double {
 }
 
 /// The EXACT linear cross-dissolve the offscreen composite shader applies per channel: `a·(1−t) + b·t`
-/// (`metalGridCompositeFragment`'s `mix(a, b, t)`). Pure mirror — used to prove the mid-fade is a true average
+/// (`metalGridCompositeFragment`'s `mix(a, b, t)`). Pure mirror - used to prove the mid-fade is a true average
 /// with NO `(1−t)²` source under-weighting and NO background term.
 public func overviewDissolveMix(_ a: Double, _ b: Double, _ t: Double) -> Double { a * (1 - t) + b * t }
 
 /// What a naive SINGLE-PASS premultiplied source-over dissolve (source then target over a shared bg) would
-/// produce in a both-covered region: `b·t + a·(1−t)² + bg·t·(1−t)` — the REJECTED background-bleed formula.
+/// produce in a both-covered region: `b·t + a·(1−t)² + bg·t·(1−t)` - the REJECTED background-bleed formula.
 /// Exposed only so tests can assert the offscreen path does NOT behave like this.
 public func overviewDissolveSinglePassBleed(_ a: Double, _ b: Double, _ bg: Double, _ t: Double) -> Double {
     b * t + a * (1 - t) * (1 - t) + bg * t * (1 - t)
@@ -48,7 +48,7 @@ public struct OverviewLayerDissolvePlan: Equatable, Sendable {
     public let target: GridFramePlan
     /// The source's own display mode (NOT forced square).
     public let sourceDisplayMode: TileContentDisplayMode
-    /// The target's display mode — `squareFillCrop` for the overview levels.
+    /// The target's display mode - `squareFillCrop` for the overview levels.
     public let targetDisplayMode: TileContentDisplayMode
     /// Where the target settles (commit info): the anchored scroll-Y and column phase for `targetLevel`.
     public let targetScrollY: CGFloat
@@ -75,7 +75,7 @@ public struct OverviewLayerDissolvePlan: Equatable, Sendable {
     /// Opacity of the TARGET layer (fades in as q→1).
     public var targetOpacity: Double { overviewDissolveEase(q) }
 
-    /// A copy at a new progress. The two rasters and display modes are unchanged — only the blend moves, so the
+    /// A copy at a new progress. The two rasters and display modes are unchanged - only the blend moves, so the
     /// target stays in its FINAL positions at every q (the whole point of a layer dissolve).
     public func withProgress(_ newQ: Double) -> OverviewLayerDissolvePlan {
         OverviewLayerDissolvePlan(sourceLevel: sourceLevel, targetLevel: targetLevel, source: source, target: target,
@@ -89,17 +89,17 @@ public extension SquareTileGridEngine {
     /// Build an overview layer dissolve from level `s` to adjacent level `t` (must be an overview boundary).
     /// The SOURCE plan is the current settled grid (its own scroll + display mode); the TARGET plan is the
     /// adjacent overview grid, anchored so the item under the cursor stays under the cursor, in square mode.
-    /// Pure: it composes settled `framePlan`s + the engine's anchor math — no relocation, no transition builder.
+    /// Pure: it composes settled `framePlan`s + the engine's anchor math - no relocation, no transition builder.
     /// Returns nil if `s↔t` is not an overview boundary or the anchor can't resolve (empty library).
     ///
     /// SCROLL / ANCHOR policy (V3.13, direction-aware). The target layer is rendered at the SAME scroll the
-    /// settled grid will commit to — never an un-clamped scroll — so there is no settle jump.
+    /// settled grid will commit to - never an un-clamped scroll - so there is no settle jump.
     ///   • The CURSOR anchor always wins: the target scroll keeps the cursor's item under the cursor (the raw
     ///     anchored scroll), then clamped to `[0, targetMaxY]`.
     ///   • The bottom-fill override is applied ONLY on zoom-OUT from a bottom-pinned source (`targetLevel >
     ///     sourceLevel` = toward the denser overview): there the overview is rendered bottom-filled
     ///     (`targetScrollY = targetMaxY`) to avoid the down-jump (V3.12). On pinch-IN (`targetLevel <
-    ///     sourceLevel`) it is NEVER applied — a short overview source being bottom-pinned must not drag the
+    ///     sourceLevel`) it is NEVER applied - a short overview source being bottom-pinned must not drag the
     ///     zoom back to the old origin.
     /// `targetMaxY` is 0 when the target content is shorter than the viewport, so a short target settles at 0
     /// (never stretched/faked). Direction is read from the levels (the ladder is monotonic in density, so
@@ -111,7 +111,7 @@ public extension SquareTileGridEngine {
                                    overscan: CGFloat) -> OverviewLayerDissolvePlan? {
         guard isOverviewBoundary(s, t) else { return nil }
         let width = viewportSize.width
-        // The TARGET level lays out at its OWN width — the L3↔L4 boundary crosses the normal/overview gutter divide
+        // The TARGET level lays out at its OWN width - the L3↔L4 boundary crosses the normal/overview gutter divide
         // (a normal level has the outer margin; an overview is edge-to-edge), so source and target `layoutWidth`
         // differ. Using the source width for the target mis-sized the target tiles and put the committed scroll at
         // the wrong row ⇒ the photo under the cursor landed at the wrong grid position on release.

@@ -19,7 +19,7 @@ import MetalRenderingCore
         return ""
     }
 
-    // 1 — a single named background color is the source of truth, a neutral dark gray, used for the clear color.
+    // 1 - a single named background color is the source of truth, a neutral dark gray, used for the clear color.
     @Test func productionGridUsesSingleBackgroundColor() {
         let c = MetalGridPalette.backgroundRGBA
         #expect(abs(c.r - c.g) < 0.01 && abs(c.g - c.b) < 0.01, "background must be a NEUTRAL gray")
@@ -36,7 +36,7 @@ import MetalRenderingCore
         #expect(!host.contains("red: 0.043"), "no leftover hardcoded warm-brown clear color")
     }
 
-    // 2 — production grid build draws NO per-cell card for resident or missing images. Missing thumbnails should
+    // 2 - production grid build draws NO per-cell card for resident or missing images. Missing thumbnails should
     // reveal the same bottom-most grid surface instead of a darker rounded square.
     @Test func rendererDoesNotDrawGridCellBackgroundsInProduction() {
         let coord = src("MetalGridCoordinator.swift")
@@ -46,7 +46,7 @@ import MetalRenderingCore
         #expect(!body.contains("quads: backgrounds"), "production must not submit a placeholder-background render group")
     }
 
-    // 3 — aspectFit leaves letterbox INSIDE the square slot; with no card drawn, it shows the grid background.
+    // 3 - aspectFit leaves letterbox INSIDE the square slot; with no card drawn, it shows the grid background.
     @Test func aspectFitLetterboxUsesGridBackground() {
         let slot = CGRect(x: 0, y: 0, width: 180, height: 180)
         // A wide (16:9) photo letterboxes: contentRect is strictly shorter than the square → letterbox bands exist.
@@ -54,11 +54,11 @@ import MetalRenderingCore
         #expect(fit.contentRect.height < slot.height - eps, "letterbox bands must exist for a wide photo")
         #expect(fit.contentRect.minX >= slot.minX - eps && fit.contentRect.maxX <= slot.maxX + eps, "content stays in slot")
         // No card is drawn behind a resident image (guard #2), so the letterbox bands reveal the cleared
-        // MetalGridPalette.background — the same uniform surface as the gaps.
+        // MetalGridPalette.background - the same uniform surface as the gaps.
         #expect(MetalGridPalette.backgroundVector.w == 1)
     }
 
-    // 4 — the synthetic colored-tile debug grid was removed; production (buildRealGroups) must never draw a
+    // 4 - the synthetic colored-tile debug grid was removed; production (buildRealGroups) must never draw a
     // solid colored card, and the debug palette must stay gone entirely.
     @Test func productionDoesNotUseSyntheticDebugColors() {
         let coord = src("MetalGridCoordinator.swift")

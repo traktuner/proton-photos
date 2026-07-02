@@ -1,6 +1,6 @@
 import CoreGraphics
 
-/// Visual constants for the Metal grid cells — one source of truth for corner radius so the rounded
+/// Visual constants for the Metal grid cells - one source of truth for corner radius so the rounded
 /// corners match at rest and through a zoom.
 package enum GridVisualConstants {
     /// Shared thumbnail corner radius in points. The reference capture's rounded image corner measures

@@ -9,7 +9,7 @@ private enum BadgeStyle {
     static let border: CGFloat = 3
 }
 
-/// A single photo on the map — a rounded thumbnail. Carries a `clusteringIdentifier` so MapKit merges
+/// A single photo on the map - a rounded thumbnail. Carries a `clusteringIdentifier` so MapKit merges
 /// nearby photos into a `MKClusterAnnotation` as the user zooms out.
 final class PhotoAnnotationView: MKAnnotationView {
     static let reuseID = "PhotoAnnotation"
@@ -47,7 +47,7 @@ final class PhotoAnnotationView: MKAnnotationView {
     }
 }
 
-/// A cluster of photos — the hero thumbnail with a count pill (e.g. "52"), like Apple Photos. The hero is
+/// A cluster of photos - the hero thumbnail with a count pill (e.g. "52"), like Apple Photos. The hero is
 /// the first member for now (a best/cover heuristic can replace `heroUID` later).
 final class PhotoClusterAnnotationView: MKAnnotationView {
     private let imageLayer = CALayer()

@@ -10,7 +10,7 @@ import MediaLocationCore
 /// Only the annotations in the visible map rect (+ margin) are placed, so even a 20k-photo library puts
 /// just the on-screen subset on the map; MapKit's built-in clustering then merges them into count+hero
 /// badges that split apart on zoom. Annotations refresh as the background GPS crawl fills the index in
-/// (the `revision` binding). macOS UI layer — an iOS/iPad variant reuses the same `PhotoLocationIndex`.
+/// (the `revision` binding). macOS UI layer - an iOS/iPad variant reuses the same `PhotoLocationIndex`.
 public struct LibraryMapView: NSViewRepresentable {
     private let index: PhotoLocationIndex
     private let thumbnail: (PhotoUID) -> NSImage?

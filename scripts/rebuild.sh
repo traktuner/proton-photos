@@ -2,7 +2,7 @@
 # Build the app and install it as the single canonical /Applications/ProtonPhotos.app, then launch.
 #
 # RULE (do not break): there must always, after every build without exception, be exactly ONE openable
-# ProtonPhotos.app, and it must live in /Applications — so Spotlight search only ever finds that one.
+# ProtonPhotos.app, and it must live in /Applications - so Spotlight search only ever finds that one.
 # To guarantee it, the build output lives under a `*.noindex` derived-data folder: Spotlight skips any
 # directory whose name ends in `.noindex` (the same reason Xcode's own `Intermediates.noindex` never
 # shows up while `Products` would). So the build product is never indexed, and /Applications is the only
@@ -69,5 +69,5 @@ xattr -dr com.apple.quarantine "$DST" 2>/dev/null || true
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DST"
 open "$DST"
 echo "Installed + launched: $DST"
-echo "Spotlight bundles (must be exactly one — /Applications):"
+echo "Spotlight bundles (must be exactly one - /Applications):"
 mdfind -name "ProtonPhotos.app" 2>/dev/null | grep -i "ProtonPhotos.app$" || true

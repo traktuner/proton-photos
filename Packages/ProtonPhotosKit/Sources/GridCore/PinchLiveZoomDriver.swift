@@ -1,7 +1,7 @@
 // PinchLiveZoomDriver.swift
 //
 // V3.9 CONTINUOUS MULTI-LEVEL live-pinch driver for the single-presentation-lattice transition. PURE +
-// headless: no clock, no engine, no GPU, no UserDefaults — every time step is passed in as `dt`, so the
+// headless: no clock, no engine, no GPU, no UserDefaults - every time step is passed in as `dt`, so the
 // whole state machine is unit-testable in isolation.
 //
 // Apple Photos lets the user pinch continuously through MANY levels in one uninterrupted gesture (smallest
@@ -19,16 +19,16 @@
 //     grid follows the finger until release, then settles the ACTIVE segment to its nearest detent.
 //
 // The driver chains only within the eligible band `[chainLo, chainHi]` (the contiguous focusRowRelayout run
-// the gesture started in — the normal levels L0–L3); the host decides lattice-vs-reflow up front and clamps
+// the gesture started in - the normal levels L0–L3); the host decides lattice-vs-reflow up front and clamps
 // the position into the band, so an out-of-band (overview) excursion holds at the boundary detent.
 
 package struct PinchLiveZoomDriver: Equatable, Sendable {
 
     package struct Tunables: Equatable, Sendable {
         /// Release decision (fingers up): the active segment settles to its target if `segmentQ ≥` this, else
-        /// back to its source — i.e. the nearest detent to the global position.
+        /// back to its source - i.e. the nearest detent to the global position.
         package var releaseCommitQ: Double = 0.50
-        /// Settle ramp speed floor / cap (q per second) — never stalls, never an instant snap.
+        /// Settle ramp speed floor / cap (q per second) - never stalls, never an instant snap.
         package var autoCompleteMinQPerSecond: Double = 1.8
         package var autoCompleteMaxQPerSecond: Double = 8.0
         /// A very short directional pinch that never clears the live-scrub dead-band should still behave like
@@ -38,10 +38,10 @@ package struct PinchLiveZoomDriver: Equatable, Sendable {
         package var velocityEmaAlpha: Double = 0.25
         /// |continuousLevel − startLevel| (level units) needed before the first segment engages (rest dead-band).
         package var directionResolveQ: Double = 0.02
-        /// Hysteresis (level units) around an integer detent before the active interval switches — prevents
+        /// Hysteresis (level units) around an integer detent before the active interval switches - prevents
         /// rebuild thrash when the finger holds right on a detent.
         package var detentHysteresisQ: Double = 0.02
-        /// Low-pass on `segmentQ`. 1.0 = pass-through (DEFAULT — exact 1:1, no lag); < 1 = light filter.
+        /// Low-pass on `segmentQ`. 1.0 = pass-through (DEFAULT - exact 1:1, no lag); < 1 = light filter.
         package var displayQLowPassAlpha: Double = 1.0
 
         package init() {}
@@ -175,7 +175,7 @@ package struct PinchLiveZoomDriver: Equatable, Sendable {
     @discardableResult
     package mutating func release(cancelled: Bool = false) -> Int {
         guard phase == .scrub else { return finalLevel }
-        // cancelled gestures also settle to nearest (graceful) — there is no abrupt revert.
+        // cancelled gestures also settle to nearest (graceful) - there is no abrupt revert.
         _ = cancelled
         if !directionResolved {
             settleTargetQ = segmentQ      // never moved ⇒ stay on the start detent

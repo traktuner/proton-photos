@@ -40,7 +40,7 @@ final class UploadManagerTests: XCTestCase {
         XCTAssertEqual(uploader.peakConcurrent, 2, "should actually run two in parallel")
     }
 
-    // 4a. UploadStateMachineTest — happy path
+    // 4a. UploadStateMachineTest - happy path
     func testStateMachineHappyPath() async throws {
         let (_, urls) = try jpegs(["one"])
         let uploader = MockUploader()
@@ -57,7 +57,7 @@ final class UploadManagerTests: XCTestCase {
         )
     }
 
-    // 4b. UploadStateMachineTest — failed → retry → completed
+    // 4b. UploadStateMachineTest - failed → retry → completed
     func testStateMachineRetryToCompleted() async throws {
         let (_, urls) = try jpegs(["x"])
         let uploader = MockUploader(deliverProgress: false, transientFailures: ["x.jpg": 1])
@@ -77,7 +77,7 @@ final class UploadManagerTests: XCTestCase {
         XCTAssertEqual(seq.last, .completed)
     }
 
-    // 4c. UploadStateMachineTest — cancel while in-flight
+    // 4c. UploadStateMachineTest - cancel while in-flight
     func testCancelInFlight() async throws {
         let (_, urls) = try jpegs(["slow"])
         let uploader = MockUploader(workDuration: .seconds(5), deliverProgress: false)
@@ -105,7 +105,7 @@ final class UploadManagerTests: XCTestCase {
         XCTAssertEqual(uploader.startedOrder, ["good.jpg"], "unsupported file must never reach the backend")
     }
 
-    // 7a. AlbumDestinationTest — existing album maps to add-to-album
+    // 7a. AlbumDestinationTest - existing album maps to add-to-album
     func testExistingAlbumAddsUploadedPhotos() async throws {
         let (_, urls) = try jpegs(["p1", "p2"])
         let uploader = MockUploader(deliverProgress: false)
@@ -118,7 +118,7 @@ final class UploadManagerTests: XCTestCase {
         XCTAssertTrue(added.allSatisfy { $0.1 == "alb" })
     }
 
-    // 7b. AlbumDestinationTest — new album is created before add
+    // 7b. AlbumDestinationTest - new album is created before add
     func testNewAlbumCreatedBeforeAdd() async throws {
         let (_, urls) = try jpegs(["n1"])
         let uploader = MockUploader(deliverProgress: false)
@@ -130,7 +130,7 @@ final class UploadManagerTests: XCTestCase {
         XCTAssertEqual(albums.addedSnapshot.first?.1, "new-album-1")
     }
 
-    // 7c. AlbumDestinationTest — unsupported create fails fast, nothing uploads
+    // 7c. AlbumDestinationTest - unsupported create fails fast, nothing uploads
     func testUnsupportedNewAlbumFailsFastWithoutUploading() async throws {
         let (_, urls) = try jpegs(["z"])
         let uploader = MockUploader(deliverProgress: false)
@@ -142,7 +142,7 @@ final class UploadManagerTests: XCTestCase {
         XCTAssertTrue(uploader.startedOrder.isEmpty, "must not upload to library when album destination can't be honoured")
     }
 
-    // 8. AlbumCoverSelectionTest — first uploaded photo becomes the cover
+    // 8. AlbumCoverSelectionTest - first uploaded photo becomes the cover
     func testFirstUploadedPhotoBecomesCover() async throws {
         let (_, urls) = try jpegs(["a", "b"])
         let uploader = MockUploader(deliverProgress: false)
@@ -167,7 +167,7 @@ final class UploadManagerTests: XCTestCase {
         XCTAssertEqual(albums.coversSnapshot.first?.1, testUID("b.jpg"))
     }
 
-    // 9. PartialFailureTest — upload ok but album add fails → partial success
+    // 9. PartialFailureTest - upload ok but album add fails → partial success
     func testPartialSuccessWhenAlbumAddFails() async throws {
         let (_, urls) = try jpegs(["pf"])
         let uploader = MockUploader(deliverProgress: false)
@@ -181,7 +181,7 @@ final class UploadManagerTests: XCTestCase {
         if case .failed = item?.state {} else { XCTFail("state should be failed-with-partial") }
     }
 
-    // 10. ResumeSupportTest — capability honesty + queue-level pause/resume
+    // 10. ResumeSupportTest - capability honesty + queue-level pause/resume
     func testResumeCapabilityIsHonest() async {
         let uploader = MockUploader()
         let manager = UploadManager(uploader: uploader, maxConcurrent: 1)
@@ -239,8 +239,8 @@ final class UploadManagerTests: XCTestCase {
         stats.completed = 1
         XCTAssertTrue(UploadQueuePresentation.canClearFinished(stats))
         // summaryText is localized via the package catalog (compiled by Xcode; under plain SwiftPM the
-        // raw key + interpolated counts is returned). Either way the three counts — completed=1,
-        // active=0, failed=0 — must appear in that order. Asserting their order keeps the test
+        // raw key + interpolated counts is returned). Either way the three counts - completed=1,
+        // active=0, failed=0 - must appear in that order. Asserting their order keeps the test
         // independent of language and of whether the catalog is compiled.
         let s = stats.summaryText
         var cursor = s.startIndex

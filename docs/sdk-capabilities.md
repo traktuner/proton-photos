@@ -6,7 +6,7 @@ where each capability is wrapped. The runtime equivalent is logged once at sign-
 
 The golden rule: **use the SDK where it exists and is stable; where it doesn't, route through the
 direct-HTTP layer behind a clean feature interface; where neither can do it, surface an explicit
-`unsupported` error — never fake success and never silently downgrade.**
+`unsupported` error - never fake success and never silently downgrade.**
 
 ## `ProtonPhotosClient`
 
@@ -16,7 +16,7 @@ direct-HTTP layer behind a clean feature interface; where neither can do it, sur
 | `downloadThumbnails` | yes | `DriveSDKBridge.loadThumbnails/singleThumbnail` | implemented | grid + viewer thumbnails |
 | `download` | yes | `DriveSDKBridge.downloadOriginal` | implemented | full-res export |
 | `downloadOperation` | indirect | (via `download`) | available | not separately surfaced; `download` covers current needs |
-| `cancelPhotoDownload` | no | — | available | not wired (downloads are short-lived) |
+| `cancelPhotoDownload` | no | - | available | not wired (downloads are short-lived) |
 | `uploadPhoto` | **yes (new)** | `DriveSDKBridge: PhotoUploading.upload` | implemented | library upload; convenience path (operation + start) |
 | `startUpload` | indirect | (inside `uploadPhoto`) | implemented | called by the convenience `uploadPhoto` |
 | `uploadOperation` | indirect | (inside `uploadPhoto`) | available | not held separately, so no in-flight byte-pause (see below) |
@@ -36,7 +36,7 @@ calls `startUpload`). It does **not** retain the `UploadOperation`, so:
   in-flight transfers are **not** byte-paused. Queued (not-yet-started) items pause at the queue level;
   a cancelled/failed item **retries from the start**. This is reported honestly via
   `UploadBackendCapabilities.supportsPauseResume = false`.
-- **Resume across relaunch:** **not supported** (`supportsResumeAcrossRelaunch = false`) — operation
+- **Resume across relaunch:** **not supported** (`supportsResumeAcrossRelaunch = false`) - operation
   state is in-memory only; on relaunch, incomplete items are re-queued as retry-from-start.
 
 To get true in-flight pause/byte-resume later, switch `DriveSDKBridge.upload` to retain the
@@ -50,9 +50,9 @@ The Swift SDK exposes **no** album API (confirmed: `grep -ri album Vendor/sdk-sw
 |---|---|---|---|
 | List albums | direct HTTP | implemented | `DriveSession.fetchAlbums` + name decryption (`PhotoVideoStreamSource.nodeName`) |
 | List album photos | direct HTTP | implemented | `DriveSession.fetchAlbumPhotos` |
-| Create album | — | **unsupported** | needs album-node encryption (node key + encrypted name + hash key) — not implemented |
-| Add photo to album | — | **unsupported** | needs re-encrypting the photo's content key to the album key — not implemented |
-| Set album cover | — | **unsupported** | no SDK API and no encrypted-write HTTP path |
+| Create album | - | **unsupported** | needs album-node encryption (node key + encrypted name + hash key) - not implemented |
+| Add photo to album | - | **unsupported** | needs re-encrypting the photo's content key to the album key - not implemented |
+| Set album cover | - | **unsupported** | no SDK API and no encrypted-write HTTP path |
 
 `DriveCrypto` is **decrypt-only** today (address→share→node→content-key→block decryption), so the
 encryption primitives album writes require don't exist yet. Album writes therefore return

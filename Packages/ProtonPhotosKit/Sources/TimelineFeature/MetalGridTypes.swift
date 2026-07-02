@@ -2,7 +2,7 @@ import Foundation
 import CoreGraphics
 import GridCore
 
-// MARK: - Metal grid — shared value types (diagnostics + HUD)
+// MARK: - Metal grid - shared value types (diagnostics + HUD)
 //
 // Per-frame render accounting and HUD mirroring for the Metal-backed photo grid.
 //
@@ -58,7 +58,7 @@ struct MetalGridStats: Equatable, Sendable {
 
     private func fmt(_ v: Double) -> String { String(format: "%.2f", v) }
 
-    /// Pure derivation of the visible/real/placeholder counts from a frame's draw list — unit-testable
+    /// Pure derivation of the visible/real/placeholder counts from a frame's draw list - unit-testable
     /// without Metal (DiagnosticsCounterTest). `realResident(id)` reports whether a real GPU texture is
     /// resident for that item (placeholder otherwise).
     static func counts<ID>(
@@ -146,7 +146,7 @@ struct MetalGridHUD: Equatable, Sendable {
     var cache = MetalGridCacheStats()
     var level = 2
     var totalItems = 0
-    var dataSource = "—"   // "real" / "synthetic"
+    var dataSource = "-"   // "real" / "synthetic"
 }
 
 typealias MetalGridBudget = GridTextureBudget

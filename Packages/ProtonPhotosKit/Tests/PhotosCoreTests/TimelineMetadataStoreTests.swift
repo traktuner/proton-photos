@@ -6,7 +6,7 @@ import SQLite3
 ///
 /// Pinned contract:
 /// - schema v1 (feature-versioned via `schema_info`) with the hot `photos` table, normalized
-///   `photo_tags` / `burst_members` feature tables — never serialized blobs;
+///   `photo_tags` / `burst_members` feature tables - never serialized blobs;
 /// - deterministic `(t, vol, node)` timeline order across save/load cycles (the DB index, the
 ///   in-memory comparator, and grid identity must always agree);
 /// - O(changes) incremental saves: digest no-op short-circuit, only changed/new rows written, and
@@ -15,7 +15,7 @@ import SQLite3
 /// - purge coverage: sign-out erases the whole per-account library directory, and the legacy
 ///   `timeline-v3` store names stay covered for stores written by older builds.
 ///
-/// All I/O uses scratch temp directories — never the real user cache/support directories.
+/// All I/O uses scratch temp directories - never the real user cache/support directories.
 final class TimelineMetadataStoreTests: XCTestCase {
 
     private let uid = "user-DB1"
@@ -214,7 +214,7 @@ final class TimelineMetadataStoreTests: XCTestCase {
         let plain = makeItem(node: "img", t: 200)
         store.save([video, plain])
 
-        // Normalized rows on disk — one row per (tag, vol, node), no CSV blob anywhere.
+        // Normalized rows on disk - one row per (tag, vol, node), no CSV blob anywhere.
         let rows = rawRows(url, "SELECT tag, vol, node FROM photo_tags ORDER BY tag;")
         XCTAssertEqual(rows, [
             [String(PhotoTag.favorites.rawValue), "vol1", "vid"],
@@ -237,7 +237,7 @@ final class TimelineMetadataStoreTests: XCTestCase {
         let dir = try makeTempDir()
         let (store, url) = try makeStore(in: dir)
 
-        // Presentation order is deliberately NOT sorted — seq must preserve it exactly.
+        // Presentation order is deliberately NOT sorted - seq must preserve it exactly.
         let members = ["member-c", "member-a", "member-b"]
         let anchor = makeItem(node: "anchor", t: 100, tags: [.bursts], burst: members)
         store.save([anchor])
@@ -279,7 +279,7 @@ final class TimelineMetadataStoreTests: XCTestCase {
         XCTAssertTrue(afterReopen.skippedUnchanged, "digest short-circuit must persist across launches")
         XCTAssertEqual(reopened.load(), items.sorted(by: TimelineOrder.areInIncreasingOrder))
 
-        // Any real change breaks the short-circuit again — but only the new row is written; the
+        // Any real change breaks the short-circuit again - but only the new row is written; the
         // 50 unchanged survivors are not rewritten (O(changes)).
         let changed = reopened.save(items + [makeItem(node: "new", t: 2000)])
         XCTAssertFalse(changed.skippedUnchanged)
@@ -425,7 +425,7 @@ final class TimelineMetadataStoreTests: XCTestCase {
         XCTAssertFalse(changedSave.skippedUnchanged)
         XCTAssertEqual(changedSave.generation, 2)
         // O(changes): a +25 / −100 refresh writes ONLY the 25 new rows and sweeps ONLY the 100
-        // vanished rows — the 19,900 unchanged survivors are not rewritten (previously all 19,925
+        // vanished rows - the 19,900 unchanged survivors are not rewritten (previously all 19,925
         // were re-stamped every refresh). This is the write-amplification guard.
         XCTAssertEqual(changedSave.upsertedRows, 25)
         XCTAssertEqual(changedSave.sweptRows, 100)
@@ -487,8 +487,8 @@ final class TimelineMetadataStoreTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("entities.sqlite").path))
     }
 
-    /// Simulated sign-out: after the two metadata purges (SDK dir + library dir) run — exactly
-    /// what `DriveSDKBridge.purgeMetadata` does — NO app-owned account file may survive. A new
+    /// Simulated sign-out: after the two metadata purges (SDK dir + library dir) run - exactly
+    /// what `DriveSDKBridge.purgeMetadata` does - NO app-owned account file may survive. A new
     /// store file added without purge coverage fails this walk.
     func testSimulatedSignOutLeavesNoAccountOwnedMetadataFiles() throws {
         let base = try makeTempDir()      // stands in for Application Support
@@ -520,7 +520,7 @@ final class TimelineMetadataStoreTests: XCTestCase {
 
     func testOrphanedLegacyTimelineSweepIgnoresOtherStores() throws {
         let dir = try makeTempDir()
-        // Legacy formats from THREE different accounts — the wild state observed after the v1
+        // Legacy formats from THREE different accounts - the wild state observed after the v1
         // reset shipped: the uid-scoped sign-in cleanup missed accounts that never sign in again.
         let legacy = [
             "timeline-v3-\(uid).sqlite", "timeline-v3-\(uid).sqlite-wal",
@@ -578,13 +578,13 @@ final class TimelineMetadataStoreTests: XCTestCase {
         store.save([a, b])
         store.updateDimensions([a.uid: try dims(320, 240)])
 
-        // A CHANGED refresh writes only changed/new rows and never references w/h — learned
+        // A CHANGED refresh writes only changed/new rows and never references w/h - learned
         // dimensions on unchanged rows must survive.
         let changed = store.save([a, b, makeItem(node: "c", t: 300)])
         XCTAssertFalse(changed.skippedUnchanged)
         XCTAssertEqual(store.loadDimensions(), [a.uid: try dims(320, 240)])
 
-        // An UNCHANGED refresh short-circuits — dimensions are not part of the timeline digest,
+        // An UNCHANGED refresh short-circuits - dimensions are not part of the timeline digest,
         // so recording them must not break the no-op skip.
         store.updateDimensions([b.uid: try dims(100, 100)])
         let skipped = store.save([a, b, makeItem(node: "c", t: 300)])

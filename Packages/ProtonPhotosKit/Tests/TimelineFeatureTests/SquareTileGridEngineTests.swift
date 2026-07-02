@@ -43,7 +43,7 @@ import GridCore
         }
     }
 
-    // 2. Media aspect cannot affect the slot rect — the engine takes NO aspect input. The content fit lives
+    // 2. Media aspect cannot affect the slot rect - the engine takes NO aspect input. The content fit lives
     // entirely in `TileContentFitter` (outside the engine) and is always contained in the unchanged slot.
     @Test func mediaAspectDoesNotAffectSlotRect() {
         let plan = settledPlan(level: 1)
@@ -104,7 +104,7 @@ import GridCore
         return max(0, h / 2 - viewport.height / 2)
     }
 
-    // 6/7/8. FIXED-COLUMNS, WIDTH-FILL: the grid is LEADING-aligned — a full visible row starts at column 0 (x≈0)
+    // 6/7/8. FIXED-COLUMNS, WIDTH-FILL: the grid is LEADING-aligned - a full visible row starts at column 0 (x≈0)
     // and runs to column count-1, and the last column's right edge FILLS the viewport width (no gutter).
     @Test func visibleQueryIsLeadingAlignedAndFillsWidth() {
         for level in 0 ..< engine().levelCount {
@@ -145,7 +145,7 @@ import GridCore
         for i in 1 ..< sides.count { #expect(sides[i] >= sides[i - 1], "tile size monotone non-decreasing in width") }
     }
 
-    // 10. Hit testing uses the SQUARE slot rect — a point in the slot corner that an aspectFit inner rect
+    // 10. Hit testing uses the SQUARE slot rect - a point in the slot corner that an aspectFit inner rect
     // would exclude still hits; a point in the inter-slot gap misses.
     @Test func hitTestingUsesSlotRect() {
         let e = engine()
@@ -169,7 +169,7 @@ import GridCore
         let e = engine()
         let w = viewport.width
         // SEAM: the live apparent side at an integer detent equals the SETTLED (width-filled) side for that
-        // level — so a pinch commit lands with no size pop. (Was: the raw reference side, which only matched at
+        // level - so a pinch commit lands with no size pop. (Was: the raw reference side, which only matched at
         // the reference width.) Between detents it interpolates strictly between the two filled sides.
         func filledSide(_ lvl: Int) -> CGFloat { e.resolvedMetrics(level: lvl, width: w).slotSide }
         #expect(abs(e.apparentSlotSide(at: 2, width: w) - filledSide(2)) < eps)     // detent → settled filled side (seam closes)
@@ -184,7 +184,7 @@ import GridCore
     }
 
     // 11b. Continuous zoom-out lens: at every apparent (between-detent) level the lens is leading-aligned with a
-    // BOUNDED trailing margin (< one pitch) — the round column count + interpolated side need not fill exactly
+    // BOUNDED trailing margin (< one pitch) - the round column count + interpolated side need not fill exactly
     // mid-zoom (unlike the settled grid, which fills); background, never a black strip or missing column.
     @Test func zoomOutIsLeadingAlignedWithBoundedTrailingMargin() {
         let e = engine()
@@ -249,7 +249,7 @@ import GridCore
         #expect(!plan.visibleHeaders.isEmpty)   // section headers are owned + queryable
     }
 
-    // A wide-video-shaped item occupies the SAME square slot as any other — the engine has no media-type
+    // A wide-video-shaped item occupies the SAME square slot as any other - the engine has no media-type
     // input, so the slot size is identical regardless of payload.
     @Test func videoUsesSameSquareSlot() {
         let plan = settledPlan(level: 2, scrollY: 3000)

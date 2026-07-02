@@ -132,7 +132,7 @@ actor PhotoVideoStreamSource {
                              blocks: blocks, sessionKey: sessionKey)
     }
 
-    /// Encrypted bytes for one block — called by the resource loader on demand.
+    /// Encrypted bytes for one block - called by the resource loader on demand.
     func encryptedBlockData(_ block: VideoBlock) async throws -> Data {
         try await session.fetchBlock(url: block.url, token: block.token)
     }
@@ -267,7 +267,7 @@ struct LinkBody: Decodable {
     }
 }
 
-/// Decrypted XAttr (extended attributes) — Proton stores a device string + dimensions + duration +
+/// Decrypted XAttr (extended attributes) - Proton stores a device string + dimensions + duration +
 /// GPS, but no full EXIF (no aperture/ISO/lens). Field names match Proton's exact PascalCase JSON.
 struct ExtendedAttributes: Decodable {
     let common: Common?

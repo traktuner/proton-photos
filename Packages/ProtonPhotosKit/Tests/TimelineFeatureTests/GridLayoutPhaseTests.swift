@@ -8,7 +8,7 @@ import GridCore
 /// the photo under the cursor does NOT fly across the grid on release. The phase is `column(g)=(phase+g)%cols`,
 /// chosen so `column(anchor)==cursorColumn`. These tests pin the phase math, the small commit delta, and that
 /// the phase persists + scrolls coherently. (Trade-off: a cursor-aligned phase splits the partial row between
-/// the oldest top-left and newest bottom-right ends — see the report; the bottom pin resets to canonical.)
+/// the oldest top-left and newest bottom-right ends - see the report; the bottom pin resets to canonical.)
 @Suite struct GridLayoutPhaseTests {
     private let viewport = CGSize(width: 1400, height: 900)
     private let width: CGFloat = 1400
@@ -33,7 +33,7 @@ import GridCore
         s.e.framePlan(level: target, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: s.scrollY), overscan: 0, columnPhase: s.phase)
     }
 
-    // MARK: 1 — SettledTargetPreservesCursorAnchorColumnTest
+    // MARK: 1 - SettledTargetPreservesCursorAnchorColumnTest
     @Test func settledTargetPreservesCursorAnchorColumn() {
         for target in 0 ..< SquareTileGridEngine.testRegularLevels.count {
             let s = setup(target: target)
@@ -43,7 +43,7 @@ import GridCore
         }
     }
 
-    // MARK: 2 — CommitAnchorHorizontalDeltaIsSmallTest
+    // MARK: 2 - CommitAnchorHorizontalDeltaIsSmallTest
     @Test func commitAnchorHorizontalDeltaIsSmall() {
         // Targets 0,2,3,5,6 have a large canonical phase shift (≥1 column) per the seam measurement.
         for target in [0, 2, 3, 5, 6] {
@@ -60,23 +60,23 @@ import GridCore
         }
     }
 
-    // MARK: 3 — SelectedPhotoDoesNotMoveToFarRightOnReleaseTest
+    // MARK: 3 - SelectedPhotoDoesNotMoveToFarRightOnReleaseTest
     @Test func selectedPhotoDoesNotMoveToFarRightOnRelease() {
-        let target = 5   // a big zoom-out (densest) — the original far-right fly
+        let target = 5   // a big zoom-out (densest) - the original far-right fly
         let s = setup(target: target)
         let cols = s.e.resolvedMetrics(level: target, width: width).columns
         #expect(s.desiredCol < cols - 1, "the mid-viewport cursor must not BE the far-right column")
         let anchorSlot = phasedPlan(s, target: target).visibleSlots.first { $0.index == anchor }!
         #expect(anchorSlot.column == s.desiredCol, "selected photo must settle in the cursor column")
         #expect(anchorSlot.column != cols - 1, "selected photo must NOT settle to the far-right column")
-        // Without the phase (canonical bottom-right) it lands elsewhere — that is the bug being fixed.
+        // Without the phase (canonical bottom-right) it lands elsewhere - that is the bug being fixed.
         let canonicalCol = s.e.framePlan(level: target, viewportSize: viewport,
                                          scrollOffset: CGPoint(x: 0, y: s.scrollY), overscan: 0)
             .visibleSlots.first { $0.index == anchor }?.column
         #expect(canonicalCol != s.desiredCol, "canonical phase would move the anchor to a different column (the bug)")
     }
 
-    // MARK: 4 — NoLargeRectLerpForMatchedGlobalIndexTest
+    // MARK: 4 - NoLargeRectLerpForMatchedGlobalIndexTest
     @Test func noLargeRectLerpForMatchedGlobalIndex() {
         for target in [0, 3, 5, 6] {
             let s = setup(target: target)
@@ -92,7 +92,7 @@ import GridCore
         }
     }
 
-    // MARK: 5 — FocusRowPhasePreservedAfterCommitTest
+    // MARK: 5 - FocusRowPhasePreservedAfterCommitTest
     @Test func focusRowPhasePreservedAfterCommit() {
         for target in [1, 2, 3, 4, 5] {
             let s = setup(target: target)
@@ -105,7 +105,7 @@ import GridCore
         }
     }
 
-    // MARK: 6 — PhaseComputedFromAnchorGlobalIndexAndDesiredColumnTest
+    // MARK: 6 - PhaseComputedFromAnchorGlobalIndexAndDesiredColumnTest
     @Test func phaseComputedFromAnchorGlobalIndexAndDesiredColumn() {
         let target = 3
         let e = SquareTileGridEngine.testRegular(sectionCounts: [count])
@@ -120,8 +120,8 @@ import GridCore
         }
     }
 
-    // MARK: 7 — GridPhasePersistsAfterZoomTest
-    // The column is a pure function of (phase + globalIndex), independent of scroll — so the phase persists and
+    // MARK: 7 - GridPhasePersistsAfterZoomTest
+    // The column is a pure function of (phase + globalIndex), independent of scroll - so the phase persists and
     // the next frame never snaps back to the canonical phase.
     @Test func gridPhasePersistsAfterZoom() {
         let target = 4
@@ -136,7 +136,7 @@ import GridCore
         }
     }
 
-    // MARK: 8 — ScrollingAfterPhasedZoomRemainsCoherentTest
+    // MARK: 8 - ScrollingAfterPhasedZoomRemainsCoherentTest
     // Scrolling one row keeps every item in the SAME column and shifts its row by exactly one pitch.
     @Test func scrollingAfterPhasedZoomRemainsCoherent() {
         let target = 3

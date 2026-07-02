@@ -2,11 +2,11 @@ import Foundation
 import AVFoundation
 import PhotosCore
 
-/// Serves a Proton video to AVFoundation via range requests — the native equivalent of Proton Drive
+/// Serves a Proton video to AVFoundation via range requests - the native equivalent of Proton Drive
 /// Web's streaming service worker. AVFoundation issues byte-range loading requests against the custom
 /// `protonvideo://` URL; we map each requested range to the cleartext blocks that cover it (pure
 /// `VideoBlockMap`), fetch only those encrypted blocks (disk cache → network), decrypt them, and
-/// respond with the exact window — in file order so the data is contiguous.
+/// respond with the exact window - in file order so the data is contiguous.
 ///
 /// Robustness mirrors the web client: byte-range access is advertised so AVFoundation can seek;
 /// obsolete requests are cancelled on seek (`didCancel`); a small LRU of decrypted blocks plus the
@@ -70,7 +70,7 @@ final class ProtonVideoResourceLoader: NSObject, AVAssetResourceLoaderDelegate, 
                 try await self.serve(dataRequest, request: loadingRequest)
                 if !Task.isCancelled { loadingRequest.finishLoading() }
             } catch is CancellationError {
-                // Seek cancelled this request — leave it; AVFoundation will re-ask if needed.
+                // Seek cancelled this request - leave it; AVFoundation will re-ask if needed.
             } catch {
                 if !Task.isCancelled {
                     loadingRequest.finishLoading(with: error as NSError)

@@ -126,7 +126,7 @@ private struct RefreshResponse: Decodable {
 
 // MARK: - Photos listing (Live Photo / video metadata)
 
-/// One photo as returned by the direct `/drive/volumes/{volumeID}/photos` endpoint — carries the
+/// One photo as returned by the direct `/drive/volumes/{volumeID}/photos` endpoint - carries the
 /// `Tags` + `RelatedPhotos` that the SDK's `enumerateTimeline` wrapper drops.
 struct PhotosListEntry: Decodable {
     let linkID: String
@@ -190,7 +190,7 @@ extension DriveSession {
 
     /// Enumerates the photos listing for a volume via the direct REST endpoint (cursor pagination),
     /// returning the per-photo `Tags` + `RelatedPhotos` the SDK wrapper omits. Pass `tag` for a
-    /// server-side smart filter (Favorites/Videos/Selfies/…) — the API filters by a single tag.
+    /// server-side smart filter (Favorites/Videos/Selfies/…) - the API filters by a single tag.
     func fetchPhotosList(volumeID: String, tag: Int? = nil, pageSize: Int = 500) async throws -> [PhotosListEntry] {
         var all: [PhotosListEntry] = []
         var cursor: String?
@@ -215,7 +215,7 @@ extension DriveSession {
         }
     }
 
-    /// Sets an album's cover to an already-uploaded photo. A cleartext LinkID reference (no crypto) — matches the
+    /// Sets an album's cover to an already-uploaded photo. A cleartext LinkID reference (no crypto) - matches the
     /// Proton web client: PUT the album link with the chosen photo's link id.
     func setAlbumCover(volumeID: String, albumLinkID: String, coverLinkID: String) async throws {
         try await send("/drive/photos/volumes/\(volumeID)/albums/\(albumLinkID)", method: "PUT", body: ["CoverLinkID": coverLinkID])
@@ -246,7 +246,7 @@ extension DriveSession {
     }
 
     /// Lists the user's owned photo albums (AnchorID cursor pagination). Names are NOT included here
-    /// — they're decrypted separately from each album's link metadata.
+    /// - they're decrypted separately from each album's link metadata.
     func fetchAlbums(volumeID: String) async throws -> [AlbumListEntry] {
         var all: [AlbumListEntry] = []
         var anchor: String?
@@ -352,7 +352,7 @@ extension DriveSession {
     private static func decodeAccountData(users: Data, addresses: Data) throws -> AccountData {
         let u = try JSONDecoder().decode(UsersResponse.self, from: users)
         let a = try JSONDecoder().decode(AddressesResponse.self, from: addresses)
-        // Surface the storage quota for Settings (works offline too — both the live and cached paths decode here).
+        // Surface the storage quota for Settings (works offline too - both the live and cached paths decode here).
         if let used = u.user.usedSpace, let max = u.user.maxSpace, max > 0 {
             Task { @MainActor in AccountInfo.shared.update(usedBytes: used, maxBytes: max) }
         }

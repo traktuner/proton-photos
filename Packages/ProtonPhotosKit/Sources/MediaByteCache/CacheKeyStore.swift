@@ -3,11 +3,11 @@ import CryptoKit
 import Security
 
 /// Persists the per-account cache MainKey (the AES-256 key that encrypts the thumbnail/preview cache).
-/// Abstracted so production uses the Apple platform Keychain and tests can inject an in-memory double — the cache
+/// Abstracted so production uses the Apple platform Keychain and tests can inject an in-memory double - the cache
 /// never depends on the Keychain being reachable in a unit test.
 public protocol CacheKeyStore: Sendable {
     /// The key for `account`, minting + persisting a fresh random 256-bit key on first use. Returns `nil`
-    /// only when the backing store is unavailable (e.g. Keychain locked/denied) — the caller then treats
+    /// only when the backing store is unavailable (e.g. Keychain locked/denied) - the caller then treats
     /// the cache as locked (every read is a miss, every write is dropped), never crashes.
     func loadOrCreateKey(account: String) -> SymmetricKey?
 
@@ -22,9 +22,9 @@ public protocol CacheKeyStore: Sendable {
 ///
 /// • One generic-password item per account. The default service keeps the original macOS cache-key namespace for
 ///   migration-free compatibility; callers may inject a different service for a future account-wide namespace.
-/// • `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` — readable only while the device is unlocked, and
+/// • `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` - readable only while the device is unlocked, and
 ///   NEVER migrated to another device or included in an unencrypted backup.
-/// • `kSecAttrSynchronizable` is deliberately NOT set — the key must not sync to iCloud Keychain.
+/// • `kSecAttrSynchronizable` is deliberately NOT set - the key must not sync to iCloud Keychain.
 /// The key value is 32 random bytes from the system CSPRNG. The key is never logged.
 public struct KeychainCacheKeyStore: CacheKeyStore {
     private let service: String
@@ -48,7 +48,7 @@ public struct KeychainCacheKeyStore: CacheKeyStore {
             return SymmetricKey(data: keyData)
         }
         if add == errSecDuplicateItem {
-            // Raced with another writer — read the winner back.
+            // Raced with another writer - read the winner back.
             return existingKey(account: account)
         }
         return nil

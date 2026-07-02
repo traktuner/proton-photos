@@ -5,7 +5,7 @@ import PhotosCore
 /// STABLE for a short window (~100 ms). During a fast scroll the visible set changes every frame; without
 /// this, the visible set would be re-enqueued/reprioritised dozens of times per second. This emits the
 /// settled set exactly ONCE per stable viewport so a visible-priority fetch interrupts the background
-/// crawl after the scroll comes to rest — matching Apple Photos, where thumbnails fill in when you stop.
+/// crawl after the scroll comes to rest - matching Apple Photos, where thumbnails fill in when you stop.
 ///
 /// Pure policy: the caller supplies `now` (monotonic seconds), so it is fully deterministic and unit
 /// testable with no timers. Thread-safe (NSLock) because the render path and the settle check may touch
@@ -50,7 +50,7 @@ public final class ViewportRequestDebouncer: @unchecked Sendable {
     }
 
     /// True when there is a noted set that has NOT yet been emitted (settled or still settling). The caller
-    /// uses this — not its own per-frame queue — to decide whether to re-arm the settle check, so a fast
+    /// uses this - not its own per-frame queue - to decide whether to re-arm the settle check, so a fast
     /// scroll's final viewport still gets emitted after the scroll stops.
     public func hasPendingUnflushed() -> Bool {
         lock.withLock { pendingKey != nil && pendingKey != lastFlushedKey }

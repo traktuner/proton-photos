@@ -15,7 +15,7 @@ public protocol UploadManaging: Sendable {
 }
 
 /// Bounded-concurrency upload queue with a strict per-item state machine, album orchestration, and
-/// partial-success handling. Pure of any SDK/HTTP concern — all transport goes through the injected
+/// partial-success handling. Pure of any SDK/HTTP concern - all transport goes through the injected
 /// `PhotoUploading` (and optional `AlbumAttaching`) seams, which keeps the whole thing unit-testable.
 public actor UploadManager: UploadManaging {
 
@@ -37,7 +37,7 @@ public actor UploadManager: UploadManaging {
     }
 
     private var jobs: [UploadQueueItemID: Job] = [:]
-    private var order: [UploadQueueItemID] = []      // enqueue order — the stable display order
+    private var order: [UploadQueueItemID] = []      // enqueue order - the stable display order
     private var activeIDs: Set<UploadQueueItemID> = []
     private var globalPaused = false
     private var nextOrdinal = 0
@@ -352,7 +352,7 @@ public actor UploadManager: UploadManaging {
         pump()
     }
 
-    /// Global gate — stop dispatching new uploads (in-flight items finish).
+    /// Global gate - stop dispatching new uploads (in-flight items finish).
     public func pauseAll() {
         globalPaused = true
         notify()

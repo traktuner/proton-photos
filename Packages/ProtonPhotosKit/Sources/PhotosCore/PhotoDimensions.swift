@@ -6,7 +6,7 @@ import Foundation
 /// The values may be THUMBNAIL-SCALE: the thumbnail feed records the decoded thumbnail's pixel
 /// size, which preserves the aspect ratio but not the original's absolute resolution. Consumers
 /// that need layout/aspect information can rely on `aspectRatio`; consumers that need true pixel
-/// counts must use `PhotoMetadata` (server xattr) — a future writer may upgrade rows to true
+/// counts must use `PhotoMetadata` (server xattr) - a future writer may upgrade rows to true
 /// dimensions via `TimelineMetadataStore.updateDimensions(_:overwrite: true)`.
 public struct PhotoPixelDimensions: Hashable, Sendable, Codable {
     public let width: Int
@@ -34,16 +34,16 @@ public protocol PhotoDimensionRecording: Sendable {
 
 /// Coalesces per-decode dimension callbacks into batched store writes.
 ///
-/// The thumbnail feeds fire `record` once per decoded image — during a fast scroll or the
+/// The thumbnail feeds fire `record` once per decoded image - during a fast scroll or the
 /// background crawl that is hundreds of callbacks per second, and re-decodes of evicted
 /// thumbnails repeat for UIDs already seen. This actor dedupes per session, buffers, and flushes
 /// one batch after `flushDelay`, so the store sees a handful of small transactions instead of
-/// per-decode writes — and never any DB work on the caller's (render/decode) path.
+/// per-decode writes - and never any DB work on the caller's (render/decode) path.
 public actor PhotoDimensionCoalescer {
     private let store: any PhotoDimensionRecording
     private let flushDelay: Duration
     private var pending: [PhotoUID: PhotoPixelDimensions] = [:]
-    /// UIDs already flushed this session — re-decodes of the same photo are dropped here instead
+    /// UIDs already flushed this session - re-decodes of the same photo are dropped here instead
     /// of re-hitting the store (where they would be a no-op anyway).
     private var recorded: Set<PhotoUID> = []
     private var flushTask: Task<Void, Never>?
@@ -60,7 +60,7 @@ public actor PhotoDimensionCoalescer {
         Task { await self.enqueue(uid, dimensions) }
     }
 
-    /// Awaitable enqueue (the fire-and-forget `record` hops here) — first sighting of a UID wins
+    /// Awaitable enqueue (the fire-and-forget `record` hops here) - first sighting of a UID wins
     /// for the session, matching the store's fill-if-NULL semantics.
     public func enqueue(_ uid: PhotoUID, _ dimensions: PhotoPixelDimensions) {
         guard !recorded.contains(uid), pending[uid] == nil else { return }
@@ -72,7 +72,7 @@ public actor PhotoDimensionCoalescer {
         }
     }
 
-    /// Flushes immediately — for app teardown and tests.
+    /// Flushes immediately - for app teardown and tests.
     public func flushNow() async {
         flushTask?.cancel()
         await flush()

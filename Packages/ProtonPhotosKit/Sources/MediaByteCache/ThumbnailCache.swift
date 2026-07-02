@@ -20,7 +20,7 @@ public struct ThumbnailCacheConfiguration: Sendable, Equatable {
 /// written to disk; the in-memory tier holds plaintext for the running process only. The cache is usable
 /// before sign-in via a process-ephemeral key (nothing readable persists), then account configuration purges
 /// any legacy plaintext cache. Reads transparently decrypt; a failed authentication tag is a cache MISS and
-/// the corrupt blob is deleted, while a missing key (locked cache) is a plain MISS that keeps the blob — never
+/// the corrupt blob is deleted, while a missing key (locked cache) is a plain MISS that keeps the blob - never
 /// a crash.
 public actor ThumbnailCache {
     private nonisolated(unsafe) let memory = NSCache<NSString, NSData>()   // NSCache is thread-safe
@@ -33,6 +33,8 @@ public actor ThumbnailCache {
     private nonisolated let crypto: CryptoBox
     /// Filenames proven decryptable this session (so `hasUsableDiskData` is O(1) after the first probe).
     private nonisolated let validated = ValidatedPresence()
+    /// Nominal RAM-tier byte budget, retained so a memory-pressure scale can be restored to full.
+    private nonisolated let dataMemoryBudgetBytes: Int
 
     public init(
         namespace: String = "thumbnails",
@@ -73,7 +75,18 @@ public actor ThumbnailCache {
                                      derivative: self.derivative),
             account: CryptoBox.ephemeralAccount
         )
+        self.dataMemoryBudgetBytes = configuration.dataMemoryBudgetBytes
         memory.totalCostLimit = configuration.dataMemoryBudgetBytes
+    }
+
+    /// Governor-driven memory-pressure response for the in-process plaintext RAM tier. `scale` lowers
+    /// the NSCache cost limit; `purge` drops the tier now. `nonisolated` + thread-safe NSCache, so the
+    /// governor never hops the cache actor. The encrypted disk tier is untouched - bytes are re-read
+    /// (and decrypted) on demand, never lost.
+    public nonisolated func applyMemoryPressure(scale: Double, purge: Bool) {
+        let clamped = min(1, max(0, scale))
+        memory.totalCostLimit = max(1, Int(Double(dataMemoryBudgetBytes) * clamped))
+        if purge { memory.removeAllObjects() }
     }
 
     public nonisolated static func defaultRootDirectory() -> URL {
@@ -124,7 +137,7 @@ public actor ThumbnailCache {
         return data
     }
 
-    /// Cheap on-disk existence check (no read/decrypt) — for diagnostics/coverage only. Do NOT use this to
+    /// Cheap on-disk existence check (no read/decrypt) - for diagnostics/coverage only. Do NOT use this to
     /// gate network fetches: with encrypted blobs a corrupt/tampered/wrong-key file can exist yet be
     /// unreadable. Use `hasUsableDiskData(_:)` for any skip-the-network decision.
     public nonisolated func has(_ uid: PhotoUID) -> Bool {
@@ -168,7 +181,7 @@ public actor ThumbnailCache {
         return plaintext
     }
 
-    /// URL of the on-disk ENCRYPTED blob (bytes are ciphertext — not directly decodable).
+    /// URL of the on-disk ENCRYPTED blob (bytes are ciphertext - not directly decodable).
     public nonisolated func diskURL(for uid: PhotoUID) -> URL {
         let (_, account) = crypto.snapshot()
         return directory.appendingPathComponent(filename(uid: uid, account: account))
@@ -182,7 +195,7 @@ public actor ThumbnailCache {
         let name = filename(uid: uid, account: account)
         do {
             try sealed.write(to: directory.appendingPathComponent(name), options: .atomic)
-            validated.insert(name)   // we just sealed it — it's decryptable
+            validated.insert(name)   // we just sealed it - it's decryptable
         } catch {
             validated.remove(name)
         }
@@ -196,7 +209,7 @@ public actor ThumbnailCache {
     // MARK: - LRU size cap (used ONLY by the originals cache; thumbnails/previews stay uncapped & hot-path-free)
 
     /// Marks a blob as recently used (bumps its modification date) so LRU eviction keeps it. Called on a disk
-    /// HIT for the originals cache only — never on the thumbnail/preview scrolling hot path.
+    /// HIT for the originals cache only - never on the thumbnail/preview scrolling hot path.
     public nonisolated func touch(_ uid: PhotoUID) {
         let (_, account) = crypto.snapshot()
         let url = directory.appendingPathComponent(filename(uid: uid, account: account))
@@ -230,7 +243,7 @@ public actor ThumbnailCache {
 
     // MARK: - Clearing
 
-    /// Erases the on-disk cache (keeps the account key — re-crawl refills). Used by "Delete Offline Cache".
+    /// Erases the on-disk cache (keeps the account key - re-crawl refills). Used by "Delete Offline Cache".
     public func clear() {
         memory.removeAllObjects()
         validated.clearAll()

@@ -33,7 +33,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             name: "PhotosCore",
             // CryptoKit: timeline save-skip digest (contract-permitted). OSLog: package-wide
             // Apple-platform signpost instrumentation (macOS/iOS/iPadOS), not UI or hardware policy. SQLite3: the system C
-            // SQLite module backing the app-owned `library-v1.sqlite` timeline metadata store —
+            // SQLite module backing the app-owned `library-v1.sqlite` timeline metadata store -
             // public, supported API on macOS/iOS/iPadOS (QA1809), not a UI framework.
             allowedImports: ["AVFoundation", "CoreGraphics", "CryptoKit", "Foundation", "OSLog", "SQLite3"],
             expectedDependencies: [],
@@ -81,8 +81,8 @@ final class CoreArchitectureGateTests: XCTestCase {
             // (with a value-math justification) if a legitimate need ever appears.
             allowedImports: ["CoreGraphics", "simd"],
             expectedDependencies: [],
-            // CoreGraphics DRAWING/surface types — as opposed to the `CGRect`/`CGSize`/`CGPoint`/`CGFloat`
-            // value types GridCore legitimately relies on — have no place in pure grid geometry. Scoped to
+            // CoreGraphics DRAWING/surface types - as opposed to the `CGRect`/`CGSize`/`CGPoint`/`CGFloat`
+            // value types GridCore legitimately relies on - have no place in pure grid geometry. Scoped to
             // GridCore (not global) because `CGImage` IS a legitimate decoded-image type in MediaDecodingCore
             // and MediaFeedCore, so a global ban would wrongly fail those Core targets.
             extraForbiddenTokens: ["CGContext", "CGImage", "CGColorSpace", "CGLayer"]
@@ -138,7 +138,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         "MTKView",
         // Render/GPU-surface + presentation types (Phase 3.9). None is ever a legitimate universal-Core type;
         // they belong in platform adapters. `CAMetal*`/`CADisplayLink`/`CALayer` are QuartzCore-sourced (so a
-        // ban is meaningful even if QuartzCore were re-allowed), and `MTL*` are Metal resource objects — banning
+        // ban is meaningful even if QuartzCore were re-allowed), and `MTL*` are Metal resource objects - banning
         // the concrete type names catches a fully-qualified reference or a re-exporting shim even if the `Metal`
         // import ban were bypassed.
         "CAMetalDrawable",

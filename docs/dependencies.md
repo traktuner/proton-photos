@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Repo | https://github.com/ProtonDriveApps/sdk-swift |
-| Integration | Vendored **local path** Swift package (`Vendor/sdk-swift`), gitignored — re-clone, not committed |
+| Integration | Vendored **local path** Swift package (`Vendor/sdk-swift`), gitignored - re-clone, not committed |
 | Current tag | **0.17.1** |
 | Tag commit | `527b3115a80fcf006e944bf610ffe27ab3a9e23e` |
 | SDK source commit | `2eb7f75ca92d508d074e11f0a540ba6dadad3d8e` |
@@ -13,7 +13,7 @@
 | Updated | 2026-06-18 (from 0.15.0 / commit `fab6c242…` / source `6fabe065…`) |
 
 It must be a **local path** package (not a versioned remote dependency) because the SDK's
-`Package.swift` uses `.unsafeFlags` in its linker settings — SwiftPM forbids those in remote deps.
+`Package.swift` uses `.unsafeFlags` in its linker settings - SwiftPM forbids those in remote deps.
 Re-clone with: `git clone --branch 0.17.1 https://github.com/ProtonDriveApps/sdk-swift Vendor/sdk-swift`
 
 ### ProtonCore coupling (important)
@@ -38,7 +38,7 @@ The public Swift API the app consumes (`ProtonPhotosClient.enumerateTimeline` / 
 / `download`, `SDKNodeUid`, `PhotoTimelineItem`, `ProtonDriveClientConfiguration`,
 `HttpClientProtocol`, `AccountClientProtocol`) is **unchanged**. The only `Sources/` diffs are the
 generated protobuf and additive telemetry enum cases (`DownloadError.validationError`,
-`UploadError.validationError`) — both ignored by the app's no-op log/metric callbacks.
+`UploadError.validationError`) - both ignored by the app's no-op log/metric callbacks.
 
 All SDK-specific types stay isolated in `App/Drive/` (`DriveSDKBridge`, `SDKHttpClient`,
 `SDKAccountClient`, `DriveSession`). The feature package `Packages/ProtonPhotosKit` has **no** SDK or
@@ -49,5 +49,5 @@ ProtonCore dependency.
 | | |
 |---|---|
 | Repo | https://github.com/ProtonMail/protoncore_ios |
-| Version | **37.3.0** (was 37.0.1) — pinned `exact` in `project.yml`, must match sdk-swift |
+| Version | **37.3.0** (was 37.0.1) - pinned `exact` in `project.yml`, must match sdk-swift |
 | Products linked | `ProtonCoreDataModel`, `ProtonCoreCrypto`, `ProtonCoreCryptoGoInterface`, `ProtonCoreCryptoPatchedGoImplementation`, `ProtonCoreKeyManager`, `GoLibsCryptoPatchedGo` (via SDK) |

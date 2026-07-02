@@ -7,7 +7,7 @@ import GridCore
 /// Pins the zoom anchor model the engine must honour: the anchor identity is the ITEM (section / global
 /// index) + a local fraction within its slot, NOT a raw scroll offset. Across changing slotSide / gap /
 /// column-count / row / section-offset, the engine rebases the scroll offset from the anchor item so the
-/// same logical point stays under the same viewport point — the grid never jumps to a different timeline
+/// same logical point stays under the same viewport point - the grid never jumps to a different timeline
 /// position. These guard the live-pinch fix.
 @Suite struct ZoomAnchorPreservationTests {
     private let width: CGFloat = 1400
@@ -30,7 +30,7 @@ import GridCore
         return (anchor, a.flatIndex, a.localFraction)
     }
 
-    // ZoomPreservesAnchorItemTest — the same anchor item stays under the same viewport point across apparent
+    // ZoomPreservesAnchorItemTest - the same anchor item stays under the same viewport point across apparent
     // metrics (source level → target/apparent levels).
     @Test func zoomPreservesAnchorItem() {
         let e = singleSection()
@@ -45,7 +45,7 @@ import GridCore
         }
     }
 
-    // ZoomDoesNotJumpToDifferentTimelinePositionTest — changing slotSide/gap/columns must keep the anchor
+    // ZoomDoesNotJumpToDifferentTimelinePositionTest - changing slotSide/gap/columns must keep the anchor
     // item on-screen and the visible window centred on it (no jump to unrelated global indices).
     @Test func zoomDoesNotJumpToDifferentTimelinePosition() {
         let e = singleSection()
@@ -64,7 +64,7 @@ import GridCore
         }
     }
 
-    // SectionAwareAnchorPreservationTest — with multiple sections, the anchor item (in a LATER section,
+    // SectionAwareAnchorPreservationTest - with multiple sections, the anchor item (in a LATER section,
     // whose top offset + row count both shift when columns change) stays under the viewport point.
     @Test func sectionAwareAnchorPreservation() {
         let e = manySections()
@@ -87,7 +87,7 @@ import GridCore
         }
     }
 
-    // ScrollOffsetRebasedWhenMetricsChangeTest — the offset is RECOMPUTED from the anchor item + apparent
+    // ScrollOffsetRebasedWhenMetricsChangeTest - the offset is RECOMPUTED from the anchor item + apparent
     // metrics; the raw start offset is not reused (and reusing it would put the anchor elsewhere).
     @Test func scrollOffsetRebasedWhenMetricsChange() {
         let e = singleSection()
@@ -103,7 +103,7 @@ import GridCore
         #expect(abs((anchorContentY - startScrollY) - viewportPoint.y) > 50.0)    // raw reuse → wrong (jump)
     }
 
-    // VisibleSlotsStableAroundAnchorDuringPinchTest — over a fine continuous sweep, the anchor stays visible
+    // VisibleSlotsStableAroundAnchorDuringPinchTest - over a fine continuous sweep, the anchor stays visible
     // and the view stays in its timeline neighbourhood every frame (no mid-pinch jump).
     @Test func visibleSlotsStableAroundAnchorDuringPinch() {
         let e = singleSection()
@@ -115,7 +115,7 @@ import GridCore
             let visible = Set(plan.visibleSlots.map(\.index))
             #expect(visible.contains(cap.flatIndex), "anchor lost at apparent level \(x)")
             // The anchor's index-neighbourhood remains present and overlaps the previous frame (local
-            // coherence — the view doesn't teleport between frames).
+            // coherence - the view doesn't teleport between frames).
             let near = visible.filter { abs($0 - cap.flatIndex) <= 60 }
             #expect(near.count >= 8, "anchor neighbourhood thinned out at \(x)")
             if let prevNear, !prevNear.isEmpty {

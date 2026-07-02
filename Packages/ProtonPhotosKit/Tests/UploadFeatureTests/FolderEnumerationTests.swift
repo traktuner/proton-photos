@@ -9,8 +9,8 @@ final class FolderEnumerationTests: XCTestCase {
         try fm.createDirectory(at: root.appendingPathComponent("sub"), withIntermediateDirectories: true)
         func write(_ rel: String) throws { try Data("x".utf8).write(to: root.appendingPathComponent(rel)) }
         try write("photo1.jpg")
-        try write(".hidden.jpg")        // hidden — skipped by default
-        try write("note.txt")           // unsupported — reported, not uploaded
+        try write(".hidden.jpg")        // hidden - skipped by default
+        try write("note.txt")           // unsupported - reported, not uploaded
         try write("sub/photo2.png")     // nested media
         try write("sub/clip.mov")       // nested video
         try write("sub/.DS_Store")      // hidden junk

@@ -15,7 +15,7 @@ package enum GridTextureStreamingPolicy {
     /// Pinning is clamped to the first `maxPinned` items in priority order (visible first, then nearest
     /// overscan): pinned entries are exempt from eviction, so an unclamped pin set at dense zoom levels
     /// (viewport + 2×overscan can exceed the whole texture budget) would make residency unbounded. Items
-    /// beyond the clamp stay in `priority` — they may still upload when the budget has room, but they
+    /// beyond the clamp stay in `priority` - they may still upload when the budget has room, but they
     /// remain evictable.
     package static func window<ID: Hashable & Sendable>(
         visibleIDs: [ID],

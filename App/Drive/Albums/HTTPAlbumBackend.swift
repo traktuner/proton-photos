@@ -7,7 +7,7 @@ import AlbumsFeature
 /// Listing + SET-COVER work via direct REST (the set-cover write is just a cleartext `CoverLinkID` PUT, no
 /// crypto). Create + add-photo are still **not** implemented: those HTTP writes require album-node encryption
 /// (generating an album node key, encrypting the name + hash key, and re-encrypting each photo's content key to
-/// the album key) that this app's `DriveCrypto` (decrypt-only) can't yet do — they report `.unsupported` with the
+/// the album key) that this app's `DriveCrypto` (decrypt-only) can't yet do - they report `.unsupported` with the
 /// exact gap rather than faking success.
 struct HTTPAlbumBackend: AlbumBackend {
     /// Supplied by the bridge: the already-decrypted album list the sidebar uses.

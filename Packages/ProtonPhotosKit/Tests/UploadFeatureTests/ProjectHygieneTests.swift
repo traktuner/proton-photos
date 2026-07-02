@@ -41,7 +41,7 @@ final class ProjectHygieneTests: XCTestCase {
         return String(tail[..<next])
     }
 
-    // 11. CleanupSafetyTest — the excluded/deleted experiment is gone and unreferenced.
+    // 11. CleanupSafetyTest - the excluded/deleted experiment is gone and unreferenced.
     func testPrivateAppleGridExperimentRemoved() {
         let fm = FileManager.default
         XCTAssertFalse(fm.fileExists(atPath: appDir.appendingPathComponent("PrivateAppleGrid").path),
@@ -63,7 +63,7 @@ final class ProjectHygieneTests: XCTestCase {
         XCTAssertFalse(projectYML.contains("Bridging-Header"))
     }
 
-    // 12. PrivateAPISafetyTest — production app target uses no known private Apple API / frameworks.
+    // 12. PrivateAPISafetyTest - production app target uses no known private Apple API / frameworks.
     func testNoPrivateAppleAPIInProductionTarget() {
         let banned = ["PPApplePrivate", "loadPrivateFrameworks", "filterWithType:", "CAFilterClassNames"]
         for url in appSourceFiles() {

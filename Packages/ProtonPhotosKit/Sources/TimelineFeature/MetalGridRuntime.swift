@@ -4,7 +4,7 @@ import MetalRenderingCore
 import PhotosCore
 
 /// Runtime probe for the Metal-backed library grid. The production timeline is MetalGrid-ONLY (the canonical
-/// `SquareTileGridEngine` owns all geometry — there is no legacy-grid fallback and no feature flag). This
+/// `SquareTileGridEngine` owns all geometry - there is no legacy-grid fallback and no feature flag). This
 /// only answers "can Metal actually initialise on this machine" so callers never crash if a GPU/shader is
 /// missing, and logs the resolved path once for diagnostics.
 enum MetalGridRuntime {

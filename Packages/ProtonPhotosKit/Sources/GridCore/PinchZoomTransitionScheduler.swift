@@ -2,7 +2,7 @@
 //
 // Builds the immutable PINCH071 plan for a live L0↔L1 pinch: W071 fixed-width (0.0706 q) component
 // windows, centre-out, host-owned q (the coordinator drives q from a critically-damped follower on
-// the raw magnification — NOT computed here). No component-local timers; lp is a pure function of q,
+// the raw magnification - NOT computed here). No component-local timers; lp is a pure function of q,
 // so a fast gesture that crosses a window between frames is legitimately compressed (no prolonging),
 // and reversing the gesture reverses the presentation immediately.
 

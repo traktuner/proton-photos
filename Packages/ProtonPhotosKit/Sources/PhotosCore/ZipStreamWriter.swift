@@ -1,13 +1,13 @@
 import Foundation
 
-/// Minimal STREAMING ZIP writer, STORE method (no compression — photos/videos are already compressed, so
+/// Minimal STREAMING ZIP writer, STORE method (no compression - photos/videos are already compressed, so
 /// recompressing wastes CPU for ~0 gain). Each entry's bytes are written straight to the destination file via a
 /// `FileHandle`:
-///   • E2EE: decrypted originals only ever land at the user's chosen `.zip` — never staged in an app temp dir.
+///   • E2EE: decrypted originals only ever land at the user's chosen `.zip` - never staged in an app temp dir.
 ///   • Scale: the whole archive is never held in RAM, and ZIP64 is emitted per-entry / per-archive whenever a
 ///     size or offset crosses the 4 GB zip32 limit, so an export of any size (multi-TB) is a valid archive.
 ///
-/// Each `addFile` is given the file's full decrypted bytes (so CRC-32 + size are known up front — no streaming
+/// Each `addFile` is given the file's full decrypted bytes (so CRC-32 + size are known up front - no streaming
 /// data-descriptor needed). Little-endian throughout, per the PKZIP APPNOTE.
 public final class ZipStreamWriter {
     private let handle: FileHandle
@@ -123,7 +123,7 @@ public final class ZipStreamWriter {
         try handle.close()
     }
 
-    /// Closes the file WITHOUT writing the central directory — for an aborted export (the caller deletes the
+    /// Closes the file WITHOUT writing the central directory - for an aborted export (the caller deletes the
     /// partial file). Leaves no valid archive behind.
     public func abort() { try? handle.close() }
 

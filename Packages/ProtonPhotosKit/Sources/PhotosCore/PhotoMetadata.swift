@@ -1,6 +1,6 @@
 import Foundation
 
-/// Full file metadata for the viewer's info panel — filename, capture/EXIF-ish data, dimensions and
+/// Full file metadata for the viewer's info panel - filename, capture/EXIF-ish data, dimensions and
 /// location. Sourced from the decrypted Drive link `Name` + the file's `XAttr` (Proton stores only a
 /// device string, not full EXIF: no aperture/ISO/lens are available).
 public struct PhotoMetadata: Sendable, Equatable {

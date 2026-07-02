@@ -1,7 +1,7 @@
 import Foundation
 
 /// Global back-off gate for Proton Drive's rate limits (HTTP 429). When the API tells us to slow
-/// down (via `Retry-After`), every Drive request waits out the penalty window before proceeding —
+/// down (via `Retry-After`), every Drive request waits out the penalty window before proceeding -
 /// mirroring how the official clients gate their request rate. Shared across all HTTP calls.
 final class RateLimitGate: @unchecked Sendable {
     private let lock = NSLock()

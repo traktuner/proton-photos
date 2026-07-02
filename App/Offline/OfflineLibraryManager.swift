@@ -8,7 +8,7 @@ import ProtonAuth
 
 /// Owns the local offline-cache roots and bridges the Settings UI to the running thumbnail feed
 /// (Deliverables 1–3). One shared instance: the main window registers its feed here on appear, and
-/// the Settings scene — a separate window with no access to `MainView`'s state — reads/writes through
+/// the Settings scene - a separate window with no access to `MainView`'s state - reads/writes through
 /// it. The thumbnail crawl is mandatory grid infrastructure and is not controlled by the Offline
 /// Photo Library toggle; "Delete Offline Cache…" is the explicit cache-erasing action.
 @MainActor
@@ -16,7 +16,7 @@ import ProtonAuth
 final class OfflineLibraryManager {
     static let shared = OfflineLibraryManager()
 
-    /// Disk thumbnail cache (decoded grid previews) — shared with `MainView`'s `ThumbnailFeed`. Encrypted
+    /// Disk thumbnail cache (decoded grid previews) - shared with `MainView`'s `ThumbnailFeed`. Encrypted
     /// per-account (AES-GCM); `configure(session:)` installs a key derived from the restored Proton session.
     let cache = ThumbnailCache(
         namespace: "thumbnails",
@@ -31,7 +31,7 @@ final class OfflineLibraryManager {
     )
     /// Full-resolution ORIGINALS viewed in the photo viewer, persisted (encrypted) when the offline library is
     /// ON, bounded by an LRU size cap (see `originalsCapBytes`). Makes reopening a photo instant even after a
-    /// relaunch / while offline — the bug this fixes was that originals lived only in a per-process RAM cache.
+    /// relaunch / while offline - the bug this fixes was that originals lived only in a per-process RAM cache.
     let originalsCache = ThumbnailCache(
         namespace: "originals",
         derivative: "original",
@@ -69,7 +69,7 @@ final class OfflineLibraryManager {
     /// Became true once this session saw an un-warm cache (the pill is an INITIAL-LOAD affordance only).
     private var prepareActive = false
     /// The pill whooshed away after the first warm-up; it stays hidden for the rest of the session. We can't
-    /// meaningfully predict a mid-session backlog ("1500 new assets just synced"), so re-showing is deferred —
+    /// meaningfully predict a mid-session backlog ("1500 new assets just synced"), so re-showing is deferred -
     /// a fresh launch with an un-warm cache naturally counts as that launch's initial load.
     private var prepareDismissed = false
     /// Drives the toolbar "preparing library" pill: shown only during the session's first warm-up, hidden the
@@ -101,7 +101,7 @@ final class OfflineLibraryManager {
     }
 
     /// Polls the thumbnail crawl's coverage so the toolbar "preparing library" pill shows live progress, then
-    /// whooshes the pill away once warm. Cheap: one actor read every 1.5 s. INITIAL-LOAD only — once it completes
+    /// whooshes the pill away once warm. Cheap: one actor read every 1.5 s. INITIAL-LOAD only - once it completes
     /// it is not re-shown this session (see `prepareDismissed`); a warm-at-launch cache shows nothing at all.
     private func startPrepareMonitor() {
         prepareMonitor?.cancel()
@@ -112,7 +112,7 @@ final class OfflineLibraryManager {
             while let self, !Task.isCancelled {
                 // Only trust coverage once the crawl is SEEDED (`diskThumbnailTotal > 0`). An empty crawl reports
                 // a false 1.0 "warm"; at launch the monitor runs before the timeline seeds the crawl, so without
-                // this gate it would conclude warm and exit before the first thumbnail ever loads — and the pill
+                // this gate it would conclude warm and exit before the first thumbnail ever loads - and the pill
                 // would never appear on a genuine first load (e.g. right after a cache reset).
                 if let status = await self.feed?.prefetchStatus(), status.diskThumbnailTotal > 0 {
                     let percent = status.diskThumbnailCoverageFraction * 100   // fraction → 0…100 percent
@@ -125,7 +125,7 @@ final class OfflineLibraryManager {
             guard let self, !Task.isCancelled else { return }
             self.cachePreparePercent = 100
             // Only whoosh out a pill that was actually shown (a cache warm at launch never set prepareActive).
-            // Hold 100 % briefly so completion registers, then animate the whole pill away — and keep it hidden.
+            // Hold 100 % briefly so completion registers, then animate the whole pill away - and keep it hidden.
             if self.prepareActive {
                 try? await Task.sleep(for: .seconds(0.4))
                 withAnimation(.smooth(duration: 0.45)) { self.prepareDismissed = true }
@@ -172,21 +172,21 @@ final class OfflineLibraryManager {
         prepareDismissed = false
     }
 
-    /// Kicks off the background GPS crawl that builds the Map view's location index — once per session.
+    /// Kicks off the background GPS crawl that builds the Map view's location index - once per session.
     /// Lower priority than the thumbnail crawl: a single throttled worker, resumable (only photos not yet
     /// indexed are fetched), persisting the encrypted snapshot periodically. Safe to call repeatedly; only
     /// the first non-empty call starts it.
     func startLocationCrawl(items: [PhotoItem], metadata: any PhotoMetadataProvider) {
         guard !locationCrawlStarted, !items.isEmpty else { return }
         locationCrawlStarted = true
-        let uids = items.reversed().map(\.uid)   // newest first — recent photos are likelier geotagged → pins appear fast
+        let uids = items.reversed().map(\.uid)   // newest first - recent photos are likelier geotagged → pins appear fast
         let dates = Dictionary(items.map { ($0.uid, $0.captureTime) }, uniquingKeysWith: { first, _ in first })
         let index = locationIndex
         let store = locationStore
         let feed = self.feed
         Task {
             // Give the thumbnail crawl a head start, then crawl GPS only while the grid isn't actively
-            // demanding on-screen thumbnails — so the Map crawl shares the rate-limit budget as P2 and
+            // demanding on-screen thumbnails - so the Map crawl shares the rate-limit budget as P2 and
             // never stalls scrolling (thumbnails are P1).
             try? await Task.sleep(for: .seconds(8))
             await locationCrawl.start(
@@ -199,8 +199,8 @@ final class OfflineLibraryManager {
                 },
                 index: index,
                 store: store,
-                // P2: pause the GPS crawl entirely while the thumbnail crawl (P1) still has ANY work —
-                // visible OR background fill — so they never flood the backend together and stall thumbnails.
+                // P2: pause the GPS crawl entirely while the thumbnail crawl (P1) still has ANY work -
+                // visible OR background fill - so they never flood the backend together and stall thumbnails.
                 shouldYield: { await feed?.hasPendingThumbnailWork() ?? true }
             )
         }
@@ -215,7 +215,7 @@ final class OfflineLibraryManager {
         UserDefaults.standard.set(enabled, forKey: AppSettingsKey.offlineLibraryEnabled)
     }
 
-    /// Persists the originals-cache cap and enforces it immediately — lowering it (or switching from unbounded to
+    /// Persists the originals-cache cap and enforces it immediately - lowering it (or switching from unbounded to
     /// bounded) purges the least-recently-used originals down to the new budget right away.
     func setOriginalsCap(unlimited: Bool, gigabytes: Double) {
         let d = UserDefaults.standard
@@ -229,7 +229,7 @@ final class OfflineLibraryManager {
         }
     }
 
-    /// Clears ONLY the full-resolution originals cache — used when the user turns the Offline Photo Library OFF.
+    /// Clears ONLY the full-resolution originals cache - used when the user turns the Offline Photo Library OFF.
     /// Thumbnails + previews (mandatory grid + browsing infrastructure) and the account key are kept.
     func purgeOriginalsCache() async {
         await originalsCache.clear()
@@ -243,9 +243,9 @@ final class OfflineLibraryManager {
         return HKDF<SHA256>.deriveKey(inputKeyMaterial: input, salt: salt, info: info, outputByteCount: 32)
     }
 
-    /// MASTER RESET: erases EVERYTHING on disk for the current account — thumbnails, previews, full originals, and
-    /// streamed video blocks — leaving the state as if freshly signed in (the account key is kept, so the grid
-    /// simply re-crawls). Never called implicitly — only from the explicit "Delete Offline Cache…" button.
+    /// MASTER RESET: erases EVERYTHING on disk for the current account - thumbnails, previews, full originals, and
+    /// streamed video blocks - leaving the state as if freshly signed in (the account key is kept, so the grid
+    /// simply re-crawls). Never called implicitly - only from the explicit "Delete Offline Cache…" button.
     func deleteOfflineCache() async {
         await cache.clear()
         await previewCache.clear()

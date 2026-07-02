@@ -2,7 +2,7 @@
 
 ProtonPhotos ships an English (source) and German (`de`) UI, built on Apple's **String Catalogs**
 (`.xcstrings`). The app uses the **system language automatically**; an unsupported language falls back
-to English. There is intentionally **no in-app language picker** — language follows the OS.
+to English. There is intentionally **no in-app language picker** - language follows the OS.
 
 ## Architecture at a glance
 
@@ -19,7 +19,7 @@ Two String Catalogs, split by which bundle the strings live in:
   `error.video.unsupported_codec`). The English value is the source of truth; editing English copy does
   **not** change the key.
 - The main app bundle ships `en.lproj` + `de.lproj` (produced from the App catalog). That is what makes
-  macOS run the app in German when the user prefers it — and drives `Bundle.module`'s language for the
+  macOS run the app in German when the user prefers it - and drives `Bundle.module`'s language for the
   package catalog too.
 
 ### Why a facade for package strings
@@ -40,7 +40,7 @@ public enum L10n {
 `PhotosCore` is the lowest-level module and **every** other package module already depends on it, so
 `L10n` is reachable everywhere with a single `import PhotosCore`. The facade returns a resolved `String`,
 which all SwiftUI controls accept verbatim through their `StringProtocol` initializers (`Text`, `Button`,
-`Label`, `.help`, `.accessibilityLabel`, …) — and which also works in non-SwiftUI sites (`NSMenuItem`,
+`Label`, `.help`, `.accessibilityLabel`, …) - and which also works in non-SwiftUI sites (`NSMenuItem`,
 accessibility APIs, error `userMessage`s).
 
 ```swift
@@ -52,7 +52,7 @@ label = L10n.string("upload.state_uploading \(percent)") // interpolation → ke
 ### Plurals & interpolation
 
 - **Interpolation** uses `String.LocalizationValue` interpolation: `"key \(value)"` becomes a key with a
-  `%@`/`%lld` suffix and the value as a format argument. Never concatenate localized fragments — put the
+  `%@`/`%lld` suffix and the value as a format argument. Never concatenate localized fragments - put the
   whole sentence (with placeholders) in one catalog entry.
 - **Plurals** use String Catalog plural variations (compiled to `.stringsdict`). Apple requires every
   plural variation to reference the number; for messages whose singular form omits the count (e.g. "Move
@@ -72,7 +72,7 @@ These are deliberate and shouldn't be "fixed":
   ("This action isn't available yet.") via `errorDescription`, never the raw gap prose. Album writes are
   also gated read-only in the UI today.
 - **Dynamic server/SDK detail:** passthrough error text such as `AlbumError.backend(message)`,
-  `UploadError.backend(message)`, and `ProtonAuthError.apiError`'s server message — these are
+  `UploadError.backend(message)`, and `ProtonAuthError.apiError`'s server message - these are
   runtime-provided strings (like `error.localizedDescription`), interpolated as detail into a localized
   frame where one exists, not fixed UI copy we can translate.
 - **`ViewerTitleFormatter`:** a pure, locale-parameterized formatter; its "Photo"/"Foto" fallback and
@@ -85,7 +85,7 @@ These are deliberate and shouldn't be "fixed":
    - In `App/…` → App catalog, and read it with `Text("your.key")` / `String(localized: "your.key")`.
    - In `Packages/ProtonPhotosKit/…` → Package catalog, and read it with `L10n.string("your.key")`.
 2. **Add the entry** to the chosen `Localizable.xcstrings`. Easiest in Xcode (open the `.xcstrings`, add a
-   key, fill in English + German). Manual JSON is fine too — each entry is:
+   key, fill in English + German). Manual JSON is fine too - each entry is:
    ```json
    "your.key" : {
      "comment" : "Where/why this is shown (helps translators).",
@@ -112,7 +112,7 @@ assert that **every** key has both an English and a German value, so a half-tran
    or add a `"<lang>"` localization block alongside `"en"`/`"de"` for every key).
 2. Translate every key (the `testEveryKeyHasEnglishAndGerman`-style guard can be extended to the new
    language to enforce completeness).
-3. No code changes are needed — macOS will offer the language automatically once `<lang>.lproj` is in the
+3. No code changes are needed - macOS will offer the language automatically once `<lang>.lproj` is in the
    built bundle. Optionally add the language to `knownRegions` in Xcode if you want it surfaced in the
    project's localization UI.
 
@@ -129,7 +129,7 @@ xcodebuild -exportLocalizations \
   -exportLanguage de            # repeat -exportLanguage <lang> per target language
 ```
 This produces one `de.xcloc` per language (each containing an XLIFF) covering **all** catalogs in the
-build — the App catalog and the package catalogs — grouped by source file. Upload the XLIFF to Crowdin (or
+build - the App catalog and the package catalogs - grouped by source file. Upload the XLIFF to Crowdin (or
 hand it to translators).
 
 **Import translations back:**
@@ -146,11 +146,11 @@ no credentials). Enable it and add a `CROWDIN_*` secret only when the project ac
 ## Build-system caveat (important)
 
 String Catalogs are compiled to `.lproj/.strings`(`dict`) by **Xcode's build system** (`xcstringstool`),
-which runs under `xcodebuild` — i.e. the real app build (`scripts/rebuild.sh`). **Plain command-line
+which runs under `xcodebuild` - i.e. the real app build (`scripts/rebuild.sh`). **Plain command-line
 SwiftPM** (`swift build` / `swift test`) currently copies the raw `.xcstrings` into the resource bundle
 **without** compiling it. Consequences:
 
-- The shipping app (built via `xcodebuild`) localizes correctly — verified by `de.lproj` appearing in both
+- The shipping app (built via `xcodebuild`) localizes correctly - verified by `de.lproj` appearing in both
   `ProtonPhotos.app/Contents/Resources/` and the embedded `ProtonPhotosKit_PhotosCore.bundle`.
 - Under `swift test`, the **package** facade can't resolve the catalog at runtime, so package strings come
   back as their keys. The localization tests handle this: the **catalog-content** checks read the

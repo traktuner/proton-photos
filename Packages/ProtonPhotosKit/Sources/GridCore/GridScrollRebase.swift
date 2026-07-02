@@ -5,11 +5,11 @@ import CoreGraphics
 /// When a zoom commit (or a content-shrinking zoom-out) leaves the camera at an out-of-bounds scroll, the
 /// settled grid must move from the gesture/anchored scroll to the legal clamped scroll. Doing that with an
 /// instant `scroll(to:)` is a visible JUMP. Instead the presentation layer renders the settled grid at the
-/// scroll position this helper interpolates — an ease-out slide over ~150 ms — so the correction is a subtle
+/// scroll position this helper interpolates - an ease-out slide over ~150 ms - so the correction is a subtle
 /// motion, never a snap. It carries NO grid layout model: it only eases one scalar (the Y scroll) between two
 /// engine-derived values, and ends EXACTLY at `toY` (the canonical settled scroll).
 public enum GridScrollRebase {
-    /// Bridge length — within the 120–180 ms spec.
+    /// Bridge length - within the 120–180 ms spec.
     public static let duration: CFTimeInterval = 0.15
     /// Minimum scroll delta (px) worth animating; below this the clamp is imperceptible, so commit instantly.
     public static let minPx: CGFloat = 1.5

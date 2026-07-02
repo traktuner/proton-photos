@@ -5,7 +5,7 @@ import GridCore
 import TimelineCore
 @testable import TimelineFeature
 
-/// THE canonical guard suite for the frozen MetalGrid engine contract — see `docs/metalgrid-engine-contract.md`.
+/// THE canonical guard suite for the frozen MetalGrid engine contract - see `docs/metalgrid-engine-contract.md`.
 /// These consolidate boundaries otherwise scattered across other suites so a future transition-effects branch
 /// cannot quietly reintroduce an old geometry path or mix responsibilities. Structural/functional assertions,
 /// not comment matching.
@@ -13,7 +13,7 @@ import TimelineCore
     private let eps: CGFloat = 0.5
     private func engine(_ count: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
 
-    // MARK: source access (production sources only — never the tests)
+    // MARK: source access (production sources only - never the tests)
     private func packageRoot() -> URL {
         var u = URL(fileURLWithPath: #filePath)
         for _ in 0 ..< 5 { u.deleteLastPathComponent() }                 // …/Tests/TimelineFeatureTests/X.swift → repo root
@@ -55,7 +55,7 @@ import TimelineCore
         }
     }
 
-    // 3 — slot geometry comes from the engine; the renderer does no layout math.
+    // 3 - slot geometry comes from the engine; the renderer does no layout math.
     @Test func engineOwnsSlotGeometryGuard() {
         let e = engine()
         for level in 0 ..< e.levelCount {
@@ -69,7 +69,7 @@ import TimelineCore
         #expect(src("MetalGridCoordinator.swift").contains("engine.framePlan"), "coordinator must source geometry from the engine")
     }
 
-    // 4 — content fitting (aspectFit vs squareFill) differs, but the engine slot/grid geometry is identical.
+    // 4 - content fitting (aspectFit vs squareFill) differs, but the engine slot/grid geometry is identical.
     @Test func tileContentFitterDoesNotAffectSlotGeometryGuard() {
         let e = engine()
         let before = e.framePlan(level: 1, viewportSize: CGSize(width: 1000, height: 800), scrollOffset: CGPoint(x: 0, y: 3000), overscan: 0)
@@ -85,7 +85,7 @@ import TimelineCore
         }
     }
 
-    // 5 — FIXED-COLUMNS, WIDTH-FILLING contract: a level FILLS the width across widths (no trailing gutter); the
+    // 5 - FIXED-COLUMNS, WIDTH-FILLING contract: a level FILLS the width across widths (no trailing gutter); the
     // column count is CONSTANT (held at nominalColumns) and the tile SCALES with width (resize = scale, never
     // reflow). The reference width reproduces the level's nominalColumns.
     @Test func fillWidthFixedColumnsGuard() {
@@ -119,13 +119,13 @@ import TimelineCore
     // 7
     @Test func plusMinusUsesViewportCenterGuard() {
         let host = src("MetalGridScrollHost.swift")
-        // Viewport CENTRE in LAYOUT space (unobscured width, sidebar inset removed) — see MetalGridScrollHost.
+        // Viewport CENTRE in LAYOUT space (unobscured width, sidebar inset removed) - see MetalGridScrollHost.
         #expect(host.contains("anchorContentPoint ?? CGPoint(x: max(1, bounds.width - coordinator.leadingObstructionInset) / 2, y: origin.y + vh / 2)"),
                 "+/- must anchor at the grid viewport centre (layout space)")
         #expect(!host.contains("lastMouseContentPoint"), "+/- must not use a stale mouse/hover point")
     }
 
-    // 7b — normal AppKit scroll/rubber-band owns the clip origin. The settled draw path may render at the
+    // 7b - normal AppKit scroll/rubber-band owns the clip origin. The settled draw path may render at the
     // elastic origin, but it must not programmatically clamp/scroll the NSClipView or arm a second rebase.
     @Test func settledDrawDoesNotFightNativeScrollElasticityGuard() throws {
         let coordinator = src("MetalGridCoordinator.swift")
@@ -140,7 +140,7 @@ import TimelineCore
         #expect(body.contains("renderY = rawOrigin.y"), "normal draw should render at AppKit's native clip origin")
     }
 
-    // 8 — trackpad pinch anchors the item under the cursor (resolved in the displayed/phased grid).
+    // 8 - trackpad pinch anchors the item under the cursor (resolved in the displayed/phased grid).
     @Test func pinchUsesCursorAnchorGuard() {
         let e = engine()
         let width: CGFloat = 900, scrollY: CGFloat = 5000
@@ -154,7 +154,7 @@ import TimelineCore
         #expect(src("MetalGridCoordinator.swift").contains("beginZoomTransaction(cursorContentPoint:"), "live zoom uses the cursor content point")
     }
 
-    // 9 — media aspect ratio must not change the OUTER slot geometry; no aspect-row layout exists.
+    // 9 - media aspect ratio must not change the OUTER slot geometry; no aspect-row layout exists.
     @Test func noAspectOuterLayoutGuard() {
         let all = allProductionSource()
         #expect(!all.contains("AspectRowLayout"), "no aspect-row outer layout")

@@ -52,7 +52,7 @@ import GridCore
     private let cursorVP = CGPoint(x: 430, y: 360)
     private let scenarios: [Int?] = [.none, .some(1), .some(3), .some(5)]   // canonical + several committed phases
 
-    // MARK: 1 — CursorAnchorIdentitySurvivesCommitTest
+    // MARK: 1 - CursorAnchorIdentitySurvivesCommitTest
     @Test func cursorAnchorIdentitySurvivesCommit() {
         for sourcePhase in scenarios {
             for (s, t) in [(2, 4), (3, 1), (4, 5), (1, 5)] {
@@ -63,7 +63,7 @@ import GridCore
         }
     }
 
-    // MARK: 2 — LiveZoomKeepsAnchorUnderCursorTest
+    // MARK: 2 - LiveZoomKeepsAnchorUnderCursorTest
     @Test func liveZoomKeepsAnchorUnderCursor() {
         let r = simulatePinch(sourceLevel: 3, sourcePhase: 3, targetLevel: 5, cursorVP: cursorVP, sourceScrollY: 5000)
         for lp in stride(from: CGFloat(3), through: 5, by: 0.25) {
@@ -74,7 +74,7 @@ import GridCore
         }
     }
 
-    // MARK: 3 — CommitBridgeKeepsAnchorUnderCursorTest
+    // MARK: 3 - CommitBridgeKeepsAnchorUnderCursorTest
     @Test func commitBridgeKeepsAnchorUnderCursor() {
         let r = simulatePinch(sourceLevel: 3, sourcePhase: 3, targetLevel: 5, cursorVP: cursorVP, sourceScrollY: 5000)
         let pitch = r.e.resolvedMetrics(level: 5, width: width).pitch
@@ -86,7 +86,7 @@ import GridCore
         }
     }
 
-    // MARK: 4 — FirstSettledFrameKeepsAnchorUnderCursorTest
+    // MARK: 4 - FirstSettledFrameKeepsAnchorUnderCursorTest
     @Test func firstSettledFrameKeepsAnchorUnderCursor() {
         let r = simulatePinch(sourceLevel: 2, sourcePhase: 3, targetLevel: 4, cursorVP: cursorVP, sourceScrollY: 5000)
         let plan = r.e.framePlan(level: 4, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: r.scrollY), overscan: 0, columnPhase: r.phase)
@@ -94,7 +94,7 @@ import GridCore
         #expect(underCursor == r.txAnchor, "first settled frame: \(String(describing: underCursor)) ≠ anchor \(r.txAnchor)")
     }
 
-    // MARK: 5 — ScrollLockDoesNotUndoCommitScrollTest
+    // MARK: 5 - ScrollLockDoesNotUndoCommitScrollTest
     @Test func scrollLockDoesNotUndoCommitScroll() {
         // The committed scrollY differs from the pre-zoom origin (so the lock MUST use the new value, not restore the old).
         let r = simulatePinch(sourceLevel: 2, sourcePhase: nil, targetLevel: 5, cursorVP: cursorVP, sourceScrollY: 5000)
@@ -104,7 +104,7 @@ import GridCore
         #expect(host.contains("scrollLockOrigin = CGPoint(x: 0, y: targetY)"), "scrollLock must be set to the committed targetY")
     }
 
-    // MARK: 5b — PinchEndpointUsesClampedScrollBeforeReleaseTest
+    // MARK: 5b - PinchEndpointUsesClampedScrollBeforeReleaseTest
     @Test func pinchEndpointUsesClampedScrollBeforeRelease() {
         let e = engine()
         let target = 1
@@ -136,7 +136,7 @@ import GridCore
                 "normal live-pinch detent endpoints must be built from the same clamped scrollY the release commit adopts")
     }
 
-    // MARK: 6 — CommitUsesSameCursorPointAsBeginTest
+    // MARK: 6 - CommitUsesSameCursorPointAsBeginTest
     @Test func commitUsesSameCursorPointAsBegin() {
         let r = simulatePinch(sourceLevel: 3, sourcePhase: 3, targetLevel: 5, cursorVP: cursorVP, sourceScrollY: 5000)
         #expect(r.tx.anchorViewportPoint == cursorVP, "the transaction must carry the begin cursor point")
@@ -146,10 +146,10 @@ import GridCore
         #expect(coord.contains("viewportPoint: tx.anchorViewportPoint, level: lv"), "commit must rebase from the begin cursor point")
     }
 
-    // MARK: 7 — Problematic24To18RegressionTest
+    // MARK: 7 - Problematic24To18RegressionTest
     @Test func problematic24To18Regression() {
         // The exact failure shape: a 2nd gesture (committed phase ≠ canonical). The item under the cursor before
-        // the gesture must equal the item after commit — NOT the item the canonical layout would have resolved.
+        // the gesture must equal the item after commit - NOT the item the canonical layout would have resolved.
         let e = engine()
         let cursorContent = CGPoint(x: cursorVP.x, y: cursorVP.y + 5000)
         let displayed = itemUnderCursor(e, vp: cursorVP, level: 2, phase: 3, scrollY: 5000)!
@@ -160,7 +160,7 @@ import GridCore
         #expect(r.after != canonical, "regression: cursor must NOT settle on the canonical (wrong) item \(canonical)")
     }
 
-    // MARK: 8 — Working84CaseStillWorksTest
+    // MARK: 8 - Working84CaseStillWorksTest
     @Test func working84CaseStillWorks() {
         // A gesture starting from the canonical phase (e.g. right after bottom-pin reset) keeps working.
         for (s, t) in [(2, 4), (4, 2), (3, 5)] {
@@ -169,11 +169,11 @@ import GridCore
         }
     }
 
-    // MARK: 9/11/12 — +/- uses VIEWPORT CENTER (not mouse / toolbar button / top / stale hover)
+    // MARK: 9/11/12 - +/- uses VIEWPORT CENTER (not mouse / toolbar button / top / stale hover)
     @Test func plusMinusZoomUsesViewportCenterAnchor() {
         let host = hostSource()
         // setLevel(+/-) anchors at the grid viewport centre.
-        // Viewport CENTRE — now in LAYOUT space (the unobscured width, sidebar inset removed), so the engine
+        // Viewport CENTRE - now in LAYOUT space (the unobscured width, sidebar inset removed), so the engine
         // receives a layout-space anchor; the render translation happens once at the coordinator's draw chokepoint.
         #expect(host.contains("anchorContentPoint ?? CGPoint(x: max(1, bounds.width - coordinator.leadingObstructionInset) / 2, y: origin.y + vh / 2)"),
                 "+/- must anchor at the grid viewport centre (layout space)")
@@ -181,7 +181,7 @@ import GridCore
         #expect(!host.contains("lastMouseContentPoint"), "+/- must not reuse a stale mouse/hover point")
     }
 
-    // MARK: 10/13 — center item survives +/- commit AND the phase persists
+    // MARK: 10/13 - center item survives +/- commit AND the phase persists
     @Test func plusMinusCenterItemSurvivesCommit() {
         let e = engine()
         let scrollY: CGFloat = 5000
@@ -207,7 +207,7 @@ import GridCore
         }
     }
 
-    // MARK: 15 — DiagnosticsEmitWithoutTrap (regression: postCommit had a duplicate `phase` key → runtime trap)
+    // MARK: 15 - DiagnosticsEmitWithoutTrap (regression: postCommit had a duplicate `phase` key → runtime trap)
     @MainActor @Test func diagnosticsEmitWithoutDuplicateKeys() {
         let p = CGPoint(x: 430, y: 360)
         GridZoomAnchorLog.begin(trigger: .pinch, cursorViewportPoint: p, cursorContentPoint: p,
@@ -223,7 +223,7 @@ import GridCore
         #expect(Bool(true))   // reaching here ⇒ no dictionary-literal duplicate-key trap on any emit path
     }
 
-    // MARK: 14 — TriggerAnchorModeDiagnosticTest
+    // MARK: 14 - TriggerAnchorModeDiagnosticTest
     @Test func triggerAnchorModeDiagnostic() {
         #expect(GridZoomTrigger.pinch.anchorMode == .cursor)
         #expect(GridZoomTrigger.toolbarPlus.anchorMode == .viewportCenter)
@@ -234,8 +234,8 @@ import GridCore
         #expect(GridZoomTrigger.keyboardMinus.isPlusMinus == true)
     }
 
-    // MARK: GUARANTEE 2 — RepeatedPinchIdentityTest. The same item under the cursor survives EACH begin/commit
-    // pair across a CHAIN of gestures (commit, then pinch back, then again) — each gesture begins on the grid the
+    // MARK: GUARANTEE 2 - RepeatedPinchIdentityTest. The same item under the cursor survives EACH begin/commit
+    // pair across a CHAIN of gestures (commit, then pinch back, then again) - each gesture begins on the grid the
     // previous one COMMITTED (its phase + scroll), so a stale committed phase can't swap the anchor on gesture 2+.
     @Test func repeatedPinchIdentitySurvivesEachGesture() {
         // Gesture 1: 3 → 1 from the canonical phase.
@@ -253,10 +253,10 @@ import GridCore
         #expect(g3.after == g3.displayed, "gesture 3: anchor left the cursor after two prior commits")
     }
 
-    // MARK: GUARANTEE 3 — PinchChainEndpointEqualityTest. The production LATTICE commit (`commitPinchChain` ->
+    // MARK: GUARANTEE 3 - PinchChainEndpointEqualityTest. The production LATTICE commit (`commitPinchChain` ->
     // `pinchDetentParams`) builds the target detent with a cursor-aligned phase + anchor scroll CLAMPED via
     // `engine.clampScrollOffsetY`. The first settled frame at that exact (phase, clampedScroll) must keep the
-    // gesture anchor under the cursor — i.e. the commit endpoint equals the terminal live-transition endpoint.
+    // gesture anchor under the cursor - i.e. the commit endpoint equals the terminal live-transition endpoint.
     @Test func pinchChainEndpointEqualsFirstSettledFrame() {
         let e = engine()
         let sourceScrollY: CGFloat = 5000
@@ -281,10 +281,10 @@ import GridCore
         }
     }
 
-    // MARK: GUARANTEE 4 — SidebarLayoutSpaceAnchorTest. With a non-zero leading obstruction inset, the render-
+    // MARK: GUARANTEE 4 - SidebarLayoutSpaceAnchorTest. With a non-zero leading obstruction inset, the render-
     // space cursor x is converted to layout space by subtracting the inset ONCE, and ALL engine/anchor math runs
     // at the inset-removed layout width. The anchor resolved at begin must equal the displayed item, and the
-    // settled frame keeps it under the (layout-space) cursor — no double translation post-commit.
+    // settled frame keeps it under the (layout-space) cursor - no double translation post-commit.
     @Test func sidebarLayoutSpaceAnchorIsConsistent() {
         let e = engine()                                     // the engine works purely in layout space
         let inset: CGFloat = 282 + MetalGridScrollHost.normalLevelLeadingGap   // sidebar + normal-level gap
@@ -316,7 +316,7 @@ import GridCore
                 "the engine layout width must come from the per-level bounds policy")
     }
 
-    // MARK: GUARANTEE 5 — LatticeCommitScrollLockOrderingTest. The production lattice commit (`commitLivePinch`)
+    // MARK: GUARANTEE 5 - LatticeCommitScrollLockOrderingTest. The production lattice commit (`commitLivePinch`)
     // must set the scroll lock to the COMMITTED Y BEFORE it scrolls, or the post-magnify grace window's
     // `scrolled()` backstop would restore the pre-pinch origin and undo the commit scroll.
     @Test func latticeCommitSetsScrollLockBeforeScrolling() {

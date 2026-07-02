@@ -5,7 +5,7 @@ import UploadCore
 import UploadFeature
 
 /// High-level, app-facing composition of the Proton clients. Built once the SDK bridge is ready and
-/// owned by `AppModel`. The UI binds to the feature objects here (uploads, albums) — never to the SDK.
+/// owned by `AppModel`. The UI binds to the feature objects here (uploads, albums) - never to the SDK.
 ///
 /// This is the single seam where the concrete `DriveSDKBridge` (SDK/HTTP) is wired into the pure
 /// feature modules, so features can be added/removed without touching the rest of the app.

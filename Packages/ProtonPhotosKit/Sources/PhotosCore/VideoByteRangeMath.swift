@@ -34,7 +34,7 @@ public struct ByteRange: Equatable, Sendable, Comparable {
     }
 }
 
-/// A set of non-overlapping, coalesced byte ranges — the "what have we got on disk?" model for the
+/// A set of non-overlapping, coalesced byte ranges - the "what have we got on disk?" model for the
 /// byte cache and the buffered-progress UI. Adjacent and overlapping ranges merge automatically so
 /// `CacheRangeMergeTest` holds: inserting `[0,10)` then `[10,20)` yields a single `[0,20)`.
 public struct ByteRangeSet: Equatable, Sendable {
@@ -57,7 +57,7 @@ public struct ByteRangeSet: Equatable, Sendable {
         var result: [ByteRange] = []
         for r in ranges {
             if r.upper < merged.lower || r.lower > merged.upper {
-                result.append(r)            // disjoint (and not abutting) — keep as is
+                result.append(r)            // disjoint (and not abutting) - keep as is
             } else {
                 merged = ByteRange(lower: Swift.min(r.lower, merged.lower),
                                    upper: Swift.max(r.upper, merged.upper))
@@ -114,7 +114,7 @@ public struct ClearBlock: Equatable, Sendable {
 
 /// One block's contribution to a requested range: which block to read, and the sub-slice of that
 /// block's *decrypted* bytes to hand back. Returned in file order so concatenating the slices yields
-/// exactly the requested window with no gaps — the contiguity AVFoundation requires.
+/// exactly the requested window with no gaps - the contiguity AVFoundation requires.
 public struct BlockSlice: Equatable, Sendable {
     public let blockIndex: Int
     /// Byte range *within the decrypted block* (0-based) to copy out.
@@ -162,7 +162,7 @@ public struct VideoBlockMap: Sendable {
     ///
     /// Blocks are stored in ascending `clearOffset` order (so their cleartext *ends* are non-decreasing);
     /// a binary search skips straight to the first block that can overlap the window instead of scanning
-    /// every block from the front — the output is byte-for-byte identical to the old linear scan.
+    /// every block from the front - the output is byte-for-byte identical to the old linear scan.
     public func slices(offset: Int, length: Int) -> [BlockSlice] {
         let reqStart = Swift.max(0, offset)
         let reqEnd = Swift.min(offset + length, totalSize)
@@ -192,7 +192,7 @@ public struct VideoBlockMap: Sendable {
         slices(offset: offset, length: length).map(\.blockIndex)
     }
 
-    /// Up to `count` non-empty blocks (in file order) whose cleartext bytes extend past `clearOffset` —
+    /// Up to `count` non-empty blocks (in file order) whose cleartext bytes extend past `clearOffset` -
     /// the read-ahead set for forward prefetch. Binary-searches to the first candidate so a large block
     /// count isn't rescanned linearly on every range request. Equivalent to
     /// `blocks.filter { $0.clearSize > 0 && $0.clearOffset + $0.clearSize > clearOffset }.prefix(count)`.
@@ -209,7 +209,7 @@ public struct VideoBlockMap: Sendable {
     }
 
     /// Index of the first block whose cleartext *end* (`clearOffset + clearSize`) is strictly greater
-    /// than `offset` — i.e. the first block that could contain or follow `offset`. Block ends are
+    /// than `offset` - i.e. the first block that could contain or follow `offset`. Block ends are
     /// non-decreasing, so this is a standard lower-bound binary search.
     func firstBlockIndex(endGreaterThan offset: Int) -> Int {
         var lo = 0

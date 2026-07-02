@@ -6,11 +6,11 @@ import PhotosCore
 ///
 /// Loaded once (decrypted) from `PhotoLocationStore` and then filled in live by `LocationCrawl`. At
 /// ~40–60 bytes per photo, 20k photos is ~1 MB, so keeping the entire library resident is trivial and
-/// makes region queries an in-memory filter (microseconds) — no per-view decode. The decrypted
+/// makes region queries an in-memory filter (microseconds) - no per-view decode. The decrypted
 /// coordinates exist ONLY here in RAM; on disk they are always AES-GCM encrypted.
 ///
 /// `@MainActor @Observable`: the map view binds to `revision`, so annotations refresh as the crawl adds
-/// coordinates. Platform-agnostic (no AppKit) — reused as-is by a future iOS/iPad map UI.
+/// coordinates. Platform-agnostic (no AppKit) - reused as-is by a future iOS/iPad map UI.
 @MainActor
 @Observable
 public final class PhotoLocationIndex {
@@ -21,7 +21,7 @@ public final class PhotoLocationIndex {
 
     public init() {}
 
-    /// Replace the whole index — e.g. after decrypting the persisted snapshot at startup.
+    /// Replace the whole index - e.g. after decrypting the persisted snapshot at startup.
     public func replaceAll(_ coords: [PhotoCoordinate]) {
         coordinates = coords
         seen = Set(coords.map(\.uid))
@@ -39,7 +39,7 @@ public final class PhotoLocationIndex {
         if added { revision += 1 }
     }
 
-    /// The uids already indexed — used by the crawl to skip work it has already done (resumable).
+    /// The uids already indexed - used by the crawl to skip work it has already done (resumable).
     public func indexedUIDs() -> Set<PhotoUID> { seen }
 
     /// Coordinates whose point falls inside the bounding box (the visible map rect + margin).

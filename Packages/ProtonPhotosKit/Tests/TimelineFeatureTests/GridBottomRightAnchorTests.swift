@@ -44,7 +44,7 @@ import GridCore
                 // Camera at the very bottom (newest).
                 let scrollY = max(0, content.height - viewport.height)
                 let plan = e.framePlan(level: level, viewportSize: viewport, scrollOffset: CGPoint(x: 0, y: scrollY), overscan: 0)
-                // FIXED-COLUMNS, WIDTH-FILL: the bottom-most row is FULL (all columns filled — newest in the last
+                // FIXED-COLUMNS, WIDTH-FILL: the bottom-most row is FULL (all columns filled - newest in the last
                 // filled column, bottom-right of the CONTENT). It is leading-aligned and FILLS the width: the last
                 // column's right edge lands at ~the viewport width (no gutter), clearing to the grid background.
                 let bottomRow = plan.visibleSlots.filter { $0.row == plan.visibleSlots.map(\.row).max() }

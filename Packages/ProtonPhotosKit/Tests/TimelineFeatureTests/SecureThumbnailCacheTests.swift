@@ -4,7 +4,7 @@ import Testing
 import PhotosCore
 @testable import MediaCache
 
-/// Test double for the cache key store — deterministic, no Keychain. `available: false` models a
+/// Test double for the cache key store - deterministic, no Keychain. `available: false` models a
 /// locked/denied Keychain (every key lookup fails).
 final class MemoryCacheKeyStore: CacheKeyStore, @unchecked Sendable {
     private let lock = NSLock()
@@ -238,7 +238,7 @@ struct SecureThumbnailCacheTests {
 
     @Test func unconfiguredInstanceCannotReadConfiguredBlobs() {
         // Documents the regression class the wiring bug caused: an UNCONFIGURED cache (ephemeral key,
-        // "(unconfigured)" account) cannot read a configured cache's blobs — so a feed built with an
+        // "(unconfigured)" account) cannot read a configured cache's blobs - so a feed built with an
         // unconfigured cache would re-crawl everything every launch.
         let store = MemoryCacheKeyStore()
         let ns = uniqueNamespace()

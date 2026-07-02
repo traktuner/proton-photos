@@ -46,7 +46,7 @@ public actor UIKitThumbnailFeed {
             configuration: configuration,
             clock: clock,
             onDecoded: { uid, decoded in
-                // Same DB-backed dimension pipeline as the macOS feed — batched, off this path.
+                // Same DB-backed dimension pipeline as the macOS feed - batched, off this path.
                 dimensions?.record(uid, width: decoded.pixelWidth, height: decoded.pixelHeight)
             }
         )

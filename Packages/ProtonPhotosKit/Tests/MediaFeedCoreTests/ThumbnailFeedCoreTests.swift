@@ -337,7 +337,7 @@ struct ThumbnailFeedCoreTests {
         try await Self.waitUntil { await feed.prefetchStatus().failedItemError == 1 }
         #expect(await loader.requestCount() == 1)
 
-        // Same crawl: the refused uid is quarantined — a new priority request must not re-download.
+        // Same crawl: the refused uid is quarantined - a new priority request must not re-download.
         await feed.requestPriority(uid, priority: .visibleNow)
         try await Self.waitUntil { await feed.prefetchStatus().skippedUnfetchable >= 1 }
         #expect(await loader.requestCount() == 1)

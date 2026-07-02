@@ -50,7 +50,7 @@ struct MainView: View {
     @State private var topBarInset: CGFloat = 0
     @State private var networkMonitor = NetworkMonitor.shared
     // The grid's leading obstruction inset == the floating sidebar's overlap when it's open, else 0. Derived from
-    // the KNOWN sidebar column width — SwiftUI coordinate spaces and preferences do NOT bridge across
+    // the KNOWN sidebar column width - SwiftUI coordinate spaces and preferences do NOT bridge across
     // NavigationSplitView's AppKit-hosted sidebar column, so the detail can't measure the overlap (its leading
     // safe-area inset reads 0 under a floating overlay sidebar). It changes only on a sidebar toggle (constant
     // during any window resize → no per-tick Metal re-layout).
@@ -89,7 +89,7 @@ struct MainView: View {
         self.backend = facade.backend
         self.uploadCoordinator = facade.uploadCoordinator
         // Learned thumbnail dimensions persist into the library metadata DB (photos.w/h) through the
-        // backend bridge — batched by the coalescer, so decode callbacks never touch the DB directly.
+        // backend bridge - batched by the coalescer, so decode callbacks never touch the DB directly.
         let dimensions = (backend as? PhotoDimensionRecording).map { PhotoDimensionCoalescer(store: $0) }
         // Use the SHARED, account-configured cache (AppModel.prepareBackend calls
         // OfflineLibraryManager.shared.configure(session:) before this view is built) so the encrypted
@@ -115,7 +115,7 @@ struct MainView: View {
             NavigationSplitView(columnVisibility: $columnVisibility) {
                 SidebarView(albums: albums, selection: $selection)
                     // Fixed width. (The OS still draws a resize cursor on the divider even though the column is not
-                    // user-resizable — an AppKit quirk we accept; min==ideal==max did not change it.)
+                    // user-resizable - an AppKit quirk we accept; min==ideal==max did not change it.)
                     .navigationSplitViewColumnWidth(sidebarWidth)
             } detail: {
                 TimelineView(model: timelineModel, level: $level, proxy: gridProxy,
@@ -137,8 +137,8 @@ struct MainView: View {
                 .toolbar { toolbarContent }
                 // Native Liquid Glass everywhere: no `.toolbarBackground` style is registered, so both the grid
                 // and the viewer use the system glass bar (registering any style here would replace the adaptive
-                // glass with a flat fill AND box the sidebar titlebar — see git history / the removed WindowToolbarChrome).
-                // Always the real inset — do NOT flip to 0 when the viewer opens: the grid is covered by the
+                // glass with a flat fill AND box the sidebar titlebar - see git history / the removed WindowToolbarChrome).
+                // Always the real inset - do NOT flip to 0 when the viewer opens: the grid is covered by the
                 // viewer anyway, and a flip would arm a spurious full-width sidebar scale that plays when you
                 // close the viewer (and would move the cell the zoom transition flies from).
                 .environment(\.gridLeadingEventInset, leadingObstructionInset)
@@ -155,7 +155,7 @@ struct MainView: View {
             .onChange(of: librarySettled) { _, _ in evaluateVeilLift() }
             .onChange(of: selection) { oldValue, newValue in
                 // Switching sidebar route while a photo/video is open: close the viewer INSTANTLY so the new tab's
-                // grid (or Map) just shows. No zoom-back-to-cell — the photo's cell usually isn't in the new
+                // grid (or Map) just shows. No zoom-back-to-cell - the photo's cell usually isn't in the new
                 // route, and the expectation is simply "tab switches, photo closes."
                 if viewerModel != nil {
                     zoom = nil
@@ -169,8 +169,8 @@ struct MainView: View {
                 // Non-timeline routes (for example the Map overlay) keep the last grid route underneath.
                 guard newValue.hasTimeline else { return }
                 // The new route opens at its remembered position, or at the newest end on first visit. Both the
-                // target and the generation are set SYNCHRONOUSLY here — BEFORE the async `select(...)` that loads
-                // the route — so the generation is already pending when the new sections (and the new data token)
+                // target and the generation are set SYNCHRONOUSLY here - BEFORE the async `select(...)` that loads
+                // the route - so the generation is already pending when the new sections (and the new data token)
                 // arrive in the grid. The host owns the one-shot placement; we never scroll from here. (Not
                 // `scrollToLatest`: that re-arms sticky bottom-pinning and would fight the user's first scroll.)
                 routeInitialScrollAnchor = routeScrollPositions[newValue]
@@ -188,7 +188,7 @@ struct MainView: View {
                 searchDebounceTask = nil
             }
             .onChange(of: columnVisibility) { _, newValue in
-                // The NATIVE split-view toggle drives columnVisibility — mirror it back into our open-state +
+                // The NATIVE split-view toggle drives columnVisibility - mirror it back into our open-state +
                 // persistence (the ⌥⌘S path goes through toggleSidebar() which sets both).
                 let visible = newValue != .detailOnly
                 guard visible != sidebarOpen else { return }
@@ -231,7 +231,7 @@ struct MainView: View {
                     .ignoresSafeArea()
             }
 
-            // Hidden while a NON-interactive zoom (open/close spring) animates — the overlay stands in. During an
+            // Hidden while a NON-interactive zoom (open/close spring) animates - the overlay stands in. During an
             // INTERACTIVE pinch-dismiss it stays mounted but INVISIBLE, so the pinch gesture keeps delivering while
             // the overlay shows the live shrink-into-the-cell.
             if let viewerModel, zoom == nil || zoom?.interactive == true {
@@ -249,7 +249,7 @@ struct MainView: View {
                     // Matches the zoom overlay's `contentRect` inset, so the open/close hand-off has no jump.
                     .padding(.leading, leadingObstructionInset)
                     .animation(.easeInOut(duration: 0.3), value: leadingObstructionInset)   // slide with the sidebar toggle
-                // NOT `.opacity(0)` while dismissing — an alpha-0 NSView is non-hit-testable, so a fresh pinch would
+                // NOT `.opacity(0)` while dismissing - an alpha-0 NSView is non-hit-testable, so a fresh pinch would
                 // leak to the grid behind (it would scroll/zoom) and never return to the scroll view (the image
                 // "locks"). The viewer stays hit-testable and hides its OWN background + image while dismissing, so
                 // the gesture always reaches its scroll view and the grid behind stays frozen.
@@ -321,7 +321,7 @@ struct MainView: View {
         }
     }
 
-    /// Native upload menu — a system toolbar `Menu` gets the OS Liquid Glass pill for free.
+    /// Native upload menu - a system toolbar `Menu` gets the OS Liquid Glass pill for free.
     private var uploadToolbarMenu: some View {
         Menu {
             Button("menu.upload_photos") { performUploadUIAction("uploadPhotos", trigger: .toolbar) }
@@ -337,7 +337,7 @@ struct MainView: View {
         .accessibilityLabel("toolbar.upload")
     }
 
-    /// The download trigger — or, while a download runs, the native progress indicator (so the icon is REPLACED,
+    /// The download trigger - or, while a download runs, the native progress indicator (so the icon is REPLACED,
     /// never duplicated: one download at a time). In Trash the same slot is the Restore action.
     @ViewBuilder private var downloadActionItem: some View {
         if isExporting {
@@ -363,9 +363,9 @@ struct MainView: View {
     }
 
     /// While a download runs: the SYSTEM's native determinate progress indicator (a custom coloured ring can't
-    /// render inside a system toolbar control — the toolbar standardises item content — so this is the
+    /// render inside a system toolbar control - the toolbar standardises item content - so this is the
     /// Liquid-Glass-native indicator). Paired with `exportCancelButton` so the two sit together and the pill is a
-    /// normal two-item width (a lone tiny indicator made the pill a sliver). Cancel is a real LEFT-click button —
+    /// normal two-item width (a lone tiny indicator made the pill a sliver). Cancel is a real LEFT-click button -
     /// right-click only opens the OS toolbar's own "Icon & Text / Icon Only" customization menu.
     private var exportProgressIndicator: some View {
         let pct = Int((exportFraction * 100).rounded())
@@ -385,7 +385,7 @@ struct MainView: View {
         .accessibilityLabel("export.cancel")
     }
 
-    /// Subtle bottom pill shown only while the device has no network — so cached browsing reads as a deliberate
+    /// Subtle bottom pill shown only while the device has no network - so cached browsing reads as a deliberate
     /// offline state, and a failed upload/favorite/video has an obvious reason.
     private var offlineIndicator: some View {
         HStack(spacing: 6) {
@@ -439,7 +439,7 @@ struct MainView: View {
         GeometryReader { geo in
             // Window coords (this layer ignores the safe area, matching the window-space cell frames). The
             // media region sits BELOW the opaque top bar AND to the trailing side of the floating sidebar
-            // (the leading-obstruction inset) — identical to where the inset viewer renders it, so handing
+            // (the leading-obstruction inset) - identical to where the inset viewer renders it, so handing
             // off to the viewer causes no shrink/jump; at progress 0 it is the grid cell.
             let contentRect = CGRect(x: leadingObstructionInset, y: topBarInset,
                                      width: max(0, geo.size.width - leadingObstructionInset),
@@ -467,7 +467,7 @@ struct MainView: View {
     }
 
     /// Open the viewer for a photo identified only by uid (a Map pin tap). Looks it up in the currently loaded
-    /// library list and opens directly (no cell-zoom — the grid cell is behind the map / may be off-screen).
+    /// library list and opens directly (no cell-zoom - the grid cell is behind the map / may be off-screen).
     private func openPhotoByUID(_ uid: PhotoUID) {
         guard let item = timelineModel.allItems.first(where: { $0.uid == uid }) else { return }
         openPhoto(item, timelineModel.allItems)
@@ -498,7 +498,7 @@ struct MainView: View {
     /// its EXACT grid cell while the grid fades back in behind it. The viewer is kept alive (rendered invisible) so
     /// its in-progress pinch gesture keeps delivering. Falls back to the spring close if the cell scrolled off-screen.
     private func beginInteractiveDismiss() {
-        // A fresh pinch-out may OVERRIDE a stranded interactive dismiss — e.g. the video player loaded mid-pinch and
+        // A fresh pinch-out may OVERRIDE a stranded interactive dismiss - e.g. the video player loaded mid-pinch and
         // swapped the content view out from under the previous gesture, leaving the overlay half-collapsed. Only a
         // NON-interactive open/close spring is left undisturbed; otherwise the pinch always takes over and resolves
         // the close (the user's "pinch out should overrule whatever is happening" requirement).
@@ -577,7 +577,7 @@ struct MainView: View {
         manager.liveAssetCount = timelineModel.allItems.count
     }
 
-    /// Aspect-fit rect of `image` centred in `size` — the photo's fullscreen frame.
+    /// Aspect-fit rect of `image` centred in `size` - the photo's fullscreen frame.
     private func fitRect(_ image: NSImage, in size: CGSize) -> CGRect {
         let ia = image.size.width / max(image.size.height, 1)
         let ra = size.width / max(size.height, 1)
@@ -595,14 +595,14 @@ struct MainView: View {
 
     // MARK: - Chrome
 
-    /// True once the timeline has settled (loaded / empty / failed) — the signal that lifts the launch veil.
+    /// True once the timeline has settled (loaded / empty / failed) - the signal that lifts the launch veil.
     private var librarySettled: Bool {
         if case .loading = timelineModel.state { return false }
         return true
     }
 
     /// Lift the launch veil only once the VISIBLE thumbnails are actually drawn (the grid fires
-    /// `onFirstContentReady` → `markLibraryReady`), not merely when the library LIST loads — so it never reveals
+    /// `onFirstContentReady` → `markLibraryReady`), not merely when the library LIST loads - so it never reveals
     /// blank cells. An empty/failed library has nothing to draw, so it lifts at once. A safety timeout guarantees
     /// the veil can never stick: a cell that somehow never becomes resident must not pin it forever.
     private func evaluateVeilLift() {
@@ -759,7 +759,7 @@ struct MainView: View {
         }
     }
 
-    /// Whether EVERY selected photo is already a favorite — drives the batch heart's filled/empty state and the
+    /// Whether EVERY selected photo is already a favorite - drives the batch heart's filled/empty state and the
     /// toggle direction, so it's ONE button (mirroring the viewer's single-photo heart), never a separate
     /// favorite + unfavorite pair.
     private var selectedAllFavorited: Bool {
@@ -810,7 +810,7 @@ struct MainView: View {
         searchDebounceTask?.cancel()
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             committedSearchText = ""
-            // Clearing the search restores the FULL timeline — land at the newest (bottom-right), the grid's home,
+            // Clearing the search restores the FULL timeline - land at the newest (bottom-right), the grid's home,
             // not the preserved filtered-view offset (which reads as the oldest, top). Re-arm the one-shot
             // initial-viewport placement with a nil anchor (⇒ `.newest`); the host applies it when the full data lands.
             routeInitialScrollAnchor = nil
@@ -860,14 +860,14 @@ struct MainView: View {
     /// thumbnail cache builds; it whooshes away once warm and is not re-shown this session (see
     /// `OfflineLibraryManager.isPreparingLibrary`). The exact percent lives on the tooltip / VoiceOver.
     ///
-    /// Deliberately the SAME control as `exportProgressIndicator` (the download progress) — a determinate
-    /// `.circular` `ProgressView` at `.controlSize(.regular)` — so the two read identically and the pill sizes
+    /// Deliberately the SAME control as `exportProgressIndicator` (the download progress) - a determinate
+    /// `.circular` `ProgressView` at `.controlSize(.regular)` - so the two read identically and the pill sizes
     /// itself the same proven way. No glyph, no label. No manual `.glassEffect`: the toolbar glass is system-owned.
     private var libraryPreparePill: some View {
         let pct = Int(OfflineLibraryManager.shared.cachePreparePercent.rounded())
         // Wrapped in a Button so it gets the SAME round, padded toolbar pill as the aspect-toggle button (a bare
-        // view gets a tight content-hugging pill instead). The action is a deliberate no-op — it's a status
-        // indicator, not a control — but it must stay HIT-TESTABLE, otherwise the hover tooltip (the live percent)
+        // view gets a tight content-hugging pill instead). The action is a deliberate no-op - it's a status
+        // indicator, not a control - but it must stay HIT-TESTABLE, otherwise the hover tooltip (the live percent)
         // never fires (`.allowsHitTesting(false)` would suppress hover, and `.disabled` would dim the pie).
         return Button(action: {}) {
             ProgressView(value: max(0.001, min(1, OfflineLibraryManager.shared.cachePreparePercent / 100)))
@@ -952,23 +952,23 @@ struct MainView: View {
             // The sidebar toggle is the NATIVE NavigationSplitView one (it returns automatically + moves with the
             // sidebar). The ⌥⌘S command still posts `.protonPhotosToggleSidebar` → `toggleSidebar()`.
             // No explicit "select mode": click / ⌘-click / ⇧-click / drag-marquee select directly, double
-            // click opens. The toolbar is stable — the download (or restore) + trash actions are always
+            // click opens. The toolbar is stable - the download (or restore) + trash actions are always
             // present and just enable when something is selected.
-            // Library-preparing pill — its OWN glass pill, right before the upload group. A single determinate
+            // Library-preparing pill - its OWN glass pill, right before the upload group. A single determinate
             // progress indicator (the SAME control as the download progress); the system supplies its glass.
             // The trailing `ToolbarSpacer(.fixed)` splits this off as a SEPARATE pill from the upload group.
             if OfflineLibraryManager.shared.isPreparingLibrary {
                 ToolbarItem(placement: .primaryAction) { libraryPreparePill }
                 ToolbarSpacer(.fixed, placement: .primaryAction)
             }
-            // Pill 1 — upload + download belong together (`ToolbarSpacer` splits the system glass into a SEPARATE
+            // Pill 1 - upload + download belong together (`ToolbarSpacer` splits the system glass into a SEPARATE
             // pill from the selection actions; the toolbar manages its own glass, so this native split is the only
             // reliable way to get distinct pills).
             ToolbarItemGroup(placement: .primaryAction) {
                 uploadToolbarMenu
                 downloadActionItem
             }
-            // Pill 2 — selection actions (trash / favorite / album cover). Omitted entirely in Trash (only Restore
+            // Pill 2 - selection actions (trash / favorite / album cover). Omitted entirely in Trash (only Restore
             // applies there, and it lives in the download slot of pill 1).
             if selection != .trash {
                 ToolbarSpacer(.fixed, placement: .primaryAction)
@@ -999,7 +999,7 @@ struct MainView: View {
                     }
                 }
             }
-            // Pill 3 — zoom + aspect view controls.
+            // Pill 3 - zoom + aspect view controls.
             ToolbarSpacer(.fixed, placement: .primaryAction)
             ToolbarItemGroup(placement: .primaryAction) {
                 ControlGroup {
@@ -1020,7 +1020,7 @@ struct MainView: View {
                 }
                 aspectSquareToggleButton
             }
-            // Account — its own trailing item.
+            // Account - its own trailing item.
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button("action.sign_out", role: .destructive) { model.signOut() }
@@ -1032,7 +1032,7 @@ struct MainView: View {
     }
 
     /// Apple-Photos-style aspect/square thumbnail toggle. Switches `gridContentMode` between
-    /// aspectFitInsideSquare and squareFillCrop and pushes it to the grid coordinator — content fit ONLY, the
+    /// aspectFitInsideSquare and squareFillCrop and pushes it to the grid coordinator - content fit ONLY, the
     /// square slot geometry never changes. Disabled on the dense overview levels (L4–L5, square-only). The
     /// glyph is an SF Symbol (or an in-app vector fallback) resolved by `AspectSquareToggleModel`; no raster.
     private var aspectSquareToggleButton: some View {
@@ -1044,7 +1044,7 @@ struct MainView: View {
         }
         .help(AspectSquareToggleModel.accessibilityLabel(for: gridContentMode))
         .accessibilityLabel(AspectSquareToggleModel.accessibilityLabel(for: gridContentMode))
-        .disabled(level >= 4)   // overview levels are square-only — the toggle is inert there
+        .disabled(level >= 4)   // overview levels are square-only - the toggle is inert there
     }
 
 
@@ -1196,7 +1196,7 @@ struct MainView: View {
         // Captures self only to push 0…1 onto the @State ring; the closure itself runs on the main actor.
         let onProgress: @Sendable (Double) -> Void = { p in Task { @MainActor in self.exportFraction = p } }
 
-        // Resolve the destination FIRST — the progress pill must appear only when the download actually begins,
+        // Resolve the destination FIRST - the progress pill must appear only when the download actually begins,
         // never while the Save panel is open (otherwise a blank pill sits there until the user picks a location).
         let single = items.count == 1
         let dest: URL
@@ -1249,7 +1249,7 @@ struct MainView: View {
     }
 
     /// Off-main streaming ZIP export. A `defer` guarantees that ANY non-success exit (cancel, low-disk, or a
-    /// failed download) aborts the writer and deletes the partial `.zip` — there is never a half-written archive
+    /// failed download) aborts the writer and deletes the partial `.zip` - there is never a half-written archive
     /// left behind, and the cancel is honoured between files without touching the main thread.
     nonisolated private static func writeZipExport(items: [PhotoItem], dest: URL, backend: any PhotosBackend,
                                                    cache: ThumbnailCache, onProgress: @escaping @Sendable (Double) -> Void) async throws {
@@ -1277,7 +1277,7 @@ struct MainView: View {
         success = true
     }
 
-    /// Decrypted original bytes — REUSES the offline cache (already-viewed/offline originals) so a big export
+    /// Decrypted original bytes - REUSES the offline cache (already-viewed/offline originals) so a big export
     /// doesn't re-download what's already local; otherwise a fresh decrypt+download (reporting progress).
     /// `nonisolated` + the actor's `nonisolated diskData` ⇒ the AES-GCM decrypt happens off the main thread.
     nonisolated private static func fetchOriginal(item: PhotoItem, backend: any PhotosBackend, cache: ThumbnailCache,
@@ -1344,15 +1344,15 @@ struct MainView: View {
 
 /// Apple-Photos-style top-bar frost over the grid: a public within-window `NSVisualEffectView` (which DOES
 /// blur the Metal grid behind it, unlike the native toolbar glass, which can't sample a `CAMetalLayer`),
-/// masked to a vertical gradient — strongest frost at the very top, fading to fully clear below the toolbar
+/// masked to a vertical gradient - strongest frost at the very top, fading to fully clear below the toolbar
 /// band. It never covers the sidebar (it is an overlay on the detail), never paints a flat opaque strip, and
 /// never blocks pointer/scroll events. When the grid scrolls, the photos show through the fading edge.
 private struct GridTopFrost: View {
-    /// Total band height — the toolbar inset plus the fade region below it.
+    /// Total band height - the toolbar inset plus the fade region below it.
     let height: CGFloat
 
     var body: some View {
-        // A LIGHT, UNIFORM frost across the toolbar band (no gradient) — held at full strength over the
+        // A LIGHT, UNIFORM frost across the toolbar band (no gradient) - held at full strength over the
         // toolbar height, with only a soft fade at the very bottom edge so it doesn't read as a hard strip.
         // Lighter overall (reduced opacity) so the photos show through as a subtle frosted contrast.
         WithinWindowBlur(material: .headerView)
@@ -1367,7 +1367,7 @@ private struct GridTopFrost: View {
                     startPoint: .top, endPoint: .bottom
                 )
             )
-            .opacity(0.5)                                        // lighter — a subtle frost, not a dark band
+            .opacity(0.5)                                        // lighter - a subtle frost, not a dark band
             .frame(maxWidth: .infinity, alignment: .top)
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
@@ -1393,7 +1393,7 @@ private struct WithinWindowBlur: NSViewRepresentable {
     }
 }
 
-/// Collapsible left sidebar — a native macOS sidebar `List` (Liquid-Glass vibrant material, native
+/// Collapsible left sidebar - a native macOS sidebar `List` (Liquid-Glass vibrant material, native
 /// selection): Proton smart filters (tags) on top, user albums below.
 private struct SidebarView: View {
     let albums: [PhotoAlbum]

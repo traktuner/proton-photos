@@ -1,7 +1,7 @@
 import AppKit
 
 // Small AppKit overlay views used by the Metal production grid's header layer (`MetalGridHeaderRenderer`).
-// Pure display views for the month-label overlay — no grid geometry.
+// Pure display views for the month-label overlay - no grid geometry.
 
 /// A flipped (top-left origin) overlay container that is transparent to events, so scrolling/clicks pass
 /// straight through to the grid below it.

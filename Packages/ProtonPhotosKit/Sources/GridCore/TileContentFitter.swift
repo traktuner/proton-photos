@@ -1,7 +1,7 @@
 import CoreGraphics
 import simd
 
-// MARK: - TileContentFitter — how a photo/video fills its (already-decided) square slot
+// MARK: - TileContentFitter - how a photo/video fills its (already-decided) square slot
 //
 // This is the ONLY place media aspect enters the picture, and it is explicitly OUTSIDE the grid engine.
 // Photos/videos are PAYLOAD; grid slots are GEOMETRY. The fitter takes a slot rect (from
@@ -11,7 +11,7 @@ import simd
 // CONTRACT (guarded by TileContentFitterTests):
 //   • the output `contentRect` is ALWAYS contained inside `slotRect`;
 //   • changing `mode` (or the media aspect) NEVER changes the slot, grid layout, hit testing, the visible
-//     query, zoom, or content size — those live in the engine and never see aspect.
+//     query, zoom, or content size - those live in the engine and never see aspect.
 //
 // The production renderer composes three independent inputs:
 //   slotRect  ← SquareTileGridEngine
@@ -20,12 +20,12 @@ import simd
 
 /// The Apple-Photos aspect/square toggle, expressed as media fitting inside an UNCHANGED square slot. This is
 /// the explicit, toggle-facing model: a trackpad/toolbar toggle flips between these two; NEITHER changes the
-/// square slot, columns, gap, pitch, content size, hit testing, or anchor — only `contentRect`/UV.
+/// square slot, columns, gap, pitch, content size, hit testing, or anchor - only `contentRect`/UV.
 public enum TileContentDisplayMode: String, Equatable, Sendable, CaseIterable {
-    /// Mode A — preserve full media aspect ratio, fit the WHOLE image inside the square (letterbox/pillarbox
+    /// Mode A - preserve full media aspect ratio, fit the WHOLE image inside the square (letterbox/pillarbox
     /// inside the slot). `contentRect` ⊂ slot, UV = full texture.
     case aspectFitInsideSquare
-    /// Mode B — fill the entire square, center-crop the overflow (the dense Apple-grid look). `contentRect` =
+    /// Mode B - fill the entire square, center-crop the overflow (the dense Apple-grid look). `contentRect` =
     /// slot, crop via the UV window. No bars.
     case squareFillCrop
 }
@@ -64,7 +64,7 @@ public struct TileContentLayout: Equatable, Sendable {
 }
 
 public enum TileContentFitter {
-    // MARK: Toggle-facing API (TileContentDisplayMode) — the same square slot in, content fit out.
+    // MARK: Toggle-facing API (TileContentDisplayMode) - the same square slot in, content fit out.
 
     /// Fit by explicit media pixel size for a toggle display mode.
     public static func fit(slotRect: CGRect, mediaPixelSize: CGSize, displayMode: TileContentDisplayMode) -> TileContentLayout {

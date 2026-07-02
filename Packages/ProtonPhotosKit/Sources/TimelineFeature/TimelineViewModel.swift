@@ -58,7 +58,7 @@ public final class TimelineViewModel {
         didSet { invalidateVisibleContentCache(bumpGeneration: true) }
     }
     /// Flat, chronological items of the CURRENTLY active route (whole library for `.all`, else the
-    /// filtered tag/album/trash set) — backs selection and the upload-found lookup, not viewer paging.
+    /// filtered tag/album/trash set) - backs selection and the upload-found lookup, not viewer paging.
     public private(set) var allItems: [PhotoItem] = []
 
     private let repository: PhotosRepository
@@ -152,7 +152,7 @@ public final class TimelineViewModel {
         }
     }
 
-    /// Re-runs the CURRENTLY selected filter — wired to the error-state "Retry" button. It must reload THIS
+    /// Re-runs the CURRENTLY selected filter - wired to the error-state "Retry" button. It must reload THIS
     /// filter, NOT fall back to `.all` (the old bug: retry on a failed Recently-Deleted loaded ALL photos while
     /// the sidebar still pointed at Trash → content/selection mismatch).
     public func retry() async {
@@ -176,14 +176,14 @@ public final class TimelineViewModel {
             guard filter == f else { return }
             filterCache[f] = sections
             let items = sections.flatMap(\.items)
-            // Only swap the grid if the content actually changed — otherwise keep the instant view (and the
+            // Only swap the grid if the content actually changed - otherwise keep the instant view (and the
             // user's scroll position) untouched.
             if items != allItems {
                 allItems = items
                 state = items.isEmpty ? .empty : .loaded(sections)
                 await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
             } else if case .loaded = state {
-                // identical to what we already showed from cache — nothing to do
+                // identical to what we already showed from cache - nothing to do
             } else {
                 state = items.isEmpty ? .empty : .loaded(sections)   // first load, content equals stale allItems
             }
@@ -235,7 +235,7 @@ public final class TimelineViewModel {
         // spinner on relaunch. The fresh enumeration below then refreshes it in the background.
         let cached = await repository.cachedTimeline()
         // A sidebar switch may have landed WHILE we were fetching. If the active filter is no longer `.all`,
-        // BAIL — never clobber the newly-selected route's content with the whole library. This is the
+        // BAIL - never clobber the newly-selected route's content with the whole library. This is the
         // "I clicked RAW right after launch but stayed in All Photos" bug: the slow `.all` load used to win.
         // Every `await` below re-checks this so the views stay married to the sidebar selection.
         guard filter == .all else { return }
@@ -250,9 +250,9 @@ public final class TimelineViewModel {
 
         do {
             let sections = Self.deduplicatedSections(try await repository.loadTimeline())
-            guard filter == .all else { return }   // route switched mid-fetch — keep the new route, not All Photos
+            guard filter == .all else { return }   // route switched mid-fetch - keep the new route, not All Photos
             let fresh = sections.flatMap(\.items)
-            // Only swap the grid if the library actually changed — otherwise keep the cached view
+            // Only swap the grid if the library actually changed - otherwise keep the cached view
             // (and the user's scroll position) untouched.
             if fresh != allItems {
                 allItems = fresh
@@ -275,7 +275,7 @@ public final class TimelineViewModel {
         let f = filter   // the route this refresh is for
         do {
             let sections = Self.deduplicatedSections(try await freshSectionsForCurrentFilter())
-            guard filter == f else {   // a sidebar switch landed mid-refresh — don't clobber the new route
+            guard filter == f else {   // a sidebar switch landed mid-refresh - don't clobber the new route
                 return TimelineRefreshResult(
                     uploadedUID: uploadedUID, foundItem: nil,
                     timelineCountBefore: before, timelineCountAfter: allItems.count,

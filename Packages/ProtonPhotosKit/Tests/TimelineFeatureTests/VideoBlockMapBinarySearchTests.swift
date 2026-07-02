@@ -56,7 +56,7 @@ struct VideoBlockMapBinarySearchTests {
     }
 
     @Test func rangeEndsExactlyAtBlockBoundary() {
-        // [100,200) ends exactly where block 2 ends — block 3 must NOT be included.
+        // [100,200) ends exactly where block 2 ends - block 3 must NOT be included.
         #expect(map.slices(offset: 100, length: 100) == linearSlices(map, offset: 100, length: 100))
         #expect(map.slices(offset: 100, length: 100).map(\.blockIndex) == [2])
     }
@@ -113,7 +113,7 @@ struct VideoBlockMapBinarySearchTests {
     }
 
     @Test func forwardBlocksIsDeterministicAndAdvances() {
-        // Repeating the same offset yields the identical read-ahead set — the loader dedups against the
+        // Repeating the same offset yields the identical read-ahead set - the loader dedups against the
         // last scheduled offset, so an unchanged offset re-schedules nothing new.
         let m = VideoBlockMap(blockSizes: [(1, 100), (2, 100), (3, 100), (4, 100)], totalOverride: 400)
         #expect(m.forwardBlocks(afterClearOffset: 0, count: 2) == m.forwardBlocks(afterClearOffset: 0, count: 2))

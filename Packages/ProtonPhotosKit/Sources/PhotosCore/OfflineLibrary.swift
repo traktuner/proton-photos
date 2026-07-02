@@ -2,7 +2,7 @@ import Foundation
 
 /// Persisted-settings keys + defaults for the Offline Photo Library and window/sidebar chrome.
 /// Centralised here (in the SDK-agnostic core) so the App glue and the test target share one
-/// source of truth — UserDefaults key strings drift silently otherwise.
+/// source of truth - UserDefaults key strings drift silently otherwise.
 public enum AppSettingsKey {
     /// Offline Photo Library master switch. When ON, full-resolution originals viewed in the photo viewer are
     /// persisted to the encrypted on-disk `originals` cache so reopening them (even after relaunch / offline) is
@@ -37,7 +37,7 @@ public protocol LibraryStatsProvider: Sendable {
     func metadataRowCount() async -> Int
 }
 
-/// Aggregated, displayable state of the on-disk offline cache — the data behind the Developer/Cache
+/// Aggregated, displayable state of the on-disk offline cache - the data behind the Developer/Cache
 /// settings surface (Deliverable 3). All fields are plain values so the view layer and tests can use
 /// it without touching the cache actors.
 public struct OfflineCacheStatus: Sendable, Equatable {

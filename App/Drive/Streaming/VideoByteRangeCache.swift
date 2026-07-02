@@ -4,7 +4,7 @@ import PhotosCore
 
 /// On-disk cache of a video's *encrypted* blocks, keyed by `uid` + block index, so reopening a video
 /// (or seeking back over already-watched regions) reuses bytes instead of re-downloading. We persist
-/// the ENCRYPTED block — not the decrypted plaintext — so no clear video content lands on disk; the
+/// the ENCRYPTED block - not the decrypted plaintext - so no clear video content lands on disk; the
 /// decrypt happens in memory on read (mirroring Proton Drive Web, which keeps decrypted bytes only in
 /// the page's memory and never persists them). A size budget with LRU eviction keeps disk bounded.
 ///
@@ -79,7 +79,7 @@ final class VideoByteRangeCache: @unchecked Sendable {
     // MARK: - Budget
 
     /// Evicts least-recently-used uid directories until under budget. Coarse-grained (per video, by
-    /// the directory's newest mtime) — cheap and good enough; a single video's blocks live or die
+    /// the directory's newest mtime) - cheap and good enough; a single video's blocks live or die
     /// together, which keeps a partially-played file fully reusable.
     private func enforceBudgetLocked(keep: String) {
         var total = sizeOnDiskLocked()
