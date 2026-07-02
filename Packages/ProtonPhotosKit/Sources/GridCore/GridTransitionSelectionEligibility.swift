@@ -5,7 +5,7 @@
 // The Metal transition renderer draws only image quads while a transition is active; selection outlines and
 // badges are settled-grid decorations and are intentionally not emitted by `renderTransitionDraws`. Therefore a
 // relocating selected identity cannot produce a double outline during the animation. Blocking such transitions
-// forced the selected/focused-photo pinch onto the legacy reflow fallback, which can diverge at release from the
+// forced the selected/focused-photo pinch onto the `GridZoomTransaction` reflow fallback (`transactionReflow`), which can diverge at release from the
 // single-lattice endpoint the user was visually following.
 
 package enum GridTransitionSelectionEligibility {

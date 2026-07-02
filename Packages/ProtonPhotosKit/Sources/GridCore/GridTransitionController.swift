@@ -54,7 +54,7 @@ package final class GridTransitionController {
     /// Try to begin a LIVE pinch (PINCH071) transition. Same eligibility gate as the click, but the plan's
     /// progress `q` is then HOST-DRIVEN via `setProgress` (the V3.8 scrub driver) instead of the trapezoidal
     /// time profile - there is no `advanceClick`/timer for a pinch plan. Returns true iff a plan was built
-    /// and is eligible; false ⇒ the host uses the legacy geometry-only `GridZoomTransaction` reflow.
+    /// and is eligible; false ⇒ the host uses the geometry-only `GridZoomTransaction` reflow fallback (`transactionReflow`).
     @discardableResult
     package func beginPinch(source: GridFramePlan, target: GridFramePlan, anchorIndex: Int,
                             viewportSize: CGSize, selection: Set<Int>) -> Bool {

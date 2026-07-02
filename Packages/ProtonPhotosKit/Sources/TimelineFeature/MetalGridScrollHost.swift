@@ -133,7 +133,7 @@ final class MetalGridScrollHost: NSView {
     // V3.9 CONTINUOUS MULTI-LEVEL LIVE-PINCH SCRUB DRIVER (single-presentation-lattice). When the first
     // resolved direction is an eligible in-band step, the pinch scrubs the V3.7 plan CONTINUOUSLY across
     // detents via this pure driver (rebuilding the segment plan as the finger crosses each detent -
-    // seam-continuous); otherwise it falls back to the legacy `GridZoomTransaction` reflow.
+    // seam-continuous); otherwise it falls back to the `GridZoomTransaction` reflow (`transactionReflow`).
     private var pinchDriver = PinchLiveZoomDriver()
     /// Per-gesture routing: undecided until the first direction resolves, then lattice (in-band chain) or reflow.
     // `.overviewDissolve` (overview boundary L3↔L4 / L4↔L5): a two-layer offscreen cross-dissolve. NOT chained
@@ -421,8 +421,8 @@ final class MetalGridScrollHost: NSView {
     }
 
     /// Route a live pinch sample. On the FIRST resolved direction, decide the mode: an in-band adjacent step
-    /// ⇒ LATTICE (continuous multi-level scrub of the V3.7 plan); otherwise ⇒ the legacy
-    /// `GridZoomTransaction` reflow. Once decided, the mode holds for the gesture.
+    /// ⇒ LATTICE (continuous multi-level scrub of the V3.7 plan); otherwise ⇒ the
+    /// `GridZoomTransaction` reflow (`transactionReflow`). Once decided, the mode holds for the gesture.
     private func driveLivePinch(continuousLevel pos: CGFloat) {
         let now = CACurrentMediaTime()
         let dt = pinchPrevMagnifyTime == 0 ? 1.0 / 60.0 : max(0, now - pinchPrevMagnifyTime)
@@ -451,7 +451,7 @@ final class MetalGridScrollHost: NSView {
                 pinchOverviewTarget = next
                 driveOverviewDissolve(continuousLevel: pos)
             } else {
-                pinchMode = .reflow                           // genuinely out-of-band ⇒ legacy reflow
+                pinchMode = .reflow                           // genuinely out-of-band ⇒ transaction reflow
                 coordinator.updateLiveZoom(continuousLevel: pos)
             }
         }

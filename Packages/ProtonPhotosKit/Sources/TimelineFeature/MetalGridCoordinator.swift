@@ -68,7 +68,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // The transition layer is a SEPARATE module that consumes the engine's GridFramePlan; it never
     // touches engine geometry, the fitter, or resize. This is the accepted production effect path (no
     // feature flag): it is attempted for every eligible normal-level +/- and pinch, falling back to the
-    // stable instant snap / legacy reflow ONLY when the geometry is ineligible (invalid case), never as a
+    // stable instant snap / transaction reflow ONLY when the geometry is ineligible (invalid case), never as a
     // switch. The clean instant settle remains the fallback for those invalid cases.
     let gridTransition = GridTransitionController(telemetrySink: { event in
         PhotoDiagnostics.shared.emit(event.name, event.fields)
@@ -1380,7 +1380,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     /// The contiguous adjacent-step band around the current `level` that is lattice-eligible (every step
     /// `lo→lo+1` is `.focusRowRelayout`). For the normal levels this is `[0, 3]`; an overview start gives a
-    /// degenerate band (`lo == hi`) ⇒ the host uses the legacy reflow. The host chains within this band.
+    /// degenerate band (`lo == hi`) ⇒ the host uses the `GridZoomTransaction` reflow (`transactionReflow`). The host chains within this band.
     func eligiblePinchChainBand() -> (lo: Int, hi: Int) {
         var lo = level, hi = level
         while lo > 0, engine.metrics(level: lo - 1).transitionKindToNext == .focusRowRelayout { lo -= 1 }
@@ -1410,7 +1410,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Both detents resolve through `pinchDetentParams`, so a rebuild at a detent crossing is seam-continuous
     /// with the previous segment. NOTHING is committed (level/phase/scroll stay at the gesture-start state; the
     /// actual scroll view stays frozen) - the plan renders the crossfade in viewport space. Returns false ⇒
-    /// the host uses the legacy reflow (only happens outside the eligible band).
+    /// the host uses the `GridZoomTransaction` reflow (`transactionReflow`) (only happens outside the eligible band).
     func tryBuildPinchSegment(source: Int, target: Int, viewportSize: CGSize) -> Bool {
         guard zoomTransaction != nil else { return false }
         let s = engine.clampLevel(source), t = engine.clampLevel(target)
@@ -1473,7 +1473,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     }
 
     /// End the active pinch plan WITHOUT committing a level change, keeping the live `GridZoomTransaction` so
-    /// the host can hand off to the legacy reflow. Defensive: only reachable if a mid-chain segment build ever
+    /// the host can hand off to the `GridZoomTransaction` reflow (`transactionReflow`). Defensive: only reachable if a mid-chain segment build ever
     /// fails (the eligible band guarantees it does not), so this prevents a stranded/frozen plan in that case.
     func abortPinchPlan() {
         gridTransition.end()
@@ -1492,7 +1492,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Begin an overview layer dissolve for an overview-boundary step `s→t`. Builds the two SETTLED plans once
     /// (source = the current on-screen grid; target = the adjacent overview, cursor-anchored, square). The live
     /// transaction (captured at gesture start in `beginLiveZoom`) supplies the cursor anchor. Returns false ⇒
-    /// caller falls back to the legacy reflow. Nothing is committed (scroll stays frozen).
+    /// caller falls back to the `GridZoomTransaction` reflow (`transactionReflow`). Nothing is committed (scroll stays frozen).
     func beginOverviewDissolve(sourceLevel s: Int, targetLevel t: Int, viewportSize: CGSize) -> Bool {
         guard let tx = zoomTransaction,
               engine.isOverviewBoundary(s, t) else { return false }
