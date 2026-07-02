@@ -35,11 +35,14 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
 
     /// macOS desktop SQLite tuning for the app-owned library DB — adapter-injected, mirroring the
     /// `GridTextureBudget` pattern. 256MB mmap + 8MiB page cache are fine on the Mac; iOS/iPadOS
-    /// adapters must build their own conservative policy instead of inheriting these numbers.
+    /// adapters must build their own conservative policy instead of inheriting these numbers. The WAL
+    /// cap is still bounded so large refreshes cannot leave a permanently inflated sidecar behind.
     private static let libraryDatabasePolicy = LibraryDatabasePolicy(
         mmapBytes: 268_435_456,
         cacheSizeKiB: 8_192,
-        busyTimeoutMs: 3_000
+        busyTimeoutMs: 3_000,
+        journalSizeLimitBytes: 16 * 1024 * 1024,
+        walCheckpointRowThreshold: 10_000
     )
 
     /// Full sign-out / master-reset: erase the SDK metadata SQLite stores for `uid` (security

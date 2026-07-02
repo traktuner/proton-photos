@@ -43,11 +43,23 @@ public struct LibraryDatabasePolicy: Sendable, Equatable {
     public let cacheSizeKiB: Int
     /// `PRAGMA busy_timeout` in milliseconds.
     public let busyTimeoutMs: Int
+    /// Upper bound SQLite should keep for the WAL sidecar after checkpoints.
+    public let journalSizeLimitBytes: Int
+    /// Successful saves touching at least this many rows trigger a truncating WAL checkpoint.
+    public let walCheckpointRowThreshold: Int
 
-    public init(mmapBytes: Int, cacheSizeKiB: Int, busyTimeoutMs: Int) {
+    public init(
+        mmapBytes: Int,
+        cacheSizeKiB: Int,
+        busyTimeoutMs: Int,
+        journalSizeLimitBytes: Int = 16 * 1024 * 1024,
+        walCheckpointRowThreshold: Int = 10_000
+    ) {
         self.mmapBytes = mmapBytes
         self.cacheSizeKiB = cacheSizeKiB
         self.busyTimeoutMs = busyTimeoutMs
+        self.journalSizeLimitBytes = max(0, journalSizeLimitBytes)
+        self.walCheckpointRowThreshold = max(0, walCheckpointRowThreshold)
     }
 
     /// Safe on the lowest supported iPhone/iPad class; platform adapters opt UP from here.
@@ -148,6 +160,7 @@ public struct TimelineSaveResult: Sendable, Equatable {
 /// Not `Sendable` by design: single-owner, held inside one actor (the app's SDK bridge).
 public final class TimelineMetadataStore {
     private var db: OpaquePointer?
+    private let policy: LibraryDatabasePolicy
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)   // SQLITE_TRANSIENT
 
     /// Feature schema versions this build understands. Bump a feature's number alongside its
@@ -170,6 +183,7 @@ public final class TimelineMetadataStore {
         let setupStart = Date()
         guard let handle = Self.openVerified(url: url, policy: policy) else { return nil }
         db = handle
+        self.policy = policy
         PhotoDiagnostics.shared.recordDBQuery(
             queryName: "library.sqlite.setup",
             durationMs: Date().timeIntervalSince(setupStart) * 1000,
@@ -208,6 +222,7 @@ public final class TimelineMetadataStore {
         sqlite3_exec(handle, "PRAGMA busy_timeout=\(policy.busyTimeoutMs);", nil, nil, nil)
         sqlite3_exec(handle, "PRAGMA cache_size=-\(max(0, policy.cacheSizeKiB));", nil, nil, nil)
         sqlite3_exec(handle, "PRAGMA mmap_size=\(max(0, policy.mmapBytes));", nil, nil, nil)
+        sqlite3_exec(handle, "PRAGMA journal_size_limit=\(policy.journalSizeLimitBytes);", nil, nil, nil)
 
         let schema = """
         CREATE TABLE IF NOT EXISTS schema_info(feature TEXT PRIMARY KEY, version INTEGER NOT NULL);
@@ -453,8 +468,21 @@ public final class TimelineMetadataStore {
             durationMs: Date().timeIntervalSince(start) * 1000,
             rowsReturned: upserted
         )
+        checkpointWALIfNeeded(rowWrites: upserted + swept)
         return TimelineSaveResult(
             skippedUnchanged: false, generation: newGeneration, upsertedRows: upserted, sweptRows: swept, succeeded: true
+        )
+    }
+
+    private func checkpointWALIfNeeded(rowWrites: Int) {
+        guard policy.walCheckpointRowThreshold > 0,
+              rowWrites >= policy.walCheckpointRowThreshold else { return }
+        let start = Date()
+        let ok = sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil) == SQLITE_OK
+        PhotoDiagnostics.shared.recordDBQuery(
+            queryName: ok ? "timeline.save.walCheckpoint" : "timeline.save.walCheckpointFailed",
+            durationMs: Date().timeIntervalSince(start) * 1000,
+            rowsReturned: rowWrites
         )
     }
 

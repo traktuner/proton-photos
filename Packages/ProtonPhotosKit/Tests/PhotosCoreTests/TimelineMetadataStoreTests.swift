@@ -30,9 +30,13 @@ final class TimelineMetadataStoreTests: XCTestCase {
         return dir
     }
 
-    private func makeStore(in dir: URL, name: String = "library-v1.sqlite") throws -> (TimelineMetadataStore, URL) {
+    private func makeStore(
+        in dir: URL,
+        name: String = "library-v1.sqlite",
+        policy: LibraryDatabasePolicy = .conservative
+    ) throws -> (TimelineMetadataStore, URL) {
         let url = dir.appendingPathComponent(name)
-        let store = try XCTUnwrap(TimelineMetadataStore(url: url))
+        let store = try XCTUnwrap(TimelineMetadataStore(url: url, policy: policy))
         return (store, url)
     }
 
@@ -84,6 +88,11 @@ final class TimelineMetadataStoreTests: XCTestCase {
         guard sqlite3_open(dbURL.path, &db) == SQLITE_OK else { return }
         defer { sqlite3_close(db) }
         sqlite3_exec(db, sql, nil, nil, nil)
+    }
+
+    private func fileSize(_ url: URL) -> Int64 {
+        let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber
+        return size?.int64Value ?? 0
     }
 
     private func timed<T>(_ label: String, _ body: () throws -> T) rethrows -> (T, Double) {
@@ -316,6 +325,30 @@ final class TimelineMetadataStoreTests: XCTestCase {
         let plan = store.timelineLoadQueryPlan()
         XCTAssertTrue(plan.contains("idx_photos_timeline"), "ordered load must ride the timeline index; plan: \(plan)")
         XCTAssertFalse(plan.uppercased().contains("TEMP B-TREE"), "no sort pass allowed; plan: \(plan)")
+        store.close()
+    }
+
+    func testLargeSaveTruncatesWalToPolicyLimit() throws {
+        let dir = try makeTempDir()
+        let policy = LibraryDatabasePolicy(
+            mmapBytes: 0,
+            cacheSizeKiB: 2_048,
+            busyTimeoutMs: 3_000,
+            journalSizeLimitBytes: 4_096,
+            walCheckpointRowThreshold: 1
+        )
+        let (store, url) = try makeStore(in: dir, policy: policy)
+
+        let result = store.save((0 ..< 1_000).map { makeSyntheticItem($0) })
+
+        XCTAssertTrue(result.succeeded)
+        XCTAssertGreaterThan(result.upsertedRows, 0)
+        let walURL = URL(fileURLWithPath: url.path + "-wal")
+        XCTAssertLessThanOrEqual(
+            fileSize(walURL),
+            Int64(policy.journalSizeLimitBytes),
+            "large saves must not leave a high-water WAL sidecar behind"
+        )
         store.close()
     }
 
