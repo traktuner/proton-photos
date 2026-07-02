@@ -92,6 +92,11 @@ public actor ThumbnailFeedCore {
     private nonisolated let unfetchable = UnfetchableThumbnailBox()
     private var skippedUnfetchable = 0
     private var lastRepassPercent = -1.0
+    /// Cursor + one-shot completion flag for the BOUNDED end-of-crawl disk-coverage re-scan
+    /// (`advanceDiskCoverageScan`). Workers share the cursor so together they complete one pass in bounded
+    /// chunks; none holds the serial actor for an O(library) scan. Reset per crawl in `startPrefetch`.
+    private var coverageScanCursor = 0
+    private var coverageSettled = false
     private var targetConcurrency = 2
     private var activeDownloaders = 0
     private var aimdSuccessStreak = 0
@@ -364,6 +369,8 @@ public actor ThumbnailFeedCore {
         diskPresence.beginTracking(uids)
         unfetchable.removeAll()   // a fresh crawl retries backend-refused items exactly once
         lastRepassPercent = -1.0
+        coverageScanCursor = 0
+        coverageSettled = false
         startWorkers()
     }
 
@@ -488,21 +495,31 @@ public actor ThumbnailFeedCore {
             let chunk = takeBatch()
             if chunk.isEmpty {
                 if priority.isEmpty && sequentialIndex >= sequential.count {
-                    // The end-of-list coverage re-scan is O(library) `cache.has` stats held on the serial
-                    // actor, and with every worker reaching the end together it stampedes. Never run it while
-                    // the viewport is actively warming (recent visible demand) — it would block the visible
-                    // decode that demand represents. Idle instead; it runs once demand quiets.
+                    // Coverage already verified for this crawl → nothing left to do.
+                    if coverageSettled { return }
+                    // Never re-scan while a viewport is actively warming (recent visible demand) — it would
+                    // compete for the serial actor with the visible decode that demand represents. Idle; the
+                    // scan resumes once demand quiets.
                     if recentVisibleDemand() {
                         try? await Task.sleep(for: .milliseconds(150))
                         continue
                     }
-                    let percent = refreshDiskCoverageFromCache().percent
-                    if percent < 0.995, percent > lastRepassPercent + 0.01 {
-                        lastRepassPercent = percent
+                    // Refresh disk coverage in a BOUNDED chunk of stats (never an O(library) actor hold), so a
+                    // full re-scan — even with every worker reaching the end together — can never starve a
+                    // visible warm decode. `nil` = the pass isn't finished (or it bailed to a live viewport):
+                    // yield the actor and continue it on a later iteration.
+                    guard let coverage = advanceDiskCoverageScan() else {
+                        try? await Task.sleep(for: .milliseconds(15))
+                        continue
+                    }
+                    if coverage.percent < 0.995, coverage.percent > lastRepassPercent + 0.01 {
+                        lastRepassPercent = coverage.percent
                         sequentialIndex = 0
+                        coverageScanCursor = 0
                         try? await Task.sleep(for: .seconds(2))
                         continue
                     }
+                    coverageSettled = true   // ≥99.5% (or no longer improving) → stop re-scanning this crawl
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(150))
@@ -682,15 +699,27 @@ public actor ThumbnailFeedCore {
         return (now ?? clock()).timeIntervalSince(last) < configuration.visibleQuietWindow
     }
 
-    private func refreshDiskCoverageFromCache() -> (present: Int, total: Int, percent: Double) {
+    /// Bound on `cache.has` stats performed per `advanceDiskCoverageScan` invocation - the ceiling on how long
+    /// one end-of-crawl coverage step can hold the serial actor. Small enough that a visible warm decode never
+    /// waits behind more than this many filesystem stats.
+    private static let coverageScanChunk = 512
+
+    /// Advances the end-of-crawl disk-coverage re-scan by ONE bounded chunk of `cache.has` stats, returning the
+    /// refreshed coverage ONLY when a full pass just completed (else `nil` — "call again"). Bounded so it can
+    /// never hold the serial actor for an O(library) scan, and it bails to `nil` the instant a viewport goes
+    /// live, so it can never starve a visible warm decode. Workers share `coverageScanCursor`, so together they
+    /// complete one pass in bounded steps; no single worker runs a full scan.
+    private func advanceDiskCoverageScan() -> (present: Int, total: Int, percent: Double)? {
         var scanned = 0
-        for uid in sequential {
+        while coverageScanCursor < sequential.count, scanned < Self.coverageScanChunk {
+            if recentVisibleDemand() { return nil }
+            let uid = sequential[coverageScanCursor]
             diskPresence.set(uid, present: cache.has(uid))
+            coverageScanCursor += 1
             scanned += 1
-            // This is O(library) `cache.has` stats on the serial actor. If a viewport goes live mid-scan, bail
-            // so the visible decode isn't blocked behind the rest of the scan; the next idle pass finishes it.
-            if scanned & 0x1FF == 0, recentVisibleDemand() { break }
         }
+        guard coverageScanCursor >= sequential.count else { return nil }   // pass not finished yet
+        coverageScanCursor = 0
         return diskPresence.coverage()
     }
 
@@ -770,6 +799,20 @@ public actor ThumbnailFeedCore {
         return "ProtonPhotos.thumbnailPrefetch." + String(cleaned.prefix(180))
     }
 }
+
+#if DEBUG
+extension ThumbnailFeedCore {
+    /// Test seam (DEBUG only): seed the crawl's sequential list and run exactly ONE end-of-crawl coverage-scan
+    /// step, returning how many `cache.has` stats it performed. Proves the re-scan is incremental — one
+    /// actor-held step can never scan the whole library (the cold-start starvation risk this guards against).
+    func coverageScanStepStatCountForTesting(seeding uids: [PhotoUID]) -> Int {
+        sequential = uids
+        coverageScanCursor = 0
+        _ = advanceDiskCoverageScan()
+        return coverageScanCursor == 0 ? uids.count : coverageScanCursor
+    }
+}
+#endif
 
 private final class DecodedThumbnailBox: @unchecked Sendable {
     let value: DecodedThumbnail

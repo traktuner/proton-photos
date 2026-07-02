@@ -98,7 +98,7 @@ struct ThumbnailCrawlYieldTests {
         let clock = ClockBox(Date(timeIntervalSince1970: 1000))
         let feed = await Self.makeFeed(loader: loader, clock: clock, concurrency: 1, batch: 1)
 
-        await feed.noteVisibleDemand()   // viewport is live at T=1000; no enqueue, no decode
+        feed.noteVisibleDemand()   // viewport is live at T=1000; synchronous (nonisolated), no enqueue/decode
         await feed.startPrefetch(seq)
 
         try await Task.sleep(for: .milliseconds(200))
@@ -110,6 +110,17 @@ struct ThumbnailCrawlYieldTests {
         try await Self.waitUntil { let o = await loader.fetchOrder(); return seq.allSatisfy { o.contains($0) } }
         let finalOrder = await loader.fetchOrder()
         #expect(seq.allSatisfy { finalOrder.contains($0) })
+    }
+
+    @Test func noteVisibleDemandIsRecordedSynchronouslyWithoutActorHop() async throws {
+        // Concurrency invariant: visible demand is marked SYNCHRONOUSLY on the caller's thread, so it can never
+        // queue behind the coverage scans that starve `warmDecoded` on the serial feed actor. The call below
+        // has NO `await` - it compiles only because `noteVisibleDemand` is `nonisolated`; a regression to an
+        // actor-hop would fail this build.
+        let clock = ClockBox(Date(timeIntervalSince1970: 1000))
+        let feed = await Self.makeFeed(loader: RecordingLoader(), clock: clock)
+        feed.noteVisibleDemand()
+        #expect(await feed.hasRecentVisibleDemand())
     }
 
     @Test func rateLimitedBatchBacksOffSequentialCrawl() async throws {

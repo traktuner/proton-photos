@@ -231,6 +231,19 @@ struct ThumbnailFeedCoreTests {
         await feed.stopPrefetch()   // frozen clock never expires the backoff; don't leave the worker looping
     }
 
+    @Test func endOfCrawlCoverageRescanIsBoundedNotFullLibraryScan() async throws {
+        // Concurrency invariant: a single end-of-crawl coverage step stats only a BOUNDED chunk, never the
+        // whole library, so no worker (and not the whole stampede of them) can hold the serial feed actor for
+        // an O(library) scan that would starve a visible warm decode. Proven directly on the incremental scan.
+        let feed = ThumbnailFeedCore(cache: Self.cache("coverage-bound"), loader: RecordingLoader(), configuration: Self.configuration())
+        let library = (0 ..< 5000).map { Self.uid("cov-\($0)") }
+
+        let statsInOneStep = await feed.coverageScanStepStatCountForTesting(seeding: library)
+
+        #expect(statsInOneStep < library.count)   // one actor-held step never scans the whole 5000-item library
+        #expect(statsInOneStep == 512)            // it advances exactly one bounded chunk
+    }
+
     @Test func diskHitsDoNotBecomeDownloads() async throws {
         let uids = (0 ..< 3).map { Self.uid("disk-hit-\($0)") }
         let cache = Self.cache("diskhits")
