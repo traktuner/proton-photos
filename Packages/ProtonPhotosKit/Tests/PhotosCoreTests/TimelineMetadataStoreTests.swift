@@ -86,6 +86,44 @@ final class TimelineMetadataStoreTests: XCTestCase {
         sqlite3_exec(db, sql, nil, nil, nil)
     }
 
+    private func timed<T>(_ label: String, _ body: () throws -> T) rethrows -> (T, Double) {
+        let start = Date()
+        let value = try body()
+        let ms = Date().timeIntervalSince(start) * 1000
+        print("[DBMicroPerf] \(label)=\(String(format: "%.2f", ms))ms")
+        return (value, ms)
+    }
+
+    private func makeSyntheticItem(_ index: Int, tagsOverride: Set<PhotoTag>? = nil) -> PhotoItem {
+        let isVideo = index.isMultiple(of: 11)
+        let isLive = index.isMultiple(of: 17)
+        let node = String(format: "node-%05d", index)
+        let tags: Set<PhotoTag>
+        if let tagsOverride {
+            tags = tagsOverride
+        } else if isVideo {
+            tags = [.videos]
+        } else if index.isMultiple(of: 19) {
+            tags = [.favorites]
+        } else {
+            tags = []
+        }
+        let burstMembers = index.isMultiple(of: 97)
+            ? [String(format: "burst-%05d-a", index), String(format: "burst-%05d-b", index)]
+            : []
+        return makeItem(
+            vol: "vol\(index % 3)",
+            node: node,
+            t: Double(1_700_000_000 + (index / 4)),
+            mime: isVideo ? "video/quicktime" : "image/jpeg",
+            live: isLive,
+            relvid: isLive ? String(format: "video-%05d", index) : nil,
+            dur: isVideo ? Double(30 + (index % 90)) : nil,
+            tags: tags,
+            burst: burstMembers
+        )
+    }
+
     // MARK: - 1. Schema creation + schema_info
 
     func testSchemaCreationStampsFeatureVersions() throws {
@@ -278,6 +316,72 @@ final class TimelineMetadataStoreTests: XCTestCase {
         let plan = store.timelineLoadQueryPlan()
         XCTAssertTrue(plan.contains("idx_photos_timeline"), "ordered load must ride the timeline index; plan: \(plan)")
         XCTAssertFalse(plan.uppercased().contains("TEMP B-TREE"), "no sort pass allowed; plan: \(plan)")
+        store.close()
+    }
+
+    func testTwentyThousandRowSyntheticSaveLoadSkipAndChangedUpsertGuard() throws {
+        let dir = try makeTempDir()
+        let (store, _) = try makeStore(in: dir)
+
+        let items = (0 ..< 20_000).map { makeSyntheticItem($0) }
+        let ordered = items.sorted(by: TimelineOrder.areInIncreasingOrder)
+
+        let (firstSave, firstSaveMs) = timed("20k.initialSave") {
+            store.save(items)
+        }
+        XCTAssertTrue(firstSave.succeeded)
+        XCTAssertFalse(firstSave.skippedUnchanged)
+        XCTAssertEqual(firstSave.generation, 1)
+        XCTAssertEqual(firstSave.upsertedRows, 20_000)
+        XCTAssertEqual(firstSave.sweptRows, 0)
+        XCTAssertEqual(store.count(), 20_000)
+
+        let (loaded, loadMs) = timed("20k.load") {
+            store.load()
+        }
+        XCTAssertEqual(loaded.count, 20_000)
+        XCTAssertEqual(loaded.first, ordered.first)
+        XCTAssertEqual(loaded.last, ordered.last)
+        XCTAssertEqual(loaded, ordered)
+
+        let plan = store.timelineLoadQueryPlan()
+        XCTAssertTrue(plan.contains("idx_photos_timeline"), "20k ordered load must ride the timeline index; plan: \(plan)")
+        XCTAssertFalse(plan.uppercased().contains("TEMP B-TREE"), "20k load must not sort via temp b-tree; plan: \(plan)")
+
+        let (skipSave, skipMs) = timed("20k.unchangedSkip") {
+            store.save(items)
+        }
+        XCTAssertTrue(skipSave.succeeded)
+        XCTAssertTrue(skipSave.skippedUnchanged)
+        XCTAssertEqual(skipSave.generation, 1)
+        XCTAssertEqual(skipSave.upsertedRows, 0)
+        XCTAssertEqual(skipSave.sweptRows, 0)
+
+        let additions = (20_000 ..< 20_025).map { makeSyntheticItem($0, tagsOverride: [.favorites]) }
+        let changedItems = Array(items.dropFirst(100)) + additions
+        let (changedSave, changedMs) = timed("20k.changedUpsert") {
+            store.save(changedItems)
+        }
+        XCTAssertTrue(changedSave.succeeded)
+        XCTAssertFalse(changedSave.skippedUnchanged)
+        XCTAssertEqual(changedSave.generation, 2)
+        XCTAssertEqual(changedSave.upsertedRows, 19_925)
+        XCTAssertEqual(changedSave.sweptRows, 100)
+        XCTAssertEqual(store.count(), 19_925)
+
+        let (changedLoaded, changedLoadMs) = timed("20k.changedLoad") {
+            store.load()
+        }
+        XCTAssertEqual(changedLoaded.count, 19_925)
+        XCTAssertEqual(changedLoaded, changedItems.sorted(by: TimelineOrder.areInIncreasingOrder))
+
+        print(
+            "[DBMicroPerf] 20k.summary initialSaveMs=\(String(format: "%.2f", firstSaveMs)) " +
+            "loadMs=\(String(format: "%.2f", loadMs)) " +
+            "skipMs=\(String(format: "%.2f", skipMs)) " +
+            "changedSaveMs=\(String(format: "%.2f", changedMs)) " +
+            "changedLoadMs=\(String(format: "%.2f", changedLoadMs))"
+        )
         store.close()
     }
 
