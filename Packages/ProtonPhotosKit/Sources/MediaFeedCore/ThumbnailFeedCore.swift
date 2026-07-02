@@ -58,7 +58,7 @@ public actor ThumbnailFeedCore {
     private nonisolated let cache: ThumbnailCache
     private nonisolated let loader: ThumbnailBatchLoader
     private nonisolated let onDecoded: @Sendable (PhotoUID, DecodedThumbnail) -> Void
-    private nonisolated(unsafe) let decoded = NSCache<NSString, DecodedThumbnailBox>()
+    private nonisolated let decoded: DecodedThumbnailCache
     private nonisolated let diskPresence = DiskPresenceCache()
     private nonisolated let configuration: ThumbnailFeedCoreConfiguration
 
@@ -129,25 +129,24 @@ public actor ThumbnailFeedCore {
         self.configuration = configuration
         self.clock = clock
         self.onDecoded = onDecoded
-        decoded.totalCostLimit = configuration.decodedMemoryBudgetBytes
+        self.decoded = DecodedThumbnailCache(costLimit: configuration.decodedMemoryBudgetBytes)
         targetConcurrency = configuration.initialDownloadConcurrency
     }
 
     /// Governor-driven memory-pressure response for the decoded-thumbnail RAM tier. `scale` lowers the
-    /// NSCache cost limit (future decodes are bounded smaller); `purge` drops everything held now (the
-    /// UIKit `didReceiveMemoryWarning` / critical semantic). `nonisolated` + thread-safe NSCache, so the
+    /// cost budget (evicting LRU entries down to it); `purge` drops everything held now (the UIKit
+    /// `didReceiveMemoryWarning` / critical semantic). `nonisolated` + internally lock-guarded, so the
     /// governor calls it without hopping the feed actor (never blocks visible-tile decodes). Restoring
     /// `scale: 1.0, purge: false` returns the full budget. The disk tier is untouched - nothing is lost,
     /// only re-decoded on demand.
     public nonisolated func applyDecodedMemoryPressure(scale: Double, purge: Bool) {
         let clamped = min(1, max(0, scale))
-        decoded.totalCostLimit = max(1, Int(Double(configuration.decodedMemoryBudgetBytes) * clamped))
-        if purge { decoded.removeAllObjects() }
+        decoded.setCostLimit(max(1, Int(Double(configuration.decodedMemoryBudgetBytes) * clamped)))
+        if purge { decoded.removeAll() }
     }
 
     public func cachedDecoded(for uid: PhotoUID) -> DecodedThumbnail? {
-        let key = Self.key(uid)
-        if let cached = decoded.object(forKey: key)?.value {
+        if let cached = decoded.image(for: uid) {
             PhotoDiagnostics.shared.increment("thumb.ramDecodedHit")
             return cached
         }
@@ -166,7 +165,7 @@ public actor ThumbnailFeedCore {
     }
 
     public nonisolated func memoryDecoded(for uid: PhotoUID) -> DecodedThumbnail? {
-        decoded.object(forKey: Self.key(uid))?.value
+        decoded.image(for: uid)
     }
 
     public nonisolated func isKnownUnfetchable(_ uid: PhotoUID) -> Bool {
@@ -179,7 +178,7 @@ public actor ThumbnailFeedCore {
         return ThumbnailCacheTierState(
             knownInTimeline: true,
             diskThumbnail: diskThumbnail,
-            ramDecoded: decoded.object(forKey: Self.key(request.uid)) != nil,
+            ramDecoded: decoded.contains(request.uid),
             gpuTexture: gpuTextureResident
         )
     }
@@ -246,7 +245,7 @@ public actor ThumbnailFeedCore {
         var needDecode: [PhotoUID] = []
         needDecode.reserveCapacity(targets.count)
         for request in targets {
-            if decoded.object(forKey: Self.key(request.uid)) != nil {
+            if decoded.contains(request.uid) {
                 PhotoDiagnostics.shared.increment("thumb.ramDecodedHit")
                 alreadyDecoded += 1
             } else {
@@ -815,7 +814,7 @@ public actor ThumbnailFeedCore {
     }
 
     private func storeDecoded(_ image: DecodedThumbnail, for uid: PhotoUID) {
-        decoded.setObject(DecodedThumbnailBox(image), forKey: Self.key(uid), cost: image.decodedCostBytes)
+        decoded.set(image, for: uid)
         onDecoded(uid, image)
     }
 
@@ -895,12 +894,124 @@ extension ThumbnailFeedCore {
 }
 #endif
 
-private final class DecodedThumbnailBox: @unchecked Sendable {
-    let value: DecodedThumbnail
-
-    init(_ value: DecodedThumbnail) {
-        self.value = value
+/// Cost-bounded, `PhotoUID`-keyed decoded-thumbnail RAM tier (replaces `NSCache<NSString, …>`). The hot
+/// render read path (`ThumbnailFeedCore.memoryDecoded`) no longer builds an `NSString` key per lookup — it
+/// hashes the `PhotoUID` directly (stable identity; NO index/string re-keying, so no wrong-thumbnail risk).
+/// Byte-costed by `DecodedThumbnail.decodedCostBytes`, O(1) move-to-front LRU eviction, and one internal
+/// lock so the nonisolated render reads, the feed actor's stores, and the memory governor all touch it
+/// without an actor hop. Platform-universal (no AppKit/UIKit/Foundation-cache dependency beyond `NSLock`).
+/// `internal` (not `private`) only so `@testable` tests can assert eviction/cost/pressure behavior directly.
+final class DecodedThumbnailCache: @unchecked Sendable {
+    private final class Node {
+        let uid: PhotoUID
+        var image: DecodedThumbnail
+        var cost: Int
+        var prev: Node?
+        var next: Node?
+        init(uid: PhotoUID, image: DecodedThumbnail, cost: Int) {
+            self.uid = uid; self.image = image; self.cost = cost
+        }
     }
+
+    private let lock = NSLock()
+    private var map: [PhotoUID: Node] = [:]
+    private var head: Node?   // most-recently used
+    private var tail: Node?   // least-recently used → evicted first
+    private var totalCost = 0
+    private var costLimit: Int
+
+    init(costLimit: Int) {
+        self.costLimit = max(1, costLimit)
+    }
+
+    /// Hot render read: look up and promote to most-recently-used. Nil on miss.
+    func image(for uid: PhotoUID) -> DecodedThumbnail? {
+        lock.lock(); defer { lock.unlock() }
+        guard let node = map[uid] else { return nil }
+        moveToFront(node)
+        return node.image
+    }
+
+    /// Membership check WITHOUT promoting (diagnostics / "already decoded" checks).
+    func contains(_ uid: PhotoUID) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return map[uid] != nil
+    }
+
+    /// Insert or replace, adjusting the running cost, then evict LRU entries until within budget. The
+    /// just-set entry is never evicted here unless it ALONE exceeds the budget (then it is kept and the
+    /// cache stays transiently over budget until a later set/limit-change reclaims it).
+    func set(_ image: DecodedThumbnail, for uid: PhotoUID) {
+        let cost = max(0, image.decodedCostBytes)
+        lock.lock(); defer { lock.unlock() }
+        if let node = map[uid] {
+            totalCost += cost - node.cost
+            node.image = image
+            node.cost = cost
+            moveToFront(node)
+        } else {
+            let node = Node(uid: uid, image: image, cost: cost)
+            map[uid] = node
+            insertAtFront(node)
+            totalCost += cost
+        }
+        evictToBudget(keeping: uid)
+    }
+
+    func setCostLimit(_ bytes: Int) {
+        lock.lock(); defer { lock.unlock() }
+        costLimit = max(1, bytes)
+        evictToBudget(keeping: nil)
+    }
+
+    func removeAll() {
+        lock.lock(); defer { lock.unlock() }
+        map.removeAll(keepingCapacity: true)
+        head = nil
+        tail = nil
+        totalCost = 0
+    }
+
+    // MARK: - Intrusive doubly-linked-list ops (caller holds `lock`)
+
+    private func insertAtFront(_ node: Node) {
+        node.prev = nil
+        node.next = head
+        head?.prev = node
+        head = node
+        if tail == nil { tail = node }
+    }
+
+    private func unlink(_ node: Node) {
+        node.prev?.next = node.next
+        node.next?.prev = node.prev
+        if head === node { head = node.next }
+        if tail === node { tail = node.prev }
+        node.prev = nil
+        node.next = nil
+    }
+
+    private func moveToFront(_ node: Node) {
+        guard head !== node else { return }
+        unlink(node)
+        insertAtFront(node)
+    }
+
+    private func evictToBudget(keeping uid: PhotoUID?) {
+        while totalCost > costLimit, let victim = tail, victim.uid != uid {
+            unlink(victim)
+            map[victim.uid] = nil
+            totalCost -= victim.cost
+        }
+    }
+
+    #if DEBUG
+    /// Test seam: current entry count + running cost, for eviction/budget assertions.
+    func snapshotForTesting() -> (count: Int, cost: Int) {
+        lock.lock(); defer { lock.unlock() }
+        return (map.count, totalCost)
+    }
+    #endif
 }
 
 private final class UnfetchableThumbnailBox: @unchecked Sendable {

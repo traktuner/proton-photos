@@ -4,6 +4,7 @@ import Foundation
 import ImageIO
 import Testing
 import PhotosCore
+import MediaDecodingCore
 @testable import MediaByteCache
 @testable import MediaFeedCore
 
@@ -310,6 +311,96 @@ struct ThumbnailFeedCoreTests {
         await feed.stopPrefetch()
     }
 
+    // MARK: - Decoded RAM tier: PhotoUID-keyed costed LRU cache (replaces NSCache<NSString>)
+
+    @Test func decodedCacheHitAndMissKeyedByPhotoUID() {
+        let cache = DecodedThumbnailCache(costLimit: 1_000_000)
+        let a = Self.uid("dc-a"); let b = Self.uid("dc-b")
+        cache.set(Self.decodedThumb(10, 10), for: a)   // keyed directly by PhotoUID, no NSString built
+        #expect(cache.image(for: a) != nil)
+        #expect(cache.image(for: b) == nil)
+        #expect(cache.contains(a))
+        #expect(!cache.contains(b))
+    }
+
+    @Test func decodedCacheEvictsLruWhenOverBudgetAndKeepsRecentlyUsed() {
+        // Budget holds exactly two 10×10×4=400-byte entries; the third eviction targets the LRU.
+        let cache = DecodedThumbnailCache(costLimit: 800)
+        let ids = (0 ..< 3).map { Self.uid("dc-lru-\($0)") }
+        cache.set(Self.decodedThumb(10, 10), for: ids[0])
+        cache.set(Self.decodedThumb(10, 10), for: ids[1])
+        _ = cache.image(for: ids[0])                    // touch ids[0] → MRU, so ids[1] becomes the LRU
+        cache.set(Self.decodedThumb(10, 10), for: ids[2])   // over budget → evict LRU (ids[1])
+
+        #expect(cache.image(for: ids[0]) != nil)        // recently used survives
+        #expect(cache.image(for: ids[1]) == nil)        // least-recently used evicted
+        #expect(cache.image(for: ids[2]) != nil)        // just-inserted survives
+        #expect(cache.snapshotForTesting().count == 2)
+    }
+
+    @Test func decodedCacheReplaceUpdatesRunningCost() {
+        let cache = DecodedThumbnailCache(costLimit: 10_000_000)
+        let a = Self.uid("dc-rep")
+        cache.set(Self.decodedThumb(10, 10), for: a)    // 400
+        #expect(cache.snapshotForTesting().cost == 400)
+        cache.set(Self.decodedThumb(20, 20), for: a)    // 1600, same UID → replace, not add
+        #expect(cache.snapshotForTesting().count == 1)
+        #expect(cache.snapshotForTesting().cost == 1600)
+    }
+
+    @Test func decodedCacheKeepsSingleOverBudgetItemThenReclaims() {
+        // An item alone larger than the whole budget is kept (transiently over budget), then reclaimed
+        // when a newer item arrives.
+        let cache = DecodedThumbnailCache(costLimit: 100)
+        let a = Self.uid("dc-big-a")
+        cache.set(Self.decodedThumb(10, 10), for: a)    // 400 > 100 → kept
+        #expect(cache.image(for: a) != nil)
+        #expect(cache.snapshotForTesting().count == 1)
+        let b = Self.uid("dc-big-b")
+        cache.set(Self.decodedThumb(10, 10), for: b)    // keeping=b → evict LRU (a)
+        #expect(cache.image(for: b) != nil)
+        #expect(cache.image(for: a) == nil)
+    }
+
+    @Test func decodedCacheSetCostLimitEvictsDownToBudget() {
+        let cache = DecodedThumbnailCache(costLimit: 10_000_000)
+        let ids = (0 ..< 3).map { Self.uid("dc-shrink-\($0)") }
+        for id in ids { cache.set(Self.decodedThumb(10, 10), for: id) }   // 3×400 = 1200
+        cache.setCostLimit(800)                          // shrink → evict oldest down to ≤800
+        #expect(cache.snapshotForTesting().count == 2)
+        #expect(cache.snapshotForTesting().cost <= 800)
+        #expect(cache.image(for: ids[2]) != nil)         // newest survives
+        #expect(cache.image(for: ids[0]) == nil)         // oldest evicted
+    }
+
+    @Test func decodedCacheRemoveAllClears() {
+        let cache = DecodedThumbnailCache(costLimit: 10_000_000)
+        cache.set(Self.decodedThumb(10, 10), for: Self.uid("dc-x"))
+        cache.removeAll()
+        #expect(cache.snapshotForTesting().count == 0)
+        #expect(cache.snapshotForTesting().cost == 0)
+        #expect(cache.image(for: Self.uid("dc-x")) == nil)
+    }
+
+    @Test func decodedRamTierRespondsToMemoryPressureThroughFeed() async throws {
+        // End-to-end through the feed: warmDecoded stores into the decoded tier; a critical pressure purge
+        // drops it; restoring the budget lets a fresh decode land again.
+        let uid = Self.uid("dc-pressure")
+        let diskCache = Self.cache("dc-pressure")
+        diskCache.storeToDisk(Self.pngData(width: 12, height: 12), for: uid)
+        let feed = ThumbnailFeedCore(cache: diskCache, loader: RecordingLoader(), configuration: Self.configuration())
+
+        _ = await feed.warmDecoded([ThumbnailRequest(uid: uid)], priority: .visibleNow, limit: 1)
+        #expect(feed.memoryDecoded(for: uid) != nil)
+
+        feed.applyDecodedMemoryPressure(scale: 0.0, purge: true)   // critical → shrink budget + purge
+        #expect(feed.memoryDecoded(for: uid) == nil)
+
+        feed.applyDecodedMemoryPressure(scale: 1.0, purge: false)  // back to full budget
+        _ = await feed.warmDecoded([ThumbnailRequest(uid: uid)], priority: .visibleNow, limit: 1)
+        #expect(feed.memoryDecoded(for: uid) != nil)               // decodes land again
+    }
+
     @Test func diskHitsDoNotBecomeDownloads() async throws {
         let uids = (0 ..< 3).map { Self.uid("disk-hit-\($0)") }
         let cache = Self.cache("diskhits")
@@ -516,6 +607,12 @@ struct ThumbnailFeedCoreTests {
         makePNGData(width: width, height: height)
     }
 
+    /// A decoded thumbnail of a known pixel size → deterministic `decodedCostBytes` (width*height*4) for
+    /// cost/eviction assertions.
+    private static func decodedThumb(_ width: Int, _ height: Int) -> DecodedThumbnail {
+        DecodedThumbnail(image: makeCGImage(width: width, height: height))
+    }
+
     private static func waitUntil(_ condition: @Sendable () async -> Bool) async throws {
         for _ in 0 ..< 60 {
             if await condition() { return }
@@ -636,7 +733,7 @@ private final class LockedAspects: @unchecked Sendable {
     }
 }
 
-private func makePNGData(width: Int, height: Int) -> Data {
+private func makeCGImage(width: Int, height: Int) -> CGImage {
     var pixels = [UInt8](repeating: 0, count: width * height * 4)
     for offset in stride(from: 0, to: pixels.count, by: 4) {
         pixels[offset] = 160
@@ -645,7 +742,7 @@ private func makePNGData(width: Int, height: Int) -> Data {
         pixels[offset + 3] = 255
     }
     let provider = CGDataProvider(data: Data(pixels) as CFData)!
-    let image = CGImage(
+    return CGImage(
         width: width,
         height: height,
         bitsPerComponent: 8,
@@ -658,6 +755,10 @@ private func makePNGData(width: Int, height: Int) -> Data {
         shouldInterpolate: false,
         intent: .defaultIntent
     )!
+}
+
+private func makePNGData(width: Int, height: Int) -> Data {
+    let image = makeCGImage(width: width, height: height)
     let data = NSMutableData()
     let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil)!
     CGImageDestinationAddImage(destination, image, nil)
