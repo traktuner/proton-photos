@@ -1629,7 +1629,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             if s.rect.intersects(pureViewport) { visibleUIDs.append(flatUIDs[s.index]) } else { overscanUIDs.append(flatUIDs[s.index]) }
         }
         streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
-        let realCount = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
+        let realCount = renderRealSlots(in: view, slots: Self.viewportDrawSlots(slots, viewportSize: viewportSize),
+                                        flatUIDs: flatUIDs, viewportSize: viewportSize)
         hasPendingVisibleThumbnails = !cache.residencySaturatedThisFrame && hasRetryableMissingVisibleTexture(visibleUIDs)
         publishLightDiagnostics(phase: "commitBridge", visibleCount: visibleUIDs.count,
                                 overscanCount: overscanUIDs.count, realCount: realCount, cellCount: slots.count,
@@ -1700,7 +1701,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         // Fully settled (no live focus-row transaction) → allow the soft→sharp upgrade of carried-over textures.
         let pendingVisibleQualityUpgrade = streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs,
                                                           allowUpgrade: zoomTransaction == nil)
-        let realCount = renderRealSlots(in: view, slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
+        let realCount = renderRealSlots(in: view, slots: Self.viewportDrawSlots(slots, viewportSize: viewportSize),
+                                        flatUIDs: flatUIDs, viewportSize: viewportSize)
         // Keep ticking while a visible cell is still a placeholder OR a resident texture is mid-upgrade (a
         // budget-deferred soft→sharp grow), so both finish on an otherwise-idle grid. Residency-saturated
         // frames stay forced-idle: those placeholders can only fill on a window change, which redraws anyway.
@@ -1716,6 +1718,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Real thumbnails: resident images are cover-filled INSIDE the square slot (aspect only via the UV window
     /// — never changes the slot), directly over the single uniform grid background, plus production decorations.
     /// Missing thumbnails draw nothing, so the bottom-most clear surface remains one continuous field.
+    nonisolated static func viewportDrawSlots(_ slots: [GridRenderSlot], viewportSize: CGSize) -> [GridRenderSlot] {
+        let viewport = CGRect(origin: .zero, size: viewportSize)
+        return slots.filter { $0.rect.intersects(viewport) }
+    }
+
     @discardableResult
     private func renderRealSlots(in view: MTKView, slots: [GridRenderSlot], flatUIDs: [PhotoUID], viewportSize: CGSize) -> Int {
         let (groups, realCount) = PhotoPerformanceSignposts.grid.interval("buildRealGroups") {
