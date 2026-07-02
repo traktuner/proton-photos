@@ -130,13 +130,34 @@ public protocol ThumbnailProvider: Sendable {
     func thumbnail(for uid: PhotoUID) async throws -> Data
 }
 
+/// How one `loadThumbnails` batch disposed of every uid that did NOT stream back through
+/// `onLoaded`. The feed uses this to classify (and account for) undelivered items instead of
+/// collapsing every failure into an unexplained "0/N".
+public struct ThumbnailBatchLoadResult: Sendable, Equatable {
+    /// The whole call failed (transport/session/SDK error) before or while streaming. Undelivered
+    /// items in the batch failed for this reason.
+    public let batchError: String?
+    /// Failures the backend reported per item (uid → short reason), e.g. "no thumbnail" or a
+    /// decrypt error. These are authoritative answers, not transport problems.
+    public let itemErrors: [PhotoUID: String]
+
+    public init(batchError: String? = nil, itemErrors: [PhotoUID: String] = [:]) {
+        self.batchError = batchError
+        self.itemErrors = itemErrors
+    }
+
+    /// The loader finished normally and reported no failures (items it didn't deliver are simply unknown).
+    public static let delivered = ThumbnailBatchLoadResult()
+}
+
 /// Bulk thumbnail loading — streams results as the SDK decrypts/downloads them, so the whole
-/// library can be filled in the background as fast as the connection allows.
+/// library can be filled in the background as fast as the connection allows. Returns a per-batch
+/// disposition so callers can explain (and stop retrying) items the backend refused.
 public protocol ThumbnailBatchLoader: Sendable {
     func loadThumbnails(
         for uids: [PhotoUID],
         onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
-    ) async
+    ) async -> ThumbnailBatchLoadResult
 }
 
 /// Loads full-resolution original bytes without creating an app-owned plaintext cache file.

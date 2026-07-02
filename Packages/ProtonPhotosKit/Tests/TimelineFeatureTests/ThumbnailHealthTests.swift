@@ -222,13 +222,14 @@ private actor FakeThumbnailLoader: ThumbnailBatchLoader {
     func loadThumbnails(
         for uids: [PhotoUID],
         onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
-    ) async {
+    ) async -> ThumbnailBatchLoadResult {
         requests.append(contentsOf: uids)
         for uid in uids {
             if let data = payloads[uid] {
                 onLoaded(uid, data)
             }
         }
+        return .delivered
     }
 
     func requestCount() -> Int {

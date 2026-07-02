@@ -127,5 +127,5 @@ private final class RefreshRepository: PhotosRepository, @unchecked Sendable {
 }
 
 private actor EmptyThumbnailLoader: ThumbnailBatchLoader {
-    func loadThumbnails(for uids: [PhotoUID], onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void) async {}
+    func loadThumbnails(for uids: [PhotoUID], onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void) async -> ThumbnailBatchLoadResult { .delivered }
 }

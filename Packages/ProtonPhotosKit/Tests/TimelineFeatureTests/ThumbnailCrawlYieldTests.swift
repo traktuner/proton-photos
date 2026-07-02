@@ -15,10 +15,11 @@ actor RecordingLoader: ThumbnailBatchLoader {
         self.failAll = failAll
     }
 
-    func loadThumbnails(for uids: [PhotoUID], onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void) async {
+    func loadThumbnails(for uids: [PhotoUID], onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void) async -> ThumbnailBatchLoadResult {
         order.append(contentsOf: uids)
-        guard !failAll else { return }
+        guard !failAll else { return ThumbnailBatchLoadResult(batchError: "simulated 429") }
         for uid in uids { if let data = payloads[uid] { onLoaded(uid, data) } }
+        return .delivered
     }
 
     func fetchOrder() -> [PhotoUID] { order }

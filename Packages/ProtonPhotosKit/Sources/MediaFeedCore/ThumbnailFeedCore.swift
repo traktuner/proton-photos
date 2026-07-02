@@ -77,11 +77,20 @@ public actor ThumbnailFeedCore {
     private var checkpointKey: String?
     private var prefetchCompleted = 0
     private var prefetchFailed = 0
+    private var prefetchFailedTimeout = 0
+    private var prefetchFailedBatchError = 0
+    private var prefetchFailedItemError = 0
+    private var prefetchFailedUnreported = 0
     private var prefetchDiskHit = 0
     private var prefetchDownloadStarted = 0
     private var prefetchDownloadCompleted = 0
     private var prefetchDecodeStarted = 0
     private var prefetchDecodeCompleted = 0
+    /// UIDs whose thumbnail the backend refused per item (e.g. "no thumbnail"). Quarantined so the
+    /// crawl doesn't re-request them every batch; cleared by `startPrefetch` so a fresh crawl
+    /// (new session, timeline refresh) retries them exactly once.
+    private var unfetchable: Set<PhotoUID> = []
+    private var skippedUnfetchable = 0
     private var lastRepassPercent = -1.0
     private var targetConcurrency = 2
     private var activeDownloaders = 0
@@ -282,12 +291,26 @@ public actor ThumbnailFeedCore {
 
     public func decoded(for uid: PhotoUID) async -> DecodedThumbnail? {
         if let image = cachedDecoded(for: uid) { return image }
+        // Visible tiles re-request on every appearance; once the backend has said "no thumbnail"
+        // for this crawl, don't burn a network round-trip per visibility.
+        if unfetchable.contains(uid) {
+            PhotoDiagnostics.shared.increment("thumb.unfetchableShortCircuit")
+            return nil
+        }
         let box = ByteBox()
         PhotoDiagnostics.shared.recordNetworkRequestDuringPinch()
-        await loader.loadThumbnails(for: [uid]) { loadedUID, data in
+        let result = await loader.loadThumbnails(for: [uid]) { loadedUID, data in
             if loadedUID == uid { box.set(data) }
         }
-        guard let data = box.value else { return nil }
+        guard let data = box.value else {
+            if let reason = result.itemErrors[uid] {
+                unfetchable.insert(uid)
+                recordError("thumbnail refused for \(Self.key(uid)): \(reason)")
+            } else if let reason = result.batchError {
+                recordError("thumbnail fetch failed for \(Self.key(uid)): \(reason)")
+            }
+            return nil
+        }
         cache.storeToDisk(data, for: uid)
         guard let image = decode(data, for: uid) else { return nil }
         storeDecoded(image, for: uid)
@@ -300,6 +323,7 @@ public actor ThumbnailFeedCore {
         checkpointKey = Self.checkpointKey(for: uids)
         sequentialIndex = checkpointKey.flatMap { UserDefaults.standard.object(forKey: $0) as? Int } ?? 0
         sequentialIndex = min(max(sequentialIndex, 0), sequential.count)
+        unfetchable.removeAll()   // a fresh crawl retries backend-refused items exactly once
         startWorkers()
     }
 
@@ -343,11 +367,19 @@ public actor ThumbnailFeedCore {
         public let activeJobs: Int
         public let completed: Int
         public let failed: Int
+        /// Classified breakdown of `failed` (their sum equals `failed`).
+        public let failedTimeout: Int
+        public let failedBatchError: Int
+        public let failedItemError: Int
+        public let failedUnreported: Int
         public let diskHit: Int
         public let downloadStarted: Int
         public let downloadCompleted: Int
         public let decodeStarted: Int
         public let decodeCompleted: Int
+        /// Items currently quarantined because the backend refused them per item this crawl.
+        public let unfetchableCount: Int
+        public let skippedUnfetchable: Int
         public let pausedReason: String
     }
 
@@ -377,11 +409,17 @@ public actor ThumbnailFeedCore {
             activeJobs: downloadInFlight + decodeInFlight,
             completed: prefetchCompleted,
             failed: prefetchFailed,
+            failedTimeout: prefetchFailedTimeout,
+            failedBatchError: prefetchFailedBatchError,
+            failedItemError: prefetchFailedItemError,
+            failedUnreported: prefetchFailedUnreported,
             diskHit: prefetchDiskHit,
             downloadStarted: prefetchDownloadStarted,
             downloadCompleted: prefetchDownloadCompleted,
             decodeStarted: prefetchDecodeStarted,
             decodeCompleted: prefetchDecodeCompleted,
+            unfetchableCount: unfetchable.count,
+            skippedUnfetchable: skippedUnfetchable,
             pausedReason: pausedReason
         )
     }
@@ -430,7 +468,7 @@ public actor ThumbnailFeedCore {
             downloadInFlight += chunk.count
             prefetchDownloadStarted += chunk.count
             PhotoDiagnostics.shared.recordNetworkRequestDuringPinch()
-            let completed = await Self.loadWithTimeout(
+            let snapshot = await Self.loadBatch(
                 chunk,
                 loader: loader,
                 cache: cache,
@@ -439,14 +477,42 @@ public actor ThumbnailFeedCore {
             )
             activeDownloaders = max(0, activeDownloaders - 1)
             downloadInFlight = max(0, downloadInFlight - chunk.count)
+            let completed = snapshot.delivered.count
             prefetchCompleted += completed
             prefetchDownloadCompleted += completed
-            let failed = max(0, chunk.count - completed)
-            prefetchFailed += failed
+            let undelivered = chunk.filter { !snapshot.delivered.contains($0) }
+            prefetchFailed += undelivered.count
+            var networkSuspect = false   // batch/timeout/unreported failures point at transport, not content
+            switch snapshot.resolution {
+            case .timedOut:
+                prefetchFailedTimeout += undelivered.count
+                networkSuspect = true
+                recordError("thumbnail batch timed out after \(configuration.downloadTimeoutSeconds)s (\(completed)/\(chunk.count) delivered)")
+            case let .finished(result):
+                if let batchError = result.batchError {
+                    prefetchFailedBatchError += undelivered.count
+                    networkSuspect = true
+                    recordError("thumbnail batch failed (\(completed)/\(chunk.count) delivered): \(batchError)")
+                } else if !undelivered.isEmpty {
+                    let refused = undelivered.filter { result.itemErrors[$0] != nil }
+                    prefetchFailedItemError += refused.count
+                    unfetchable.formUnion(refused)
+                    if let first = refused.first, let reason = result.itemErrors[first] {
+                        recordError("thumbnail refused for \(refused.count) item(s), e.g. \(Self.key(first)): \(reason)")
+                    }
+                    let unreported = undelivered.count - refused.count
+                    prefetchFailedUnreported += unreported
+                    if unreported > 0 {
+                        networkSuspect = true
+                        recordError("thumbnail batch missing \(unreported)/\(chunk.count) with no reported reason")
+                    }
+                }
+            }
             if completed == 0, !chunk.isEmpty {
-                recordError("thumbnail fetch returned 0/\(chunk.count) (network or rate-limit)")
                 crawlBackoffUntil = clock().addingTimeInterval(configuration.crawlBackoffSeconds)
-                targetConcurrency = max(configuration.minimumDownloadConcurrency, targetConcurrency / 2)
+                if networkSuspect {
+                    targetConcurrency = max(configuration.minimumDownloadConcurrency, targetConcurrency / 2)
+                }
                 aimdSuccessStreak = 0
             } else if completed > 0 {
                 aimdSuccessStreak += 1
@@ -462,27 +528,52 @@ public actor ThumbnailFeedCore {
         }
     }
 
-    private nonisolated static func loadWithTimeout(
+    private enum BatchResolution: Sendable {
+        case finished(ThumbnailBatchLoadResult)
+        case timedOut
+    }
+
+    private struct BatchSnapshot: Sendable {
+        let delivered: Set<PhotoUID>
+        let resolution: BatchResolution
+    }
+
+    /// Runs one loader batch against a real wall-clock timeout. The loader await is not
+    /// cancellable (the SDK's FFI continuation ignores task cancellation), so on timeout the
+    /// loader is left running detached: late deliveries still land in the disk cache (a later
+    /// pass counts them as disk hits), but counters snapshot exactly once here — an item is
+    /// either delivered-by-resolution or failed, never both.
+    private nonisolated static func loadBatch(
         _ chunk: [PhotoUID],
         loader: ThumbnailBatchLoader,
         cache: ThumbnailCache,
         diskPresence: DiskPresenceCache,
         seconds: Double
-    ) async -> Int {
-        let counter = IntBox()
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                await loader.loadThumbnails(for: chunk) { uid, data in
-                    cache.storeToDisk(data, for: uid)
-                    diskPresence.set(uid, present: true)
-                    counter.increment()
+    ) async -> BatchSnapshot {
+        let delivered = UIDSetBox()
+        let loaderTask = Task {
+            await loader.loadThumbnails(for: chunk) { uid, data in
+                cache.storeToDisk(data, for: uid)
+                diskPresence.set(uid, present: true)
+                delivered.insert(uid)
+            }
+        }
+        let resolution: BatchResolution = await withCheckedContinuation { continuation in
+            let once = OnceFlag()
+            let timeoutTask = Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled else { return }
+                if once.claim() { continuation.resume(returning: .timedOut) }
+            }
+            Task {
+                let result = await loaderTask.value
+                if once.claim() {
+                    timeoutTask.cancel()
+                    continuation.resume(returning: .finished(result))
                 }
             }
-            group.addTask { try? await Task.sleep(for: .seconds(seconds)) }
-            await group.next()
-            group.cancelAll()
         }
-        return counter.value
+        return BatchSnapshot(delivered: delivered.snapshot, resolution: resolution)
     }
 
     private func takeBatch() -> [PhotoUID] {
@@ -496,6 +587,10 @@ public actor ThumbnailFeedCore {
             } ?? priority.index(before: priority.endIndex)
             let uid = priority.remove(at: bestIndex)
             priorityByUID.removeValue(forKey: uid)
+            if unfetchable.contains(uid) {
+                skippedUnfetchable += 1
+                continue
+            }
             PhotoDiagnostics.shared.recordDiskPresenceCheckDuringPinch()
             let diskHit = cache.has(uid)
             diskPresence.set(uid, present: diskHit)
@@ -518,6 +613,10 @@ public actor ThumbnailFeedCore {
             scannedThisCall += 1
             let uid = sequential[sequentialIndex]
             sequentialIndex += 1
+            if unfetchable.contains(uid) {
+                skippedUnfetchable += 1
+                continue
+            }
             let diskHit = cache.has(uid)
             diskPresence.set(uid, present: diskHit)
             if !diskHit && !out.contains(uid) {
@@ -575,12 +674,19 @@ public actor ThumbnailFeedCore {
             "activeJobs": "\(downloadInFlight + decodeInFlight)",
             "completed": "\(prefetchCompleted)",
             "failed": "\(prefetchFailed)",
+            "failedTimeout": "\(prefetchFailedTimeout)",
+            "failedBatchError": "\(prefetchFailedBatchError)",
+            "failedItemError": "\(prefetchFailedItemError)",
+            "failedUnreported": "\(prefetchFailedUnreported)",
+            "unfetchable": "\(unfetchable.count)",
+            "skippedUnfetchable": "\(skippedUnfetchable)",
             "diskHit": "\(prefetchDiskHit)",
             "downloadStarted": "\(prefetchDownloadStarted)",
             "downloadCompleted": "\(prefetchDownloadCompleted)",
             "decodeStarted": "\(prefetchDecodeStarted)",
             "decodeCompleted": "\(prefetchDecodeCompleted)",
             "pausedReason": pausedReason,
+            "lastError": lastErrors.last ?? "-",
         ], throttleSeconds: 1.0)
     }
 
@@ -625,16 +731,30 @@ private final class ByteBox: @unchecked Sendable {
     }
 }
 
-private final class IntBox: @unchecked Sendable {
+private final class UIDSetBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var count = 0
+    private var uids: Set<PhotoUID> = []
 
-    func increment() {
-        lock.withLock { count += 1 }
+    func insert(_ uid: PhotoUID) {
+        lock.withLock { _ = uids.insert(uid) }
     }
 
-    var value: Int {
-        lock.withLock { count }
+    var snapshot: Set<PhotoUID> {
+        lock.withLock { uids }
+    }
+}
+
+/// One-shot claim used to resolve the loader-vs-timeout race exactly once.
+private final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    func claim() -> Bool {
+        lock.withLock {
+            guard !claimed else { return false }
+            claimed = true
+            return true
+        }
     }
 }
 

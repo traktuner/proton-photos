@@ -120,5 +120,5 @@ private extension ProductionGridFlatteningTests {
 }
 
 private actor NoopThumbnailLoader: ThumbnailBatchLoader {
-    func loadThumbnails(for uids: [PhotoUID], onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void) async {}
+    func loadThumbnails(for uids: [PhotoUID], onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void) async -> ThumbnailBatchLoadResult { .delivered }
 }

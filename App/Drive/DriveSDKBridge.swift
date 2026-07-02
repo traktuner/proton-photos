@@ -215,18 +215,40 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     func loadThumbnails(
         for uids: [PhotoUID],
         onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
-    ) async {
+    ) async -> ThumbnailBatchLoadResult {
         let sdkUids = uids.map { SDKNodeUid(volumeID: $0.volumeID, nodeID: $0.nodeID) }
-        try? await photosClient.downloadThumbnails(
-            photoUids: sdkUids,
-            type: .thumbnail,
-            cancellationToken: UUID(),
-            onThumbnailDownloaded: { result in
-                if case let .success(item?) = result, case let .success(data) = item.result {
-                    onLoaded(PhotoUID(volumeID: item.fileUid.volumeID, nodeID: item.fileUid.nodeID), data)
+        let failures = BatchFailureBox()
+        do {
+            try await photosClient.downloadThumbnails(
+                photoUids: sdkUids,
+                type: .thumbnail,
+                cancellationToken: UUID(),
+                onThumbnailDownloaded: { result in
+                    switch result {
+                    case let .success(item?):
+                        let uid = PhotoUID(volumeID: item.fileUid.volumeID, nodeID: item.fileUid.nodeID)
+                        switch item.result {
+                        case let .success(data):
+                            onLoaded(uid, data)
+                        case let .failure(error):
+                            failures.recordItem(uid, reason: error.localizedDescription)
+                        }
+                    case .success(nil):
+                        break   // yield without an attributable item (unparseable uid) — nothing to record
+                    case let .failure(error):
+                        failures.recordStream(error.localizedDescription)
+                    }
                 }
-            }
-        )
+            )
+        } catch {
+            failures.recordStream((error as? LocalizedError)?.errorDescription ?? "\(error)")
+        }
+        let result = failures.result
+        if result != .delivered {
+            let sample = result.itemErrors.first.map { "\($0.key.nodeID.prefix(8))…: \($0.value)" } ?? "-"
+            DebugLog.log("[ThumbBatch] n=\(uids.count) itemErrors=\(result.itemErrors.count) (\(sample)) batchError=\(result.batchError ?? "-")")
+        }
+        return result
     }
 
     // MARK: - FullMediaProvider
@@ -604,6 +626,25 @@ private final class DataBox: @unchecked Sendable {
     private var _data: Data?
     func set(_ data: Data) { lock.withLock { _data = data } }
     var value: Data? { lock.withLock { _data } }
+}
+
+/// Thread-safe collector for per-item and stream-level failures of one thumbnail batch.
+private final class BatchFailureBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var itemErrors: [PhotoUID: String] = [:]
+    private var streamError: String?
+
+    func recordItem(_ uid: PhotoUID, reason: String) {
+        lock.withLock { itemErrors[uid] = reason }
+    }
+
+    func recordStream(_ reason: String) {
+        lock.withLock { if streamError == nil { streamError = reason } }
+    }
+
+    var result: ThumbnailBatchLoadResult {
+        lock.withLock { ThumbnailBatchLoadResult(batchError: streamError, itemErrors: itemErrors) }
+    }
 }
 
 private struct SharesListResponse: Decodable {

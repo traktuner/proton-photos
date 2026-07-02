@@ -31,24 +31,49 @@ private final class MemoryCacheKeyStore: CacheKeyStore, @unchecked Sendable {
 
 private actor RecordingLoader: ThumbnailBatchLoader {
     private var order: [PhotoUID] = []
+    private var finishedBatchCount = 0
     private let payloads: [PhotoUID: Data]
+    private let itemErrors: [PhotoUID: String]
+    private let batchError: String?
     private let failAll: Bool
+    private let delayMilliseconds: Int
 
-    init(payloads: [PhotoUID: Data] = [:], failAll: Bool = false) {
+    init(
+        payloads: [PhotoUID: Data] = [:],
+        itemErrors: [PhotoUID: String] = [:],
+        batchError: String? = nil,
+        failAll: Bool = false,
+        delayMilliseconds: Int = 0
+    ) {
         self.payloads = payloads
+        self.itemErrors = itemErrors
+        self.batchError = batchError
         self.failAll = failAll
+        self.delayMilliseconds = delayMilliseconds
     }
 
-    func loadThumbnails(for uids: [PhotoUID], onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void) async {
+    func loadThumbnails(for uids: [PhotoUID], onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void) async -> ThumbnailBatchLoadResult {
         order.append(contentsOf: uids)
-        guard !failAll else { return }
-        for uid in uids {
-            if let data = payloads[uid] { onLoaded(uid, data) }
+        if delayMilliseconds > 0 {
+            try? await Task.sleep(for: .milliseconds(delayMilliseconds))
         }
+        defer { finishedBatchCount += 1 }
+        if let batchError { return ThumbnailBatchLoadResult(batchError: batchError) }
+        guard !failAll else { return .delivered }   // models a loader that delivers nothing and reports nothing
+        var errors: [PhotoUID: String] = [:]
+        for uid in uids {
+            if let data = payloads[uid] {
+                onLoaded(uid, data)
+            } else if let reason = itemErrors[uid] {
+                errors[uid] = reason
+            }
+        }
+        return ThumbnailBatchLoadResult(itemErrors: errors)
     }
 
     func fetched(_ uid: PhotoUID) -> Bool { order.contains(uid) }
     func requestCount() -> Int { order.count }
+    func finishedBatches() -> Int { finishedBatchCount }
 }
 
 @Suite("MediaFeedCore")
@@ -134,10 +159,221 @@ struct ThumbnailFeedCoreTests {
         #expect(configuration.downloadTimeoutSeconds == 0.1)
     }
 
+    // MARK: - Prefetch batch accounting (downloadStarted / downloadCompleted / failed classification)
+
+    @Test func batchLoaderCompletesAllRequestedThumbnails() async throws {
+        let uids = (0 ..< 3).map { Self.uid("full-\($0)") }
+        let cache = Self.cache("full")
+        let loader = RecordingLoader(payloads: Dictionary(uniqueKeysWithValues: uids.map { ($0, Self.pngData(width: 8, height: 8)) }))
+        let feed = ThumbnailFeedCore(cache: cache, loader: loader, configuration: Self.configuration(batchSize: 4))
+
+        await feed.startPrefetch(uids)
+        try await Self.waitUntil { await feed.prefetchStatus().downloadCompleted == 3 }
+
+        let status = await feed.prefetchStatus()
+        #expect(status.downloadStarted == 3)
+        #expect(status.downloadCompleted == 3)
+        #expect(status.failed == 0)
+        #expect(uids.allSatisfy { cache.has($0) })
+    }
+
+    @Test func partialBatchCountsCompletedVersusFailed() async throws {
+        let served = (0 ..< 2).map { Self.uid("part-ok-\($0)") }
+        let refused = (0 ..< 2).map { Self.uid("part-no-\($0)") }
+        let cache = Self.cache("partial")
+        let loader = RecordingLoader(
+            payloads: Dictionary(uniqueKeysWithValues: served.map { ($0, Self.pngData(width: 8, height: 8)) }),
+            itemErrors: Dictionary(uniqueKeysWithValues: refused.map { ($0, "no thumbnail for node") })
+        )
+        let feed = ThumbnailFeedCore(cache: cache, loader: loader, configuration: Self.configuration(batchSize: 4))
+
+        await feed.startPrefetch(served + refused)
+        try await Self.waitUntil {
+            let status = await feed.prefetchStatus()
+            return status.downloadCompleted == 2 && status.failed == 2
+        }
+
+        let status = await feed.prefetchStatus()
+        #expect(status.downloadStarted == 4)
+        #expect(status.downloadCompleted == 2)
+        #expect(status.failed == 2)
+        #expect(status.failedItemError == 2)
+        #expect(status.failedTimeout == 0)
+        #expect(status.failedBatchError == 0)
+        #expect(status.unfetchableCount == 2)
+        #expect(status.lastErrors.joined().contains("no thumbnail for node"))
+    }
+
+    @Test func zeroResultBatchRecordsClassifiedFailureAndBacksOff() async throws {
+        let uids = (0 ..< 2).map { Self.uid("zero-\($0)") }
+        let frozen = Date(timeIntervalSince1970: 5000)
+        let loader = RecordingLoader(batchError: "simulated 429")
+        let feed = ThumbnailFeedCore(
+            cache: Self.cache("zero"),
+            loader: loader,
+            configuration: Self.configuration(batchSize: 2),
+            clock: { frozen }
+        )
+
+        await feed.startPrefetch(uids)
+        try await Self.waitUntil { await feed.prefetchStatus().failedBatchError == 2 }
+
+        // Frozen clock → the crawl backoff never expires; no further attempts may happen.
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(await loader.requestCount() == 2)
+
+        let status = await feed.prefetchStatus()
+        #expect(status.downloadStarted == 2)
+        #expect(status.downloadCompleted == 0)
+        #expect(status.failed == 2)
+        #expect(status.failedBatchError == 2)
+        #expect(status.lastErrors.joined().contains("simulated 429"))
+        await feed.stopPrefetch()   // frozen clock never expires the backoff; don't leave the worker looping
+    }
+
+    @Test func diskHitsDoNotBecomeDownloads() async throws {
+        let uids = (0 ..< 3).map { Self.uid("disk-hit-\($0)") }
+        let cache = Self.cache("diskhits")
+        for uid in uids { cache.storeToDisk(Self.pngData(width: 8, height: 8), for: uid) }
+        let loader = RecordingLoader()
+        let feed = ThumbnailFeedCore(cache: cache, loader: loader, configuration: Self.configuration())
+
+        await feed.startPrefetch(uids)
+        try await Self.waitUntil { await feed.prefetchStatus().diskHit >= 3 }
+
+        let status = await feed.prefetchStatus()
+        #expect(status.downloadStarted == 0)
+        #expect(status.failed == 0)
+        #expect(await loader.requestCount() == 0)
+    }
+
+    @Test func timeoutDoesNotDoubleCountCompletionOrFailure() async throws {
+        let uid = Self.uid("timeout")
+        let cache = Self.cache("timeout")
+        let loader = RecordingLoader(
+            payloads: [uid: Self.pngData(width: 8, height: 8)],
+            delayMilliseconds: 500
+        )
+        let feed = ThumbnailFeedCore(
+            cache: cache,
+            loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 1, downloadTimeoutSeconds: 0.1)
+        )
+
+        await feed.startPrefetch([uid])
+        try await Self.waitUntil { await feed.prefetchStatus().failedTimeout == 1 }
+
+        let atTimeout = await feed.prefetchStatus()
+        #expect(atTimeout.downloadStarted == 1)
+        #expect(atTimeout.downloadCompleted == 0)
+        #expect(atTimeout.failed == 1)
+
+        // The uncancellable loader finishes late; its bytes land on disk, but the batch was
+        // already accounted: failed stays 1, completed stays 0 (never both for one item).
+        try await Self.waitUntil { await loader.finishedBatches() >= 1 }
+        try await Self.waitUntil { cache.has(uid) }
+        let afterLateDelivery = await feed.prefetchStatus()
+        #expect(afterLateDelivery.downloadCompleted == 0)
+        #expect(afterLateDelivery.failed == 1)
+        #expect(afterLateDelivery.downloadStarted == 1)
+
+        // The late-delivered blob is now a disk hit: a new visible request must NOT re-download.
+        await feed.requestPriority(uid, priority: .visibleNow)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(await loader.requestCount() == 1)
+    }
+
+    @Test func prefetchStaysPausedDuringInteraction() async throws {
+        let uids = (0 ..< 2).map { Self.uid("interact-\($0)") }
+        let loader = RecordingLoader(payloads: Dictionary(uniqueKeysWithValues: uids.map { ($0, Self.pngData(width: 8, height: 8)) }))
+        let feed = ThumbnailFeedCore(cache: Self.cache("interact"), loader: loader, configuration: Self.configuration())
+
+        await feed.setUserInteractionActive(true)
+        await feed.startPrefetch(uids)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(await loader.requestCount() == 0)
+        #expect(await feed.prefetchStatus().pausedReason == "interaction")
+
+        await feed.setUserInteractionActive(false)
+        try await Self.waitUntil { await feed.prefetchStatus().downloadCompleted == 2 }
+        #expect(await loader.requestCount() == 2)
+    }
+
+    @Test func refusedItemsAreQuarantinedUntilNextCrawlStart() async throws {
+        let uid = Self.uid("refused")
+        let loader = RecordingLoader(itemErrors: [uid: "no thumbnail for node"])
+        let feed = ThumbnailFeedCore(
+            cache: Self.cache("refused"),
+            loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 1)
+        )
+
+        await feed.startPrefetch([uid])
+        try await Self.waitUntil { await feed.prefetchStatus().failedItemError == 1 }
+        #expect(await loader.requestCount() == 1)
+
+        // Same crawl: the refused uid is quarantined — a new priority request must not re-download.
+        await feed.requestPriority(uid, priority: .visibleNow)
+        try await Self.waitUntil { await feed.prefetchStatus().skippedUnfetchable >= 1 }
+        #expect(await loader.requestCount() == 1)
+
+        // A fresh crawl start clears the quarantine and retries exactly once.
+        await feed.startPrefetch([uid])
+        await feed.requestPriority(uid, priority: .visibleNow)
+        try await Self.waitUntil { await loader.requestCount() == 2 }
+        #expect(await loader.requestCount() == 2)
+    }
+
+    @Test func visiblePathDoesNotRefetchBackendRefusedItems() async throws {
+        let uid = Self.uid("visible-refused")
+        let loader = RecordingLoader(itemErrors: [uid: "Node has no thumbnails"])
+        let feed = ThumbnailFeedCore(
+            cache: Self.cache("visible-refused"),
+            loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 1)
+        )
+
+        // First visible request hits the loader and learns the refusal…
+        #expect(await feed.decoded(for: uid) == nil)
+        #expect(await loader.requestCount() == 1)
+        // …every further visibility is short-circuited for this crawl.
+        #expect(await feed.decoded(for: uid) == nil)
+        #expect(await feed.decoded(for: uid) == nil)
+        #expect(await loader.requestCount() == 1)
+
+        // A fresh crawl start retries once (the node may have gained a thumbnail since).
+        await feed.startPrefetch([])
+        #expect(await feed.decoded(for: uid) == nil)
+        #expect(await loader.requestCount() == 2)
+    }
+
+    @Test func diagnosticsExplainEveryFailure() async throws {
+        let refused = Self.uid("diag-refused")
+        let loader = RecordingLoader(itemErrors: [refused: "decrypt failed"])
+        let feed = ThumbnailFeedCore(
+            cache: Self.cache("diag"),
+            loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 1)
+        )
+
+        await feed.startPrefetch([refused])
+        try await Self.waitUntil { await feed.prefetchStatus().failed == 1 }
+
+        let status = await feed.prefetchStatus()
+        // failed=N must decompose into the classified buckets…
+        #expect(status.failed == status.failedTimeout + status.failedBatchError + status.failedItemError + status.failedUnreported)
+        #expect(status.failedItemError == 1)
+        // …and the human-readable reason must be surfaced.
+        #expect(status.lastErrors.joined().contains("decrypt failed"))
+    }
+
     private static func configuration(
         downloadConcurrencyLimit: Int = 2,
         batchSize: Int = 2,
-        maxConcurrentDecodes: Int = 1
+        maxConcurrentDecodes: Int = 1,
+        visibleQuietWindow: TimeInterval = 0.25,
+        crawlBackoffSeconds: TimeInterval = 0.25,
+        downloadTimeoutSeconds: Double = 1
     ) -> ThumbnailFeedCoreConfiguration {
         ThumbnailFeedCoreConfiguration(
             targetPixels: 16,
@@ -149,9 +385,9 @@ struct ThumbnailFeedCoreTests {
             maxConcurrentDecodes: maxConcurrentDecodes,
             priorityQueueLimit: 16,
             sequentialScanLimit: 16,
-            visibleQuietWindow: 0.25,
-            crawlBackoffSeconds: 0.25,
-            downloadTimeoutSeconds: 1
+            visibleQuietWindow: visibleQuietWindow,
+            crawlBackoffSeconds: crawlBackoffSeconds,
+            downloadTimeoutSeconds: downloadTimeoutSeconds
         )
     }
 

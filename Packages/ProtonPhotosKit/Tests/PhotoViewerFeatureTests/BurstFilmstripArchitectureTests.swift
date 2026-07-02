@@ -146,7 +146,7 @@ final class BurstFilmstripArchitectureTests: XCTestCase {
 }
 
 private struct EmptyThumbnailLoader: ThumbnailBatchLoader {
-    func loadThumbnails(for uids: [PhotoUID], onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void) async {}
+    func loadThumbnails(for uids: [PhotoUID], onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void) async -> ThumbnailBatchLoadResult { .delivered }
 }
 
 private struct FailingMediaProvider: FullMediaProvider {
