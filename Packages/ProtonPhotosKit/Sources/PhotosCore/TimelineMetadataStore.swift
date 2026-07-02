@@ -134,9 +134,10 @@ public struct TimelineSaveResult: Sendable, Equatable {
     public let skippedUnchanged: Bool
     /// Refresh generation stamped on this save (unchanged when skipped).
     public let generation: Int
-    /// Rows written through the upsert (0 when skipped).
+    /// Rows actually written by the upsert — inserts plus real content updates, NOT unchanged
+    /// survivors (0 when skipped). This is the O(changes) signal the guard tests assert on.
     public let upsertedRows: Int
-    /// Rows from older generations removed by the post-enumeration sweep.
+    /// Rows removed by the anti-join sweep because they vanished from this full enumeration.
     public let sweptRows: Int
     /// False when the transaction failed and was rolled back.
     public let succeeded: Bool
@@ -152,8 +153,9 @@ public struct TimelineSaveResult: Sendable, Equatable {
 /// - `photos` is the hot path and carries ONLY what the timeline needs; feature data lives in
 ///   feature-owned tables (`photo_tags`, `burst_members`) — never serialized blobs.
 /// - Timeline order is `(t, vol, node)` everywhere; `idx_photos_timeline` serves the ordered scan.
-/// - Saves are generation-based incremental upserts with a digest no-op short-circuit; a full
-///   refresh bumps `gen` and sweeps rows from older generations.
+/// - Saves are O(changes): a digest no-op short-circuit skips unchanged refreshes; a changed
+///   refresh upserts only rows whose content actually differs and anti-joins the enumerated key
+///   set to sweep vanished rows — never a full-table rewrite.
 /// - `schema_info` versions each feature's tables explicitly; an unknown newer version fails
 ///   closed by resetting the (re-derivable) database rather than guessing.
 ///
@@ -173,6 +175,10 @@ public final class TimelineMetadataStore {
 
     private static let metaDigestKey = "timeline.digest"
     private static let metaGenerationKey = "timeline.generation"
+
+    /// Name of the connection-scoped TEMP scratch table that holds the current enumeration's keys
+    /// for the incremental save's anti-join sweep (see `ensureIncomingKeyTable`).
+    private static let incomingKeyTable = "save_incoming_keys"
 
     /// Single source of truth for the ordered hot-path scan — the query-plan guard test explains
     /// exactly this statement, so plan and load can never drift apart.
@@ -236,7 +242,6 @@ public final class TimelineMetadataStore {
           w INTEGER,
           h INTEGER,
           dur REAL,
-          gen INTEGER NOT NULL DEFAULT 0,
           PRIMARY KEY (vol, node)
         );
         CREATE INDEX IF NOT EXISTS idx_photos_timeline ON photos(t, vol, node);
@@ -391,17 +396,18 @@ public final class TimelineMetadataStore {
 
     // MARK: Save
 
-    /// Generation-based incremental save of a FULL timeline enumeration.
+    /// Incremental, O(changes) save of a FULL timeline enumeration.
     ///
     /// 1. No-op short-circuit: a deterministic digest of the (canonically ordered) input is
     ///    compared against the persisted one — an unchanged refresh writes nothing at all.
-    /// 2. Otherwise every incoming row is upserted stamped with a bumped `gen`; rows the
-    ///    enumeration no longer contains keep their old `gen` and are swept by
-    ///    `DELETE … WHERE gen < current` after the successful pass. There is deliberately no
-    ///    `DELETE FROM photos` full rewrite anymore.
+    /// 2. Otherwise each incoming row is upserted with a NULL-safe change guard, so only rows whose
+    ///    persisted fields actually differ are written; unchanged survivors are left untouched (no
+    ///    page churn, no WAL frames). Rows the enumeration no longer contains are removed by an
+    ///    anti-join against the recorded key set. There is deliberately no full-table rewrite.
     ///
-    /// `w`/`h` (learned dimensions, future aspects migration) are written as NULL on first insert
-    /// and left untouched on update so a future dimension writer is not clobbered by refreshes.
+    /// The `generation` counter still advances once per changed save (diagnostics only — it no
+    /// longer stamps rows). `w`/`h` (learned dimensions) are never referenced by the upsert, so a
+    /// future dimension writer's values survive every refresh.
     @discardableResult
     public func save(_ items: [PhotoItem]) -> TimelineSaveResult {
         PhotoPerformanceSignposts.database.interval("db.save") {
@@ -413,8 +419,9 @@ public final class TimelineMetadataStore {
     private func saveInstrumented(_ items: [PhotoItem]) -> TimelineSaveResult {
         let start = Date()
         // Canonical order: identical input sets digest identically regardless of arrival order,
-        // and rows persist in exactly the order load() returns them.
-        let ordered = items.sorted(by: TimelineOrder.areInIncreasingOrder)
+        // and rows persist in exactly the order load() returns them. The enumeration feeding save
+        // is normally already in timeline order, so an O(n) precheck skips a redundant full sort.
+        let ordered = Self.isTimelineOrdered(items) ? items : items.sorted(by: TimelineOrder.areInIncreasingOrder)
         let digest = Self.timelineDigest(of: ordered)
         let generation = readMetaInt(Self.metaGenerationKey) ?? 0
 
@@ -430,7 +437,10 @@ public final class TimelineMetadataStore {
         }
 
         let newGeneration = generation + 1
-        guard sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+        // The anti-join sweep reads from a connection-scoped scratch key set; make sure it exists
+        // before opening the write transaction (its DDL lives in the TEMP store, off the WAL).
+        guard ensureIncomingKeyTable(),
+              sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
             return TimelineSaveResult(
                 skippedUnchanged: false, generation: generation, upsertedRows: 0, sweptRows: 0, succeeded: false
             )
@@ -439,11 +449,18 @@ public final class TimelineMetadataStore {
         var upserted = 0
         var swept = 0
         let ok: Bool = {
-            guard upsertPhotos(ordered, generation: newGeneration, upserted: &upserted) else { return false }
-            // Sweep: anything the full enumeration did not re-stamp belongs to an older refresh.
-            guard sqlite3_exec(db, "DELETE FROM photos WHERE gen < \(newGeneration);", nil, nil, nil) == SQLITE_OK else {
-                return false
-            }
+            // Record every incoming key, then upsert only the rows whose persisted content actually
+            // changed (unchanged rows write nothing — no page churn, no WAL frames).
+            guard sqlite3_exec(db, "DELETE FROM \(Self.incomingKeyTable);", nil, nil, nil) == SQLITE_OK,
+                  upsertChangedPhotos(ordered, upserted: &upserted) else { return false }
+            // Sweep: delete exactly the rows this full enumeration no longer contains (an anti-join
+            // against the recorded key set), instead of rewriting every surviving row per refresh.
+            guard sqlite3_exec(
+                db,
+                "DELETE FROM photos WHERE NOT EXISTS " +
+                "(SELECT 1 FROM \(Self.incomingKeyTable) k WHERE k.vol = photos.vol AND k.node = photos.node);",
+                nil, nil, nil
+            ) == SQLITE_OK else { return false }
             swept = Int(sqlite3_changes(db))
             guard rewriteTags(ordered), rewriteBurstMembers(ordered) else { return false }
             guard writeMeta(Self.metaDigestKey, digest),
@@ -486,17 +503,35 @@ public final class TimelineMetadataStore {
         )
     }
 
-    private func upsertPhotos(_ items: [PhotoItem], generation: Int, upserted: inout Int) -> Bool {
+    /// Incremental upsert of the ordered enumeration. Two things happen per row: the `(vol, node)`
+    /// key is recorded in the scratch set (for the anti-join sweep), and the row is upserted with a
+    /// NULL-safe `IS NOT` change guard so a row whose persisted fields are unchanged writes nothing
+    /// at all. `upserted` accumulates `sqlite3_changes` (0 for an unchanged row, 1 for an insert or
+    /// a real update), so it reports rows *actually written*, not rows visited. `w`/`h` are never
+    /// referenced, so a refresh never clobbers learned dimensions.
+    private func upsertChangedPhotos(_ items: [PhotoItem], upserted: inout Int) -> Bool {
+        var keyStmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "INSERT OR IGNORE INTO \(Self.incomingKeyTable)(vol, node) VALUES(?, ?);", -1, &keyStmt, nil
+        ) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(keyStmt) }
+
         var stmt: OpaquePointer?
         let sql = """
-        INSERT INTO photos(vol, node, t, mime, live, relvid, dur, gen) VALUES(?,?,?,?,?,?,?,?)
+        INSERT INTO photos(vol, node, t, mime, live, relvid, dur) VALUES(?,?,?,?,?,?,?)
         ON CONFLICT(vol, node) DO UPDATE SET
-          t=excluded.t, mime=excluded.mime, live=excluded.live,
-          relvid=excluded.relvid, dur=excluded.dur, gen=excluded.gen;
+          t=excluded.t, mime=excluded.mime, live=excluded.live, relvid=excluded.relvid, dur=excluded.dur
+        WHERE t IS NOT excluded.t OR mime IS NOT excluded.mime OR live IS NOT excluded.live
+           OR relvid IS NOT excluded.relvid OR dur IS NOT excluded.dur;
         """
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
         defer { sqlite3_finalize(stmt) }
         for item in items {
+            sqlite3_reset(keyStmt)
+            sqlite3_bind_text(keyStmt, 1, item.uid.volumeID, -1, transient)
+            sqlite3_bind_text(keyStmt, 2, item.uid.nodeID, -1, transient)
+            guard sqlite3_step(keyStmt) == SQLITE_DONE else { return false }
+
             sqlite3_reset(stmt)
             sqlite3_bind_text(stmt, 1, item.uid.volumeID, -1, transient)
             sqlite3_bind_text(stmt, 2, item.uid.nodeID, -1, transient)
@@ -507,9 +542,33 @@ public final class TimelineMetadataStore {
             else { sqlite3_bind_null(stmt, 6) }
             if let dur = item.durationSeconds { sqlite3_bind_double(stmt, 7, dur) }
             else { sqlite3_bind_null(stmt, 7) }
-            sqlite3_bind_int64(stmt, 8, Int64(generation))
             guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
-            upserted += 1
+            upserted += Int(sqlite3_changes(db))
+        }
+        return true
+    }
+
+    /// Connection-scoped scratch table holding the current enumeration's `(vol, node)` keys — it
+    /// backs the incremental save's anti-join sweep. It lives in SQLite's TEMP store, so filling it
+    /// never appends to the durable WAL; `WITHOUT ROWID` + the composite PK give the anti-join a
+    /// covering index and make duplicate keys in one enumeration a harmless no-op (`INSERT OR IGNORE`).
+    private func ensureIncomingKeyTable() -> Bool {
+        sqlite3_exec(
+            db,
+            "CREATE TEMP TABLE IF NOT EXISTS \(Self.incomingKeyTable)" +
+            "(vol TEXT NOT NULL, node TEXT NOT NULL, PRIMARY KEY(vol, node)) WITHOUT ROWID;",
+            nil, nil, nil
+        ) == SQLITE_OK
+    }
+
+    /// True when `items` is already in canonical `(t, vol, node)` order — the common case, because
+    /// the enumeration feeding `save` is pre-sorted by the bridge. Lets `save` skip a redundant
+    /// O(n log n) resort via an O(n) scan; any out-of-order input falls back to a full sort.
+    private static func isTimelineOrdered(_ items: [PhotoItem]) -> Bool {
+        var index = 1
+        while index < items.count {
+            if TimelineOrder.areInIncreasingOrder(items[index], items[index - 1]) { return false }
+            index += 1
         }
         return true
     }

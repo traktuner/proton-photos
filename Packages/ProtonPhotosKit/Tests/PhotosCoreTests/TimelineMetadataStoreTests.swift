@@ -9,8 +9,8 @@ import SQLite3
 ///   `photo_tags` / `burst_members` feature tables — never serialized blobs;
 /// - deterministic `(t, vol, node)` timeline order across save/load cycles (the DB index, the
 ///   in-memory comparator, and grid identity must always agree);
-/// - generation-based incremental saves: digest no-op short-circuit, `gen` bump per refresh,
-///   sweep of rows missing from the latest full enumeration (no `DELETE FROM photos` rewrite);
+/// - O(changes) incremental saves: digest no-op short-circuit, only changed/new rows written, and
+///   an anti-join sweep of rows missing from the latest full enumeration (no full-table rewrite);
 /// - the ordered load rides `idx_photos_timeline` (no temp b-tree);
 /// - purge coverage: sign-out erases the whole per-account library directory, and the legacy
 ///   `timeline-v3` store names stay covered for stores written by older builds.
@@ -279,18 +279,19 @@ final class TimelineMetadataStoreTests: XCTestCase {
         XCTAssertTrue(afterReopen.skippedUnchanged, "digest short-circuit must persist across launches")
         XCTAssertEqual(reopened.load(), items.sorted(by: TimelineOrder.areInIncreasingOrder))
 
-        // Any real change breaks the short-circuit again.
+        // Any real change breaks the short-circuit again — but only the new row is written; the
+        // 50 unchanged survivors are not rewritten (O(changes)).
         let changed = reopened.save(items + [makeItem(node: "new", t: 2000)])
         XCTAssertFalse(changed.skippedUnchanged)
         XCTAssertTrue(changed.succeeded)
-        XCTAssertEqual(changed.upsertedRows, 51)
+        XCTAssertEqual(changed.upsertedRows, 1)
         reopened.close()
         store.close()
     }
 
-    // MARK: - 6. Generation sweep
+    // MARK: - 6. Anti-join sweep
 
-    func testGenerationSweepRemovesRowsMissingFromLatestRefresh() throws {
+    func testAntiJoinSweepRemovesRowsMissingFromLatestRefresh() throws {
         let dir = try makeTempDir()
         let (store, url) = try makeStore(in: dir)
         let a = makeItem(node: "a", t: 100)
@@ -299,19 +300,44 @@ final class TimelineMetadataStoreTests: XCTestCase {
 
         let first = store.save([a, b, c])
         XCTAssertEqual(first.generation, 1)
+        XCTAssertEqual(first.upsertedRows, 3)
 
         let second = store.save([a, c])   // b disappeared from the full enumeration
         XCTAssertFalse(second.skippedUnchanged)
         XCTAssertEqual(second.generation, 2)
         XCTAssertEqual(second.sweptRows, 1, "exactly the vanished row is swept")
+        // O(changes): a and c are unchanged survivors, so nothing is rewritten for them.
+        XCTAssertEqual(second.upsertedRows, 0, "unchanged survivors must not be rewritten")
         XCTAssertEqual(store.load(), [a, c])
 
         // Feature tables follow: b's tag rows must not orphan.
         XCTAssertTrue(rawRows(url, "SELECT * FROM photo_tags WHERE node='b';").isEmpty)
+        store.close()
+    }
 
-        // Surviving rows all carry the current generation.
-        let gens = Set(rawRows(url, "SELECT DISTINCT gen FROM photos;").map { $0[0] })
-        XCTAssertEqual(gens, ["2"])
+    func testOnlyRowsWithChangedContentAreRewrittenNullSafe() throws {
+        let dir = try makeTempDir()
+        let (store, _) = try makeStore(in: dir)
+        let a = makeItem(node: "a", t: 100)
+        let b = makeItem(node: "b", t: 200, mime: "video/quicktime", relvid: "v1", dur: 5)
+        let c = makeItem(node: "c", t: 300)
+        XCTAssertEqual(store.save([a, b, c]).upsertedRows, 3)
+
+        // Change ONE field of b (duration); a and c stay byte-identical.
+        let bChanged = makeItem(node: "b", t: 200, mime: "video/quicktime", relvid: "v1", dur: 9)
+        let s1 = store.save([a, bChanged, c])
+        XCTAssertEqual(s1.upsertedRows, 1, "only the row whose content changed is rewritten")
+        XCTAssertEqual(s1.sweptRows, 0)
+        XCTAssertEqual(store.load(), [a, bChanged, c])
+
+        // NULL-safe: clearing a nullable field (relvid "v1" -> nil) is a real change.
+        let bNulled = makeItem(node: "b", t: 200, mime: "video/quicktime", relvid: nil, dur: 9)
+        let s2 = store.save([a, bNulled, c])
+        XCTAssertEqual(s2.upsertedRows, 1, "NULL-safe guard must detect a value -> NULL transition")
+        XCTAssertNil(store.load().first { $0.uid == b.uid }?.relatedVideoID)
+
+        // Re-saving identical content is a full no-op (digest short-circuit).
+        XCTAssertTrue(store.save([a, bNulled, c]).skippedUnchanged)
         store.close()
     }
 
@@ -398,7 +424,10 @@ final class TimelineMetadataStoreTests: XCTestCase {
         XCTAssertTrue(changedSave.succeeded)
         XCTAssertFalse(changedSave.skippedUnchanged)
         XCTAssertEqual(changedSave.generation, 2)
-        XCTAssertEqual(changedSave.upsertedRows, 19_925)
+        // O(changes): a +25 / −100 refresh writes ONLY the 25 new rows and sweeps ONLY the 100
+        // vanished rows — the 19,900 unchanged survivors are not rewritten (previously all 19,925
+        // were re-stamped every refresh). This is the write-amplification guard.
+        XCTAssertEqual(changedSave.upsertedRows, 25)
         XCTAssertEqual(changedSave.sweptRows, 100)
         XCTAssertEqual(store.count(), 19_925)
 
@@ -549,8 +578,8 @@ final class TimelineMetadataStoreTests: XCTestCase {
         store.save([a, b])
         store.updateDimensions([a.uid: try dims(320, 240)])
 
-        // A CHANGED refresh upserts every row (gen bump) — w/h must survive because the timeline
-        // upsert deliberately omits them.
+        // A CHANGED refresh writes only changed/new rows and never references w/h — learned
+        // dimensions on unchanged rows must survive.
         let changed = store.save([a, b, makeItem(node: "c", t: 300)])
         XCTAssertFalse(changed.skippedUnchanged)
         XCTAssertEqual(store.loadDimensions(), [a.uid: try dims(320, 240)])
