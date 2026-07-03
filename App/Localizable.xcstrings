@@ -1166,20 +1166,38 @@
         }
       }
     },
-    "settings.developer_tab": {
+    "settings.account_tab": {
       "extractionState": "manual",
-      "comment": "Settings tab label (cache diagnostics).",
+      "comment": "Settings tab label for account-level settings.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Library Info"
+            "value": "Account"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Library-Infos"
+            "value": "Account"
+          }
+        }
+      }
+    },
+    "settings.diagnostics_tab": {
+      "extractionState": "manual",
+      "comment": "Settings tab label for cache and library diagnostics.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnostics"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diagnose"
           }
         }
       }
@@ -1306,6 +1324,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "Meldet diesen Mac ab und entfernt lokale Account-Daten."
+          }
+        }
+      }
+    },
+    "settings.account_section": {
+      "extractionState": "manual",
+      "comment": "Settings section header for account actions.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account"
           }
         }
       }
@@ -1810,6 +1846,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "Belegt"
+          }
+        }
+      }
+    },
+    "settings.storage_unavailable": {
+      "extractionState": "manual",
+      "comment": "Fallback text when account storage quota is not available yet.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage information is not available yet."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speicherinformationen sind noch nicht verfügbar."
           }
         }
       }

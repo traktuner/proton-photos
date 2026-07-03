@@ -4,44 +4,34 @@ import PhotosCore
 import DesignSystem
 import ProtonDriveBackend
 
-/// Native macOS Settings window (Proton Photos -> Einstellungen...). Two panes: Library/Offline (the
-/// Offline Photo Library toggle + cache deletion) and Developer (the live cache-status surface).
+/// Native macOS Settings window (Proton Photos -> Einstellungen...).
 struct SettingsView: View {
     let signOut: () -> Void
 
     var body: some View {
         TabView {
-            LibrarySettingsTab(signOut: signOut)
+            AccountSettingsTab(signOut: signOut)
+                .tabItem { Label("settings.account_tab", systemImage: "person.crop.circle") }
+            LibrarySettingsTab()
                 .tabItem { Label("settings.library_tab", systemImage: "photo.on.rectangle.angled") }
             CacheStatusTab()
-                .tabItem { Label("settings.developer_tab", systemImage: "internaldrive") }
+                .tabItem { Label("settings.diagnostics_tab", systemImage: "internaldrive") }
         }
-        // Tall enough that the (now larger) Library tab fits without overflowing → no scroller appears. A scroller
-        // only shows if a smaller screen genuinely can't fit the window.
-        .frame(width: 520, height: 580)
+        .frame(width: 520, height: 520)
     }
 }
 
-// MARK: - Library / Offline
+// MARK: - Account
 
-private struct LibrarySettingsTab: View {
+private struct AccountSettingsTab: View {
     let signOut: () -> Void
 
-    @State private var offline = OfflineLibraryManager.shared
     @State private var account = AccountInfo.shared
-    @AppStorage(AppSettingsKey.offlineOriginalsCapUnlimited) private var capUnlimited = AppSettingsDefault.offlineOriginalsCapUnlimited
-    @AppStorage(AppSettingsKey.offlineOriginalsCapGB) private var capGB = AppSettingsDefault.offlineOriginalsCapGB
-    @State private var confirmDelete = false
-    @State private var confirmDisableOffline = false
-    @State private var deleting = false
-    @State private var cacheSize: Int64 = 0
-    @State private var originalsSize: Int64 = 0
 
     var body: some View {
         Form {
-            // Proton storage quota (from the account data we already fetch; shows last-known value offline).
-            if let used = account.usedSpaceBytes, let max = account.maxSpaceBytes, max > 0 {
-                Section {
+            Section {
+                if let used = account.usedSpaceBytes, let max = account.maxSpaceBytes, max > 0 {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Text("settings.storage_used").font(.system(size: 12, weight: .medium))
@@ -52,13 +42,43 @@ private struct LibrarySettingsTab: View {
                         }
                         ProgressView(value: Double(min(used, max)), total: Double(max))
                     }
-                } header: {
-                    Text("settings.storage_section")
+                } else {
+                    Text("settings.storage_unavailable")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
+            } header: {
+                Text("settings.storage_section")
             }
 
-            // 1) Offline master switch. E2EE is ALWAYS on (not a toggle); this only decides whether full
-            //    originals are KEPT locally for instant/offline reopening.
+            Section {
+                Button("action.sign_out", role: .destructive, action: signOut)
+                Text("settings.sign_out_help")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("settings.account_section")
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - Library / Cache
+
+private struct LibrarySettingsTab: View {
+    @State private var offline = OfflineLibraryManager.shared
+    @AppStorage(AppSettingsKey.offlineOriginalsCapUnlimited) private var capUnlimited = AppSettingsDefault.offlineOriginalsCapUnlimited
+    @AppStorage(AppSettingsKey.offlineOriginalsCapGB) private var capGB = AppSettingsDefault.offlineOriginalsCapGB
+    @State private var confirmDelete = false
+    @State private var confirmDisableOffline = false
+    @State private var deleting = false
+    @State private var cacheSize: Int64 = 0
+    @State private var originalsSize: Int64 = 0
+
+    var body: some View {
+        Form {
             Section {
                 Toggle(isOn: Binding(get: { offline.offlineEnabled }, set: { setOffline($0) })) {
                     Text("settings.offline_library_toggle")
@@ -71,8 +91,6 @@ private struct LibrarySettingsTab: View {
                 Text("settings.library_offline_section")
             }
 
-            // 2) Originals cache budget - Unbounded or a slider-set cap (LRU purge of the oldest). Only meaningful
-            //    while the offline library is on, so the whole section greys out otherwise.
             Section {
                 Picker("settings.cache_limit_section", selection: $capUnlimited) {
                     Text("settings.cache_limit_bounded").tag(false)
@@ -100,7 +118,6 @@ private struct LibrarySettingsTab: View {
             }
             .disabled(!offline.offlineEnabled)
 
-            // 3) Master reset: wipes EVERYTHING on disk (incl. thumbnails) for the current account.
             Section {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -119,14 +136,8 @@ private struct LibrarySettingsTab: View {
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section {
-                Button("action.sign_out", role: .destructive, action: signOut)
-                Text("settings.sign_out_help")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("settings.storage_section")
             }
         }
         .formStyle(.grouped)
@@ -148,16 +159,13 @@ private struct LibrarySettingsTab: View {
         }
     }
 
-    /// Turning ON is immediate. Turning OFF must ALWAYS purge the originals (the OFF contract is "nothing kept");
-    /// the `originalsSize` snapshot can lag (another window, or status not yet refreshed), so it only gates whether
-    /// to confirm first - never whether to purge.
     private func setOffline(_ on: Bool) {
         if on { offline.setOfflineEnabled(true); return }
         if originalsSize > 0 {
-            confirmDisableOffline = true   // the confirm action disables + purges
+            confirmDisableOffline = true
         } else {
             offline.setOfflineEnabled(false)
-            Task { await offline.purgeOriginalsCache(); await refreshSize() }   // idempotent on empty
+            Task { await offline.purgeOriginalsCache(); await refreshSize() }
         }
     }
 
@@ -180,7 +188,7 @@ private struct LibrarySettingsTab: View {
     }
 }
 
-// MARK: - Developer / Cache status (Deliverable 3)
+// MARK: - Diagnostics
 
 private struct CacheStatusTab: View {
     @State private var status = OfflineCacheStatus()
