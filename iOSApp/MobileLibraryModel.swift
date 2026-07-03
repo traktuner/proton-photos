@@ -110,6 +110,7 @@ final class MobileLibraryModel: ObservableObject {
     private func teardown() {
         loadTask?.cancel()
         firstContentGuard?.cancel()
+        firstContentGuard = nil
         configuredUID = nil
         session = nil
         backend = nil
@@ -124,6 +125,7 @@ final class MobileLibraryModel: ObservableObject {
     private func start(session: ProtonSession, store: SessionKeychainStore) {
         loadTask?.cancel()
         firstContentGuard?.cancel()
+        firstContentGuard = nil   // must re-nil so armFirstContentGuardIfNeeded re-arms the safety net next load
         configuredUID = session.uid
         backend = nil
         facade = nil
@@ -171,6 +173,7 @@ final class MobileLibraryModel: ObservableObject {
                 // refresh from the server. The grid mounts under the loading overlay so it can report first
                 // content, which lifts the overlay onto real thumbnails (never a blank grid).
                 if let cached = await backend.cachedTimeline() {
+                    try Task.checkCancellation()   // a newer session may have superseded us during the await
                     applyItems(cached, cached: true)
                     await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
                 }

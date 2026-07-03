@@ -79,9 +79,8 @@ public final class UIKitTimelineGridHostView: UIView {
     /// The user-driven density level set by pinch. Takes precedence over the profile default so pinch survives
     /// item refreshes; cleared when an explicit external `level` arrives. `nil` → profile default (data-driven).
     private var interactiveLevel: Int?
-    /// Pinch gesture bookkeeping: the level and focal content point captured at gesture start.
+    /// The level captured at pinch-gesture start (the cumulative-scale reference).
     private var pinchStartLevel: Int?
-    private var pinchFocusContentPoint: CGPoint = .zero
     private var displayMode: TileContentDisplayMode = .squareFillCrop
     private var warmTask: Task<Void, Never>?
     private var lastWarmIDs: [PhotoUID] = []
@@ -129,6 +128,9 @@ public final class UIKitTimelineGridHostView: UIView {
         self.items = items
         self.itemUIDs = newUIDs
         self.thumbnailFeed = thumbnailFeed
+        // An explicit external level is authoritative: it clears any pinch-driven level so the host follows the
+        // caller again (a nil level leaves the user's pinch level in place).
+        if let level, level != levelOverride { interactiveLevel = nil }
         self.levelOverride = level
         self.displayMode = displayMode
         if uidsChanged {
@@ -354,7 +356,9 @@ public final class UIKitTimelineGridHostView: UIView {
     }
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        guard gesture.state == .ended, let onOpenPhoto, let ctx = currentGridContext() else { return }
+        // A tap that merely halts a decelerating scroll must not also open a photo.
+        guard gesture.state == .ended, !scrollView.isDecelerating,
+              let onOpenPhoto, let ctx = currentGridContext() else { return }
         // contentView spans the full content size at origin .zero, so its coordinate space IS the engine's
         // content space (y down, origin at the library top).
         let contentPoint = gesture.location(in: contentView)

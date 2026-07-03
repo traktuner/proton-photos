@@ -35,7 +35,9 @@ struct MobileMapScreen: View {
                 }
             }
             .navigationTitle("Map")
-            .task { model.startLocationCrawlIfNeeded() }
+            // Re-runs when the library finishes loading, so opening Map before the timeline is ready still starts
+            // the crawl once items exist (the start is idempotent).
+            .task(id: model.items.isEmpty) { model.startLocationCrawlIfNeeded() }
         }
         .fullScreenCover(item: $viewer) { presentation in
             MobilePhotoViewer(items: presentation.items, startIndex: presentation.index, libraryModel: model)

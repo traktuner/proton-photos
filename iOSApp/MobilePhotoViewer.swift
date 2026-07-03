@@ -160,6 +160,9 @@ private struct MobileVideoPage: View {
     let libraryModel: MobileLibraryModel
 
     @State private var player: AVPlayer?
+    /// The streaming asset is the ONLY strong owner of the range resource-loader, which AVFoundation holds
+    /// weakly — it must live as long as the player, or every protonvideo:// range request goes unserved.
+    @State private var streamingAsset: StreamingVideoAsset?
     @State private var failed = false
 
     var body: some View {
@@ -178,20 +181,27 @@ private struct MobileVideoPage: View {
         .onChange(of: isCurrent) { _, current in
             if current { player?.play() } else { player?.pause() }
         }
-        .onDisappear { player?.pause() }
+        .onDisappear { teardown() }
     }
 
     private func prepare() async {
         guard player == nil, let backend = libraryModel.backend else { return }
         do {
             let streaming = try await backend.makeStreamingAsset(for: item.uid)
-            let item = AVPlayerItem(asset: streaming.asset)
-            let newPlayer = AVPlayer(playerItem: item)
+            let newPlayer = AVPlayer(playerItem: AVPlayerItem(asset: streaming.asset))
+            streamingAsset = streaming   // retain the resource loader for the player's lifetime
             player = newPlayer
             if isCurrent { newPlayer.play() }
         } catch {
             failed = true
         }
+    }
+
+    private func teardown() {
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+        streamingAsset = nil
     }
 }
 
