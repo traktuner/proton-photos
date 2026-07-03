@@ -112,6 +112,7 @@ private struct MobileLoginView: View {
 
 private struct MobileTimelineShell: View {
     @EnvironmentObject private var sessionModel: MobileSessionModel
+    @State private var selectedRoute: MobileLibraryRoute? = .allPhotos
 
     let email: String
     let items: [PhotoItem]
@@ -119,11 +120,17 @@ private struct MobileTimelineShell: View {
 
     var body: some View {
         NavigationSplitView {
-            List {
+            List(selection: $selectedRoute) {
                 Section {
-                    Label("All Photos", systemImage: "square.grid.3x3.fill")
-                    Label("Albums", systemImage: "rectangle.stack")
-                    Label("Map", systemImage: "map")
+                    NavigationLink(value: MobileLibraryRoute.allPhotos) {
+                        Label("All Photos", systemImage: "square.grid.3x3.fill")
+                    }
+                    NavigationLink(value: MobileLibraryRoute.albums) {
+                        Label("Albums", systemImage: "rectangle.stack")
+                    }
+                    NavigationLink(value: MobileLibraryRoute.map) {
+                        Label("Map", systemImage: "map")
+                    }
                 }
                 Section {
                     Button(role: .destructive) {
@@ -135,29 +142,84 @@ private struct MobileTimelineShell: View {
             }
             .navigationTitle("Library")
         } detail: {
-            VStack(spacing: 0) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("All Photos")
-                            .font(.headline)
-                            .foregroundStyle(ProtonColor.textNorm)
-                        Text(email)
-                            .font(.caption)
-                            .foregroundStyle(ProtonColor.textHint)
-                    }
-                    Spacer()
-                    Text("\(items.count)")
-                        .font(.caption.monospacedDigit())
+            switch selectedRoute ?? .allPhotos {
+            case .allPhotos:
+                MobileAllPhotosView(email: email, items: items, thumbnailFeed: thumbnailFeed)
+            case .albums:
+                MobilePlaceholderView(
+                    title: "Albums",
+                    systemImage: "rectangle.stack",
+                    message: "Album UI is not wired in this simulator shell yet."
+                )
+            case .map:
+                MobilePlaceholderView(
+                    title: "Map",
+                    systemImage: "map",
+                    message: "Map UI is not wired in this simulator shell yet."
+                )
+            }
+        }
+    }
+}
+
+private enum MobileLibraryRoute: Hashable {
+    case allPhotos
+    case albums
+    case map
+}
+
+private struct MobileAllPhotosView: View {
+    let email: String
+    let items: [PhotoItem]
+    let thumbnailFeed: UIKitThumbnailFeed
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("All Photos")
+                        .font(.headline)
+                        .foregroundStyle(ProtonColor.textNorm)
+                    Text(email)
+                        .font(.caption)
                         .foregroundStyle(ProtonColor.textHint)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-
-                UIKitTimelineGrid(items: items, thumbnailFeed: thumbnailFeed)
-                    .ignoresSafeArea(edges: .bottom)
+                Spacer()
+                Text("\(items.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(ProtonColor.textHint)
             }
-            .background(ProtonColor.backgroundNorm)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+
+            UIKitTimelineGrid(items: items, thumbnailFeed: thumbnailFeed)
+                .ignoresSafeArea(edges: .bottom)
         }
+        .background(ProtonColor.backgroundNorm)
+    }
+}
+
+private struct MobilePlaceholderView: View {
+    let title: String
+    let systemImage: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 38, weight: .semibold))
+                .foregroundStyle(ProtonColor.primary)
+            Text(title)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(ProtonColor.textNorm)
+            Text(message)
+                .font(.body)
+                .foregroundStyle(ProtonColor.textWeak)
+                .multilineTextAlignment(.center)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ProtonColor.backgroundNorm)
     }
 }
 
