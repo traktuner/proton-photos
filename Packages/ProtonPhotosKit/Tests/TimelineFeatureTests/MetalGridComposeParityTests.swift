@@ -108,6 +108,46 @@ import PhotosCore
         #expect(cache.pinnedCount == 2)
     }
 
+    @Test func streamDoesNotUploadOrWarmOverscanWhileVisibleTilesAreMissing() {
+        guard let cache = makeCache(), let image = makeImage() else { return }
+        let visible = [uid("v0"), uid("v1")]
+        let overscan = [uid("o0"), uid("o1")]
+        let ram: [PhotoUID: CGImage] = Dictionary(uniqueKeysWithValues: overscan.map { ($0, image) })
+
+        let result = MetalGridFrameComposer.stream(
+            cache: cache, visibleIDs: visible, overscanIDs: overscan,
+            pinOverscan: false, effectiveUploadPixels: 64, allowUpgrade: false,
+            hasImage: { ram[$0] != nil }, canRetry: { _ in true }, provideImage: { ram[$0] }
+        )
+
+        #expect(result.warm == visible)
+        #expect(!cache.isResident(overscan[0]))
+        #expect(!cache.isResident(overscan[1]))
+        #expect(cache.uploadsThisFrame == 0)
+    }
+
+    @Test func streamUploadsOverscanAfterVisibleTilesAreResident() {
+        guard let cache = makeCache(), let image = makeImage() else { return }
+        let visible = [uid("v0"), uid("v1")]
+        let overscan = [uid("o0"), uid("o1")]
+        let ram: [PhotoUID: CGImage] = Dictionary(uniqueKeysWithValues: (visible + overscan).map { ($0, image) })
+
+        _ = MetalGridFrameComposer.stream(
+            cache: cache, visibleIDs: visible, overscanIDs: overscan,
+            pinOverscan: false, effectiveUploadPixels: 64, allowUpgrade: false,
+            hasImage: { ram[$0] != nil }, canRetry: { _ in true }, provideImage: { ram[$0] }
+        )
+        #expect(visible.allSatisfy { cache.isResident($0) })
+
+        _ = MetalGridFrameComposer.stream(
+            cache: cache, visibleIDs: visible, overscanIDs: overscan,
+            pinOverscan: true, effectiveUploadPixels: 64, allowUpgrade: false,
+            hasImage: { ram[$0] != nil }, canRetry: { _ in true }, provideImage: { ram[$0] }
+        )
+
+        #expect(overscan.allSatisfy { cache.isResident($0) })
+    }
+
     // MARK: - Render-group assembly parity (GPU-backed)
 
     @Test func buildGroupsEmitsImageGroupThenDecorationGroupsInFixedOrder() {

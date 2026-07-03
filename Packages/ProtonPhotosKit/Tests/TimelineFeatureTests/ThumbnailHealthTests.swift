@@ -54,6 +54,39 @@ struct ThumbnailHealthTests {
         #expect(availabilityCallbacks >= 2, "warming \(count) items must drain across more than one \(96)-item batch")
     }
 
+    @Test @MainActor func repeatedWarmDemandDoesNotRestartLargeViewportAtFirstBatch() async throws {
+        let count = 220
+        let uids = (0 ..< count).map { PhotoUID(volumeID: "vol", nodeID: "repeat-warm-\($0)-\(UUID().uuidString)") }
+        let cache = ThumbnailCache(namespace: Self.uniqueNamespace("repeat-warm"), rootDirectory: timelineFeatureTestCacheRoot("thumb-health"))
+        let loader = FakeThumbnailLoader()
+        let feed = await Self.makeFeed(cache: cache, loader: loader, concurrency: 2, batch: 32)
+        let items = uids.map { PhotoItem(uid: $0, captureTime: Date(timeIntervalSince1970: 0), mediaType: "image/jpeg") }
+        let dataSource = RealMetalGridDataSource(sections: [
+            TimelineSection(id: "repeat-warm", date: Date(timeIntervalSince1970: 0), title: "Repeat Warm", items: items)
+        ], feed: feed)
+
+        var availabilityCallbacks = 0
+        dataSource.onImagesAvailable = {
+            availabilityCallbacks += 1
+            if availabilityCallbacks < 12 {
+                dataSource.warm(uids)
+            }
+        }
+
+        dataSource.warm(uids)
+        for _ in 0 ..< 100 {
+            if availabilityCallbacks >= 5 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(availabilityCallbacks >= 5)
+        #expect(
+            await loader.fetched(uids[180]),
+            "Repeated L5-sized warm calls must progress beyond the first 96 visible items while callbacks continue"
+        )
+        await feed.stopPrefetch()
+    }
+
     @Test @MainActor func firstWarmPassFetchesVisibleNetworkMissesButNotDiskHits() async throws {
         // The opening viewport (a fresh data source's first warm pass) must decode disk-present cells straight
         // from disk and fetch only the true disk-misses over the network — exercising the first-pass

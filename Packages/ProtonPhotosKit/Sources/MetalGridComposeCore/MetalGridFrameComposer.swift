@@ -89,7 +89,8 @@ package enum MetalGridFrameComposer {
             maxPinned: cache.maxSafePinnedCount, pinOverscan: pinOverscan
         )
         cache.beginFrame(pinned: window.pinned)
-        let priority = window.priority
+        let visibleMissing = visibleIDs.contains { !cache.isResident($0) && canRetry($0) }
+        let priority = visibleMissing ? visibleIDs : window.priority
         var wanted: [ID] = []
         for uid in priority where !cache.isResident(uid) && hasImage(uid) { wanted.append(uid) }
         let upgradeCandidates = allowUpgrade ? visibleIDs.filter { cache.residentTextureNeedsMeaningfulUpgrade($0) } : []

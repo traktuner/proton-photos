@@ -65,6 +65,7 @@ final class RealMetalGridDataSource: MetalGridDataSource {
     /// across all cores, so this is sized to cover a typical screenful in one or two batches (fewer main-thread
     /// round-trips, faster cold-start fill) rather than the old serial ≈100 ms/batch cap.
     private let maxWarmBatch = 96
+    private var warmBatchInFlight = Set<PhotoUID>()
     /// Coalesces the per-frame visible set so the NETWORK reprioritisation (`.visibleNow`) is enqueued once
     /// per stable viewport (~100 ms), not every scroll frame. Disk→RAM decode below stays immediate.
     private let networkDebouncer = ViewportRequestDebouncer(window: 0.1)
@@ -112,9 +113,10 @@ final class RealMetalGridDataSource: MetalGridDataSource {
         // the crawl on the serial feed actor — the crawl reads it `nonisolated` and backs its scan off at once,
         // yielding the actor to this decode instead of starving it on a cold start.
         feed.noteVisibleDemand()
-        // Latest viewport wins (the coordinator passes the still-missing cells in visible-first order each
-        // frame). No permanent suppression - a cell evicted from the RAM cache must be able to re-warm.
-        pendingWarm = uids
+        // Latest viewport wins without restarting the current viewport from item zero on every display-link
+        // tick. Keep still-visible pending work in order, drop scrolled-away work, and append newly demanded
+        // UIDs behind the current queue. This lets dense L5 viewports drain past the first 96-item batch.
+        mergeWarmDemand(uids)
         pumpWarm()
         // Reprioritise the background crawl toward what's on screen, but only once the viewport has been
         // stable for ~100 ms - so a fast scroll doesn't re-enqueue the visible set every frame.
@@ -154,6 +156,7 @@ final class RealMetalGridDataSource: MetalGridDataSource {
         warmInFlight = true
         let batch = Array(pendingWarm.prefix(maxWarmBatch))
         pendingWarm.removeFirst(min(maxWarmBatch, pendingWarm.count))
+        warmBatchInFlight = Set(batch)
         // The FIRST batch of a fresh data source is the opening viewport. Enqueue its true disk-misses at
         // `.visibleNow` so they jump the background crawl immediately, instead of sitting at
         // `.zoomAnchorAndFocusRow` until the ~120 ms viewport-settle upgrade (`scheduleSettleCheck`). Disk
@@ -180,10 +183,32 @@ final class RealMetalGridDataSource: MetalGridDataSource {
                 ])
             }
             await MainActor.run {
+                self.warmBatchInFlight.removeAll()
                 self.warmInFlight = false
                 self.onImagesAvailable?()
                 self.pumpWarm()
             }
+        }
+    }
+
+    private func mergeWarmDemand(_ uids: [PhotoUID]) {
+        var incomingSeen = Set<PhotoUID>()
+        let incoming = uids.filter { uid in
+            incomingSeen.insert(uid).inserted
+                && feed.memoryCGImage(for: uid) == nil
+                && !feed.isKnownUnfetchable(uid)
+        }
+        let incomingSet = Set(incoming)
+        pendingWarm.removeAll { uid in
+            !incomingSet.contains(uid)
+                || feed.memoryCGImage(for: uid) != nil
+                || feed.isKnownUnfetchable(uid)
+        }
+        var queued = Set(pendingWarm)
+        queued.formUnion(warmBatchInFlight)
+        for uid in incoming where !queued.contains(uid) {
+            pendingWarm.append(uid)
+            queued.insert(uid)
         }
     }
 }
