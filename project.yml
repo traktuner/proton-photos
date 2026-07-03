@@ -147,3 +147,16 @@ targets:
         INFOPLIST_FILE: iOSApp/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
+        # The Drive SDK's SwiftPM target only links the dotNET runtime bootstrapper for macOS.
+        # The iOS app must link the platform-specific bootstrapper at the final app target so
+        # SwiftPM's broad `.iOS` condition does not mix iphoneos and iphonesimulator objects.
+        LIBRARY_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/Vendor/sdk-swift/Resources
+        OTHER_LDFLAGS[sdk=iphonesimulator*]:
+          - $(inherited)
+          - -llibbootstrapperdll.iossimulator-arm64.o
+          - -llibbootstrapperdll.iossimulator-x64.o
+        OTHER_LDFLAGS[sdk=iphoneos*]:
+          - $(inherited)
+          - -llibbootstrapperdll.ios-arm64.o
