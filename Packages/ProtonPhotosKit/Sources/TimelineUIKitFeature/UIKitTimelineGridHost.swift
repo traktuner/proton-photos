@@ -159,7 +159,7 @@ public final class UIKitTimelineGridHostView: UIView {
             isMetal3Capable = false
             return
         }
-        isMetal3Capable = device.supportsFamily(.apple7)
+        isMetal3Capable = UIKitTimelineMetalCapability.supportsTimelineGrid(device: device)
         guard isMetal3Capable else { return }
         self.device = device
         renderer = MetalGridRenderer(device: device)

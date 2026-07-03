@@ -7,6 +7,7 @@ import ProtonAuth
 import ProtonDriveBackend
 import ProtonCoreCryptoPatchedGoImplementation
 import SwiftUI
+import TimelineUIKitAdapter
 import TimelineUIKitFeature
 import UIKit
 
@@ -355,7 +356,7 @@ private struct MobileMetal3Runtime {
         guard let device = MTLCreateSystemDefaultDevice() else {
             return Self(isSupported: false, message: "This device does not expose a Metal renderer.")
         }
-        guard device.supportsFamily(.apple7) else {
+        guard UIKitTimelineMetalCapability.supportsTimelineGrid(device: device) else {
             return Self(isSupported: false, message: "Proton Photos for iOS/iPadOS requires a Metal 3-capable Apple GPU.")
         }
         return Self(isSupported: true, message: device.name)

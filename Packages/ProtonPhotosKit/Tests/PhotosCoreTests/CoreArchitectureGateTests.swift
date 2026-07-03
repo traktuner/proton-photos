@@ -1906,6 +1906,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         let hostFile = adapterRoot.appendingPathComponent("UIKitTimelineMetalHostView.swift")
         let drawableFile = adapterRoot.appendingPathComponent("UIKitTimelineMetalDrawableTarget.swift")
         let displayLinkFile = adapterRoot.appendingPathComponent("UIKitTimelineDisplayLinkDriver.swift")
+        let capabilityFile = adapterRoot.appendingPathComponent("UIKitTimelineMetalCapability.swift")
         var violations: [String] = []
 
         if let targetLine = manifestLine(forTarget: "TimelineUIKitAdapter", in: manifest) {
@@ -1917,7 +1918,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             violations.append("TimelineUIKitAdapter: missing Package.swift target declaration")
         }
 
-        for file in [hostFile, drawableFile, displayLinkFile] where !FileManager.default.fileExists(atPath: file.path) {
+        for file in [hostFile, drawableFile, displayLinkFile, capabilityFile] where !FileManager.default.fileExists(atPath: file.path) {
             violations.append("TimelineUIKitAdapter/\(file.lastPathComponent): missing UIKit Metal host seam file")
         }
 
@@ -1978,6 +1979,25 @@ final class CoreArchitectureGateTests: XCTestCase {
                 "stop()"
             ] where !source.contains(symbol) {
                 violations.append("TimelineUIKitAdapter/UIKitTimelineDisplayLinkDriver.swift: missing \(symbol)")
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: capabilityFile.path) {
+            let imports = try importedModules(in: capabilityFile)
+            let expectedImports: Set<String> = ["Metal"]
+            if imports != expectedImports {
+                violations.append("TimelineUIKitAdapter/UIKitTimelineMetalCapability.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
+            }
+            let source = try String(contentsOf: capabilityFile, encoding: .utf8)
+            for symbol in [
+                "#if canImport(UIKit)",
+                "public enum UIKitTimelineMetalCapability",
+                "public static func supportsTimelineGrid(device: MTLDevice) -> Bool",
+                "#if targetEnvironment(simulator)",
+                "true",
+                "device.supportsFamily(.apple7)"
+            ] where !source.contains(symbol) {
+                violations.append("TimelineUIKitAdapter/UIKitTimelineMetalCapability.swift: missing \(symbol)")
             }
         }
 
@@ -2088,7 +2108,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             "MetalGridFrameComposer.buildGroups(",
             "MetalGridRenderer",
             "MetalGridDrawableTarget(layer:",
-            "device.supportsFamily(.apple7)",
+            "UIKitTimelineMetalCapability.supportsTimelineGrid(device: device)",
         ] where !source.contains(required) {
             violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: missing \(required)")
         }
