@@ -15,7 +15,7 @@ public actor UIKitThumbnailFeed {
     public typealias PrefetchStatus = ThumbnailFeedCore.PrefetchStatus
 
     private nonisolated let core: ThumbnailFeedCore
-    private nonisolated(unsafe) let imageWrappers = NSCache<NSString, UIImage>()
+    private nonisolated let imageWrappers: WrapperImageCache<UIImage>
 
     public init(
         cache: ThumbnailCache,
@@ -50,8 +50,19 @@ public actor UIKitThumbnailFeed {
                 dimensions?.record(uid, width: decoded.pixelWidth, height: decoded.pixelHeight)
             }
         )
-        imageWrappers.countLimit = 256
-        imageWrappers.totalCostLimit = UIKitMediaCachePolicy.wrapperRAMBudgetBytes()
+        imageWrappers = WrapperImageCache(
+            countLimit: 256,
+            costLimitBytes: UIKitMediaCachePolicy.wrapperRAMBudgetBytes()
+        )
+    }
+
+    /// Governor-driven memory-pressure response for BOTH iOS RAM tiers this adapter owns: the UIImage
+    /// wrappers here and the shared decoded-CGImage tier in the core. `scale` lowers each cost limit;
+    /// `purge` drops held images now. `nonisolated` + thread-safe caches, so the governor never hops this
+    /// actor. Nothing is lost — wrappers rebuild from the decoded tier, decodes from the encrypted disk tier.
+    public nonisolated func applyMemoryPressure(scale: Double, purge: Bool) {
+        imageWrappers.applyMemoryPressure(scale: scale, purge: purge)
+        core.applyDecodedMemoryPressure(scale: scale, purge: purge)
     }
 
     public static func decodedCost(_ image: UIImage) -> Int {
@@ -65,10 +76,10 @@ public actor UIKitThumbnailFeed {
 
     public nonisolated func memoryImage(for uid: PhotoUID) -> UIImage? {
         let key = Self.key(uid)
-        if let image = imageWrappers.object(forKey: key) { return image }
+        if let image = imageWrappers.image(forKey: key) { return image }
         guard let decoded = core.memoryDecoded(for: uid) else { return nil }
         let image = UIKitThumbnailImageDecoder.image(from: decoded)
-        imageWrappers.setObject(image, forKey: key, cost: decoded.decodedCostBytes)
+        imageWrappers.set(image, forKey: key, cost: decoded.decodedCostBytes)
         return image
     }
 
@@ -150,9 +161,9 @@ public actor UIKitThumbnailFeed {
 
     private func image(for decoded: DecodedThumbnail, uid: PhotoUID) -> UIImage {
         let key = Self.key(uid)
-        if let image = imageWrappers.object(forKey: key) { return image }
+        if let image = imageWrappers.image(forKey: key) { return image }
         let image = UIKitThumbnailImageDecoder.image(from: decoded)
-        imageWrappers.setObject(image, forKey: key, cost: decoded.decodedCostBytes)
+        imageWrappers.set(image, forKey: key, cost: decoded.decodedCostBytes)
         return image
     }
 

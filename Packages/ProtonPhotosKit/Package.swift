@@ -112,6 +112,8 @@ let package = Package(
         .target(name: "MetalGridComposeCore", dependencies: ["GridCore", "MetalGridTextureCore", "MetalRenderingCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCacheAppKitAdapter", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaCacheCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCacheUIKitAdapter", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaCacheCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "MediaCacheUIKitAdapterTests", dependencies: ["MediaCacheUIKitAdapter", "MediaCacheCore", "MediaByteCache", "MediaFeedCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "MediaCacheCoreTests", dependencies: ["MediaCacheCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCache", dependencies: ["MediaByteCache", "MediaLocationCore", "MediaCacheCore", "MediaCacheAppKitAdapter"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "TimelineCore", dependencies: ["PhotosCore", "GridCore"], resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "TimelineCoreTests", dependencies: ["TimelineCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
@@ -123,7 +125,7 @@ let package = Package(
             swiftSettings: disableDynamicActorIsolation
         ),
         .target(name: "PhotoViewerCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
-        .target(name: "PhotoViewerUIKitAdapter", dependencies: ["PhotoViewerCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "PhotoViewerUIKitAdapter", dependencies: ["PhotoViewerCore", "PhotosCore", "MediaCacheCore"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "PhotoViewerFeature",
             dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "PhotoViewerCore"],

@@ -450,6 +450,23 @@ struct ThumbnailFeedCoreTests {
         #expect(feed.memoryDecoded(for: uid) != nil)               // decodes land again
     }
 
+    @Test func memoryOnlyRenderReadPathNeverFallsThroughToDiskOrDecode() async throws {
+        // The per-frame render read (`memoryDecoded`) must be a pure RAM lookup: bytes sitting on DISK must
+        // NOT be silently read/decrypted/decoded by it — that is warmDecoded's (off-render) job. A nil here
+        // despite disk-present bytes is the proof; after an explicit warm the same read serves from RAM.
+        let uid = Self.uid("render-pure")
+        let diskCache = Self.cache("render-pure")
+        diskCache.storeToDisk(Self.pngData(width: 12, height: 12), for: uid)
+        let feed = ThumbnailFeedCore(cache: diskCache, loader: RecordingLoader(), configuration: Self.configuration())
+
+        #expect(diskCache.hasUsableDiskData(uid))                  // bytes ARE on disk…
+        #expect(feed.memoryDecoded(for: uid) == nil)               // …but the render read does no disk work
+        #expect(feed.memoryDecoded(for: uid) == nil)               // stable: repeated reads stay memory-only
+
+        _ = await feed.warmDecoded([ThumbnailRequest(uid: uid)], priority: .visibleNow, limit: 1)
+        #expect(feed.memoryDecoded(for: uid) != nil)               // the off-render warm fills the RAM tier
+    }
+
     @Test func diskHitsDoNotBecomeDownloads() async throws {
         let uids = (0 ..< 3).map { Self.uid("disk-hit-\($0)") }
         let cache = Self.cache("diskhits")
