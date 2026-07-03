@@ -48,7 +48,6 @@ private struct MobileRootView: View {
                 MobileLoginView()
             } else if let feed = timelineModel.thumbnailFeed {
                 MobileTimelineShell(
-                    email: sessionModel.accountLabel,
                     items: timelineModel.items,
                     thumbnailFeed: feed
                 )
@@ -115,7 +114,6 @@ private struct MobileTimelineShell: View {
     @EnvironmentObject private var sessionModel: MobileSessionModel
     @State private var selectedRoute: MobileLibraryRoute? = .allPhotos
 
-    let email: String
     let items: [PhotoItem]
     let thumbnailFeed: UIKitThumbnailFeed
 
@@ -145,7 +143,7 @@ private struct MobileTimelineShell: View {
         } detail: {
             switch selectedRoute ?? .allPhotos {
             case .allPhotos:
-                MobileAllPhotosView(email: email, items: items, thumbnailFeed: thumbnailFeed)
+                MobileAllPhotosView(items: items, thumbnailFeed: thumbnailFeed)
             case .albums:
                 MobilePlaceholderView(
                     title: "Albums",
@@ -170,7 +168,6 @@ private enum MobileLibraryRoute: Hashable {
 }
 
 private struct MobileAllPhotosView: View {
-    let email: String
     let items: [PhotoItem]
     let thumbnailFeed: UIKitThumbnailFeed
 
@@ -181,9 +178,6 @@ private struct MobileAllPhotosView: View {
                     Text("All Photos")
                         .font(.headline)
                         .foregroundStyle(ProtonColor.textNorm)
-                    Text(email)
-                        .font(.caption)
-                        .foregroundStyle(ProtonColor.textHint)
                 }
                 Spacer()
                 Text("\(items.count)")
@@ -250,10 +244,6 @@ private final class MobileSessionModel: ObservableObject {
 
     let sessionStore = SessionKeychainStore()
     private let authController: ProtonAuthController
-
-    var accountLabel: String {
-        session?.uid ?? "Signed in"
-    }
 
     init() {
         injectDefaultCryptoImplementation()
