@@ -116,20 +116,89 @@ import GridCore
         #expect(policy.residentCount == 2)
     }
 
-    @Test func byteEvictionStopsAtMinimalLRUPrefixAndKeepsPinned() {
-        var policy = GridTextureResidencyPolicy<String>(capacity: 100, costCapacity: 1_000, uploadBudgetPerFrame: 10)
-        upload("old-pinned", cost: 500, into: &policy)
-        upload("old-evictable", cost: 500, into: &policy)
-        upload("new", cost: 500, into: &policy)
+    @Test func byteEvictionShedsToSoftTargetKeepingPinnedAndNewestResidents() {
+        var policy = GridTextureResidencyPolicy<String>(capacity: 100, costCapacity: 1_000, uploadBudgetPerFrame: 20)
+        // A pinned visible tile + nine evictable tiles fill the cap exactly; a tenth pushes over it.
+        upload("visible", cost: 100, pinned: ["visible"], into: &policy)
+        for i in 0 ..< 10 { upload("e\(i)", cost: 100, into: &policy) }   // 100 pinned + 1,000 = 1,100 total
 
-        policy.beginFrame(pinned: ["old-pinned"])
+        policy.beginFrame(pinned: ["visible"])
+        #expect(policy.residentCost == 1_100)
         let evicted = policy.evictToBudget()
 
-        // The pinned LRU entry survives; evicting the single oldest non-pinned suffices (1,500 → 1,000).
-        #expect(evicted == ["old-evictable"])
-        #expect(policy.isResident("old-pinned"))
-        #expect(policy.isResident("new"))
+        // Over the HARD cap → shed the oldest non-pinned down to the 10% headroom band (soft target 900), NOT to
+        // the exact ceiling: residency stops pinning at 100%, giving later uploads admission headroom. The pinned
+        // tile and the NEWEST evictable tiles survive.
+        #expect(policy.softCostTarget == 900)
+        #expect(policy.residentCost <= policy.softCostTarget)
+        #expect(policy.residentCost == 900)
+        #expect(evicted == ["e0", "e1"])                 // exactly the two oldest non-pinned
+        #expect(policy.isResident("visible"))            // pinned is never evicted
+        #expect(policy.isResident("e9"))                 // newest non-pinned retained
+        #expect(!policy.isResident("e0") && !policy.isResident("e1"))
+    }
+
+    @Test func pinnedVisibleUploadIsAdmittedEvenWhenOffscreenResidencyFillsTheByteBudget() {
+        var policy = GridTextureResidencyPolicy<String>(capacity: 100, costCapacity: 1_000, uploadBudgetPerFrame: 20)
+        for i in 0 ..< 10 { upload("off-\(i)", cost: 100, into: &policy) }   // offscreen fills the cap exactly
         #expect(policy.residentCost == 1_000)
+
+        // A fresh visible frame: the incoming tile is pinned. Even though total residency is AT the ceiling, it
+        // is admitted against the (currently 0) pinned floor - offscreen residents never block a visible upload
+        // (they are evicted afterwards). Visible-first admission, structurally.
+        policy.beginFrame(pinned: ["incoming"])
+        #expect(policy.pinnedResidentCost == 0)
+        #expect(policy.canAdmitUpload("incoming", cost: 300))
+        // An UNPINNED overscan upload, by contrast, is refused at the ceiling this frame (a deferral, not saturation).
+        #expect(!policy.canAdmitUpload("overscan", cost: 300))
+    }
+
+    @Test func offscreenResidencyCannotStarveTheVisibleWorkingSetUnderScroll() {
+        var policy = GridTextureResidencyPolicy<Int>(capacity: 200, costCapacity: 2_000, uploadBudgetPerFrame: 32)
+        for i in -50 ..< 0 { upload(i, cost: 100, into: &policy) }   // seed a large offscreen resident set
+
+        for frame in 0 ..< 30 {
+            let visible = Array(frame * 4 ..< frame * 4 + 8)
+            policy.beginFrame(pinned: Set(visible))
+            for v in policy.selectUploads(wanted: visible) {
+                #expect(policy.canAdmitUpload(v, cost: 100), "visible tile \(v) must be admitted, never starved by offscreen")
+                policy.completeUpload(v, cost: 100)
+            }
+            _ = policy.evictToBudget()
+            #expect(Set(visible).allSatisfy(policy.isResident), "every visible tile stays resident")
+            #expect(policy.residentCost <= 2_000)
+        }
+    }
+
+    @Test func denseL5SoftTargetShedInOnePassOnHeterogeneousCostsNeverEvictsVisible() {
+        // 512 MB-ish budget with a large offscreen set of small (112 px ≈ 50 KB) tiles mixed with big
+        // carried-over (400 px ≈ 640 KB) tiles - the heterogeneity that made the old mean-cost estimate
+        // under-shoot and rescan the whole resident set repeatedly (the L5 eviction spike). One evictToBudget
+        // must shed to the soft target and never evict the pinned visible working set.
+        let budget = 512 * 1_000_000
+        let small = 112 * 112 * 4
+        let big = 400 * 400 * 4
+        var policy = GridTextureResidencyPolicy<Int>(capacity: 16_384, costCapacity: budget, uploadBudgetPerFrame: 48)
+
+        var id = 0
+        // Fill offscreen to just under the cap so the 750 visible uploads below push residency clearly OVER it.
+        while policy.residentCost < budget - 100 * small {
+            upload(id, cost: id % 7 == 0 ? big : small, into: &policy)
+            id += 1
+        }
+
+        let visible = Array(id ..< id + 750)
+        policy.beginFrame(pinned: Set(visible))
+        for v in visible where policy.canAdmitUpload(v, cost: small) { policy.completeUpload(v, cost: small) }
+        #expect(Set(visible).allSatisfy(policy.isResident), "all 750 visible admitted against the pinned floor")
+        #expect(policy.residentCost > budget, "visible working set pushed residency over the hard cap")
+
+        let evicted = policy.evictToBudget()
+        #expect(policy.residentCost <= policy.softCostTarget, "one call sheds to the headroom band, no undershoot")
+        #expect(policy.residentCost <= budget)
+        #expect(!evicted.isEmpty)
+        #expect(Set(visible).allSatisfy(policy.isResident), "the visible working set is never evicted")
+        #expect(evicted.allSatisfy { !visible.contains($0) }, "only offscreen residents are shed")
     }
 
     @Test func evictionCannotGoBelowPinnedFloorEvenWhenOverByteBudget() {

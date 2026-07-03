@@ -274,6 +274,34 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
         #expect(cache.maxSafePinnedCount == 10)                           // 163,840 / (64·64·4), effective==max
     }
 
+    @Test func residencySaturatedIsSetOnlyWhenAPinnedVisibleUploadCannotFit() throws {
+        // Byte budget holds exactly two 16 KiB (64²·4) textures.
+        guard let cache = Self.makeCache(budget: GridTextureBudget(
+            maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 1_048_576,
+            maxCachedTextures: 100, maxResidentBytes: 32_768, overscanFraction: 1.0
+        )), let image = Self.makeImage() else { return }
+
+        // Frame 1: fill the byte budget with two OFFSCREEN (unpinned) residents.
+        cache.beginFrame(pinned: [])
+        cache.uploadVisible(wanted: [uid("off0"), uid("off1")]) { _ in image }
+        #expect(cache.residentBytes == 32_768)
+
+        // Frame 2: an UNPINNED overscan upload at the full ceiling is a deferral, NOT saturation - offscreen
+        // residents could be evicted to admit it later; the visible working set is unaffected.
+        cache.beginFrame(pinned: [])
+        cache.uploadVisible(wanted: [uid("overscan")]) { _ in image }
+        #expect(!cache.residencySaturatedThisFrame)
+        #expect(cache.deferredUploadsThisFrame >= 1)
+
+        // Frame 3: a PINNED visible upload beyond what the pinned floor can ever hold is TRUE saturation
+        // (three 16 KiB visible tiles cannot all fit a 32 KiB budget even with every non-pinned evicted).
+        let visible = [uid("v0"), uid("v1"), uid("v2")]
+        cache.beginFrame(pinned: Set(visible))
+        cache.uploadVisible(wanted: visible) { _ in image }
+        #expect(cache.isResident(uid("v0")) && cache.isResident(uid("v1")))   // visible admitted against the floor
+        #expect(cache.residencySaturatedThisFrame)                            // the third pinned tile cannot fit
+    }
+
     @Test func effectiveCapShrinksDenseUploadSizeAndByteCost() throws {
         guard let cache = Self.makeCache(budget: GridTextureBudget(
             maxUploadsPerFrame: 10, maxUploadBytesPerFrame: 1_048_576,

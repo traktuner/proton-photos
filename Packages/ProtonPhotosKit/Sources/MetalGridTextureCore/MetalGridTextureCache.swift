@@ -199,7 +199,13 @@ package final class MetalGridTextureCache<ID: Hashable & Sendable> {
                 continue
             }
             guard lru.canAdmitUpload(id, cost: bytes) else {
-                residencySaturatedThisFrame = true
+                // Only a PINNED (visible) upload that cannot fit even against the pinned-resident byte floor is
+                // TRUE residency saturation: offscreen residents don't count toward that floor, so evicting them
+                // would not make room. An UNPINNED (overscan) refusal at the byte ceiling is an ordinary
+                // this-frame deferral - later eviction frees the room, and the visible working set is unaffected -
+                // so it must NOT be reported as saturation (which would keep the display link spinning and read
+                // as a visible-tile failure it is not).
+                if lru.isPinned(id) { residencySaturatedThisFrame = true }
                 lru.abandonUpload(id)
                 budgetDeferred += 1
                 continue
