@@ -114,10 +114,16 @@ public enum LibraryLoadPolicy {
             return .preparingInventory
 
         case let .failed(message, retryable):
-            // A failure only surfaces if there is nothing presentable yet. Once content is on screen, a later
-            // (e.g. background refresh) failure must not yank the grid away.
-            if case .contentReady = state { return state }
-            return .failed(message: message, retryable: retryable)
+            // A failure only surfaces when there is nothing presentable yet (still preparing, or a prior
+            // failure). Once an inventory has resolved — even a stale cached one still drawing, or a settled
+            // empty/ready grid — a later (background refresh) failure must not replace it: the user keeps their
+            // photos and browses offline instead of hitting an error wall.
+            switch state {
+            case .preparingInventory, .failed:
+                return .failed(message: message, retryable: retryable)
+            case .loadingContent, .contentReady, .empty:
+                return state
+            }
 
         case let .inventoryResolved(count, cached):
             guard count > 0 else { return .empty }

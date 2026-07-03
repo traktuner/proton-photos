@@ -109,12 +109,23 @@ import Testing
         #expect(state.hasSettled)
     }
 
-    @Test func failureWhileLoadingContentStillSurfaces() {
+    @Test func failureAfterCachedInventoryKeepsShowingCachedContent() {
+        // A cached snapshot is loading; the fresh refresh then fails. The user keeps their (cached) photos and
+        // browses offline — no error wall replaces resolvable content.
         let state = reduce(.initial, [
             .inventoryResolved(count: 100, cached: true),
             .failed(message: "Timed out", retryable: true),
         ])
-        #expect(state == .failed(message: "Timed out", retryable: true))
+        #expect(state == .loadingContent(count: 100, usingCachedInventory: true))
+    }
+
+    @Test func failureAfterEmptyDoesNotSurface() {
+        // Settled-empty then a background refresh fails → stays empty, not an error.
+        let state = reduce(.initial, [
+            .inventoryResolved(count: 0, cached: false),
+            .failed(message: "Timed out", retryable: true),
+        ])
+        #expect(state == .empty)
     }
 
     @Test func nonRetryableFailureIsPreserved() {
