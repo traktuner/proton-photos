@@ -25,6 +25,10 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
     private let displayMode: TileContentDisplayMode
     private let selectionMode: Bool
     private let selectedUIDs: Set<PhotoUID>
+    /// Whether this grid's surface is the active one (its tab is selected). When false the host stops its
+    /// display link and cancels ahead-warm so a hidden grid never competes with menus/transitions on screen;
+    /// defaults to true so a grid that is always visible (e.g. a pushed collection detail) behaves as before.
+    private let isActive: Bool
     private let onFirstContentReady: (() -> Void)?
     private let onOpenPhoto: ((PhotoItem) -> Void)?
     private let onToggleSelection: ((PhotoItem) -> Void)?
@@ -36,6 +40,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         displayMode: TileContentDisplayMode = .squareFillCrop,
         selectionMode: Bool = false,
         selectedUIDs: Set<PhotoUID> = [],
+        isActive: Bool = true,
         onFirstContentReady: (() -> Void)? = nil,
         onOpenPhoto: ((PhotoItem) -> Void)? = nil,
         onToggleSelection: ((PhotoItem) -> Void)? = nil
@@ -46,6 +51,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         self.displayMode = displayMode
         self.selectionMode = selectionMode
         self.selectedUIDs = selectedUIDs
+        self.isActive = isActive
         self.onFirstContentReady = onFirstContentReady
         self.onOpenPhoto = onOpenPhoto
         self.onToggleSelection = onToggleSelection
@@ -59,6 +65,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         view.onToggleSelection = onToggleSelection
         view.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, displayMode: displayMode,
                        selectionMode: selectionMode, selectedUIDs: selectedUIDs)
+        view.setActive(isActive)
         return view
     }
 
@@ -69,6 +76,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         uiView.onToggleSelection = onToggleSelection
         uiView.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, displayMode: displayMode,
                          selectionMode: selectionMode, selectedUIDs: selectedUIDs)
+        uiView.setActive(isActive)
     }
 }
 
@@ -277,20 +285,52 @@ public final class UIKitTimelineGridHostView: UIView {
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil {
-            displayLink.stop()
-            warmTask?.cancel()
-            aheadWarmTask?.cancel()
-            aheadWarmInFlight = false
-            cancelLiveZoomState()
-            warmGeneration &+= 1   // retire the cancelled pass so its late completion can't touch a newer one
-            warmInFlight = false   // never leave the warm gate latched shut after a detach cancels the pass
-        } else {
-            metalView.updateDrawableSize()
-            // Thumbnails may have landed on disk while detached (tab switch); re-warm the visible set on return
-            // even if it is unchanged, so the grid fills without needing a scroll nudge.
-            warmNeedsRepass = true
-            requestRender()
+            suspendRenderLoop()
+        } else if framePump.isActive {
+            // Re-attached while the tab is the active surface → resume. If the tab is inactive, stay
+            // suspended; `setActive(true)` resumes later (window is present by then).
+            resumeRenderLoop()
         }
+    }
+
+    /// Tab/surface activation from the SwiftUI host. An inactive grid must not keep the display link alive
+    /// doing render + warm work that competes with the menus/transitions on screen. This is the platform
+    /// plumbing for the shared `GridFramePump` active gate — Core decides "should the loop run", UIKit
+    /// supplies the lifecycle event. Only acts on a real transition (the pump reports it), so a steady
+    /// stream of identical `updateUIView` calls is free.
+    public func setActive(_ active: Bool) {
+        guard framePump.setActive(active) else { return }
+        if active {
+            // Resume only makes sense once we are in a window; otherwise `didMoveToWindow` will resume on
+            // attach (the pump is now active), so this is safe either way.
+            if window != nil { resumeRenderLoop() }
+        } else {
+            suspendRenderLoop()
+        }
+        UIHitchLog.gridActivity(
+            active: active, hasWindow: window != nil, displayLinkRunning: displayLink.isRunning,
+            warmInFlight: warmInFlight, aheadWarmInFlight: aheadWarmInFlight, items: items.count)
+    }
+
+    /// Stop the render loop and drop all in-flight warm work — used both when the view leaves its window and
+    /// when the tab deactivates. Visible cache/textures stay resident, so returning redraws immediately.
+    private func suspendRenderLoop() {
+        displayLink.stop()
+        perf.noteLoopStopped()
+        warmTask?.cancel()
+        aheadWarmTask?.cancel()
+        aheadWarmInFlight = false
+        cancelLiveZoomState()
+        warmGeneration &+= 1   // retire the cancelled pass so its late completion can't touch a newer one
+        warmInFlight = false   // never leave the warm gate latched shut after a suspend cancels the pass
+    }
+
+    /// Re-arm exactly one render on return to the active window, decoding any visible tiles whose bytes
+    /// landed while we were suspended (no scroll nudge needed).
+    private func resumeRenderLoop() {
+        metalView.updateDrawableSize()
+        warmNeedsRepass = true
+        requestRender()
     }
 
     private func configureSubviews() {
@@ -466,7 +506,10 @@ public final class UIKitTimelineGridHostView: UIView {
     private func requestRender() {
         guard isMetal3Capable else { return }
         framePump.invalidate()
-        guard window != nil else { return }   // didMoveToWindow re-arms the loop on re-attach
+        // Start the loop only when the surface can actually draw: in a window AND active (the pump gates
+        // `shouldTick` on active). A hidden/inactive grid stays marked dirty, so returning re-arms it, but
+        // never spins the display link while menus/other tabs are on screen.
+        guard window != nil, framePump.shouldTick else { return }
         if !displayLink.isRunning {
             displayLink.start { [weak self] _ in
                 self?.tick()
@@ -477,6 +520,7 @@ public final class UIKitTimelineGridHostView: UIView {
     private func tick() {
         guard framePump.shouldTick else {
             displayLink.stop()
+            perf.noteLoopStopped()
             return
         }
         let outcome = renderNow()
@@ -879,6 +923,9 @@ public final class UIKitTimelineGridHostView: UIView {
     /// pass in flight, decodes in small chunks, and aborts between chunks the moment a visible pass starts.
     /// RAM-neutral by design — it fills the EXISTING decoded budget ahead of need; no cache grows.
     private func scheduleScrollAheadWarmIfIdle(plan: GridFramePlan) {
+        // Never pre-warm ahead for an inactive/hidden grid — that would decode disk→RAM off-screen while the
+        // user is in another tab/menu. (renderNow only runs when active, so this is defense-in-depth.)
+        guard framePump.isActive else { return }
         guard let thumbnailFeed, let down = scrollDirectionDown, !itemUIDs.isEmpty else { return }
         guard !warmInFlight, !aheadWarmInFlight else { return }
         let indices = plan.visibleSlots.map(\.index)
@@ -1036,9 +1083,21 @@ private struct RenderPerfWindow {
     private var saturatedDraws = 0
     /// Last frame's RAM-decoded-but-not-GPU-resident visible count (`ramHitGpuMissing`).
     private var lastRamHitGpuMiss = 0
+    /// Timestamp of the previous tick, and how many inter-tick gaps this window exceeded ~2 frames (33 ms) —
+    /// a cheap proxy for a visible render-loop hitch. Reset to 0 when the loop stops so a resume after an
+    /// idle stretch is never counted as one giant gap.
+    private var lastTickAt: CFTimeInterval = 0
+    private var hitches = 0
+    private var maxGapMs: Double = 0
 
     mutating func noteScrollEvent() {
         scrollEvents += 1
+    }
+
+    /// The loop stopped (idle or suspended) — forget the last tick time so the next run's first gap is not
+    /// measured against a stale timestamp.
+    mutating func noteLoopStopped() {
+        lastTickAt = 0
     }
 
     mutating func noteDraw<ID>(visible: Int, missing: Int, ramHitGpuMiss: Int, saturated: Bool,
@@ -1062,6 +1121,11 @@ private struct RenderPerfWindow {
         ticks += 1
         if drawableFailed { drawableFailures += 1 }
         let now = CACurrentMediaTime()
+        if lastTickAt != 0 {
+            let gapMs = (now - lastTickAt) * 1000
+            if gapMs > 33 { hitches += 1; maxGapMs = max(maxGapMs, gapMs) }
+        }
+        lastTickAt = now
         if windowStart == 0 { windowStart = now }
         if now - windowStart >= 1.0 {
             flush(reason: "window")
@@ -1075,11 +1139,18 @@ private struct RenderPerfWindow {
         let (u, um, du, up) = (uploads, String(format: "%.2f", uploadMs), deferredUploads, upgrades)
         let (vis, mis, mb) = (lastVisible, lastMissing, lastResidentBytes / 1_048_576)
         let (capMB, sat, ramGpu) = (lastResidentCapBytes / 1_048_576, saturatedDraws, lastRamHitGpuMiss)
+        let (hit, gap) = (hitches, String(format: "%.0f", maxGapMs))
         Self.logger.notice("""
         [MobileGridPerf] \(reason, privacy: .public) ticks=\(t) draws=\(d) scrollEvents=\(s) \
         drawableFail=\(f) uploads=\(u) uploadMs=\(um, privacy: .public) deferred=\(du) upgrades=\(up) \
-        visible=\(vis) missing=\(mis) ramGpuMiss=\(ramGpu) residentMB=\(mb)/\(capMB) saturated=\(sat)
+        visible=\(vis) missing=\(mis) ramGpuMiss=\(ramGpu) residentMB=\(mb)/\(capMB) saturated=\(sat) \
+        hitches=\(hit) maxGapMs=\(gap, privacy: .public)
         """)
+        // A visible hitch during grid activity gets its own low-noise [UIHitch] line (1 s throttled via the
+        // window) so a `log stream` filtered to [UIHitch] shows both tab transitions AND grid frame stalls.
+        if hitches > 0 {
+            UIHitchLog.frameGap(hitches: hitches, maxGapMs: maxGapMs, ticks: ticks, draws: draws)
+        }
         scrollEvents = 0
         ticks = 0
         draws = 0
@@ -1089,6 +1160,35 @@ private struct RenderPerfWindow {
         deferredUploads = 0
         upgrades = 0
         saturatedDraws = 0
+        hitches = 0
+        maxGapMs = 0
+    }
+}
+
+// MARK: - UI hitch diagnostics
+
+/// Low-noise `[UIHitch]` diagnostics for menu/tab smoothness: emits only on grid ACTIVITY transitions and,
+/// at most once per second, when the render loop measured a frame gap over ~2 frames. It never logs per
+/// frame. The app shell emits its own `[UIHitch] tab=…` line on tab changes (same category), so a single
+/// `log stream --predicate 'category == "UIHitch"'` shows the whole interaction picture.
+@MainActor
+enum UIHitchLog {
+    private static let logger = Logger(subsystem: "me.protonphotos.ios", category: "UIHitch")
+
+    static func gridActivity(active: Bool, hasWindow: Bool, displayLinkRunning: Bool,
+                             warmInFlight: Bool, aheadWarmInFlight: Bool, items: Int) {
+        logger.notice("""
+        [UIHitch] event=gridActivity gridActive=\(active) window=\(hasWindow) \
+        displayLink=\(displayLinkRunning) warmInFlight=\(warmInFlight) aheadWarm=\(aheadWarmInFlight) \
+        items=\(items)
+        """)
+    }
+
+    static func frameGap(hitches: Int, maxGapMs: Double, ticks: Int, draws: Int) {
+        logger.notice("""
+        [UIHitch] event=gridFrameGap hitches=\(hitches) maxGapMs=\(String(format: "%.0f", maxGapMs), privacy: .public) \
+        ticks=\(ticks) draws=\(draws)
+        """)
     }
 }
 #endif

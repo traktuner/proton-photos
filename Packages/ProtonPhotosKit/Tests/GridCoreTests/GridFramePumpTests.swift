@@ -38,4 +38,45 @@ final class GridFramePumpTests: XCTestCase {
         pump.invalidate()
         XCTAssertTrue(pump.shouldTick)
     }
+
+    // MARK: - Active gating (host lifecycle: hidden/inactive surface must not keep the loop alive)
+
+    func testFreshPumpIsActive() {
+        XCTAssertTrue(GridFramePump().isActive)
+    }
+
+    func testDeactivatingGatesTicksOffEvenWithPendingWork() {
+        var pump = GridFramePump()
+        pump.invalidate()
+        XCTAssertTrue(pump.shouldTick)
+        XCTAssertTrue(pump.setActive(false))            // real transition
+        XCTAssertFalse(pump.isActive)
+        XCTAssertFalse(pump.shouldTick)                 // gated off despite being dirty
+    }
+
+    func testInactivePumpNeverKeepsTickingEvenWithPendingStreamWork() {
+        var pump = GridFramePump()
+        pump.setActive(false)
+        // Even "pending work" / a failed present cannot keep an inactive loop running.
+        XCTAssertFalse(pump.completeTick(presented: false, hasPendingWork: true))
+        XCTAssertFalse(pump.shouldTick)
+    }
+
+    func testReactivatingRearmsExactlyOneFrame() {
+        var pump = GridFramePump()
+        pump.completeTick(presented: true, hasPendingWork: false)   // idle
+        pump.setActive(false)
+        XCTAssertFalse(pump.shouldTick)
+        XCTAssertTrue(pump.setActive(true))             // real transition → re-arm
+        XCTAssertTrue(pump.shouldTick)                  // one frame on return, no external nudge
+        XCTAssertFalse(pump.completeTick(presented: true, hasPendingWork: false))   // then settles
+    }
+
+    func testRedundantSetActiveIsANoOpTransition() {
+        var pump = GridFramePump()
+        XCTAssertFalse(pump.setActive(true))            // already active
+        pump.completeTick(presented: true, hasPendingWork: false)   // idle
+        XCTAssertFalse(pump.setActive(true))            // still active → no re-arm
+        XCTAssertFalse(pump.shouldTick)
+    }
 }
