@@ -1,5 +1,6 @@
 import DesignSystemCore
 import MediaByteCache
+import MediaCacheCore
 import MediaCacheUIKitAdapter
 import Metal
 import PhotosCore
@@ -386,13 +387,13 @@ private final class MobileTimelineModel: ObservableObject {
 
                 if let cached = await backend.cachedTimeline() {
                     apply(cached)
-                    await feed.startPrefetch(items.map(\.uid))
+                    await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
                 }
 
                 let refreshed = try await backend.loadTimeline()
                 try Task.checkCancellation()
                 apply(refreshed)
-                await feed.startPrefetch(items.map(\.uid))
+                await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
                 statusText = items.isEmpty ? "No photos" : "Ready"
             } catch is CancellationError {
                 // A newer session/configuration replaced this task.

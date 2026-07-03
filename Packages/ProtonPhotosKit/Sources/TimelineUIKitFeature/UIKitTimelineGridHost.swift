@@ -64,10 +64,14 @@ public final class UIKitTimelineGridHostView: UIView {
     private var items: [PhotoItem] = []
     /// Flat UID order for the current items, cached so the per-frame composer input never re-maps the library.
     private var itemUIDs: [PhotoUID] = []
+    private var itemIndexByUID: [PhotoUID: Int] = [:]
     private var levelOverride: Int?
     private var displayMode: TileContentDisplayMode = .squareFillCrop
     private var warmTask: Task<Void, Never>?
     private var lastWarmIDs: [PhotoUID] = []
+    private var needsInitialNewestViewport = true
+    private var userHasScrolledTimeline = false
+    private var isApplyingProgrammaticScroll = false
 
     public private(set) var isMetal3Capable = false
 
@@ -95,14 +99,24 @@ public final class UIKitTimelineGridHostView: UIView {
     ) {
         let newUIDs = items.map(\.uid)
         let uidsChanged = itemUIDs != newUIDs
+        let shouldOpenAtNewest = uidsChanged && !newUIDs.isEmpty && !userHasScrolledTimeline
         self.items = items
         self.itemUIDs = newUIDs
         self.thumbnailFeed = thumbnailFeed
         self.levelOverride = level
         self.displayMode = displayMode
         if uidsChanged {
-            Task { await thumbnailFeed.startPrefetch(newUIDs) }
+            itemIndexByUID = Dictionary(
+                newUIDs.enumerated().map { ($0.element, $0.offset) },
+                uniquingKeysWith: { _, latest in latest }
+            )
             lastWarmIDs = []
+            if shouldOpenAtNewest {
+                needsInitialNewestViewport = true
+            } else if newUIDs.isEmpty {
+                needsInitialNewestViewport = true
+                userHasScrolledTimeline = false
+            }
         }
         refreshContentSize()
         renderNow()
@@ -179,6 +193,21 @@ public final class UIKitTimelineGridHostView: UIView {
         let size = resolvedContentSize()
         scrollView.contentSize = size
         contentView.frame = CGRect(origin: .zero, size: size)
+        applyInitialNewestViewportIfNeeded(contentSize: size)
+    }
+
+    private func applyInitialNewestViewportIfNeeded(contentSize: CGSize) {
+        guard needsInitialNewestViewport,
+              bounds.width > 0,
+              bounds.height > 0,
+              !itemUIDs.isEmpty
+        else { return }
+
+        let bottomY = max(0, contentSize.height - bounds.height)
+        isApplyingProgrammaticScroll = true
+        scrollView.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)
+        isApplyingProgrammaticScroll = false
+        needsInitialNewestViewport = false
     }
 
     private func resolvedContentSize() -> CGSize {
@@ -255,11 +284,19 @@ public final class UIKitTimelineGridHostView: UIView {
         textureCache.evictToBudget()
         renderer.render(to: target, viewportSize: viewportSize, groups: groups)
 
-        let missingVisible = ids.visible.filter { uid in
-            !textureCache.isResident(uid) && !(feed?.isKnownUnfetchable(uid) ?? false)
-        }
+        let missingVisible = newestFirst(
+            ids.visible.filter { uid in
+                !textureCache.isResident(uid) && !(feed?.isKnownUnfetchable(uid) ?? false)
+            }
+        )
         scheduleWarmIfNeeded(missingVisible, pixelSize: uploadPixels)
         updateDisplayLink(shouldRun: !missingVisible.isEmpty && !textureCache.residencySaturatedThisFrame)
+    }
+
+    private func newestFirst(_ uids: [PhotoUID]) -> [PhotoUID] {
+        uids.sorted { lhs, rhs in
+            (itemIndexByUID[lhs] ?? -1) > (itemIndexByUID[rhs] ?? -1)
+        }
     }
 
     private func scheduleWarmIfNeeded(_ uids: [PhotoUID], pixelSize: Int) {
@@ -290,6 +327,10 @@ public final class UIKitTimelineGridHostView: UIView {
 
 extension UIKitTimelineGridHostView: UIScrollViewDelegate {
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if !isApplyingProgrammaticScroll,
+           scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
+            userHasScrolledTimeline = true
+        }
         renderNow()
     }
 }

@@ -90,6 +90,7 @@ final class ProjectHygieneTests: XCTestCase {
             "product: TimelineUIKitAdapter",
             "product: TimelineUIKitFeature",
             "product: MediaCacheUIKitAdapter",
+            "product: MediaCacheCore",
             "product: MetalGridTextureUIKitAdapter",
             "product: AlbumsFeature",
             "product: PhotoViewerCore",
@@ -140,6 +141,22 @@ final class ProjectHygieneTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: verifyScript.path), "iOS app shell build gate script is required")
         let rebuild = (try? String(contentsOf: repoRoot.appendingPathComponent("scripts/rebuild.sh"), encoding: .utf8)) ?? ""
         XCTAssertTrue(rebuild.contains("verify-ios-app-shell.sh"), "rebuild.sh must run the iOS app shell gate")
+
+        let mobileShell = mobileAppSourceFiles()
+            .compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .joined(separator: "\n")
+        XCTAssertTrue(
+            mobileShell.contains("import MediaCacheCore"),
+            "iOS app must import the shared thumbnail crawl policy module"
+        )
+        XCTAssertTrue(
+            mobileShell.contains("ThumbnailCrawlOrder.newestToOldest(items)"),
+            "iOS app must crawl thumbnails newest-to-oldest like macOS"
+        )
+        XCTAssertFalse(
+            mobileShell.contains("feed.startPrefetch(items.map(\\.uid))"),
+            "iOS app must not crawl thumbnails in raw timeline order"
+        )
     }
 
     func testPlatformAppsUseSharedProtonDriveBackend() {

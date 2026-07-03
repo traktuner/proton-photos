@@ -2109,6 +2109,12 @@ final class CoreArchitectureGateTests: XCTestCase {
             "MetalGridRenderer",
             "MetalGridDrawableTarget(layer:",
             "UIKitTimelineMetalCapability.supportsTimelineGrid(device: device)",
+            "needsInitialNewestViewport",
+            "userHasScrolledTimeline",
+            "isApplyingProgrammaticScroll",
+            "applyInitialNewestViewportIfNeeded(contentSize:",
+            "scrollView.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)",
+            "newestFirst(",
         ] where !source.contains(required) {
             violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: missing \(required)")
         }
@@ -2128,6 +2134,8 @@ final class CoreArchitectureGateTests: XCTestCase {
             "GridTextureStreamingPolicy.window",
             "func buildGroups",
             "func classifyUIDs",
+            // Full-library background crawl order belongs to the shared timeline/app model, not the view host.
+            "startPrefetch(",
         ] where contains(forbidden, in: code) {
             violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: forbidden macOS/SDK/duplicated-sequence reference \(forbidden)")
         }
