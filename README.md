@@ -7,7 +7,7 @@ The app is built around Proton Drive's end-to-end encrypted data model. Authenti
 ## Current Status
 
 - macOS is the primary and most mature target.
-- iOS/iPadOS is functional enough for real-device and simulator testing: sign-in, library loading, the shared Metal timeline, viewer basics, selection UI, settings, and cache plumbing are present, with UI polish still ongoing.
+- iOS is functional enough for real-device and simulator testing: sign-in, library loading, the shared Metal timeline, viewer basics, selection UI, settings, and cache plumbing are present, with UI polish still ongoing.
 - Core features are organized as Swift package modules so timeline, media cache, decoding, albums, uploads, map data, viewer policy, and backend composition can be shared by macOS, iOS, and iPadOS.
 - Platform targets are intended to stay thin: AppKit/UIKit integration, window/navigation chrome, gestures, and platform-native presentation.
 - `Vendor/sdk-swift` is used as a local path dependency for the Proton Drive SDK.
