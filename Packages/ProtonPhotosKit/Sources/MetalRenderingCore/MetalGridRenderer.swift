@@ -137,37 +137,43 @@ package final class MetalGridRenderer {
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
     }
 
-    /// Encode all groups (back → front) onto an already-configured encoder. Returns (drawCalls, instances).
+    /// Encode all groups (back → front) onto an already-configured encoder. Returns (drawCalls, instances, binds).
     /// Pure w.r.t. the encoder - identical work whether the target is the drawable or an offscreen texture.
     ///
-    /// `pooledSlot` selects how the vertex storage is sourced: a non-nil slot packs every group's vertices
-    /// into one reused ring buffer (the steady `render(...)` path - no per-frame allocation); `nil` allocates
-    /// a fresh shared buffer per group (the transient offscreen dissolve path, where pooling buys nothing).
+    /// `pooledSlot` selects how the vertex storage is sourced. A non-nil slot is the steady `render(...)` path:
+    /// every group's vertices are written DIRECTLY into the reused ring buffer's `contents()` pointer at
+    /// pre-computed offsets - no intermediate `[Vertex]` array and no memcpy, so a dense L5 frame no longer
+    /// churns ~0.2-0.65 MB of transient allocation per invalidated frame. `nil` is the transient offscreen
+    /// dissolve path: it builds a per-group array and a fresh shared buffer (it runs only on layer-dirty
+    /// frames, so pooling buys nothing there). Both paths preserve group order, draw order, and the
+    /// draw-call / instance / texture-bind counts exactly.
     @discardableResult
     private func encode(groups: [MetalGridRenderGroup], into encoder: MTLRenderCommandEncoder, pooledSlot: Int? = nil) -> (Int, Int, Int) {
         let stride = MemoryLayout<Vertex>.stride
-        // Build each non-empty group's vertices up front, recording its byte offset into the packed buffer.
-        var built: [(verts: [Vertex], source: MetalGridRenderGroup.Source, quadCount: Int, offset: Int)] = []
-        built.reserveCapacity(groups.count)
+        // Group metadata only (no vertices yet): source order preserved; each non-empty group reserves a
+        // contiguous `quadCount * 6`-vertex run, its start offset recorded up front so the pooled and
+        // per-group paths bind identical byte offsets.
+        var planned: [(group: MetalGridRenderGroup, vertexOffset: Int)] = []
+        planned.reserveCapacity(groups.count)
         var totalVerts = 0
         for group in groups where !group.quads.isEmpty {
-            var verts: [Vertex] = []
-            verts.reserveCapacity(group.quads.count * 6)
-            for q in group.quads { appendQuad(into: &verts, q) }
-            built.append((verts, group.source, group.quads.count, totalVerts * stride))
-            totalVerts += verts.count
+            planned.append((group, totalVerts))
+            totalVerts += group.quads.count * 6
         }
         guard totalVerts > 0 else { return (0, 0, 0) }
 
-        // Resolve the vertex buffer + each group's offset into it.
+        // Steady path: grow the ring slot once, then write each quad's six vertices straight into it.
         let packed: MTLBuffer?
         if let slot = pooledSlot {
-            packed = pooledBuffer(slot: slot, byteCount: totalVerts * stride)
-            if let buffer = packed {
-                let base = buffer.contents()
-                for g in built {
-                    g.verts.withUnsafeBytes { raw in
-                        if let src = raw.baseAddress { memcpy(base.advanced(by: g.offset), src, raw.count) }
+            let buffer = pooledBuffer(slot: slot, byteCount: totalVerts * stride)
+            packed = buffer
+            if let buffer {
+                let base = buffer.contents().assumingMemoryBound(to: Vertex.self)
+                for (group, vertexOffset) in planned {
+                    var cursor = base.advanced(by: vertexOffset)
+                    for q in group.quads {
+                        writeQuad(q, into: cursor)
+                        cursor = cursor.advanced(by: 6)
                     }
                 }
             }
@@ -178,26 +184,30 @@ package final class MetalGridRenderer {
         var drawCalls = 0
         var instances = 0
         var textureBinds = 0
-        for g in built {
+        for (group, vertexOffset) in planned {
+            let quadCount = group.quads.count
             let buffer: MTLBuffer
-            let offset: Int
+            let byteOffset: Int
             if let pooled = packed {
                 buffer = pooled
-                offset = g.offset
+                byteOffset = vertexOffset * stride
             } else {
-                guard let b = device.makeBuffer(bytes: g.verts, length: stride * g.verts.count, options: .storageModeShared) else { continue }
+                var verts: [Vertex] = []
+                verts.reserveCapacity(quadCount * 6)
+                for q in group.quads { appendQuad(into: &verts, q) }
+                guard let b = device.makeBuffer(bytes: verts, length: stride * verts.count, options: .storageModeShared) else { continue }
                 buffer = b
-                offset = 0
+                byteOffset = 0
             }
-            encoder.setVertexBuffer(buffer, offset: offset, index: 0)
-            switch g.source {
+            encoder.setVertexBuffer(buffer, offset: byteOffset, index: 0)
+            switch group.source {
             case .sharedTexture(let texture):
                 encoder.setFragmentTexture(texture, index: 0)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: g.verts.count)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: quadCount * 6)
                 drawCalls += 1
                 textureBinds += 1
-                instances += g.quadCount
-            case .perQuadTexture(let textures) where textures.count == g.quadCount:
+                instances += quadCount
+            case .perQuadTexture(let textures) where textures.count == quadCount:
                 for (i, texture) in textures.enumerated() {
                     encoder.setFragmentTexture(texture, index: 0)
                     encoder.drawPrimitives(type: .triangle, vertexStart: i * 6, vertexCount: 6)
@@ -355,7 +365,10 @@ package final class MetalGridRenderer {
         }
     }
 
-    private func appendQuad(into verts: inout [Vertex], _ q: MetalGridQuad) {
+    /// The six triangle vertices for one quad (two triangles: tl,bl,tr / tr,bl,br), the single source of the
+    /// renderer's vertex layout. Shared by the pooled direct-write path (`writeQuad`) and the transient
+    /// per-group path (`appendQuad`) so both emit byte-identical geometry.
+    private func quadVertices(_ q: MetalGridQuad) -> (Vertex, Vertex, Vertex, Vertex, Vertex, Vertex) {
         let x0 = Float(q.rect.minX), y0 = Float(q.rect.minY)
         let x1 = Float(q.rect.maxX), y1 = Float(q.rect.maxY)
         let w = Float(q.rect.width), h = Float(q.rect.height)
@@ -369,7 +382,20 @@ package final class MetalGridRenderer {
         let tr = v(x1, y0, q.uvMax.x, q.uvMin.y, w, 0)
         let bl = v(x0, y1, q.uvMin.x, q.uvMax.y, 0, h)
         let br = v(x1, y1, q.uvMax.x, q.uvMax.y, w, h)
-        verts.append(contentsOf: [tl, bl, tr, tr, bl, br])
+        return (tl, bl, tr, tr, bl, br)
+    }
+
+    /// Append one quad's six vertices to a growable array - the transient offscreen dissolve path.
+    private func appendQuad(into verts: inout [Vertex], _ q: MetalGridQuad) {
+        let (a, b, c, d, e, f) = quadVertices(q)
+        verts.append(contentsOf: [a, b, c, d, e, f])
+    }
+
+    /// Write one quad's six vertices directly into pooled ring-buffer memory (six contiguous `Vertex` slots
+    /// from `ptr`). `Vertex` is trivial, so assigning into possibly-uninitialised buffer memory is safe.
+    private func writeQuad(_ q: MetalGridQuad, into ptr: UnsafeMutablePointer<Vertex>) {
+        let (a, b, c, d, e, f) = quadVertices(q)
+        ptr[0] = a; ptr[1] = b; ptr[2] = c; ptr[3] = d; ptr[4] = e; ptr[5] = f
     }
 
     private static let shaderSource = """
