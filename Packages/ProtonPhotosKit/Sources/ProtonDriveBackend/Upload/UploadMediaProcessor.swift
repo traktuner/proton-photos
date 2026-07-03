@@ -13,8 +13,8 @@ enum UploadMediaProcessor {
     private static let thumbnailMaxPixel = 512
     private static let previewMaxPixel = 1920
 
-    static func thumbnails(for url: URL, isVideo: Bool) -> [ThumbnailData] {
-        guard let source = baseImage(for: url, isVideo: isVideo) else { return [] }
+    static func thumbnails(for url: URL, isVideo: Bool) async -> [ThumbnailData] {
+        guard let source = await baseImage(for: url, isVideo: isVideo) else { return [] }
         var result: [ThumbnailData] = []
         if let thumb = jpeg(downscaling: source, maxPixel: thumbnailMaxPixel) {
             result.append(ThumbnailData(type: .thumbnail, data: thumb))
@@ -27,8 +27,11 @@ enum UploadMediaProcessor {
 
     // MARK: - Base image
 
-    private static func baseImage(for url: URL, isVideo: Bool) -> CGImage? {
-        isVideo ? videoFrame(url) : imageSourceFrame(url)
+    private static func baseImage(for url: URL, isVideo: Bool) async -> CGImage? {
+        if isVideo {
+            return await videoFrame(url)
+        }
+        return imageSourceFrame(url)
     }
 
     /// Full-ish image (downscaled to the preview box) used as the source for both outputs.
@@ -42,13 +45,13 @@ enum UploadMediaProcessor {
         return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
     }
 
-    private static func videoFrame(_ url: URL) -> CGImage? {
+    private static func videoFrame(_ url: URL) async -> CGImage? {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: previewMaxPixel, height: previewMaxPixel)
         let time = CMTime(seconds: 0, preferredTimescale: 600)
-        return try? generator.copyCGImage(at: time, actualTime: nil)
+        return try? await generator.image(at: time).image
     }
 
     // MARK: - Encoding

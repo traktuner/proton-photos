@@ -5,6 +5,7 @@ import UIKit
 
 public final class UIKitTimelineMetalHostView: UIView {
     public override class var layerClass: AnyClass { CAMetalLayer.self }
+    private var displayScaleRegistration: (any UITraitChangeRegistration)?
 
     public var metalLayer: CAMetalLayer {
         guard let layer = layer as? CAMetalLayer else {
@@ -32,11 +33,6 @@ public final class UIKitTimelineMetalHostView: UIView {
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
-        updateDrawableSize()
-    }
-
-    public override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
         updateDrawableSize()
     }
 
@@ -79,7 +75,16 @@ public final class UIKitTimelineMetalHostView: UIView {
         metalLayer.pixelFormat = .bgra8Unorm
         metalLayer.framebufferOnly = true
         metalLayer.maximumDrawableCount = 3
+        registerDisplayScaleChangesIfNeeded()
         updateDrawableSize()
+    }
+
+    private func registerDisplayScaleChangesIfNeeded() {
+        guard displayScaleRegistration == nil else { return }
+        displayScaleRegistration = registerForTraitChanges([UITraitDisplayScale.self]) {
+            (view: UIKitTimelineMetalHostView, _: UITraitCollection) in
+            view.updateDrawableSize()
+        }
     }
 }
 #endif

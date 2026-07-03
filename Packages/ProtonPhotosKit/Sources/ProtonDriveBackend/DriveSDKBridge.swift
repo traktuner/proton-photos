@@ -567,7 +567,7 @@ extension DriveSDKBridge: PhotoUploading {
     ) async throws -> PhotoUID {
         onProgress(UploadProgress(phase: .preparing))
         let isVideo = request.mediaType.hasPrefix("video/")
-        let thumbnails = UploadMediaProcessor.thumbnails(for: request.fileURL, isVideo: isVideo)
+        let thumbnails = await UploadMediaProcessor.thumbnails(for: request.fileURL, isVideo: isVideo)
         onProgress(UploadProgress(phase: .uploading, fraction: 0))
         do {
             let ids = try await photosClient.uploadPhoto(
