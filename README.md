@@ -28,9 +28,8 @@ The app is built around Proton Drive's end-to-end encrypted data model. Authenti
 - Thumbnails, previews, offline originals, account-data cache, and the local GPS index are encrypted at rest with CryptoKit AES-GCM.
 - Video streaming stores Proton-encrypted Drive blocks on disk; decrypted video bytes are held in memory only.
 - Explicit export writes decrypted originals only to the user-selected destination.
-- Debug file logging is disabled by default and release builds never write `/tmp/protonphotos.log`.
-
-Known residual risk before distribution: the app currently needs hardened-runtime relaxations for the embedded SDK runtime (`disable-library-validation`, `allow-unsigned-executable-memory`, `allow-jit`). Re-check those entitlements before shipping.
+- Debug file logging is disabled by default and release builds never write a debug log. Debug builds write the opt-in log under the app's Library Logs directory.
+- The macOS app is signed with App Sandbox, outgoing-network access, and user-selected read/write file access only. Hardened Runtime remains enabled without JIT, unsigned executable memory, or library-validation exceptions.
 
 ## Requirements
 

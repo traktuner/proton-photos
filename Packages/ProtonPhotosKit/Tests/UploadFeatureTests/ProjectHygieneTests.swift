@@ -172,4 +172,42 @@ final class ProjectHygieneTests: XCTestCase {
             "iOS app must inject the documented Proton API client identity explicitly"
         )
     }
+
+    func testMacAppEntitlementsStaySandboxedAndMinimal() throws {
+        let entitlementsURL = repoRoot.appendingPathComponent("App/ProtonPhotos.entitlements")
+        let data = try Data(contentsOf: entitlementsURL)
+        let plist = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+            "macOS entitlements must remain a dictionary plist"
+        )
+
+        for required in [
+            "com.apple.security.app-sandbox",
+            "com.apple.security.network.client",
+            "com.apple.security.files.user-selected.read-write"
+        ] {
+            XCTAssertEqual(plist[required] as? Bool, true, "missing required entitlement \(required)")
+        }
+
+        for forbidden in [
+            "com.apple.security.cs.disable-library-validation",
+            "com.apple.security.cs.allow-unsigned-executable-memory",
+            "com.apple.security.cs.allow-jit",
+            "com.apple.security.files.downloads.read-write",
+            "com.apple.security.files.pictures.read-write",
+            "com.apple.security.temporary-exception.files.absolute-path.read-write",
+            "com.apple.security.temporary-exception.files.home-relative-path.read-write"
+        ] {
+            XCTAssertNil(plist[forbidden], "entitlement \(forbidden) must not be present without a documented need")
+        }
+    }
+
+    func testDebugLogUsesSandboxCompatibleLibraryDirectory() {
+        let debugLog = (try? String(
+            contentsOf: repoRoot.appendingPathComponent("App/Drive/DebugLog.swift"),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(debugLog.contains(".libraryDirectory"), "debug logging must stay inside the app container")
+        XCTAssertFalse(debugLog.contains("/tmp/protonphotos.log"), "sandboxed app must not hard-code /tmp for debug logs")
+    }
 }

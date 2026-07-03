@@ -4,8 +4,14 @@ import Foundation
 /// filenames, node IDs, or API paths. Enable only for a deliberate Debug run with
 /// `PROTONPHOTOS_DEBUG_LOG=1`; Release never writes this log.
 enum DebugLog {
-    private static let url = URL(fileURLWithPath: "/tmp/protonphotos.log")
     private static let queue = DispatchQueue(label: "protonphotos.debuglog")
+    private static let url: URL = {
+        let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Logs", isDirectory: true)
+            .appendingPathComponent("ProtonPhotos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        return logs.appendingPathComponent("protonphotos.log")
+    }()
 
     static func log(_ message: String) {
         guard enabled else { return }
