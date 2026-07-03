@@ -7,7 +7,10 @@ import TimelineUIKitFeature
 /// The main photos tab. The Metal grid mounts as soon as items and the feed exist; loading, empty and error
 /// states stay as overlays driven by the shared `LibraryLoadState`.
 struct MobileTimelineScreen: View {
-    @EnvironmentObject private var model: MobileLibraryModel
+    @Environment(MobileLibraryModel.self) private var model
+    /// Whether the Photos tab is the active surface. Threaded into the grid so a hidden grid stops its
+    /// render loop; defaults to true so previews/other embeds keep the grid live.
+    var isActive: Bool = true
     @State private var viewer: MobileViewerPresentation?
     @State private var selectionMode = false
     @State private var selected: Set<PhotoUID> = []
@@ -133,6 +136,7 @@ struct MobileTimelineScreen: View {
                     thumbnailFeed: feed,
                     selectionMode: selectionMode,
                     selectedUIDs: selected,
+                    isActive: isActive,
                     onFirstContentReady: { withAnimation(.spring(duration: 0.55)) { model.markFirstContentReady() } },
                     onOpenPhoto: open,
                     onToggleSelection: toggleSelection
@@ -158,7 +162,7 @@ struct MobileTimelineScreen: View {
     }
 
     private func open(_ item: PhotoItem) {
-        guard let index = model.items.firstIndex(of: item) else { return }
+        guard let index = model.index(of: item.uid) else { return }   // O(1), not an O(n) firstIndex scan
         viewer = MobileViewerPresentation(index: index, items: model.items)
     }
 
@@ -175,7 +179,7 @@ struct MobileTimelineScreen: View {
 
     private func startShare() {
         guard let backend = model.backend else { return }
-        let chosen = model.items.filter { selected.contains($0.uid) }
+        let chosen = model.selectedItems(selected)   // O(k log k) from the index, not an O(n) filter
         guard !chosen.isEmpty else { return }
         isExporting = true
         Task {

@@ -12,7 +12,9 @@ import TimelineUIKitFeature
 /// Album CREATE / add-to-album are deliberately absent: the backend does not support them yet
 /// (`AlbumCapabilities.canCreate/canAddPhotos == false`), so no affordance is shown that would fail.
 struct MobileCollectionsScreen: View {
-    @EnvironmentObject private var model: MobileLibraryModel
+    /// `@Environment` over the `@Observable` model: Collections reads only `backend`/`thumbnailFeed`, so a
+    /// timeline snapshot change no longer re-renders this list.
+    @Environment(MobileLibraryModel.self) private var model
     @State private var albums: [PhotoAlbum] = []
     @State private var albumsPhase: Phase = .loading
 
@@ -137,11 +139,11 @@ private struct MobileAlbumRow: View {
 /// The shared timeline grid, filtered to ANY `PhotoFilter` route (smart tag, album, or trash), with the same
 /// tap-to-open viewer as the main timeline. One screen serves every collection — the route is the only input.
 private struct MobileFilterGridScreen: View {
-    @EnvironmentObject private var model: MobileLibraryModel
+    @Environment(MobileLibraryModel.self) private var model
     let title: String
     let filter: PhotoFilter
 
-    @State private var items: [PhotoItem] = []
+    @State private var snapshot = TimelineSnapshot()
     @State private var phase: Phase = .loading
     @State private var viewer: MobileViewerPresentation?
 
@@ -161,10 +163,10 @@ private struct MobileFilterGridScreen: View {
                     description: Text(message)
                 )
             case .loaded:
-                if items.isEmpty {
+                if snapshot.isEmpty {
                     ContentUnavailableView(String(localized: "collections.filter_empty"), systemImage: "photo.on.rectangle")
                 } else if let feed = model.thumbnailFeed {
-                    UIKitTimelineGrid(items: items, thumbnailFeed: feed, onOpenPhoto: open)
+                    UIKitTimelineGrid(items: snapshot.items, thumbnailFeed: feed, onOpenPhoto: open)
                         .ignoresSafeArea(edges: .bottom)
                 }
             }
@@ -182,7 +184,13 @@ private struct MobileFilterGridScreen: View {
         phase = .loading
         do {
             let sections = try await backend.timeline(filter: filter)
-            items = sections.flatMap(\.items).sorted(by: TimelineOrder.areInIncreasingOrder)
+            // Flatten + sort OFF the main actor, exactly like the main timeline, so opening a large album
+            // never hitches the push transition.
+            let prepared = await Task.detached(priority: .userInitiated) {
+                TimelineSnapshot(sections: sections)
+            }.value
+            guard !Task.isCancelled else { return }
+            snapshot = prepared
             phase = .loaded
         } catch {
             phase = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
@@ -190,7 +198,7 @@ private struct MobileFilterGridScreen: View {
     }
 
     private func open(_ item: PhotoItem) {
-        guard let index = items.firstIndex(of: item) else { return }
-        viewer = MobileViewerPresentation(index: index, items: items)
+        guard let index = snapshot.index(of: item.uid) else { return }   // O(1)
+        viewer = MobileViewerPresentation(index: index, items: snapshot.items)
     }
 }

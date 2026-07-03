@@ -3,6 +3,7 @@ import MediaByteCache
 import MediaCacheCore
 import MediaCacheUIKitAdapter
 import MediaLocationCore
+import Observation
 import PhotosCore
 import ProtonAuth
 import ProtonDriveBackend
@@ -14,17 +15,29 @@ import TimelineCore
 ///
 /// The heavy lifting (auth, the Drive backend, the thumbnail feed, the crawl order) is all shared Core — this
 /// model only sequences `cachedTimeline → loadTimeline → crawl` and maps outcomes onto `LibraryLoadState`.
+///
+/// `@Observable` (not `ObservableObject`): SwiftUI then tracks each property INDIVIDUALLY, so the Settings,
+/// Collections and Map tabs — which read only `loadState`/`backend`/`thumbnailFeed`, never the 20k-item
+/// `snapshot` — are not re-rendered every time a new timeline snapshot is published. Only views that actually
+/// read `items`/`snapshot` (the Photos grid) invalidate on a timeline change.
 @MainActor
-final class MobileLibraryModel: ObservableObject {
+@Observable
+final class MobileLibraryModel {
     /// The single source of truth for the onboarding/loading UI. Shared, tested policy — see `LibraryLoadState`.
-    @Published private(set) var loadState: LibraryLoadState = .initial
-    @Published private(set) var items: [PhotoItem] = []
-    @Published private(set) var thumbnailFeed: UIKitThumbnailFeed?
+    private(set) var loadState: LibraryLoadState = .initial
+    /// The flattened, ordered, indexed timeline. Built OFF the main actor (`TimelineSnapshot` is a pure,
+    /// `Sendable` value) and published here as one immutable assignment, so the main actor never flattens/
+    /// sorts a large library and open/share/trash lookups are O(1)/O(k) instead of O(n) scans.
+    private(set) var snapshot = TimelineSnapshot()
+    /// The ordered items, for the grid and callers that pass the whole list (e.g. the viewer pager). Reads
+    /// register a dependency on `snapshot`, so a timeline change invalidates only views that read items.
+    var items: [PhotoItem] { snapshot.items }
+    private(set) var thumbnailFeed: UIKitThumbnailFeed?
     /// True while the background thumbnail crawl is still filling the library AFTER the grid became
     /// presentable — drives the small persistent top-left indicator. Deliberately NOT part of
     /// `LibraryLoadState` (which models the first-load lifecycle, see its docs): crawl coverage is a
     /// background signal, so it is polled from the feed and ends the first time the crawl runs dry.
-    @Published private(set) var isBackgroundLoading = false
+    private(set) var isBackgroundLoading = false
 
     /// The shared backend, exposed so the Albums / Map / Viewer tabs can reuse it without re-building anything.
     private(set) var backend: (any PhotosBackend)?
@@ -45,6 +58,11 @@ final class MobileLibraryModel: ObservableObject {
     private var store: SessionKeychainStore?
     private var session: ProtonSession?
     private var loadTask: Task<Void, Never>?
+    /// Monotonic id for the current load. Bumped whenever a load starts or the model tears down, so an
+    /// off-main snapshot sort that finishes AFTER a newer load/teardown superseded it never publishes stale
+    /// items. Belt-and-suspenders alongside `loadTask` cancellation — and makes the "newest load wins"
+    /// invariant explicit if the load sequence is ever refactored to build snapshots concurrently.
+    private var loadToken = 0
     private var firstContentGuard: Task<Void, Never>?
     private var backgroundActivityTask: Task<Void, Never>?
 
@@ -70,8 +88,16 @@ final class MobileLibraryModel: ObservableObject {
     func trashItems(_ uids: Set<PhotoUID>) async throws {
         guard let backend, !uids.isEmpty else { return }
         try await backend.trash(Array(uids))
-        items.removeAll { uids.contains($0.uid) }
+        snapshot = snapshot.removingItems(withUIDs: uids)   // order-preserving, re-indexed
     }
+
+    /// Position of `uid` in the ordered timeline, or nil — O(1) via the snapshot index (viewer paging, map/
+    /// grid open), replacing the previous O(n) `firstIndex`.
+    func index(of uid: PhotoUID) -> Int? { snapshot.index(of: uid) }
+
+    /// The chosen items in timeline order — O(k log k) from the snapshot index, for share/export of a
+    /// selection, instead of an O(n) `filter` of the whole library on the main thread.
+    func selectedItems(_ uids: Set<PhotoUID>) -> [PhotoItem] { snapshot.items(withUIDs: uids) }
 
     /// The on-disk size (bytes) of the encrypted thumbnail cache — the app's media-cache footprint, for Settings.
     /// Computed off the main actor (it sums file sizes on disk), so a large cache never stalls the UI.
@@ -163,6 +189,7 @@ final class MobileLibraryModel: ObservableObject {
     }
 
     private func teardown() {
+        loadToken &+= 1   // supersede any in-flight snapshot sort
         loadTask?.cancel()
         firstContentGuard?.cancel()
         firstContentGuard = nil
@@ -173,7 +200,7 @@ final class MobileLibraryModel: ObservableObject {
         session = nil
         backend = nil
         facade = nil
-        items = []
+        snapshot = TimelineSnapshot()
         thumbnailFeed = nil
         thumbnailCache = nil
         loadState = .initial
@@ -182,6 +209,7 @@ final class MobileLibraryModel: ObservableObject {
     }
 
     private func start(session: ProtonSession, store: SessionKeychainStore) {
+        loadToken &+= 1   // this load supersedes any older in-flight snapshot sort
         loadTask?.cancel()
         firstContentGuard?.cancel()
         firstContentGuard = nil   // must re-nil so armFirstContentGuardIfNeeded re-arms the safety net next load
@@ -191,7 +219,7 @@ final class MobileLibraryModel: ObservableObject {
         configuredUID = session.uid
         backend = nil
         facade = nil
-        items = []
+        snapshot = TimelineSnapshot()
         thumbnailFeed = nil
         loadState = .preparingInventory
 
@@ -245,13 +273,13 @@ final class MobileLibraryModel: ObservableObject {
                 // content, which lifts the overlay onto real thumbnails (never a blank grid).
                 if let cached = await backend.cachedTimeline() {
                     try Task.checkCancellation()   // a newer session may have superseded us during the await
-                    applyItems(cached, cached: true)
+                    await applyItems(cached, cached: true)
                     await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
                 }
 
                 let refreshed = try await backend.loadTimeline()
                 try Task.checkCancellation()
-                applyItems(refreshed, cached: false)
+                await applyItems(refreshed, cached: false)
                 await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
             } catch is CancellationError {
                 // A newer session/configuration replaced this task.
@@ -261,9 +289,20 @@ final class MobileLibraryModel: ObservableObject {
         }
     }
 
-    private func applyItems(_ sections: [TimelineSection], cached: Bool) {
-        items = sections.flatMap(\.items).sorted(by: TimelineOrder.areInIncreasingOrder)
-        apply(.inventoryResolved(count: items.count, cached: cached))
+    /// Flatten + sort the sections into an immutable `TimelineSnapshot` OFF the main actor, then publish the
+    /// finished value on it. For a large library this keeps the O(n log n) sort off the main thread entirely,
+    /// so a timeline load/refresh never blocks menu/tab interaction. A newer session that superseded us while
+    /// the sort ran drops the result (the cancellation check), never clobbering the newer state.
+    private func applyItems(_ sections: [TimelineSection], cached: Bool) async {
+        let token = loadToken
+        let prepared = await Task.detached(priority: .userInitiated) {
+            TimelineSnapshot(sections: sections)
+        }.value
+        // Publish only if THIS load is still the current one: not cancelled, and no newer load/teardown
+        // bumped the token while we sorted off-main.
+        guard !Task.isCancelled, token == loadToken else { return }
+        snapshot = prepared
+        apply(.inventoryResolved(count: prepared.count, cached: cached))
         armFirstContentGuardIfNeeded()
     }
 

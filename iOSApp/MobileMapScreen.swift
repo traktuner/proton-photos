@@ -8,7 +8,7 @@ import UIKit
 /// Map tab. Presents the shared `UIKitLibraryMapHostView` over the library's GPS index, which a background crawl
 /// fills. Shows a real, honest empty state until geotagged photos are found; tapping a pin opens the viewer.
 struct MobileMapScreen: View {
-    @EnvironmentObject private var model: MobileLibraryModel
+    @Environment(MobileLibraryModel.self) private var model
     @State private var viewer: MobileViewerPresentation?
 
     var body: some View {
@@ -45,7 +45,7 @@ struct MobileMapScreen: View {
     }
 
     private func openPhoto(_ uid: PhotoUID) {
-        guard let index = model.items.firstIndex(where: { $0.uid == uid }) else { return }
+        guard let index = model.index(of: uid) else { return }   // O(1) via the snapshot index
         viewer = MobileViewerPresentation(index: index, items: model.items)
     }
 }

@@ -1,5 +1,6 @@
 import DesignSystemCore
 import Metal
+import os
 import PhotosCore
 import ProtonCoreCryptoPatchedGoImplementation
 import SwiftUI
@@ -9,13 +10,15 @@ import UIKit
 @main
 struct ProtonPhotosMobileApp: App {
     @StateObject private var sessionModel = MobileSessionModel()
-    @StateObject private var libraryModel = MobileLibraryModel()
+    /// `@State` (not `@StateObject`) because `MobileLibraryModel` is `@Observable`: SwiftUI then tracks its
+    /// properties individually, so non-grid tabs don't re-render on a timeline snapshot change.
+    @State private var libraryModel = MobileLibraryModel()
 
     var body: some Scene {
         WindowGroup {
             MobileRootView()
                 .environmentObject(sessionModel)
-                .environmentObject(libraryModel)
+                .environment(libraryModel)
                 .task {
                     libraryModel.configure(session: sessionModel.session, store: sessionModel.sessionStore)
                 }
@@ -23,6 +26,30 @@ struct ProtonPhotosMobileApp: App {
                     libraryModel.configure(session: session, store: sessionModel.sessionStore)
                 }
         }
+    }
+}
+
+/// The mobile tabs, as explicit selection values so the Photos grid can be told when it is NOT the active
+/// surface (and stop its render loop). `name` feeds the `[UIHitch]` tab-transition diagnostic.
+enum MobileTab: Hashable {
+    case photos, collections, map, settings
+
+    var name: String {
+        switch self {
+        case .photos: "photos"
+        case .collections: "collections"
+        case .map: "map"
+        case .settings: "settings"
+        }
+    }
+}
+
+/// Low-noise `[UIHitch]` tab-transition log (state-change only), same subsystem/category as the grid host's
+/// `[UIHitch]` lines so one `log stream` filtered to that category shows tab changes AND grid frame stalls.
+enum MobileTabActivityLog {
+    private static let logger = Logger(subsystem: "me.protonphotos.ios", category: "UIHitch")
+    static func note(tab: MobileTab) {
+        logger.notice("[UIHitch] event=tab tab=\(tab.name, privacy: .public)")
     }
 }
 
@@ -51,23 +78,30 @@ private struct MobileRootView: View {
 /// surfaces `.sidebarAdaptable` promotes the same tabs to a sidebar/split layout — one declaration, no per-model
 /// branching, no stretched-iPhone iPad UI.
 private struct MobileMainTabView: View {
+    /// Explicit selection so the Photos grid knows when it is NOT the active surface and can stop its render
+    /// loop + ahead-warm, keeping menu/tab/settings interaction smooth while thumbnails load.
+    @State private var selection: MobileTab = .photos
+
     var body: some View {
-        TabView {
-            Tab(String(localized: "tab.photos"), systemImage: "photo.on.rectangle.angled") {
-                MobileTimelineScreen()
+        TabView(selection: $selection) {
+            Tab(String(localized: "tab.photos"), systemImage: "photo.on.rectangle.angled", value: MobileTab.photos) {
+                MobileTimelineScreen(isActive: selection == .photos)
             }
-            Tab(String(localized: "tab.collections"), systemImage: "square.stack") {
+            Tab(String(localized: "tab.collections"), systemImage: "square.stack", value: MobileTab.collections) {
                 MobileCollectionsScreen()
             }
-            Tab(String(localized: "tab.map"), systemImage: "map") {
+            Tab(String(localized: "tab.map"), systemImage: "map", value: MobileTab.map) {
                 MobileMapScreen()
             }
-            Tab(String(localized: "tab.settings"), systemImage: "gearshape") {
+            Tab(String(localized: "tab.settings"), systemImage: "gearshape", value: MobileTab.settings) {
                 MobileSettingsScreen()
             }
         }
         .tabViewStyle(.sidebarAdaptable)
         .tint(ProtonColor.primary)
+        .onChange(of: selection) { _, tab in
+            MobileTabActivityLog.note(tab: tab)
+        }
     }
 }
 

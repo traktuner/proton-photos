@@ -8,7 +8,9 @@ import TimelineCore
 /// Account, library status, cache and sign-out settings for the mobile app.
 struct MobileSettingsScreen: View {
     @EnvironmentObject private var sessionModel: MobileSessionModel
-    @EnvironmentObject private var libraryModel: MobileLibraryModel
+    /// `@Environment` over the `@Observable` model: Settings reads only `loadState`/`isBackgroundLoading`, so
+    /// it is NOT re-rendered when a large timeline `snapshot` is published — the core menu-smoothness fix.
+    @Environment(MobileLibraryModel.self) private var libraryModel
     /// Shared Proton account info populated by the backend's account-data cache.
     @State private var account = AccountInfo.shared
 
