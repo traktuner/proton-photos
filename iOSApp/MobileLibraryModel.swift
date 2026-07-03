@@ -209,6 +209,12 @@ final class MobileLibraryModel: ObservableObject {
         )
         thumbnailCache = cache
 
+        // Drive the shared memory governor from UIKit pressure/thermal/lifecycle events and register the
+        // session's cache owners (identity-keyed: a new session's cache/feed replaces the previous
+        // registration). Same Core mechanism macOS wires through AppMemoryPressureCoordinator.
+        UIKitMemoryPressureCoordinator.shared.install()
+        UIKitMemoryPressureCoordinator.shared.attachByteCache(cache)
+
         loadTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -231,6 +237,8 @@ final class MobileLibraryModel: ObservableObject {
                 self.facade = client
                 self.backend = backend
                 self.thumbnailFeed = feed
+                // The live feed's RAM tiers (UIImage wrappers + decoded core) respond to pressure tiers.
+                UIKitMemoryPressureCoordinator.shared.attachFeed(feed)
 
                 // Stale-while-revalidate: show the cached snapshot instantly (its count + a crawl seed), then
                 // refresh from the server. The grid mounts under the loading overlay so it can report first

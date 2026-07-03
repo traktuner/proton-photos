@@ -1,6 +1,7 @@
 import AVFoundation
 import AVKit
 import DesignSystemCore
+import MediaCacheUIKitAdapter
 import PhotosCore
 import PhotoViewerCore
 import PhotoViewerUIKitAdapter
@@ -18,16 +19,20 @@ struct MobilePhotoViewer: View {
     @Environment(\.dismiss) private var dismiss
     @State private var index: Int
     @State private var chromeVisible = true
-    /// Bounded, shared image loader for the pages (thumbnail → screen-bounded preview, off-main + cached).
-    @State private var imageStore: MobileViewerImageStore
+    /// Bounded, shared image loader for the pages (thumbnail → screen-bounded preview, off-main + cached) —
+    /// the shared `PhotoViewerUIKitAdapter` store, wired to the feed's RAM tier via a closure so the
+    /// adapter never depends on a concrete feed type.
+    @State private var imageStore: UIKitViewerImageStore
 
     init(items: [PhotoItem], startIndex: Int, libraryModel: MobileLibraryModel) {
         self.items = items
         self.startIndex = startIndex
         self.libraryModel = libraryModel
         _index = State(initialValue: min(max(startIndex, 0), max(items.count - 1, 0)))
-        _imageStore = State(initialValue: MobileViewerImageStore(
-            feed: libraryModel.thumbnailFeed, media: libraryModel.backend))
+        let feed = libraryModel.thumbnailFeed
+        _imageStore = State(initialValue: UIKitViewerImageStore(
+            thumbnailProvider: { feed?.memoryImage(for: $0) },
+            media: libraryModel.backend))
     }
 
     var body: some View {
@@ -57,6 +62,14 @@ struct MobilePhotoViewer: View {
         }
         .statusBarHidden(!chromeVisible)
         .persistentSystemOverlays(chromeVisible ? .automatic : .hidden)
+        .task {
+            // Register the viewer's transient display cache with the shared memory governor (identity-keyed:
+            // a newly opened viewer replaces the previous registration; the weak capture makes a dismissed
+            // viewer's handler a no-op). Under `.minimal` the store purges every page except the visible one.
+            UIKitMemoryPressureCoordinator.shared.attach(imageStore, key: "viewerImageStore") { [weak imageStore] tier in
+                imageStore?.applyMemoryPressure(scale: tier.budgetScale, purge: tier.requiresImmediatePurge)
+            }
+        }
     }
 
     private var chrome: some View {
@@ -110,7 +123,7 @@ private struct MobileViewerPage: View {
     let item: PhotoItem
     let isCurrent: Bool
     let libraryModel: MobileLibraryModel
-    let imageStore: MobileViewerImageStore
+    let imageStore: UIKitViewerImageStore
     let onToggleChrome: () -> Void
     let onCloseRequested: () -> Void
 
@@ -143,7 +156,7 @@ private struct MobileViewerPage: View {
 private struct MobileImagePage: View {
     let item: PhotoItem
     let isCurrent: Bool
-    let imageStore: MobileViewerImageStore
+    let imageStore: UIKitViewerImageStore
     /// The shared streamer used to preload a Live Photo's paired motion clip (nil for non-Live items).
     let streamer: (any VideoStreamProvider)?
     let onToggleChrome: () -> Void

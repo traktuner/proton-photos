@@ -118,6 +118,17 @@ public final class UIKitTimelineGridHostView: UIView {
     private var videoUIDs: Set<PhotoUID> = []
     private var warmTask: Task<Void, Never>?
     private var lastWarmIDs: [PhotoUID] = []
+    /// Scroll-direction-biased prefetch (shared `GridScrollAheadPolicy`): the user's last vertical travel
+    /// direction, learned from finger scrolls only (`nil` until the first real scroll — no direction, no
+    /// ahead-warm). Reset when the content set changes.
+    private var scrollDirectionDown: Bool?
+    private var lastScrollY: CGFloat = 0
+    /// One ahead-warm at a time, keyed by (range, direction, level) so a settled static viewport never
+    /// re-issues the same prefetch. RAM-neutral: it decodes into the existing budgets at
+    /// `.nearViewportScrollAhead` priority and never runs while visible warm work is pending.
+    private var aheadWarmTask: Task<Void, Never>?
+    private var aheadWarmInFlight = false
+    private var lastAheadKey = ""
     /// True while a `warmDecoded` pass is running, so passes never stack. Replaces the old exact-set dedup as the
     /// re-warm gate: a still-missing visible set is re-warmed on the next pass whenever the set changed OR
     /// `warmNeedsRepass` was raised (an arrival / demand move), so a tile that lands on disk under a STATIC
@@ -230,6 +241,8 @@ public final class UIKitTimelineGridHostView: UIView {
             )
             videoUIDs = Set(items.filter(\.isVideo).map(\.uid))
             lastWarmIDs = []
+            scrollDirectionDown = nil
+            lastAheadKey = ""
             if !newUIDs.isEmpty {
                 // A new content set must report its own first drawn frame.
                 firstContentReported = false
@@ -266,6 +279,8 @@ public final class UIKitTimelineGridHostView: UIView {
         if window == nil {
             displayLink.stop()
             warmTask?.cancel()
+            aheadWarmTask?.cancel()
+            aheadWarmInFlight = false
             cancelLiveZoomState()
             warmGeneration &+= 1   // retire the cancelled pass so its late completion can't touch a newer one
             warmInFlight = false   // never leave the warm gate latched shut after a detach cancels the pass
@@ -332,7 +347,16 @@ public final class UIKitTimelineGridHostView: UIView {
         let policy = UIKitMetalGridTexturePolicies.policy(forViewportSize: bounds.size)
         if texturePolicy == policy, textureCache != nil { return }
         texturePolicy = policy
-        textureCache = UIKitMetalGridTextureCacheFactory.makeCache(device: device, policy: policy)
+        let cache: MetalGridTextureCache<PhotoUID>? = UIKitMetalGridTextureCacheFactory.makeCache(device: device, policy: policy)
+        textureCache = cache
+        // Register the GPU texture cache with the shared memory governor (identity-keyed: a rebuilt cache
+        // replaces the previous registration). On pressure the cache sheds offscreen residency but never
+        // the visible pinned set, so what is on screen stays drawable — mirroring the macOS coordinator.
+        if let cache {
+            UIKitMemoryPressureCoordinator.shared.attach(cache, key: "gridTextureCache") { [weak cache] tier in
+                cache?.setResidencyPressureScale(tier.budgetScale)
+            }
+        }
     }
 
     /// Keeps the LAST row of content clear of the bottom bar / home indicator: the scroll surface extends
@@ -553,7 +577,7 @@ public final class UIKitTimelineGridHostView: UIView {
             columnPhase: committedPhase
         )
 
-        return renderSlotFrame(
+        let outcome = renderSlotFrame(
             target: target,
             renderer: renderer,
             textureCache: textureCache,
@@ -566,6 +590,12 @@ public final class UIKitTimelineGridHostView: UIView {
             reportFirstContent: true,
             forcePendingWork: false
         )
+        // Settled frames only: pre-decode the next rows in the user's travel direction (disk→RAM) so
+        // resuming the scroll lands on RAM-ready tiles. Never during interaction, never over visible work.
+        if !isInteracting {
+            scheduleScrollAheadWarmIfIdle(plan: plan)
+        }
+        return outcome
     }
 
     private func renderSlotFrame(
@@ -639,7 +669,12 @@ public final class UIKitTimelineGridHostView: UIView {
         // upgrade in flight, or a warm pass running. A visible tile that is still missing with NO RAM image is
         // waiting on the network/disk crawl — the feed's arrival wake (`handleImagesAvailable`) re-arms the loop
         // when its bytes land, so we idle through that wait instead of spinning full frames the whole time.
-        let uploadPending = missingVisible.contains { feed?.memoryCGImage(for: $0) != nil }
+        // RAM-decoded but not yet GPU-resident (the `ramHitGpuMissing` diagnostic): these tiles can fill on
+        // the very next frames within the upload budget — a persistent count means upload-budget starvation.
+        let ramReadyMissing = missingVisible.reduce(into: 0) { count, uid in
+            if feed?.memoryCGImage(for: uid) != nil { count += 1 }
+        }
+        let uploadPending = ramReadyMissing > 0
         // Residency saturation means neither a deferred upload nor a deferred upgrade can make progress until the
         // streaming window changes (scroll/zoom, which re-arm on their own), so both are gated on it — matching
         // the macOS coordinator and avoiding a spin on placeholders that cannot fill this frame.
@@ -647,7 +682,9 @@ public final class UIKitTimelineGridHostView: UIView {
         let hasPendingWork = forcePendingWork
             || warmInFlight
             || ((uploadPending || streamResult.pendingVisibleQualityUpgrade) && canMakeProgress)
-        perf.noteDraw(visible: ids.visible.count, missing: missingVisible.count, cache: textureCache)
+        perf.noteDraw(visible: ids.visible.count, missing: missingVisible.count,
+                      ramHitGpuMiss: ramReadyMissing, saturated: textureCache.residencySaturatedThisFrame,
+                      cache: textureCache)
         return .drawn(hasPendingWork: hasPendingWork)
     }
 
@@ -836,6 +873,53 @@ public final class UIKitTimelineGridHostView: UIView {
         )
     }
 
+    /// Pre-decode the rows just beyond the streamed window in the user's travel direction, disk→RAM, at
+    /// `.nearViewportScrollAhead` priority — the shared `GridScrollAheadPolicy` range over this host's flat
+    /// UID order. Strictly subordinate to visible work: it runs only on settled frames with NO visible warm
+    /// pass in flight, decodes in small chunks, and aborts between chunks the moment a visible pass starts.
+    /// RAM-neutral by design — it fills the EXISTING decoded budget ahead of need; no cache grows.
+    private func scheduleScrollAheadWarmIfIdle(plan: GridFramePlan) {
+        guard let thumbnailFeed, let down = scrollDirectionDown, !itemUIDs.isEmpty else { return }
+        guard !warmInFlight, !aheadWarmInFlight else { return }
+        let indices = plan.visibleSlots.map(\.index)
+        guard let minIndex = indices.min(), let maxIndex = indices.max() else { return }
+        let range = GridScrollAheadPolicy.aheadRange(
+            coveredIndexRange: minIndex ... maxIndex,
+            itemCount: itemUIDs.count,
+            columns: plan.columns,
+            rowsAhead: 3,
+            direction: down ? .towardHigherIndices : .towardLowerIndices
+        )
+        guard !range.isEmpty else { return }
+        let key = "\(range.lowerBound)-\(range.upperBound)-\(down)-\(plan.levelID)"
+        guard key != lastAheadKey else { return }
+        lastAheadKey = key
+        let missing = range
+            .map { itemUIDs[$0] }
+            .filter { thumbnailFeed.memoryCGImage(for: $0) == nil && !thumbnailFeed.isKnownUnfetchable($0) }
+        guard !missing.isEmpty else { return }
+        let pixelSize = GridTextureUploadSizing.uploadPixels(
+            slotSidePoints: plan.slotSide,
+            backingScale: metalView.metalLayer.contentsScale,
+            headroom: 1.15,
+            floor: 64,
+            cap: textureCache?.maxTexturePixels ?? 320
+        )
+        let requests = missing.map { ThumbnailRequest(uid: $0, pixelSize: pixelSize, cropMode: displayMode.rawValue) }
+        aheadWarmInFlight = true
+        aheadWarmTask = Task { [weak self, thumbnailFeed] in
+            // Small chunks so a visible warm pass (which takes strict priority) never waits behind a long
+            // ahead batch on the serial feed actor; abort the remainder the moment visible work starts.
+            for chunk in stride(from: 0, to: requests.count, by: 12).map({ Array(requests[$0 ..< min($0 + 12, requests.count)]) }) {
+                if Task.isCancelled { break }
+                let visibleBusy = await MainActor.run { [weak self] in self?.warmInFlight ?? true }
+                if visibleBusy { break }
+                _ = await thumbnailFeed.warmDecoded(chunk, priority: .nearViewportScrollAhead, limit: chunk.count)
+            }
+            await MainActor.run { [weak self] in self?.aheadWarmInFlight = false }
+        }
+    }
+
     /// Decode the still-missing visible cells disk→RAM (queuing network for the rest), at most one pass at a time.
     ///
     /// The gate is `warmInFlight`, NOT exact-set equality: a pass is re-issued whenever the missing set changed OR
@@ -888,7 +972,11 @@ extension UIKitTimelineGridHostView: UIScrollViewDelegate {
         if !isApplyingProgrammaticScroll,
            scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
             userHasScrolledTimeline = true
+            // Learn the travel direction from real finger scrolls only (drives the settled ahead-warm).
+            let dy = scrollView.contentOffset.y - lastScrollY
+            if abs(dy) > 1 { scrollDirectionDown = dy > 0 }
         }
+        lastScrollY = scrollView.contentOffset.y
         // Scroll deltas arrive faster than vsync — mark dirty only; the display link draws exactly once
         // per frame with whatever offset is current by then.
         perf.noteScrollEvent()
@@ -943,21 +1031,30 @@ private struct RenderPerfWindow {
     private var lastVisible = 0
     private var lastMissing = 0
     private var lastResidentBytes = 0
+    private var lastResidentCapBytes = 0
+    /// Frames this window in which the resident byte/count budget refused an upload (residency saturation).
+    private var saturatedDraws = 0
+    /// Last frame's RAM-decoded-but-not-GPU-resident visible count (`ramHitGpuMissing`).
+    private var lastRamHitGpuMiss = 0
 
     mutating func noteScrollEvent() {
         scrollEvents += 1
     }
 
-    mutating func noteDraw<ID>(visible: Int, missing: Int, cache: MetalGridTextureCache<ID>?) {
+    mutating func noteDraw<ID>(visible: Int, missing: Int, ramHitGpuMiss: Int, saturated: Bool,
+                               cache: MetalGridTextureCache<ID>?) {
         draws += 1
         lastVisible = visible
         lastMissing = missing
+        lastRamHitGpuMiss = ramHitGpuMiss
+        if saturated { saturatedDraws += 1 }
         if let cache {
             uploads += cache.uploadsThisFrame
             uploadMs += cache.uploadMsThisFrame
             deferredUploads += cache.deferredUploadsThisFrame
             upgrades += cache.upgradesThisFrame
             lastResidentBytes = cache.residentBytes
+            lastResidentCapBytes = cache.residentByteBudget
         }
     }
 
@@ -977,10 +1074,11 @@ private struct RenderPerfWindow {
         let (t, d, s, f) = (ticks, draws, scrollEvents, drawableFailures)
         let (u, um, du, up) = (uploads, String(format: "%.2f", uploadMs), deferredUploads, upgrades)
         let (vis, mis, mb) = (lastVisible, lastMissing, lastResidentBytes / 1_048_576)
+        let (capMB, sat, ramGpu) = (lastResidentCapBytes / 1_048_576, saturatedDraws, lastRamHitGpuMiss)
         Self.logger.notice("""
         [MobileGridPerf] \(reason, privacy: .public) ticks=\(t) draws=\(d) scrollEvents=\(s) \
         drawableFail=\(f) uploads=\(u) uploadMs=\(um, privacy: .public) deferred=\(du) upgrades=\(up) \
-        visible=\(vis) missing=\(mis) residentMB=\(mb)
+        visible=\(vis) missing=\(mis) ramGpuMiss=\(ramGpu) residentMB=\(mb)/\(capMB) saturated=\(sat)
         """)
         scrollEvents = 0
         ticks = 0
@@ -990,6 +1088,7 @@ private struct RenderPerfWindow {
         uploadMs = 0
         deferredUploads = 0
         upgrades = 0
+        saturatedDraws = 0
     }
 }
 #endif
