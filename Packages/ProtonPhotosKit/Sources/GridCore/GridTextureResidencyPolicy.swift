@@ -127,17 +127,25 @@ package struct GridTextureResidencyPolicy<ID: Hashable & Sendable>: Equatable {
         inFlight.remove(id)
     }
 
+    package func isPinned(_ id: ID) -> Bool { pinned.contains(id) }
+
     private func isOverBudget(maxCount: Int, maxCost: Int) -> Bool {
         resident.count > maxCount || residentCost > maxCost
     }
 
-    /// Evict least-recently-used non-pinned textures until residency fits BOTH the count and the cost
-    /// budget. Partial selection (never a full sort of the resident set): each pass heap-selects the k
-    /// lowest-tick candidates, where k is exact for the count budget and estimated via the mean resident
-    /// cost for the cost budget; eviction stops at the minimal LRU prefix that satisfies both budgets,
-    /// looping only if the estimate under-shot.
+    /// The soft byte target `evictToBudget` sheds down to once the HARD cost budget is exceeded: a 10% headroom
+    /// band below the ceiling (`costCapacity - costCapacity / 10`). Evicting to a band below the cap - rather
+    /// than to the exact cap - stops residency oscillating at 100%, where every upload re-triggers a
+    /// full-resident eviction scan. One eviction then frees room for many subsequent frames' uploads, so
+    /// eviction runs far less often and visible uploads keep admission headroom. Integer-fraction based (no
+    /// fixed byte amount), so it scales identically to the smaller iOS/iPadOS budgets. Never below 0.
+    package var softCostTarget: Int { max(0, costCapacity - costCapacity / 10) }
+
+    /// Evict least-recently-used non-pinned textures when residency exceeds the HARD budget, down to the soft
+    /// byte target (a headroom band below the ceiling) and the count capacity. Pinned entries are never evicted.
     package mutating func evictToBudget() -> [ID] {
-        evict(maxCount: capacity, maxCost: costCapacity)
+        guard isOverBudget(maxCount: capacity, maxCost: costCapacity) else { return [] }
+        return evict(targetCount: capacity, targetCost: softCostTarget)
     }
 
     /// Memory-pressure response: shed non-pinned LRU residents down to a REDUCED ceiling. The ceiling
@@ -145,68 +153,53 @@ package struct GridTextureResidencyPolicy<ID: Hashable & Sendable>: Equatable {
     /// (visible-first) entries are never evicted - so the visible working set stays drawable even at a
     /// `0` ceiling ("keep only what is visible"). Returns evicted IDs.
     package mutating func evictToReducedBudget(maxCount: Int, maxCost: Int) -> [ID] {
-        evict(maxCount: min(capacity, max(0, maxCount)), maxCost: min(costCapacity, max(0, maxCost)))
+        evict(targetCount: min(capacity, max(0, maxCount)), targetCost: min(costCapacity, max(0, maxCost)))
     }
 
-    private mutating func evict(maxCount: Int, maxCost: Int) -> [ID] {
+    /// Evict non-pinned residents oldest-first until BOTH `targetCount` and `targetCost` are satisfied.
+    ///
+    /// Single bounded pass: the resident set is scanned exactly ONCE into a min-heap keyed by LRU tick, then
+    /// the oldest are extracted one at a time and evicted by ACTUAL cost until the budgets fit. Heapify is
+    /// O(resident); each extraction is O(log resident) - so a small over-budget case evicts a short prefix
+    /// without a full sort, and no case ever rescans the resident set. This replaces the earlier mean-cost
+    /// estimate, which could under-shoot on heterogeneous L5 textures (oldest tiles cheaper than the mean) and
+    /// rescan the whole resident set many times - the 20-40 ms L5 eviction spikes.
+    private mutating func evict(targetCount: Int, targetCost: Int) -> [ID] {
+        guard isOverBudget(maxCount: targetCount, maxCost: targetCost) else { return [] }
+
+        var heap: [(id: ID, tick: Int)] = []
+        heap.reserveCapacity(resident.count)
+        for id in resident where !pinned.contains(id) {
+            heap.append((id, lastUsed[id] ?? -1))
+        }
+        guard !heap.isEmpty else { return [] }   // only pinned residents remain - nothing evictable
+
+        // Min-heap by tick (oldest = smallest tick at the root). Restore the heap property after moving the
+        // last element to the root on each extraction.
+        func siftDown(from index: Int) {
+            var parent = index
+            while true {
+                let left = parent * 2 + 1
+                guard left < heap.count else { return }
+                let right = left + 1
+                var smallest = left
+                if right < heap.count, heap[right].tick < heap[left].tick { smallest = right }
+                guard heap[smallest].tick < heap[parent].tick else { return }
+                heap.swapAt(smallest, parent)
+                parent = smallest
+            }
+        }
+        for i in stride(from: heap.count / 2 - 1, through: 0, by: -1) { siftDown(from: i) }
+
         var evicted: [ID] = []
-        while isOverBudget(maxCount: maxCount, maxCost: maxCost) {
-            let countOver = max(0, resident.count - maxCount)
-            let costOver = residentCost > maxCost ? residentCost - maxCost : 0
-            let averageCost = max(1, residentCost / max(1, resident.count))
-            let costDrivenNeed = (costOver + averageCost - 1) / averageCost
-            let evictionsNeeded = max(1, max(countOver, costDrivenNeed))
-            var candidates: [(id: ID, tick: Int)] = []
-            candidates.reserveCapacity(min(evictionsNeeded, resident.count))
-
-            func siftUp(_ index: Int) {
-                var child = index
-                while child > 0 {
-                    let parent = (child - 1) / 2
-                    guard candidates[child].tick > candidates[parent].tick else { return }
-                    candidates.swapAt(child, parent)
-                    child = parent
-                }
-            }
-
-            func siftDown(from index: Int) {
-                var parent = index
-                while true {
-                    let left = parent * 2 + 1
-                    guard left < candidates.count else { return }
-                    let right = left + 1
-                    var largest = left
-                    if right < candidates.count, candidates[right].tick > candidates[left].tick {
-                        largest = right
-                    }
-                    guard candidates[largest].tick > candidates[parent].tick else { return }
-                    candidates.swapAt(largest, parent)
-                    parent = largest
-                }
-            }
-
-            for id in resident where !pinned.contains(id) {
-                let usedTick = lastUsed[id] ?? -1
-                if candidates.count < evictionsNeeded {
-                    candidates.append((id, usedTick))
-                    siftUp(candidates.count - 1)
-                } else if let newestCandidate = candidates.first, usedTick < newestCandidate.tick {
-                    candidates[0] = (id, usedTick)
-                    siftDown(from: 0)
-                }
-            }
-
-            guard !candidates.isEmpty else { break }   // only pinned residents remain - nothing evictable
-            let selectionExhaustedNonPinned = candidates.count < evictionsNeeded
-            candidates.sort { $0.tick < $1.tick }
-            for candidate in candidates {
-                guard isOverBudget(maxCount: maxCount, maxCost: maxCost) else { break }
-                resident.remove(candidate.id)
-                lastUsed.removeValue(forKey: candidate.id)
-                if let c = cost.removeValue(forKey: candidate.id) { residentCost -= c }
-                evicted.append(candidate.id)
-            }
-            if selectionExhaustedNonPinned { break }   // evicted every non-pinned entry; the rest is pinned floor
+        while isOverBudget(maxCount: targetCount, maxCost: targetCost), !heap.isEmpty {
+            let oldest = heap[0]
+            let last = heap.removeLast()
+            if !heap.isEmpty { heap[0] = last; siftDown(from: 0) }   // extract-min
+            resident.remove(oldest.id)
+            lastUsed.removeValue(forKey: oldest.id)
+            if let c = cost.removeValue(forKey: oldest.id) { residentCost -= c }
+            evicted.append(oldest.id)
         }
         evictionCount += evicted.count
         return evicted
