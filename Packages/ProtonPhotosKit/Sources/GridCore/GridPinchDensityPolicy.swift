@@ -22,8 +22,15 @@ public enum GridPinchDensityPolicy {
     /// The number of ladder steps a cumulative gesture scale is worth (rounded to the nearest step, so
     /// each step commits at the geometric midpoint between step anchors).
     public static func levelSteps(pinchScale: CGFloat) -> Int {
+        Int(continuousLevelDelta(pinchScale: pinchScale).rounded())
+    }
+
+    /// Continuous ladder displacement for live pinch rendering. Positive means zoom IN (toward lower level ids),
+    /// negative means zoom OUT. Hosts that can render intermediate frames should feed this directly into the shared
+    /// `GridZoomTransaction`; hosts that only commit discrete changes should use `levelSteps`.
+    public static func continuousLevelDelta(pinchScale: CGFloat) -> CGFloat {
         guard pinchScale.isFinite, pinchScale > 0 else { return 0 }
         let clamped = min(max(pinchScale, clampedScaleRange.lowerBound), clampedScaleRange.upperBound)
-        return Int((log2(clamped) / log2(scaleRatioPerStep)).rounded())
+        return log2(clamped) / log2(scaleRatioPerStep)
     }
 }

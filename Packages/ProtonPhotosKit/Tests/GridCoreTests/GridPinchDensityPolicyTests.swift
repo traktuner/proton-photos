@@ -27,6 +27,13 @@ final class GridPinchDensityPolicyTests: XCTestCase {
         XCTAssertEqual(GridPinchDensityPolicy.levelSteps(pinchScale: 1.0 / 4.0), -2)
     }
 
+    func testContinuousDeltaKeepsLivePinchSmoothBetweenSteps() {
+        XCTAssertEqual(GridPinchDensityPolicy.continuousLevelDelta(pinchScale: 1.0), 0, accuracy: 0.0001)
+        XCTAssertEqual(GridPinchDensityPolicy.continuousLevelDelta(pinchScale: 2.0), 1, accuracy: 0.0001)
+        XCTAssertEqual(GridPinchDensityPolicy.continuousLevelDelta(pinchScale: 0.5), -1, accuracy: 0.0001)
+        XCTAssertEqual(GridPinchDensityPolicy.continuousLevelDelta(pinchScale: sqrt(2)), 0.5, accuracy: 0.0001)
+    }
+
     func testFullLadderNeedsAnExtremeGesture() {
         // Crossing 4 steps needs > 11× finger scale — a physical near-impossibility in one gesture,
         // so a single ordinary pinch can never fly through every grid level again.

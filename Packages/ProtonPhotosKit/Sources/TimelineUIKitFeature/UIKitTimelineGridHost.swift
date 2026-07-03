@@ -95,6 +95,20 @@ public final class UIKitTimelineGridHostView: UIView {
     private var interactiveLevel: Int?
     /// The level captured at pinch-gesture start (the cumulative-scale reference).
     private var pinchStartLevel: Int?
+    /// Engine-owned live pinch transaction. This mirrors the macOS grid path at the Core boundary: the item under
+    /// the fingers is captured once, then every live frame is resolved by `GridZoomTransaction` instead of discrete
+    /// per-change reflow.
+    private var zoomTransaction: GridZoomTransaction?
+    private var zoomTransactionLevel: CGFloat = 0
+    private var pinchLockedOffsetY: CGFloat?
+    /// Optional cursor-aligned column phase committed after a live pinch. Settled iOS layout must use it everywhere
+    /// the macOS layout does (rendering, hit-testing, content size), or the release seam can jump horizontally.
+    private var committedPhase: Int?
+    private var commitBridgeTransaction: GridZoomTransaction?
+    private var commitBridgeLevel = 0
+    private var commitBridgeScrollY: CGFloat = 0
+    private var commitBridgePhase: Int?
+    private var commitBridgeStart: CFTimeInterval = 0
     private var displayMode: TileContentDisplayMode = .squareFillCrop
     /// Selection state, mirrored from SwiftUI each `configure`. In selection mode a tap toggles a cell instead of
     /// opening it, and the grid draws the shared selection decorations (blue outline + checkmark badge).
@@ -200,10 +214,16 @@ public final class UIKitTimelineGridHostView: UIView {
         }
         // An explicit external level is authoritative: it clears any pinch-driven level so the host follows the
         // caller again (a nil level leaves the user's pinch level in place).
-        if let level, level != levelOverride { interactiveLevel = nil }
+        if let level, level != levelOverride {
+            interactiveLevel = nil
+            committedPhase = nil
+            cancelLiveZoomState()
+        }
         self.levelOverride = level
         self.displayMode = displayMode
         if uidsChanged {
+            committedPhase = nil
+            cancelLiveZoomState()
             itemIndexByUID = Dictionary(
                 newUIDs.enumerated().map { ($0.element, $0.offset) },
                 uniquingKeysWith: { _, latest in latest }
@@ -246,6 +266,7 @@ public final class UIKitTimelineGridHostView: UIView {
         if window == nil {
             displayLink.stop()
             warmTask?.cancel()
+            cancelLiveZoomState()
             warmGeneration &+= 1   // retire the cancelled pass so its late completion can't touch a newer one
             warmInFlight = false   // never leave the warm gate latched shut after a detach cancels the pass
         } else {
@@ -282,8 +303,8 @@ public final class UIKitTimelineGridHostView: UIView {
         addSubview(scrollView)
 
         // Tap-to-open and pinch-to-change-density ride on the scroll surface so they coexist with the pan/scroll
-        // gesture. The tap requires no movement (never fights a scroll); the pinch drives a discrete, focal-anchored
-        // density step through the shared GridCore geometry — no bespoke iOS layout math.
+        // gesture. The tap requires no movement (never fights a scroll); the pinch drives an engine-owned
+        // `GridZoomTransaction` through shared GridCore geometry — no bespoke iOS layout math.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         tap.delegate = self
         scrollView.addGestureRecognizer(tap)
@@ -357,7 +378,7 @@ public final class UIKitTimelineGridHostView: UIView {
         let profile = currentProfile()
         let level = activeLevel(profile: profile)
         let engine = currentEngine(profile: profile)
-        let content = engine.contentSize(level: level, width: bounds.width)
+        let content = engine.contentSize(level: level, width: bounds.width, columnPhase: committedPhase)
         return CGSize(width: max(bounds.width, content.width), height: max(bounds.height + 1, content.height))
     }
 
@@ -370,6 +391,7 @@ public final class UIKitTimelineGridHostView: UIView {
     /// the grid settles — the mobile-appropriate scheduling of the SAME shared composer upgrade, not a fork.
     private var isInteracting: Bool {
         scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating || pinchStartLevel != nil
+            || zoomTransaction != nil || commitBridgeTransaction != nil
     }
 
     /// The grid profile for the current layout size, rebuilt only when that size changes (never mid-scroll).
@@ -379,6 +401,10 @@ public final class UIKitTimelineGridHostView: UIView {
         let layoutSize = UIKitTimelineGridProfileAdapter.layoutSize(
             forBounds: metalView.bounds, safeAreaInsets: metalView.safeAreaInsets)
         if let cachedProfile, cachedProfileLayoutSize == layoutSize { return cachedProfile }
+        if cachedProfile != nil {
+            committedPhase = nil
+            cancelLiveZoomState()
+        }
         let profile = profileAdapter.profile(for: metalView)
         cachedProfile = profile
         cachedProfileLayoutSize = layoutSize
@@ -469,19 +495,92 @@ public final class UIKitTimelineGridHostView: UIView {
         guard let target = MetalGridDrawableTarget(layer: metalView.metalLayer) else { return .noDrawable }
 
         let viewportSize = bounds.size
+        let overscan = texturePolicy.budget.overscanFraction * viewportSize.height
         let profile = currentProfile()
         let level = activeLevel(profile: profile)
         let engine = currentEngine(profile: profile)
-        let overscan = texturePolicy.budget.overscanFraction * viewportSize.height
+
+        if let tx = commitBridgeTransaction {
+            let elapsed = max(0, CACurrentMediaTime() - commitBridgeStart)
+            if elapsed < GridZoomCommitBridge.duration {
+                let slots = GridZoomCommitBridge.frame(
+                    transaction: tx,
+                    engine: engine,
+                    targetLevel: commitBridgeLevel,
+                    viewportSize: viewportSize,
+                    scrollY: commitBridgeScrollY,
+                    overscan: overscan,
+                    progress: CGFloat(elapsed / GridZoomCommitBridge.duration),
+                    columnPhase: commitBridgePhase
+                )
+                let metrics = engine.resolvedMetrics(level: commitBridgeLevel, width: bounds.width)
+                return renderSlotFrame(
+                    target: target,
+                    renderer: renderer,
+                    textureCache: textureCache,
+                    slots: slots,
+                    slotSidePoints: metrics.slotSide,
+                    viewportSize: viewportSize,
+                    allowUpgrade: false,
+                    reportFirstContent: false,
+                    forcePendingWork: true
+                )
+            }
+            commitBridgeTransaction = nil
+            commitBridgeStart = 0
+        }
+
+        if let tx = zoomTransaction {
+            let frame = tx.frame(continuousLevel: zoomTransactionLevel, viewportSize: viewportSize, overscan: overscan)
+            return renderSlotFrame(
+                target: target,
+                renderer: renderer,
+                textureCache: textureCache,
+                slots: frame.visibleSlots,
+                slotSidePoints: frame.slotSide,
+                viewportSize: viewportSize,
+                allowUpgrade: false,
+                reportFirstContent: false,
+                forcePendingWork: false
+            )
+        }
+
         let plan = engine.framePlan(
             level: level,
             viewportSize: viewportSize,
             scrollOffset: scrollView.contentOffset,
-            overscan: overscan
+            overscan: overscan,
+            columnPhase: committedPhase
         )
 
-        let uploadPixels = GridTextureUploadSizing.uploadPixels(
+        return renderSlotFrame(
+            target: target,
+            renderer: renderer,
+            textureCache: textureCache,
+            slots: plan.visibleSlots.map {
+                GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect)
+            },
             slotSidePoints: plan.slotSide,
+            viewportSize: viewportSize,
+            allowUpgrade: !isInteracting,
+            reportFirstContent: true,
+            forcePendingWork: false
+        )
+    }
+
+    private func renderSlotFrame(
+        target: MetalGridDrawableTarget,
+        renderer: MetalGridRenderer,
+        textureCache: MetalGridTextureCache<PhotoUID>,
+        slots: [GridRenderSlot],
+        slotSidePoints: CGFloat,
+        viewportSize: CGSize,
+        allowUpgrade: Bool,
+        reportFirstContent: Bool,
+        forcePendingWork: Bool
+    ) -> RenderOutcome {
+        let uploadPixels = GridTextureUploadSizing.uploadPixels(
+            slotSidePoints: slotSidePoints,
             backingScale: metalView.metalLayer.contentsScale,
             headroom: 1.15,
             floor: 64,
@@ -491,16 +590,9 @@ public final class UIKitTimelineGridHostView: UIView {
         // Same universal composition sequence the macOS host uses (MetalGridFrameComposer), so a
         // streaming/rendering fix lands on both platforms at once. This host owns only the iOS plumbing:
         // the CAMetalLayer drawable, the level-aware upload size, the CADisplayLink, and the warm pump.
-        let renderSlots = plan.visibleSlots.map {
-            GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect)
-        }
         let ids = MetalGridFrameComposer.classifyVisibility(
-            slots: renderSlots, flatUIDs: itemUIDs, viewportSize: viewportSize)
+            slots: slots, flatUIDs: itemUIDs, viewportSize: viewportSize)
         let feed = thumbnailFeed
-        // Enable the shared soft→sharp upgrade ONLY when settled: a dense-grid tile uploaded at a tiny slot size
-        // must grow to the larger level's crisp size after a zoom, but never churn uploads mid-scroll/pinch. The
-        // old soft texture keeps drawing until the sharp one is ready (upgrade-in-place), so there is no flash.
-        let allowUpgrade = !isInteracting
         let streamResult = MetalGridFrameComposer.stream(
             cache: textureCache,
             visibleIDs: ids.visible,
@@ -513,7 +605,7 @@ public final class UIKitTimelineGridHostView: UIView {
             provideImage: { feed?.memoryCGImage(for: $0) }
         )
         let groups = MetalGridFrameComposer.buildGroups(
-            slots: MetalGridFrameComposer.viewportDrawSlots(renderSlots, viewportSize: viewportSize),
+            slots: MetalGridFrameComposer.viewportDrawSlots(slots, viewportSize: viewportSize),
             flatUIDs: itemUIDs,
             cache: textureCache,
             displayMode: displayMode,
@@ -531,7 +623,7 @@ public final class UIKitTimelineGridHostView: UIView {
         // First fully-populated on-screen frame → tell the shell to lift the loading UI onto a real grid.
         // One-shot per content set; deferred to the next runloop tick so it never mutates observed shell
         // state during a SwiftUI update pass (renderNow can run inside updateUIView → layoutSubviews).
-        if !firstContentReported, !ids.visible.isEmpty, missingVisible.isEmpty {
+        if reportFirstContent, !firstContentReported, !ids.visible.isEmpty, missingVisible.isEmpty {
             firstContentReported = true
             if let onFirstContentReady {
                 DispatchQueue.main.async { onFirstContentReady() }
@@ -552,7 +644,8 @@ public final class UIKitTimelineGridHostView: UIView {
         // streaming window changes (scroll/zoom, which re-arm on their own), so both are gated on it — matching
         // the macOS coordinator and avoiding a spin on placeholders that cannot fill this frame.
         let canMakeProgress = !textureCache.residencySaturatedThisFrame
-        let hasPendingWork = warmInFlight
+        let hasPendingWork = forcePendingWork
+            || warmInFlight
             || ((uploadPending || streamResult.pendingVisibleQualityUpgrade) && canMakeProgress)
         perf.noteDraw(visible: ids.visible.count, missing: missingVisible.count, cache: textureCache)
         return .drawn(hasPendingWork: hasPendingWork)
@@ -570,11 +663,17 @@ public final class UIKitTimelineGridHostView: UIView {
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         // A tap that merely halts a decelerating scroll must not also open/select a photo.
-        guard gesture.state == .ended, !scrollView.isDecelerating, let ctx = currentGridContext() else { return }
+        guard gesture.state == .ended, !scrollView.isDecelerating, zoomTransaction == nil,
+              let ctx = currentGridContext() else { return }
         // contentView spans the full content size at origin .zero, so its coordinate space IS the engine's
         // content space (y down, origin at the library top).
         let contentPoint = gesture.location(in: contentView)
-        guard let slot = ctx.engine.hitTest(contentPoint: contentPoint, level: ctx.level, width: bounds.width),
+        guard let slot = ctx.engine.hitTest(
+            contentPoint: contentPoint,
+            level: ctx.level,
+            width: bounds.width,
+            columnPhase: committedPhase
+        ),
               slot.index >= 0, slot.index < items.count
         else { return }
         // In selection mode a tap toggles the cell (and never opens the viewer); otherwise it opens.
@@ -587,56 +686,117 @@ public final class UIKitTimelineGridHostView: UIView {
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
         guard let ctx = currentGridContext() else { return }
+        let viewportPoint = gesture.location(in: self)
         switch gesture.state {
         case .began:
+            commitBridgeTransaction = nil
+            commitBridgeStart = 0
             pinchStartLevel = ctx.level
+            pinchLockedOffsetY = scrollView.contentOffset.y
+            let contentPoint = CGPoint(x: viewportPoint.x, y: viewportPoint.y + scrollView.contentOffset.y)
+            zoomTransaction = ctx.engine.beginZoomTransaction(
+                cursorContentPoint: contentPoint,
+                viewportPoint: viewportPoint,
+                level: ctx.level,
+                width: bounds.width,
+                columnPhase: committedPhase
+            )
+            zoomTransactionLevel = CGFloat(ctx.level)
             // Engage the user so the newest-bottom auto-pin never fights the zoom.
             userHasScrolledTimeline = true
-        case .changed:
-            guard let startLevel = pinchStartLevel else { return }
-            // Pinch-out (scale > 1) → zoom in → fewer columns → LOWER level. The shared policy owns how much
-            // finger motion one density step costs (tested in GridCore) — the recognizer only reports scale.
-            let steps = GridPinchDensityPolicy.levelSteps(pinchScale: gesture.scale)
-            let target = ctx.profile.clampLevel(startLevel - steps)
-            guard target != ctx.level else { return }
-            let focusViewportY = gesture.location(in: self).y
-            let sourceOffsetY = scrollView.contentOffset.y
-            applyLevelChange(
-                from: ctx.level,
-                to: target,
-                cursorContentPoint: CGPoint(x: 0, y: focusViewportY + sourceOffsetY),
-                sourceOffsetY: sourceOffsetY
-            )
-        case .ended, .cancelled, .failed:
-            pinchStartLevel = nil
-            // Settled at the new density → run an upgrade frame so the carried-over soft tiles sharpen.
             requestRender()
+        case .changed:
+            guard let startLevel = pinchStartLevel, zoomTransaction != nil else { return }
+            let rawLevel = livePinchRawLevel(startLevel: startLevel, scale: gesture.scale)
+            zoomTransactionLevel = GridLiveZoomBounds.visualLevel(rawLevel: rawLevel, levelCount: ctx.engine.levelCount)
+            requestRender()
+        case .ended, .cancelled, .failed:
+            guard let startLevel = pinchStartLevel else {
+                cancelLiveZoomState()
+                requestRender()
+                return
+            }
+            let rawLevel = livePinchRawLevel(startLevel: startLevel, scale: gesture.scale)
+            let finalLevel = ctx.profile.clampLevel(Int(rawLevel.rounded()))
+            if gesture.state == .ended, finalLevel != startLevel {
+                commitLiveZoom(to: finalLevel, engine: ctx.engine)
+            } else {
+                returnLiveZoomToCurrentLevel()
+            }
         default:
             break
         }
     }
 
-    /// Applies a discrete density change, carrying the pinch focal point across the level boundary via the shared
-    /// engine so the photo under the fingers stays put (no jump to top/newest).
-    private func applyLevelChange(from sourceLevel: Int, to targetLevel: Int,
-                                  cursorContentPoint: CGPoint, sourceOffsetY: CGFloat) {
-        let profile = currentProfile()
-        let engine = currentEngine(profile: profile)
-        let anchoredY = engine.cursorAnchoredScrollOffsetY(
-            levelChangeFrom: sourceLevel,
-            to: targetLevel,
-            width: bounds.width,
-            cursorContentPoint: cursorContentPoint,
-            sourceScrollOriginY: sourceOffsetY
-        )
-        interactiveLevel = targetLevel
-        refreshContentSize()   // content size follows the new level; needsInitialNewestViewport is already spent
-        if let anchoredY {
-            isApplyingProgrammaticScroll = true
-            scrollView.setContentOffset(CGPoint(x: 0, y: min(max(anchoredY, 0), maxContentOffsetY)), animated: false)
-            isApplyingProgrammaticScroll = false
+    /// UIKit reports a cumulative scale; GridCore owns the shared logarithmic ladder tuning. Scale > 1 means zoom
+    /// in, so the raw level moves toward lower ids.
+    private func livePinchRawLevel(startLevel: Int, scale: CGFloat) -> CGFloat {
+        CGFloat(startLevel) - GridPinchDensityPolicy.continuousLevelDelta(pinchScale: scale)
+    }
+
+    private func commitLiveZoom(to targetLevel: Int, engine: SquareTileGridEngine) {
+        guard let tx = zoomTransaction else {
+            cancelLiveZoomState()
+            requestRender()
+            return
         }
+        let level = engine.clampLevel(targetLevel)
+        let desiredColumn = engine.cursorColumn(viewportX: tx.anchorViewportPoint.x, level: level, width: bounds.width)
+        let phase = engine.columnPhase(forItem: tx.anchorGlobalIndex, targetColumn: desiredColumn, level: level, width: bounds.width)
+        let rawY = engine.anchoredScrollOffset(
+            flatIndex: tx.anchorGlobalIndex,
+            localFraction: tx.anchorLocalFraction,
+            viewportPoint: tx.anchorViewportPoint,
+            level: level,
+            width: bounds.width,
+            columnPhase: phase
+        ).y
+        let targetContent = engine.contentSize(level: level, width: bounds.width, columnPhase: phase)
+        let targetMaxY = max(0, max(bounds.height + 1, targetContent.height) - bounds.height + scrollView.contentInset.bottom)
+        let scrollY = min(max(0, rawY), targetMaxY)
+
+        committedPhase = phase
+        interactiveLevel = level
+        commitBridgeTransaction = tx
+        commitBridgeLevel = level
+        commitBridgeScrollY = scrollY
+        commitBridgePhase = phase
+        commitBridgeStart = CACurrentMediaTime()
+        zoomTransaction = nil
+        pinchStartLevel = nil
+        pinchLockedOffsetY = nil
+
+        refreshContentSize()
+        isApplyingProgrammaticScroll = true
+        scrollView.setContentOffset(CGPoint(x: 0, y: scrollY), animated: false)
+        isApplyingProgrammaticScroll = false
         requestRender()
+    }
+
+    private func returnLiveZoomToCurrentLevel() {
+        guard let tx = zoomTransaction, let startLevel = pinchStartLevel else {
+            cancelLiveZoomState()
+            requestRender()
+            return
+        }
+        let scrollY = min(max(pinchLockedOffsetY ?? scrollView.contentOffset.y, 0), maxContentOffsetY)
+        commitBridgeTransaction = tx
+        commitBridgeLevel = startLevel
+        commitBridgeScrollY = scrollY
+        commitBridgePhase = committedPhase
+        commitBridgeStart = CACurrentMediaTime()
+        zoomTransaction = nil
+        pinchStartLevel = nil
+        pinchLockedOffsetY = nil
+        requestRender()
+    }
+
+    private func cancelLiveZoomState() {
+        zoomTransaction = nil
+        pinchStartLevel = nil
+        pinchLockedOffsetY = nil
+        commitBridgeTransaction = nil
+        commitBridgeStart = 0
     }
 
     private func newestFirst(_ uids: [PhotoUID]) -> [PhotoUID] {
@@ -712,6 +872,16 @@ public final class UIKitTimelineGridHostView: UIView {
 
 extension UIKitTimelineGridHostView: UIScrollViewDelegate {
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if let lockedY = pinchLockedOffsetY {
+            let clamped = min(max(lockedY, 0), maxContentOffsetY)
+            if abs(scrollView.contentOffset.y - clamped) > 0.5 {
+                isApplyingProgrammaticScroll = true
+                scrollView.setContentOffset(CGPoint(x: 0, y: clamped), animated: false)
+                isApplyingProgrammaticScroll = false
+            }
+            requestRender()
+            return
+        }
         if !isApplyingProgrammaticScroll,
            scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
             userHasScrolledTimeline = true
