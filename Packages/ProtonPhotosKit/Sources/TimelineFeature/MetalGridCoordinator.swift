@@ -1811,9 +1811,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
 extension MetalGridCoordinator {
 
-    /// Clamp the card corner radius so it never exceeds half the (square) slot - keeps tiny dense cells round.
+    /// The slot-size-derived card corner radius (shared `GridCornerRadiusPolicy`): tiny dense cells draw
+    /// SHARP 90° corners, medium cells a reduced radius, large cells the full base — matching the settled
+    /// composer path so a zoom transition never changes a tile's corner treatment mid-flight.
     private func cellRadius(_ base: Float, cell: CGRect) -> Float {
-        min(base, Float(min(cell.width, cell.height) * 0.5))
+        MetalGridFrameComposer.cellRadius(base: CGFloat(base), cell: cell)
     }
 
     // MARK: Texture streaming (visible-first upload + off-main warm)

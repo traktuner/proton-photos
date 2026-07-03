@@ -145,7 +145,6 @@ package enum MetalGridFrameComposer {
         cornerRadius: CGFloat,
         decorations: MetalGridDecorations<ID>?
     ) -> (groups: [MetalGridRenderGroup], realCount: Int) {
-        let cardRadius = Float(cornerRadius)
         var images: [MetalGridQuad] = []
         var imageTextures: [MTLTexture] = []
         var outlineQuads: [MetalGridQuad] = []
@@ -157,7 +156,7 @@ package enum MetalGridFrameComposer {
         for s in slots where s.index < flatUIDs.count {
             let uid = flatUIDs[s.index]
             let cell = s.rect                               // viewport-space, ALWAYS square (engine guarantee)
-            let r = clampedRadius(cardRadius, cell: cell)
+            let r = Self.cellRadius(base: cornerRadius, cell: cell)
             if cache.isResident(uid) {
                 cache.noteUsed(uid)
                 let texture = cache.texture(for: uid)
@@ -199,9 +198,10 @@ package enum MetalGridFrameComposer {
         return (groups, realCount)
     }
 
-    /// Clamp the card corner radius so it never exceeds half the (square) slot - keeps tiny dense cells round.
-    private static func clampedRadius(_ base: Float, cell: CGRect) -> Float {
-        min(base, Float(min(cell.width, cell.height) * 0.5))
+    /// The slot-size-derived card corner radius (shared `GridCornerRadiusPolicy`): tiny dense cells draw
+    /// SHARP 90° corners (radius 0, renderer fast path), medium cells a reduced radius, large cells `base`.
+    package static func cellRadius(base: CGFloat, cell: CGRect) -> Float {
+        Float(GridCornerRadiusPolicy.radius(forSlotSidePoints: min(cell.width, cell.height), base: base))
     }
 
     @MainActor

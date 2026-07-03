@@ -265,4 +265,41 @@ import PhotosCore
         #expect(out.groups.count == 1)
         #expect(out.realCount == 1)
     }
+
+    // MARK: - Slot-size-derived corner radius (shared GridCornerRadiusPolicy through the composer)
+
+    @Test func buildGroupsGivesDenseTinySlotsSharpCornersAndLargeSlotsTheFullRadius() {
+        guard let cache = makeCache(), let image = makeImage() else { return }
+        let a = uid("a"), b = uid("b")
+        cache.beginFrame(pinned: [a, b])
+        cache.uploadVisible(wanted: [a, b]) { _ in image }
+
+        // Dense tiny square slot (48 pt) → radius 0: sharp 90° corners on the image quad AND its decorations.
+        let dense = MetalGridFrameComposer.buildGroups(
+            slots: [slot(0, y: 0, side: 48)], flatUIDs: [a], cache: cache,
+            displayMode: .squareFillCrop, cornerRadius: 11,
+            decorations: MetalGridDecorations<PhotoUID>(
+                accent: SIMD4<Float>(0, 0, 1, 1), accentGlyphColor: .white, selectionMode: false,
+                selected: [a], favorites: [], isVideo: { _ in false }
+            )
+        )
+        #expect(dense.groups[0].quads[0].radius == 0)
+        #expect(dense.groups[1].quads[0].mode == .border)
+        #expect(dense.groups[1].quads[0].radius == 0)   // selection outline follows the same policy
+
+        // Large settled slot (200 pt) → the untouched polished base radius.
+        let large = MetalGridFrameComposer.buildGroups(
+            slots: [slot(0, y: 0, side: 200)], flatUIDs: [b], cache: cache,
+            displayMode: .squareFillCrop, cornerRadius: 11, decorations: nil
+        )
+        #expect(large.groups[0].quads[0].radius == 11)
+
+        // Medium slot (96 pt) → reduced radius, strictly between sharp and base.
+        let medium = MetalGridFrameComposer.buildGroups(
+            slots: [slot(0, y: 0, side: 96)], flatUIDs: [b], cache: cache,
+            displayMode: .squareFillCrop, cornerRadius: 11, decorations: nil
+        )
+        #expect(medium.groups[0].quads[0].radius > 0)
+        #expect(medium.groups[0].quads[0].radius < 11)
+    }
 }

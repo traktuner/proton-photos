@@ -461,17 +461,25 @@ package final class MetalGridRenderer {
         texture2d<float> tex [[texture(0)]],
         sampler s [[sampler(0)]]
     ) {
-        float dist = roundedRectSDF(in.local, in.size, in.radius);
-        float fillMask = 1.0 - smoothstep(-1.0, 1.0, dist);
         int mode = int(in.mode + 0.5);
         if (mode == 2) {
-            // Rounded-rect ring: outer fill minus an inner fill inset by borderWidth.
+            // Rounded-rect ring: outer fill minus an inner fill inset by borderWidth. Always SDF-based —
+            // at radius 0 the SDF degenerates to the plain rect ring, so no separate path is needed.
+            float dist = roundedRectSDF(in.local, in.size, in.radius);
+            float fillMask = 1.0 - smoothstep(-1.0, 1.0, dist);
             float inner = 1.0 - smoothstep(-1.0, 1.0, dist + in.borderWidth);
             float ring = clamp(fillMask - inner, 0.0, 1.0);
             float coverage = in.alpha * ring;
             float4 c = in.color;
             return float4(c.rgb * c.a * coverage, c.a * coverage);
-        } else if (mode == 1) {
+        }
+        // Sharp-corner fast path: radius 0 (dense square tiles, GridCornerRadiusPolicy) needs no SDF and no
+        // anti-aliased edge band — full coverage, hard 90° edges, no per-fragment rounded-corner cost. All
+        // quads at a dense level share radius 0, so the branch is coherent across the warp.
+        float fillMask = (in.radius <= 0.0)
+            ? 1.0
+            : 1.0 - smoothstep(-1.0, 1.0, roundedRectSDF(in.local, in.size, in.radius));
+        if (mode == 1) {
             float coverage = in.alpha * fillMask;
             float4 c = in.color;
             return float4(c.rgb * c.a * coverage, c.a * coverage);
