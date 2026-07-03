@@ -292,7 +292,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
 
     /// Whether the adjacent step `a↔b` crosses an OVERVIEW boundary (`.overviewWarp` = last normal → first
     /// dense overview, or `.denseOverviewZoom` = between the two dense overviews). These are the boundaries the
-    /// V3.10 overview WARP owns; the normal-level `.focusRowRelayout` steps stay on the accepted V3.9 pinch.
+    /// Overview boundaries own their dissolve; normal-level `.focusRowRelayout` steps stay on live pinch.
     public func isOverviewBoundary(_ a: Int, _ b: Int) -> Bool {
         switch adjacentTransitionKind(a, b) {
         case .overviewWarp, .denseOverviewZoom: return true
@@ -345,7 +345,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// ROUND (nearest), not floor: where this rule IS used the grid FILLS the width - the sub-column remainder is
     /// re-distributed INTO the tiles (a small size change), never left as a trailing gutter. Floor would keep the
     /// tile at exactly `side` and leak the remainder as blank up to one whole pitch (≈ a full empty tile at the
-    /// largest levels - the rejected "huge gutter" state). See `nominalSlotSide`, which `resolved()` pairs with
+    /// largest levels. See `nominalSlotSide`, which `resolved()` pairs with
     /// this to size the tile. Min 1 column. When `maxColumns` binds, the surplus width is margin, never a stretch.
     public static func columnsForFixedSide(side: CGFloat, gap: CGFloat, width: CGFloat, maxColumns: Int? = nil) -> Int {
         let s = max(1, side), g = max(0, gap), w = max(1, width)

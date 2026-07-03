@@ -1,9 +1,8 @@
 import Foundation
 import CoreGraphics
 
-/// Width limits for the resizable left sidebar (Deliverable 4). The drag handle and the persisted
-/// width both clamp through `clamp(_:)` so the sidebar can never be dragged uselessly narrow or so
-/// wide it crowds the grid.
+/// Width limits for the resizable left sidebar. The drag handle and persisted width both clamp through
+/// `clamp(_:)` so the sidebar cannot become unusably narrow or crowd the grid.
 public enum SidebarMetrics {
     public static let minWidth: CGFloat = 180
     public static let maxWidth: CGFloat = 360

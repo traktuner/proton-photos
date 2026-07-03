@@ -21,8 +21,7 @@ struct ProductionRouteGuardTests {
     }
 
     @Test func noRemovedProductionRoutesRemain() {
-        // The spike tuning UI, the rejected focusRow crossfade flag, AND the single-lattice gating flag must
-        // all be gone - the accepted Phase-B effect path is the production default, with no flag of any kind.
+        // Removed tuning and transition flags must stay out of production; the current effect path is the default.
         let forbidden = ["anim-tuning", "TuningView", "AnimationTuning",
                          "MetalGrid.focusRowTransition", "MetalGridFocusRowTransitionFlag",
                          "MetalGrid.singleLatticeTransition", "MetalGridSingleLatticeTransitionFlag"]
@@ -241,9 +240,8 @@ struct ProductionRouteGuardTests {
 
     @Test func sidebarFilterChangesUseInitialViewportPolicy() throws {
         // A sidebar route switch opens the route via a ONE-SHOT INITIAL-VIEWPORT POLICY owned by the Metal grid
-        // host - restoring the route's remembered scroll position, or opening at newest on first visit - NEVER an
-        // immediate / external / virtual scroll correction. These static guards pin that architecture (and the
-        // gen-before-load ordering that makes it race-free) so the rejected immediate-scroll pattern cannot return.
+        // host: restore the route's remembered scroll position, or open at newest on first visit. Avoiding a
+        // separate immediate scroll correction keeps route changes race-free.
         let mainView = Self.repoRoot.appendingPathComponent("App/Views/MainView.swift")
         let mainText = try String(contentsOf: mainView, encoding: .utf8)
         #expect(mainText.contains("@State private var routeScrollGeneration"))
@@ -299,7 +297,7 @@ struct ProductionRouteGuardTests {
         // The route data-source switch installs the route's initial-viewport policy ALONGSIDE the new data,
         // gated on a pending route generation (else `.preserve` - incremental updates never re-place).
         #expect(productionText.contains("initialViewport: routeChangePending ? routeInitialViewport : .preserve"))
-        // The rejected immediate-scroll route hook must be gone everywhere.
+        // Direct route-scroll hooks must stay out of production.
         #expect(!productionText.contains("showNewestOnceForRouteChange"))
 
         // `makeNSView` couples "mark generation applied" to arming a REAL placement, gated on a generation

@@ -4,11 +4,8 @@ import CoreGraphics
 import GridCore
 @testable import TimelineFeature
 
-// OVERVIEW LAYER DISSOLVE (replaces the rejected V3.10 warp). Two COMPLETE settled grid layers (source +
-// target), blended by opacity. No relocation, no per-cell identity handoff, no `GridTransitionComponentBuilder`.
-// Source keeps its own display mode; target is square (overview is square-only). These tests pin the
-// deterministic model; the offscreen renderer that actually blends the two layers is a separate, documented
-// step (reports/archive/PHASE_B_OVERVIEW_LAYER_DISSOLVE_REPORT.md).
+// Overview layer dissolve uses two settled grid layers, blended by opacity. There is no relocation, no per-cell
+// identity handoff, and no transition-component builder; these tests pin the pure deterministic model.
 @Suite struct OverviewLayerDissolveTests {
     private let viewport = CGSize(width: 1000, height: 760)
     private let normalLevelLeadingGap: CGFloat = 16
@@ -58,7 +55,7 @@ import GridCore
         }
     }
 
-    // Builds ONLY for the overview boundaries - never for the accepted normal-level (focusRowRelayout) steps.
+    // Builds only for the overview boundaries, never for normal-level focus-row relayout steps.
     @Test func buildsOnlyForOverviewBoundaries() {
         let e = engine()
         #expect(plan(3, 4, e) != nil)
@@ -84,7 +81,7 @@ import GridCore
         }
     }
 
-    // The TARGET overview grid is in its FINAL positions at every q (this is the property the rejected warp broke).
+    // The target overview grid is in its final position at every q.
     @Test func targetPositionsAreFinalAtEveryProgress() {
         let e = engine()
         guard let p = plan(3, 4, e) else { Issue.record("nil plan"); return }
@@ -220,7 +217,7 @@ import GridCore
         }
     }
 
-    // CONTRAST: prove the offscreen linear mix is NOT the rejected single-pass premultiplied source-over result,
+    // Contrast: prove the offscreen linear mix is not the single-pass premultiplied source-over result,
     // which darkens the mid-fade toward the background via the `(1−t)²` term.
     @Test func midFadeHasNoQSquaredDarkeningVsSinglePass() {
         let a = 0.8, b = 0.2, bg = 0.05      // bright source, dark target, dark bg (overlap region)
@@ -262,8 +259,7 @@ import GridCore
         }
     }
 
-    // GUARD: the overview layer dissolve must NOT touch the relocation lattice / transition controller - that
-    // reuse is exactly what was rejected. (Source-scan guard, matching the suite's existing guard-test style.)
+    // Guard: the overview layer dissolve must not reuse the relocation lattice / transition controller.
     @Test func dissolveModelDoesNotUseRelocationMachinery() {
         // Scan CODE only - the file's prose deliberately names these to explain what it does NOT use.
         let code = source("OverviewLayerDissolve.swift")

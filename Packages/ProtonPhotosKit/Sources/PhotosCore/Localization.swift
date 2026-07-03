@@ -19,8 +19,7 @@ import Foundation
 /// Text(L10n.string("upload.state_uploading \(percent)"))  // interpolation  → key "upload.state_uploading %lld"
 /// ```
 ///
-/// Plural-aware strings (catalog entries with plural variations, or one/other key pairs) live in the App
-/// catalog today; see `docs/localization.md` for the plurals convention.
+/// Plural-aware strings live in the platform app catalogs when the UI layer owns the grammar.
 ///
 /// SwiftUI controls accept the returned `String` through their `StringProtocol` initializers, so the
 /// already-localized value is shown verbatim (no double lookup).

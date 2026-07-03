@@ -10,12 +10,10 @@ import PhotoViewerCore
 ///  2. swap to the larger preview when it arrives (disk-cached for offline),
 ///  3. crossfade to the full original (sharp) once decrypted into RAM.
 ///
-/// Video (Deliverable 5) runs an explicit `VideoViewerState` machine instead of inferring "loading"
-/// from a tangle of optionals: try range-streaming first (which also detects image-vs-video reliably
-/// even though the main timeline reports every item as `image/jpeg`), observe `AVPlayerItem.status`,
-/// Streaming is the only video path: falling back to a decrypted local temp file is forbidden by the
-/// app-wide local E2EE rule. One `AVPlayer` is retained for the streaming path, so the view never
-/// re-creates the player on a redraw.
+/// Video playback uses an explicit `VideoViewerState` machine instead of inferring "loading" from a tangle
+/// of optionals. Streaming is the only video path: falling back to a decrypted local temp file is forbidden
+/// by the local E2EE rule. One `AVPlayer` is retained for the streaming path, so the view never re-creates
+/// the player on a redraw.
 @MainActor
 @Observable
 public final class PhotoViewerModel {

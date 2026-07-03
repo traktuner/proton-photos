@@ -63,11 +63,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// The live continuous level position (for the host's snap-on-release).
     var liveZoomLevel: CGFloat { zoomTransactionLevel }
 
-    // MARK: - Single presentation lattice transition (Phase-B - PRODUCTION DEFAULT)
+    // MARK: - Single Presentation Lattice Transition
     //
-    // CLICKV2_420_FULLER_CORNER (click) / PINCH071 (pinch), per the V3.4–V3.6 offline evidence.
     // The transition layer is a SEPARATE module that consumes the engine's GridFramePlan; it never
-    // touches engine geometry, the fitter, or resize. This is the accepted production effect path (no
+    // touches engine geometry, the fitter, or resize. This is the production effect path (no
     // feature flag): it is attempted for every eligible normal-level +/- and pinch, falling back to the
     // stable instant snap / transaction reflow ONLY when the geometry is ineligible (invalid case), never as a
     // switch. The clean instant settle remains the fallback for those invalid cases.
@@ -77,7 +76,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var transitionPrevNow: CFTimeInterval = 0
     private var selectedFlatIndices: Set<Int> { Set(selectedUIDs.compactMap { indexByUID[$0] }) }
 
-    // V3.9 LIVE PINCH (continuous multi-level): each adjacent SEGMENT is a `.pinch` single-lattice plan driven
+    // Live pinch (continuous multi-level): each adjacent segment is a `.pinch` single-lattice plan driven
     // by the host's scrub driver (`setPinchProgress`). Nothing is committed until release; segments rebuild
     // seamlessly as the finger crosses detents (a shared detent's frame is deterministic, so prev-q=1 == next-q=0).
     //
@@ -91,7 +90,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private(set) var pinchSegmentSource: Int?
     private(set) var pinchSegmentTarget: Int?
 
-    // OVERVIEW LAYER DISSOLVE (replaces the rejected warp): two COMPLETE settled grids blended by opacity via
+    // Overview layer dissolve: two complete settled grids blended by opacity via
     // the offscreen compositor. Active during L3↔L4 / L4↔L5 gestures and discrete +/- clicks. Separate from
     // `gridTransition` - it NEVER uses the relocation lattice. nil ⇒ inactive.
     private(set) var overviewDissolve: OverviewLayerDissolvePlan?
@@ -400,7 +399,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                                       viewportPoint: viewportPoint, level: level, width: width,
                                                       columnPhase: currentPhase())   // resolve in the DISPLAYED (phased) grid
         zoomTransactionLevel = CGFloat(level)
-        // V3.9: capture the gesture-start (actual) state - the start detent uses this frame in every segment.
+        // Capture the gesture-start state; the start detent uses this frame in every segment.
         pinchStartLevel = level
         pinchStartPhase = currentPhase()
         pinchStartScrollY = clipView?.bounds.origin.y ?? 0
@@ -772,7 +771,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // (generous overscan ABOVE so a narrow / scale-down reveals already-laid-out older rows, never blank), and each
     // frame we present that snapshot UNIFORMLY SCALED to the current width about the stationary LEFT edge + viewport
     // BOTTOM - ONE coherent surface, square tiles preserved, no engine resolve / group rebuild / texture churn. On
-    // gesture end the host settles ONCE, bottom-anchored: under the accepted fixed-columns model the release-width
+        // gesture end the host settles once, bottom-anchored: under the fixed-columns model the release-width
     // settled layout uses the same column count as the live snapshot, so no column reflow or detent correction is
     // expected.
 
@@ -1387,7 +1386,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         requestRedraw()
     }
 
-    // MARK: - Live pinch single-lattice transition (V3.9, host scrub-driven, continuous multi-level)
+    // MARK: - Live pinch single-lattice transition
 
     /// The contiguous adjacent-step band around the current `level` that is lattice-eligible (every step
     /// `lo→lo+1` is `.focusRowRelayout`). For the normal levels this is `[0, 3]`; an overview start gives a
@@ -1498,7 +1497,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         transitionPrevNow = 0
     }
 
-    // MARK: - Overview layer dissolve (offscreen two-layer cross-dissolve; replaces the rejected warp)
+    // MARK: - Overview layer dissolve
 
     /// Begin an overview layer dissolve for an overview-boundary step `s→t`. Builds the two SETTLED plans once
     /// (source = the current on-screen grid; target = the adjacent overview, cursor-anchored, square). The live

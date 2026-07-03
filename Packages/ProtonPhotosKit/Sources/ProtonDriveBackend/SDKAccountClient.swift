@@ -33,7 +33,7 @@ struct SDKAccountClient: AccountClientProtocol, @unchecked Sendable {
     }
 
     func getAddressPublicKeysRequest(emailAddress: String) -> [Data] {
-        // TODO(Phase 2): return armored public keys for arbitrary emails (signature verification
+        // TODO: return armored public keys for arbitrary emails (signature verification
         // of other users' shared content). For own-library timeline/thumbnails this is not needed.
         []
     }

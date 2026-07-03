@@ -37,9 +37,8 @@ public protocol LibraryStatsProvider: Sendable {
     func metadataRowCount() async -> Int
 }
 
-/// Aggregated, displayable state of the on-disk offline cache - the data behind the Developer/Cache
-/// settings surface (Deliverable 3). All fields are plain values so the view layer and tests can use
-/// it without touching the cache actors.
+/// Aggregated, displayable state of the on-disk offline cache. All fields are plain values so the view layer
+/// and tests can use them without touching the cache actors.
 public struct OfflineCacheStatus: Sendable, Equatable {
     public var offlineEnabled: Bool
     public var totalAssets: Int

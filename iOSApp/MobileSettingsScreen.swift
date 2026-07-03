@@ -5,15 +5,11 @@ import ProtonDriveBackend
 import SwiftUI
 import TimelineCore
 
-/// Account & settings tab. Four native sections — Account (email + Proton storage quota), Library status
-/// (photo total + the load/crawl state that used to sit on the Photos grid), Cache (on-disk size + clear), and
-/// Sign out. Sign out and Cache clear both confirm through a centered system `.alert` (never a row-anchored
-/// popover). All figures come from shared Core/backend state; nothing is faked.
+/// Account, library status, cache and sign-out settings for the mobile app.
 struct MobileSettingsScreen: View {
     @EnvironmentObject private var sessionModel: MobileSessionModel
     @EnvironmentObject private var libraryModel: MobileLibraryModel
-    /// Shared Proton account info (email + storage quota), populated from the account data the backend already
-    /// fetches/caches — available offline. Same `@State` singleton pattern the macOS Settings uses.
+    /// Shared Proton account info populated by the backend's account-data cache.
     @State private var account = AccountInfo.shared
 
     @State private var cacheSize: Int64 = 0
@@ -32,8 +28,6 @@ struct MobileSettingsScreen: View {
             }
             .navigationTitle(String(localized: "tab.settings"))
             .task { await refreshCacheSize() }
-            // Centered native alerts — system-centered on both iPhone AND iPad, replacing the old row-anchored
-            // sign-out popover that drifted over the Photos grid.
             .alert(
                 String(localized: "settings.sign_out_confirm \(ProductBrand.displayName)"),
                 isPresented: $confirmSignOut
@@ -55,8 +49,7 @@ struct MobileSettingsScreen: View {
 
     // MARK: - Sections
 
-    /// Account: primary email + Proton storage quota. Rendered only once at least one is known (loads quickly
-    /// online; last-known values persist offline), so the section never shows as an empty box.
+    /// Account identity and storage quota when the backend has decoded them.
     @ViewBuilder private var accountSection: some View {
         if account.primaryEmail != nil || (account.usedSpaceBytes != nil && account.maxSpaceBytes != nil) {
             Section(String(localized: "settings.section_account")) {
@@ -80,9 +73,7 @@ struct MobileSettingsScreen: View {
         }
     }
 
-    /// Library status — the photo total plus the load/crawl state that moved off the Photos grid. Progress is
-    /// honest: `LibraryLoadState` carries only the known total (no per-photo "x of X" counter exists in Core),
-    /// so we show the total and the current phase, never a fabricated percentage.
+    /// Library total and current loading phase. `LibraryLoadState` intentionally exposes no fabricated percentage.
     @ViewBuilder private var librarySection: some View {
         Section(String(localized: "settings.section_library")) {
             if let count = libraryModel.loadState.knownCount, libraryModel.loadState.hasSettled {
@@ -118,8 +109,7 @@ struct MobileSettingsScreen: View {
         }
     }
 
-    /// Cache: on-disk size of the encrypted thumbnail cache + a confirmed clear. Clearing is crash-safe with the
-    /// grid/viewer active (the feed keeps its decoded RAM thumbnails and re-downloads misses).
+    /// On-disk encrypted thumbnail-cache size and clear action.
     @ViewBuilder private var cacheSection: some View {
         Section(String(localized: "settings.section_cache")) {
             LabeledContent(String(localized: "settings.cache_size")) {

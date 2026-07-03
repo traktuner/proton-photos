@@ -1,16 +1,8 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Swift-6.2 runtime defect swiftlang/swift#76804: the compiler-inserted DYNAMIC actor-isolation assertion
-// (`swift_task_isCurrentExecutor` → `SerialExecutorRef::isMainExecutor`) SIGSEGVs once a Live-Photo motion
-// `AVPlayer`'s CoreMedia threads corrupt the main-thread executor's PAC state. It fires on EVERY `@MainActor`
-// SwiftUI body / Cocoa-callback update that reads our `@Observable` model, so structural fixes only RELOCATE
-// the crash (GeometryReader child → plain body → …). This frontend flag stops the compiler EMITTING those
-// dynamic checks at all - it removes the faulting CALL (unlike the env-var override, which only changed the
-// call's decision while the computation still segfaulted). Safe here: static Swift-6 isolation already proves
-// these run on the main actor; the dynamic check was pure belt-and-suspenders and is currently a liability.
-// `.unsafeFlags` is fine because this package is consumed as a LOCAL PATH dependency, never version-resolved.
-// REMOVE once the toolchain ships the #76804 fix (Xcode 26.2 line) - re-test the live AVPlayer path first.
+// Xcode 26.x currently crashes in dynamic actor-isolation checks on the Live Photo AVPlayer path.
+// Keep the workaround local to this path dependency and re-test it before removing the flag on a newer toolchain.
 let disableDynamicActorIsolation: [SwiftSetting] = [
     .unsafeFlags(["-Xfrontend", "-disable-dynamic-actor-isolation"])
 ]

@@ -4,10 +4,8 @@ import CoreGraphics
 import GridCore
 @testable import TimelineFeature
 
-/// Pins the Apple anchor rule for detent zoom: a discrete level change is directed toward the item UNDER THE
-/// CURSOR (the cursor item stays under the cursor), NOT the top-visible item. The engine owns the capture +
-/// rebase; gap cursors resolve the nearest item in the focus row. (Focus-row neighbourhood STABILITY during a
-/// live drag is the separate GridZoomTransaction step - see docs/grid-zoom-transaction.md - not tested here.)
+/// Pins the cursor anchor rule for detent zoom: a discrete level change keeps the cursor item under the cursor,
+/// not the top-visible item. The engine owns capture and rebase; gap cursors resolve the nearest focus-row item.
 @Suite struct CursorAnchorZoomTests {
     private let width: CGFloat = 1400
     private let eps: CGFloat = 1.0

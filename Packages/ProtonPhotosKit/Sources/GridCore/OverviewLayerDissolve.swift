@@ -1,23 +1,17 @@
 import CoreGraphics
 
-// MARK: - Overview Layer Dissolve (replaces the rejected V3.10 overview warp)
+// MARK: - Overview Layer Dissolve
 //
-// The overview boundaries (L3↔L4 `.overviewWarp`, L4↔L5 `.denseOverviewZoom`) are a DISSOLVE BETWEEN TWO
-// COMPLETE STATIC GRID LAYERS, not a per-cell relocation:
-//   • the SOURCE settled grid (its own level, scroll, display mode) and
-//   • the TARGET settled grid (the adjacent level, anchored scroll, square display mode)
-// are BOTH fully resolved ONCE at gesture start. Rendering blends the two complete rasters by opacity
-// (source fades out, target fades in). There is NO `GridTransitionComponentBuilder`, NO relocation lattice,
-// NO entry/exit endpoints, NO identity handoff - a source cell and a target cell never need to share identity.
+// Overview boundaries dissolve between two complete static grid layers, not per-cell relocation:
+//   • the source settled grid (its own level, scroll, display mode)
+//   • the target settled grid (the adjacent level, anchored scroll, square display mode)
+// Both are fully resolved once at gesture start. Rendering blends the two complete rasters by opacity.
 //
 // The source keeps its OWN display mode (it must NOT be forced to square just because the target is an overview);
 // the target is `squareFillCrop` because the overview levels L4/L5 are square-only.
 //
-// IMPORTANT - renderer requirement: correctly blending two partially-covered rasters over the shared dark
-// background CANNOT be done by the current single-pass premultiplied source-over renderer without a mid-fade
-// background-bleed artifact (proof in reports/archive/PHASE_B_OVERVIEW_LAYER_DISSOLVE_REPORT.md). It needs OFFSCREEN
-// layer compositing (render each layer to its own texture, then blend the two textures). This type is the
-// pure, renderer-independent PLAN + the deterministic guarantees; it does not itself rasterise.
+// Renderer requirement: correct blending over the shared dark background needs offscreen layer compositing.
+// This type is the renderer-independent plan; it does not rasterize.
 
 /// Smootherstep easing for the layer crossfade (matches the transition family's curve shape). Pure.
 public func overviewDissolveEase(_ q: Double) -> Double {

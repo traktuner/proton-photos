@@ -1,12 +1,11 @@
 // PinchLiveZoomDriver.swift
 //
-// V3.9 CONTINUOUS MULTI-LEVEL live-pinch driver for the single-presentation-lattice transition. PURE +
+// Continuous multi-level live-pinch driver for the single-presentation-lattice transition. Pure and
 // headless: no clock, no engine, no GPU, no UserDefaults - every time step is passed in as `dt`, so the
 // whole state machine is unit-testable in isolation.
 //
 // Apple Photos lets the user pinch continuously through MANY levels in one uninterrupted gesture (smallest
-// → largest) without lifting. V3.8 handled only ONE adjacent pair per gesture (capture latched, then you had
-// to lift and re-pinch). V3.9 makes the grid one continuous scrub surface across detents:
+// to largest) without lifting. The grid is one continuous scrub surface across detents:
 //
 //   • The physical pinch position (`continuousLevel`, level units across the ladder) is AUTHORITATIVE.
 //   • The active SEGMENT is the adjacent detent interval the position is in: `[floor(x), floor(x)+1]`,
@@ -15,7 +14,7 @@
 //   • Crossing an integer detent swaps the active interval; a small hysteresis prevents thrash at a detent.
 //     The previous interval at q=1 and the next at q=0 are the SAME detent ⇒ the host's per-detent plan frames
 //     are identical there ⇒ a continuous seam (no blank frame, no commit bridge, no snap between segments).
-//   • There is NO mid-gesture capture/latch that ends the gesture (that was V3.8's "settle + re-pinch"); the
+//   • There is no mid-gesture capture/latch that ends the gesture; the
 //     grid follows the finger until release, then settles the ACTIVE segment to its nearest detent.
 //
 // The driver chains only within the eligible band `[chainLo, chainHi]` (the contiguous focusRowRelayout run
@@ -32,7 +31,7 @@ package struct PinchLiveZoomDriver: Equatable, Sendable {
         package var autoCompleteMinQPerSecond: Double = 1.8
         package var autoCompleteMaxQPerSecond: Double = 8.0
         /// A very short directional pinch that never clears the live-scrub dead-band should still behave like
-        /// a discrete +/- step: complete one adjacent segment at the accepted click duration.
+        /// a discrete +/- step: complete one adjacent segment at the click duration.
         package var shortStepQPerSecond: Double = 1000.0 / 420.0
         /// EMA weight for the recent pinch velocity (drives the settle speed). 0…1.
         package var velocityEmaAlpha: Double = 0.25

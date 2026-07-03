@@ -1,6 +1,6 @@
 // PinchLiveZoomDriverTests.swift
 //
-// V3.9: the CONTINUOUS MULTI-LEVEL live-pinch driver (pure; no engine / GPU / clock). The grid is one
+// Continuous multi-level live-pinch driver (pure; no engine, GPU, or clock). The grid is one
 // scrub surface across detents: segmentQ follows the finger 1:1 within the active adjacent interval, and
 // crossing a detent swaps the interval seam-continuously. No mid-gesture latch; release settles the active
 // segment to its nearest detent. Convention: band L0…L3 (chainLo 0, chainHi 3). Lower index = larger tiles.

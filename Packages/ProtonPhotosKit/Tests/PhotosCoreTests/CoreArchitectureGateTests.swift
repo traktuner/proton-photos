@@ -73,7 +73,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         ),
         CoreTargetRule(
             name: "GridCore",
-            // QuartzCore intentionally NOT allowed (tightened in Phase 3.9): GridCore is pure value geometry
+            // QuartzCore is intentionally not allowed: GridCore is pure value geometry
             // that takes injected clocks (never `CACurrentMediaTime`) and uses simd/`CGAffineTransform` (never
             // `CATransform3D`), so it needs no QuartzCore symbol. Excluding QuartzCore structurally closes the
             // render-surface hole where a QuartzCore-sourced `CAMetalDrawable`/`CAMetalLayer`/`CADisplayLink`
@@ -119,9 +119,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         "SwiftUI",
         "MapKit",
         "AVKit",
-        // `Metal` (not just `MetalKit`): the renderer/drawable boundary (`MetalGridDrawableTarget`,
-        // `MTLRenderPassDescriptor`, `MTLCommandBuffer`) is platform-adapter concern and must not be imported
-        // by any universal Core target. See docs/metalgrid-boundary-audit.md Phase 3.9.
+        // `Metal` itself belongs to renderer/adapter targets; universal Core targets must remain drawable-free.
         "Metal",
         "MetalKit",
     ]
@@ -136,7 +134,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         "UIApplication",
         "NSApplication",
         "MTKView",
-        // Render/GPU-surface + presentation types (Phase 3.9). None is ever a legitimate universal-Core type;
+        // Render/GPU-surface and presentation types belong in platform adapters, not universal Core;
         // they belong in platform adapters. `CAMetal*`/`CADisplayLink`/`CALayer` are QuartzCore-sourced (so a
         // ban is meaningful even if QuartzCore were re-allowed), and `MTL*` are Metal resource objects - banning
         // the concrete type names catches a fully-qualified reference or a re-exporting shim even if the `Metal`
@@ -628,7 +626,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 4.5 MetalGridRenderer split regressed:
+            MetalGridRenderer boundary regressed:
             \(violations.joined(separator: "\n"))
 
             Shared shader/pipeline/command encoding belongs in MetalRenderingCore; MTKView conversion remains
@@ -834,7 +832,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 4.1 GridCore extraction regressed:
+            GridCore extraction boundary regressed:
             \(violations.joined(separator: "\n"))
 
             Pure grid constants and coordinate math belong in universal Core.
@@ -875,7 +873,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 4.2 GridCore commit-bridge extraction regressed:
+            GridCore commit-bridge boundary regressed:
             \(violations.joined(separator: "\n"))
 
             Pure zoom-trigger semantics and commit bridge geometry belong in universal Core.
@@ -927,7 +925,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 4.3 GridProxy seam extraction regressed:
+            GridProxy boundary regressed:
             \(violations.joined(separator: "\n"))
 
             The shell/grid command seam must stay generic and platform-neutral in GridCore.
@@ -999,7 +997,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 4.6 grid texture budget boundary regressed:
+            Grid texture budget boundary regressed:
             \(violations.joined(separator: "\n"))
 
             Universal Core owns the portable budget shape; platform adapters own concrete default values.
@@ -1093,7 +1091,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 4.7 glyph rasterizer boundary regressed:
+            Glyph rasterizer boundary regressed:
             \(violations.joined(separator: "\n"))
 
             Texture upload/cache code may own Metal texture residency; native SF Symbol rasterization belongs
@@ -1166,7 +1164,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 5.5 AppKit glyph adapter boundary regressed:
+            AppKit glyph adapter boundary regressed:
             \(violations.joined(separator: "\n"))
 
             macOS SF Symbol rasterization belongs in its AppKit texture adapter target; TimelineFeature may
@@ -1228,7 +1226,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 5.6 AppKit texture budget boundary regressed:
+            AppKit texture budget boundary regressed:
             \(violations.joined(separator: "\n"))
 
             macOS can keep aggressive desktop texture budgets, but those defaults belong to the AppKit texture
@@ -1293,7 +1291,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 5.7 AppKit texture cache factory boundary regressed:
+            AppKit texture cache factory boundary regressed:
             \(violations.joined(separator: "\n"))
 
             The macOS host may bind the shared cache to `PhotoUID`, but platform glyph/default-policy assembly
@@ -1360,7 +1358,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 5.2 UIKit glyph adapter boundary regressed:
+            UIKit glyph adapter boundary regressed:
             \(violations.joined(separator: "\n"))
 
             UIKit SF Symbol rasterization belongs in an iOS/iPadOS adapter target. MetalGridTextureCore owns
@@ -1434,7 +1432,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 5.3 UIKit texture budget boundary regressed:
+            UIKit texture budget boundary regressed:
             \(violations.joined(separator: "\n"))
 
             iOS/iPadOS texture budgets must stay in the UIKit adapter and must not inherit aggressive macOS
@@ -1484,7 +1482,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 5.4 UIKit texture cache factory boundary regressed:
+            UIKit texture cache factory boundary regressed:
             \(violations.joined(separator: "\n"))
 
             The iOS/iPadOS adapter may assemble the shared cache from a platform policy and glyph rasterizer,
@@ -1892,7 +1890,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 5.8 Timeline UIKit adapter boundary regressed:
+            Timeline UIKit adapter boundary regressed:
             \(violations.joined(separator: "\n"))
 
             The first iOS/iPadOS timeline seam must stay viewport-driven: UIKit may translate current view
@@ -2205,7 +2203,7 @@ final class CoreArchitectureGateTests: XCTestCase {
         XCTAssertTrue(
             violations.isEmpty,
             """
-            Phase 4.8 texture-cache ID boundary regressed:
+            Texture-cache ID boundary regressed:
             \(violations.joined(separator: "\n"))
 
             Real Metal texture caching may remain adapter-owned, but item identity must be generic so the

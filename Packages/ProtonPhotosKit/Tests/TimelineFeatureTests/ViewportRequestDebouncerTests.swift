@@ -4,7 +4,7 @@ import PhotosCore
 @testable import MediaCache
 
 /// Proves the stable-viewport debounce emits the visible set ONCE per settle, not every frame
-/// (Deliverable: "Stable viewport debounce enqueues visible requests once, not every frame").
+/// The viewport debounce should enqueue visible requests once, not every frame.
 @Suite("Viewport request debouncer")
 struct ViewportRequestDebouncerTests {
     private func uids(_ ids: [String]) -> [PhotoUID] { ids.map { PhotoUID(volumeID: "v", nodeID: $0) } }

@@ -3,7 +3,7 @@ import Testing
 import PhotosCore
 @testable import MediaCache
 
-/// Proves the background crawl order is newest → oldest (Deliverable: "Crawl order is newest-to-oldest").
+/// Proves the background crawl order is newest to oldest.
 @Suite("Thumbnail crawl order")
 struct ThumbnailCrawlOrderTests {
     private func item(_ id: String, _ t: TimeInterval) -> PhotoItem {

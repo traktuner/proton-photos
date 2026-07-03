@@ -1,11 +1,9 @@
 import AppKit
 import PhotosCore
 
-/// Persists + restores the main window's frame across launches (Deliverable 6). We drive this
-/// manually (rather than `setFrameAutosaveName`) so restoration always runs through
-/// `WindowFramePolicy` - which validates the saved frame against the *current* screens and re-centres
-/// safely if the old display is gone - and so the save/restore math stays unit-testable. System
-/// state restoration is disabled on the window to avoid a double-restore fighting ours.
+/// Persists and restores the main window frame through `WindowFramePolicy`, which validates the saved frame
+/// against the current screens before applying it. System restoration stays disabled so the two mechanisms do
+/// not fight each other.
 @MainActor
 final class MainWindowFrameController {
     private let key = AppSettingsKey.mainWindowFrame

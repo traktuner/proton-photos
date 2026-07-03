@@ -202,9 +202,15 @@ private struct MobileImagePage: View {
             prepareOrStopMotion()
             await load()
         }
-        .onAppear { MobileViewerLog.logger.notice("[ViewerPerf] page appear uid=\(MobileViewerLog.short(item.uid), privacy: .public) current=\(isCurrent) kind=photo") }
+        .onAppear {
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] page appear uid=\(MobileViewerLog.short(item.uid), privacy: .public) current=\(isCurrent) kind=photo")
+            }
+        }
         .onDisappear {
-            MobileViewerLog.logger.notice("[ViewerPerf] page disappear uid=\(MobileViewerLog.short(item.uid), privacy: .public)")
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] page disappear uid=\(MobileViewerLog.short(item.uid), privacy: .public)")
+            }
             motion.teardown()
         }
     }
@@ -224,7 +230,9 @@ private struct MobileImagePage: View {
         // 1. Instant thumbnail (already decoded for the grid) — never DOWNGRADE a page that already shows a preview.
         if image == nil, let thumb = imageStore.thumbnail(for: item.uid) {
             image = thumb
-            MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=thumbnail")
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=thumbnail")
+            }
         }
         // 2. Screen-bounded preview — CURRENT page only (bounded window), so neighbours never fan out fetches/decodes.
         guard ViewerImageLoadPolicy.shouldLoadDisplay(distanceFromCurrent: isCurrent ? 0 : 1) else { return }
@@ -232,7 +240,9 @@ private struct MobileImagePage: View {
         guard let display = await imageStore.displayImage(for: item.uid, maxPixelSize: cap) else { return }
         guard !Task.isCancelled else { return }
         image = display.image
-        MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=\(display.source, privacy: .public)")
+        if MobileViewerLog.isEnabled {
+            MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=\(display.source, privacy: .public)")
+        }
     }
 }
 
@@ -299,9 +309,15 @@ private struct MobileVideoPage: View {
         .onChange(of: isCurrent) { _, current in
             if current { player?.play() } else { player?.pause() }
         }
-        .onAppear { MobileViewerLog.logger.notice("[ViewerPerf] page appear uid=\(MobileViewerLog.short(item.uid), privacy: .public) current=\(isCurrent) kind=video") }
+        .onAppear {
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] page appear uid=\(MobileViewerLog.short(item.uid), privacy: .public) current=\(isCurrent) kind=video")
+            }
+        }
         .onDisappear {
-            MobileViewerLog.logger.notice("[ViewerPerf] page disappear uid=\(MobileViewerLog.short(item.uid), privacy: .public)")
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] page disappear uid=\(MobileViewerLog.short(item.uid), privacy: .public)")
+            }
             teardown()
         }
     }
@@ -379,7 +395,9 @@ private struct MobileVideoPage: View {
             poster = libraryModel.thumbnailFeed?.memoryImage(for: item.uid)
         }
         guard isCurrent, player == nil, let backend = libraryModel.backend else { return }
-        MobileViewerLog.logger.notice("[ViewerPerf] video prepare start uid=\(MobileViewerLog.short(item.uid), privacy: .public)")
+        if MobileViewerLog.isEnabled {
+            MobileViewerLog.logger.notice("[ViewerPerf] video prepare start uid=\(MobileViewerLog.short(item.uid), privacy: .public)")
+        }
         do {
             let streaming = try await backend.makeStreamingAsset(for: item.uid)
             guard !Task.isCancelled else { return }   // swiped away before the asset resolved → don't attach a player

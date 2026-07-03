@@ -4,11 +4,8 @@ import CoreGraphics
 import GridCore
 @testable import TimelineFeature
 
-/// THE FIXED-COLUMNS, WIDTH-FILLING resize contract (Apple parity). Each zoom level HOLDS its `nominalColumns`;
-/// the square slot is sized to FILL the viewport width exactly - so the grid NEVER leaves a trailing gutter, and a
-/// width change SCALES the tile (same columns, larger/smaller tile), never a column reflow. The column count
-/// changes ONLY on a zoom. Pure-engine behavioral guards for the fixed-columns model in
-/// `docs/apple-photos-parity-master-spec.md` (and §6/§10 of `docs/metalgrid-engine-contract.md`).
+/// Fixed-column, width-filling resize contract. Each zoom level keeps its `nominalColumns`; a width change scales
+/// the tile size and must not reflow columns or leave a trailing gutter.
 @Suite struct GridSizeBasedResizeTests {
     private let viewportHeight: CGFloat = 900
     private func engine(_ count: Int = 8000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
@@ -65,7 +62,7 @@ import GridCore
     }
 
     // The settled grid FILLS the width: leading-aligned, and the content width EQUALS the viewport at every level
-    // and (multi-column) width - NO trailing gutter (the rejected "huge blank margin" state is impossible).
+    // and multi-column width; no trailing gutter.
     @Test func settledGridFillsWidthNoGutter() {
         let e = engine()
         for level in 0 ..< e.levelCount {
@@ -92,7 +89,7 @@ import GridCore
                 "a point right of the last filled column must not hit a slot")
     }
 
-    // REGRESSION GUARD for the rejected screenshots: at the widths where the OLD `floor` + fixed-`side` model
+    // Regression guard: at widths where a `floor` + fixed-`side` model
     // left a trailing gutter up to a FULL tile (≈421pt at L0 @ 1700 = ~25% of the window), the grid now FILLS
     // the width. This test FAILS on the old model and passes on the width-fill model.
     @Test func wideWindowHasNoHugeGutter() {
@@ -101,7 +98,7 @@ import GridCore
         for c in cases {
             let m = e.resolvedMetrics(level: c.level, width: c.width)
             let gutter = c.width - (CGFloat(m.columns) * m.pitch - m.gap)
-            #expect(gutter < 2.0, "L\(c.level) w\(c.width): gutter \(gutter)pt (must be ~0 - the rejected huge-margin state is gone)")
+            #expect(gutter < 2.0, "L\(c.level) w\(c.width): gutter \(gutter)pt (must be ~0)")
         }
     }
 

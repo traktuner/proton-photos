@@ -6,11 +6,14 @@ import PhotoViewerUIKitAdapter
 import QuartzCore
 import UIKit
 
-/// os_log diagnostics for the viewer's staged loading, at `.notice` so a plain `log stream` capture (no
-/// `--level debug`) separates viewer fetch/decode/display stalls from grid work. Low volume — per page action,
-/// never per frame.
+/// Debug-only viewer loading diagnostics.
 enum MobileViewerLog {
     static let logger = Logger(subsystem: "me.protonphotos.ios", category: "ViewerPerf")
+    #if DEBUG
+    static let isEnabled = true
+    #else
+    static let isEnabled = false
+    #endif
 
     static func short(_ uid: PhotoUID) -> String { String(uid.nodeID.suffix(6)) }
 }
@@ -55,29 +58,41 @@ final class MobileViewerImageStore {
         guard let media else { return nil }
 
         let fetchStart = CACurrentMediaTime()
-        MobileViewerLog.logger.notice("[ViewerPerf] preview fetch start uid=\(MobileViewerLog.short(uid), privacy: .public)")
+        if MobileViewerLog.isEnabled {
+            MobileViewerLog.logger.notice("[ViewerPerf] preview fetch start uid=\(MobileViewerLog.short(uid), privacy: .public)")
+        }
         let data: Data
         let source: String
         do {
             data = try await media.preview(for: uid)
             source = "preview"
         } catch {
-            MobileViewerLog.logger.notice("[ViewerPerf] preview fetch fail uid=\(MobileViewerLog.short(uid), privacy: .public) error=\(String(describing: error), privacy: .public)")
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] preview fetch fail uid=\(MobileViewerLog.short(uid), privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
             guard !Task.isCancelled else {
-                MobileViewerLog.logger.notice("[ViewerPerf] preview cancelled uid=\(MobileViewerLog.short(uid), privacy: .public)")
+                if MobileViewerLog.isEnabled {
+                    MobileViewerLog.logger.notice("[ViewerPerf] preview cancelled uid=\(MobileViewerLog.short(uid), privacy: .public)")
+                }
                 return nil
             }
-            MobileViewerLog.logger.notice("[ViewerPerf] original fallback fetch start uid=\(MobileViewerLog.short(uid), privacy: .public)")
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] original fallback fetch start uid=\(MobileViewerLog.short(uid), privacy: .public)")
+            }
             do {
                 data = try await media.originalData(for: uid)
                 source = "originalFallback"
             } catch {
-                MobileViewerLog.logger.notice("[ViewerPerf] original fallback fail uid=\(MobileViewerLog.short(uid), privacy: .public) error=\(String(describing: error), privacy: .public)")
+                if MobileViewerLog.isEnabled {
+                    MobileViewerLog.logger.notice("[ViewerPerf] original fallback fail uid=\(MobileViewerLog.short(uid), privacy: .public) error=\(String(describing: error), privacy: .public)")
+                }
                 return nil
             }
         }
         if Task.isCancelled {
-            MobileViewerLog.logger.notice("[ViewerPerf] display fetch cancelled uid=\(MobileViewerLog.short(uid), privacy: .public)")
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] display fetch cancelled uid=\(MobileViewerLog.short(uid), privacy: .public)")
+            }
             return nil
         }
         let fetchMs = (CACurrentMediaTime() - fetchStart) * 1000
@@ -88,17 +103,21 @@ final class MobileViewerImageStore {
         }.value
         if Task.isCancelled { return nil }
         guard let image else {
-            MobileViewerLog.logger.notice("[ViewerPerf] decode fail uid=\(MobileViewerLog.short(uid), privacy: .public)")
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] decode fail uid=\(MobileViewerLog.short(uid), privacy: .public)")
+            }
             return nil
         }
         let decodeMs = (CACurrentMediaTime() - decodeStart) * 1000
         let px = image.size.applying(CGAffineTransform(scaleX: image.scale, y: image.scale))
         cache.setObject(CachedDisplayImage(image: image, source: source), forKey: key, cost: Int(px.width * px.height) * 4)
-        MobileViewerLog.logger.notice("""
-        [ViewerPerf] display ready uid=\(MobileViewerLog.short(uid), privacy: .public) source=\(source, privacy: .public) \
-        px=\(Int(px.width))x\(Int(px.height)) fetchMs=\(String(format: "%.0f", fetchMs), privacy: .public) \
-        decodeMs=\(String(format: "%.0f", decodeMs), privacy: .public) bytes=\(data.count)
-        """)
+        if MobileViewerLog.isEnabled {
+            MobileViewerLog.logger.notice("""
+            [ViewerPerf] display ready uid=\(MobileViewerLog.short(uid), privacy: .public) source=\(source, privacy: .public) \
+            px=\(Int(px.width))x\(Int(px.height)) fetchMs=\(String(format: "%.0f", fetchMs), privacy: .public) \
+            decodeMs=\(String(format: "%.0f", decodeMs), privacy: .public) bytes=\(data.count)
+            """)
+        }
         return DisplayImage(image: image, source: source)
     }
 

@@ -9,7 +9,7 @@ import Testing
         events.reduce(state) { LibraryLoadPolicy.reduce($0, $1) }
     }
 
-    // MARK: Phase 1 — authenticated but inventory not loaded yet (unknown count)
+    // MARK: Authenticated, Inventory Not Loaded
 
     @Test func initialStateIsPreparingWithUnknownCount() {
         let state = LibraryLoadState.initial
@@ -20,7 +20,7 @@ import Testing
         #expect(!state.hasSettled)
     }
 
-    // MARK: Phase 2 — inventory count known but first thumbnails not ready
+    // MARK: Inventory Known, First Thumbnails Pending
 
     @Test func freshInventoryResolvingMovesToLoadingContentWithCount() {
         let state = reduce(.initial, [.inventoryResolved(count: 20_000, cached: false)])
@@ -40,7 +40,7 @@ import Testing
         #expect(fresh.knownCount == 50)
     }
 
-    // MARK: Phase 3 — first content ready
+    // MARK: First Content Ready
 
     @Test func firstContentReadyPromotesLoadingToContentReady() {
         let state = reduce(.initial, [
@@ -72,7 +72,7 @@ import Testing
         #expect(!state.isContentReady)
     }
 
-    // MARK: Phase 4 — truly empty library
+    // MARK: Empty Library
 
     @Test func zeroCountResolvesToEmpty() {
         let state = reduce(.initial, [.inventoryResolved(count: 0, cached: false)])
@@ -98,7 +98,7 @@ import Testing
         #expect(state == .empty)
     }
 
-    // MARK: Phase 5 — load failed / retryable error
+    // MARK: Retryable Load Failure
 
     @Test func failureBeforeContentSurfacesError() {
         let state = reduce(.initial, [.failed(message: "Network unavailable", retryable: true)])

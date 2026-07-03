@@ -1,7 +1,7 @@
 // GridTransitionScheduleTests.swift
 //
-// Phase-B grid transition layer (PRODUCTION DEFAULT, no flag): structural verification of the
-// single-presentation-lattice schedule (CLICKV2_420_FULLER_CORNER + PINCH071). Pure unit tests; no GPU, no app build.
+// Grid transition layer: structural verification of the single-presentation-lattice schedule.
+// Pure unit tests; no GPU and no app build.
 
 import Testing
 import Foundation
@@ -474,7 +474,7 @@ import GridCore
         }
     }
 
-    // ── 8b'. V3.9 chaining seam: adjacent segments sharing a detent render it IDENTICALLY ──
+    // Adjacent segments sharing a detent render it identically.
     // The coordinator builds each segment from the SAME per-detent frame (deterministic from the anchor), so
     // segment [3→2] at q=1 (settled L2) and segment [2→1] at q=0 (settled L2) draw the same occupants at the
     // same rects ⇒ a continuous inter-segment seam (no blank frame, no snap) when the finger crosses a detent.

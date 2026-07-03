@@ -15,8 +15,8 @@ public struct FolderEnumerationResult: Sendable, Equatable {
 
 /// Recursively discovers uploadable media inside a folder.
 ///
-/// Rules (match the prompt): hidden files skipped by default; package bundles (`.app`, `.photoslibrary`,
-/// …) are not descended into; only supported media types are returned; order is deterministic
+/// Rules: hidden files are skipped by default; package bundles (`.app`, `.photoslibrary`, …) are not descended
+/// into; only supported media types are returned; order is deterministic
 /// (case-insensitive path sort) so the queue is reproducible.
 public enum FolderEnumerator {
     public static func enumerate(

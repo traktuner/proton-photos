@@ -1,8 +1,7 @@
 import CoreGraphics
 
-/// Pure geometry for restoring the main window across launches (Deliverable 6). Kept out of AppKit so
-/// it can be unit-tested with synthetic screen rects: feed it the persisted frame plus the current
-/// screens' visible frames and it returns a frame guaranteed to be reachable on a real display.
+/// Pure geometry for restoring the main window across launches. Kept out of AppKit so it can be unit-tested with
+/// synthetic screen rects.
 public enum WindowFramePolicy {
     /// A restored window must have at least this much of itself on some screen, otherwise the user
     /// can't grab the title bar to move it. If less is visible we re-centre on the primary screen.

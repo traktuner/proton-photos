@@ -43,7 +43,7 @@ package struct GridTransitionPresentationTransform {
     package let sx: Double, sy: Double, tx: Double, ty: Double
 
     /// Returns nil when no common rect exists to fit a stable transform ⇒ caller aborts → snap.
-    // One common rect is enough for the accepted fixed-column grid: source/target rect sizes provide scale,
+    // One common rect is enough for the fixed-column grid: source/target rect sizes provide scale,
     // and their centres provide translation. More common rects make the median robust but are not required.
     package static func fit(keys: [RelativeSlotKey], sourceRect: [RelativeSlotKey: CGRect],
                             targetRect: [RelativeSlotKey: CGRect], minCommon: Int = 1) -> GridTransitionPresentationTransform? {

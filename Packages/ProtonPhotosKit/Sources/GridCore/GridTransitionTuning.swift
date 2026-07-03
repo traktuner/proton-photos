@@ -7,7 +7,7 @@
 
 package struct GridTransitionTuning: Equatable, Sendable {
     // ── click (toolbar / keyboard +/-) ──
-    package var clickDurationMs: Double = 420            // V3.6 chosen duration (420 best trade-off; 360 fallback)
+    package var clickDurationMs: Double = 420            // chosen click duration; 360 ms remains a usable fallback
     package var clickRampFraction: Double = 0.20         // trapezoidal-velocity accel/decel fraction r/D
     package var c1EdgeFraction: Double = 0.20            // C1 linear-core edge fraction a (s = 1/(1-a) = 1.25)
 
@@ -15,10 +15,10 @@ package struct GridTransitionTuning: Equatable, Sendable {
     package var minFocusInteriorSamples60: Int = 4       // cid0 focus >= 4 useful interior samples @60
     package var minCornerInteriorSamples60: Int = 2      // cid5 corner >= 2 useful interior samples @60
 
-    // ── live pinch (PINCH071) ──
+    // ── live pinch ──
     package var pinchWidthQ: Double = 0.0706             // W071 fixed handoff width in q-space
 
-    // ── V3.9 continuous multi-level live-pinch scrub driver (PinchLiveZoomDriver) ──
+    // ── continuous multi-level live-pinch scrub driver (PinchLiveZoomDriver) ──
     // The grid is one continuous scrub surface across detents: segmentQ follows the finger 1:1 within the
     // active adjacent interval; crossing a detent swaps the interval (seam-continuous); NO mid-gesture latch.
     // On release the active segment settles to its nearest detent (the SEPARATE release-commit threshold).

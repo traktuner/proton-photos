@@ -5,10 +5,8 @@ import GridCore
 import TimelineCore
 @testable import TimelineFeature
 
-/// THE canonical guard suite for the frozen MetalGrid engine contract - see `docs/metalgrid-engine-contract.md`.
-/// These consolidate boundaries otherwise scattered across other suites so a future transition-effects branch
-/// cannot quietly reintroduce an old geometry path or mix responsibilities. Structural/functional assertions,
-/// not comment matching.
+/// Canonical guard suite for the Metal grid engine contract. These tests consolidate boundaries that would
+/// otherwise be scattered across suites, using structural assertions instead of comment matching.
 @Suite struct MetalGridContractGuardTests {
     private let eps: CGFloat = 0.5
     private func engine(_ count: Int = 6000) -> SquareTileGridEngine { SquareTileGridEngine.testRegular(sectionCounts: [count]) }
@@ -173,7 +171,7 @@ import TimelineCore
         #expect(SquareTileGridEngine.testRegularLevels.count == 6)
         #expect(engine().levelCount == 6)
         #expect(SquareTileGridEngine.appleLevelSpecs.map(\.nominalColumns) == [3, 5, 7, 9, 20, 30],
-                "accepted six-level nominal columns")
+                "configured six-level nominal columns")
     }
 
     @Test func coordinatorUsesInjectedViewportProfileWithRegularDefault() {

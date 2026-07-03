@@ -7,11 +7,8 @@ import MediaCache
 import ProtonAuth
 import ProtonDriveBackend
 
-/// Owns the local offline-cache roots and bridges the Settings UI to the running thumbnail feed
-/// (Deliverables 1–3). One shared instance: the main window registers its feed here on appear, and
-/// the Settings scene - a separate window with no access to `MainView`'s state - reads/writes through
-/// it. The thumbnail crawl is mandatory grid infrastructure and is not controlled by the Offline
-/// Photo Library toggle; "Delete Offline Cache…" is the explicit cache-erasing action.
+/// Owns the local offline-cache roots and bridges the Settings window to the running thumbnail feed.
+/// The thumbnail crawl is mandatory grid infrastructure and is independent from the Offline Library toggle.
 @MainActor
 @Observable
 final class OfflineLibraryManager {
@@ -30,9 +27,8 @@ final class OfflineLibraryManager {
         derivative: "preview",
         configuration: MacMediaCachePolicy.thumbnailByteCacheConfiguration()
     )
-    /// Full-resolution ORIGINALS viewed in the photo viewer, persisted (encrypted) when the offline library is
-    /// ON, bounded by an LRU size cap (see `originalsCapBytes`). Makes reopening a photo instant even after a
-    /// relaunch / while offline - the bug this fixes was that originals lived only in a per-process RAM cache.
+    /// Full-resolution originals viewed in the photo viewer, persisted encrypted when the Offline Library is on
+    /// and bounded by an LRU size cap.
     let originalsCache = ThumbnailCache(
         namespace: "originals",
         derivative: "original",

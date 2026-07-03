@@ -4,14 +4,8 @@ import PhotosCore
 import SwiftUI
 import TimelineUIKitFeature
 
-/// The "All Photos" tab. The Metal grid mounts as soon as items + feed exist (even while loading) so it can
-/// report first content; the loading/empty/error overlay sits on top and lifts only when the shared
-/// `LibraryLoadState` says the grid is presentable — so the user never sees a blank grid first. While the
-/// background crawl keeps filling the library after that, a small activity indicator sits on the nav-bar row.
-///
-/// A top-right "Select" button enters selection mode: tapping cells toggles them (blue check overlay), and a
-/// native bottom action bar offers Share (native sheet over exported originals) and Move to Trash (real,
-/// recoverable, confirmed) — both wired to shared backend capabilities, never faked.
+/// The main photos tab. The Metal grid mounts as soon as items and the feed exist; loading, empty and error
+/// states stay as overlays driven by the shared `LibraryLoadState`.
 struct MobileTimelineScreen: View {
     @EnvironmentObject private var model: MobileLibraryModel
     @State private var viewer: MobileViewerPresentation?
@@ -75,8 +69,6 @@ struct MobileTimelineScreen: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
-        // Browsing shows only "Select" on the trailing edge — no photo count (that lives in Settings) and no
-        // on-grid loading indicator (library-load status now lives in Settings too).
         if canSelect {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(selectionMode ? String(localized: "action.done") : String(localized: "action.select")) {
@@ -84,10 +76,7 @@ struct MobileTimelineScreen: View {
                 }
             }
         }
-        // Selection action bar: Share (left) and Trash (right) as native glass toolbar buttons, with the shared
-        // `SelectionToolbarText` policy's center text as a plain label between them. Separate items divided by
-        // flexible `ToolbarSpacer`s (NOT one grouped pill) keep the two buttons individually glassed and the
-        // label a bare, non-truncating white string — never the old "Ob…"-clipped pill.
+        // Separate toolbar items keep the action buttons native while the center label stays unframed.
         if selectionMode {
             ToolbarItem(placement: .bottomBar) {
                 Button {
@@ -125,8 +114,7 @@ struct MobileTimelineScreen: View {
         }
     }
 
-    /// The bottom-bar center text for the current selection, via the shared `SelectionToolbarText` policy — a
-    /// prompt at zero, nothing at exactly one, the count beyond that — localized here at the platform edge.
+    /// Localized center text for the shared selection-toolbar policy.
     private var selectionCenterText: String? {
         switch SelectionToolbarText.centerLabel(selectedCount: selected.count) {
         case .prompt: return String(localized: "selection.select_items")

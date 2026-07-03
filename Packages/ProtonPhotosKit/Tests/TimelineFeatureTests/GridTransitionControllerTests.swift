@@ -1,6 +1,6 @@
 // GridTransitionControllerTests.swift
 //
-// Phase-B grid transition driver - PRODUCTION DEFAULT (no feature flag). The controller builds the
+// Grid transition driver. The controller builds the
 // single-presentation-lattice click/pinch transition for every eligible step and falls back to the stable
 // instant snap ONLY for ineligible geometry (lattice build failed, degenerate plan). Selection is a settled-grid
 // decoration concern and must not force the grid onto a reflow/snap fallback.

@@ -90,7 +90,7 @@ final class MetalGridScrollHost: NSView {
     }
     /// Extra leading breathing room between the sidebar and the grid for the NORMAL levels (L0–L3) only; the
     /// dense square overviews (L4–L5) go edge-to-edge. The coordinator applies it only when a sidebar is present.
-    static let normalLevelLeadingGap: CGFloat = 16
+    nonisolated static let normalLevelLeadingGap: CGFloat = 16
 
     private var streamingTick: CADisplayLink?
     private var displayLinkWakeUntil: CFTimeInterval = 0
@@ -130,15 +130,15 @@ final class MetalGridScrollHost: NSView {
     private var pinchBaseLevel = 0
     private var pinchCumulativeMagnification: CGFloat = 0
 
-    // V3.9 CONTINUOUS MULTI-LEVEL LIVE-PINCH SCRUB DRIVER (single-presentation-lattice). When the first
-    // resolved direction is an eligible in-band step, the pinch scrubs the V3.7 plan CONTINUOUSLY across
+    // Continuous multi-level live-pinch scrub driver (single-presentation-lattice). When the first
+    // resolved direction is an eligible in-band step, the pinch scrubs the plan continuously across
     // detents via this pure driver (rebuilding the segment plan as the finger crosses each detent -
     // seam-continuous); otherwise it falls back to the `GridZoomTransaction` reflow (`transactionReflow`).
     private var pinchDriver = PinchLiveZoomDriver()
     /// Per-gesture routing: undecided until the first direction resolves, then lattice (in-band chain) or reflow.
     // `.overviewDissolve` (overview boundary L3↔L4 / L4↔L5): a two-layer offscreen cross-dissolve. NOT chained
-    // and NOT driven by the V3.9 `pinchDriver`; q maps straight from the pinch magnitude, release runs a short
-    // linear settle to the nearer endpoint. The accepted `.lattice` (normal L0–L3) path is untouched.
+    // and NOT driven by the live-pinch `pinchDriver`; q maps straight from the pinch magnitude, release runs a short
+    // linear settle to the nearer endpoint. The normal `.lattice` path is untouched.
     private enum PinchMode { case undecided, lattice, reflow, overviewDissolve }
     private var pinchMode: PinchMode = .undecided
     private var pinchSettling = false                  // fingers up, the velocity-aware settle ramp is running
@@ -392,7 +392,7 @@ final class MetalGridScrollHost: NSView {
             pinchSettling = false
             pinchBaseLevel = coordinator.level
             pinchCumulativeMagnification = 0
-            // V3.9 scrub driver: routing is decided on the first resolved direction (the eligible band is
+            // Live-pinch scrub driver: routing is decided on the first resolved direction (the eligible band is
             // captured now); the driver is begun then. Tuning mirrors the central surface.
             pinchMode = .undecided
             pinchBuiltSegment = nil
@@ -516,7 +516,7 @@ final class MetalGridScrollHost: NSView {
 
     /// A very short directional pinch may never clear the live-scrub dead-band, but Apple Photos still treats it
     /// like a normal adjacent zoom command. Use the gesture direction to seed one segment and let it complete at
-    /// the accepted click speed; no hard snap, and no need to lift/re-pinch.
+    /// the click speed; no hard snap, and no need to lift/re-pinch.
     private func beginShortPinchStep(cancelled: Bool) -> Bool {
         guard !cancelled, abs(pinchCumulativeMagnification) > 1e-6 else { return false }
         let direction = pinchCumulativeMagnification > 0 ? -1 : 1   // positive magnification = pinch-in = lower level

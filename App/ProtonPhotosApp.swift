@@ -92,7 +92,7 @@ final class ProtonPhotosAppDelegate: NSObject, NSApplicationDelegate {
 
 /// Makes the window title bar transparent + full-size, so content (the photo grid) extends up under
 /// the translucent Liquid-Glass toolbar - you see photos scroll through behind it, like Apple Photos.
-/// Also installs the frame save/restore controller (Deliverable 6).
+/// Also installs the frame save/restore controller.
 private struct WindowConfigurator: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
