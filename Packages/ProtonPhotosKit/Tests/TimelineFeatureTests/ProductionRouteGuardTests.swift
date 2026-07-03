@@ -50,28 +50,28 @@ struct ProductionRouteGuardTests {
     }
 
     @Test func appAccountDataCacheIsEncryptedAndCleared() throws {
-        let accountCache = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/AccountDataCache.swift"), encoding: .utf8)
+        let accountCache = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/AccountDataCache.swift"), encoding: .utf8)
         #expect(accountCache.contains("AES.GCM.seal"), "account cache must seal raw account JSON before writing")
         #expect(accountCache.contains("AES.GCM.open"), "account cache must authenticate/decrypt before use")
         #expect(accountCache.contains("HKDF<SHA256>.deriveKey"), "account cache key must be derived, not raw-used")
         #expect(accountCache.contains("keyPassword"), "account cache must be bound to the unlocked Proton secret")
         #expect(accountCache.contains("uid"), "account cache must be account-scoped")
 
-        let driveSession = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSession.swift"), encoding: .utf8)
-        #expect(driveSession.contains("AccountDataCache.save(users: uData, addresses: aData, uid: current.uid, keyPassword: current.keyPassword)"))
-        #expect(driveSession.contains("AccountDataCache.load(uid: current.uid, keyPassword: current.keyPassword)"))
+        let driveSession = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DriveSession.swift"), encoding: .utf8)
+        #expect(driveSession.contains("AccountDataCache.save(users: uData, addresses: aData, uid: current.uid, keyPassword: current.keyPassword, in: accountCacheDirectory)"))
+        #expect(driveSession.contains("AccountDataCache.load(uid: current.uid, keyPassword: current.keyPassword, in: accountCacheDirectory)"))
 
-        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSDKBridge.swift"), encoding: .utf8)
+        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DriveSDKBridge.swift"), encoding: .utf8)
         #expect(bridge.contains("driveSession.cachedAccountData()"),
                 "offline cold start must use only the encrypted account cache fallback")
 
         let appModel = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/AppModel.swift"), encoding: .utf8)
-        #expect(appModel.contains("AccountDataCache.clear(uid: session.uid)"),
-                "sign-out must clear encrypted account cache blobs")
+        #expect(appModel.contains("ProtonDriveBackendFactory.purgeLocalAccountData"),
+                "sign-out must clear encrypted account cache blobs through the shared backend factory")
     }
 
     @Test func sdkSecretCacheIsInMemoryOnly() throws {
-        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSDKBridge.swift"), encoding: .utf8)
+        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DriveSDKBridge.swift"), encoding: .utf8)
         #expect(bridge.contains("\"secrets.sqlite\"") && bridge.contains("\"secrets.sqlite-wal\"") && bridge.contains("\"secrets.sqlite-shm\""),
                 "startup must purge legacy SDK plaintext secret-cache files")
         let config = try Self.body(of: bridge, from: "let config = ProtonDriveClientConfiguration(", to: "self.photosClient = try await ProtonPhotosClient(")
@@ -115,7 +115,7 @@ struct ProductionRouteGuardTests {
     }
 
     @Test func videoBlockCacheStoreDoesNotWalkWholeTreePerBlock() throws {
-        let cache = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/Streaming/VideoByteRangeCache.swift"), encoding: .utf8)
+        let cache = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/Streaming/VideoByteRangeCache.swift"), encoding: .utf8)
         let storeBody = try Self.body(of: cache, from: "func store(uid: PhotoUID, block: Int, encrypted: Data) {", to: "    /// Clears the whole video block cache")
         #expect(storeBody.contains("sizeOnDiskLocked()"), "store must initialize from the cached size tracker")
         #expect(storeBody.contains("enforceBudgetLocked(keep:"), "store must enforce budget from the cached size tracker")
@@ -126,7 +126,7 @@ struct ProductionRouteGuardTests {
     }
 
     @Test func burstProviderMaterializesHiddenSeriesMembers() throws {
-        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSDKBridge.swift"), encoding: .utf8)
+        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DriveSDKBridge.swift"), encoding: .utf8)
         let body = try Self.body(of: bridge, from: "func burstGroup(containing uid: PhotoUID) async throws -> [PhotoItem] {", to: "    // MARK: - VideoStreamProvider")
         #expect(body.contains("Self.syntheticBurstMember("),
                 "Proton exposes series as one visible timeline photo plus hidden RelatedPhotos; the viewer must materialize those hidden members")
@@ -232,7 +232,7 @@ struct ProductionRouteGuardTests {
         #expect(sdk.contains("case motionPhoto // = 4"),
                 "the vendored SDK must expose Proton_Drive_Sdk_PhotoTag.motionPhoto")
 
-        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Drive/DriveSDKBridge.swift"), encoding: .utf8)
+        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DriveSDKBridge.swift"), encoding: .utf8)
         #expect(bridge.contains("fetchPhotosList(volumeID: root.volumeID, tag: tag.rawValue)"),
                 "sidebar smart filters must query Proton by the server tag raw value")
     }

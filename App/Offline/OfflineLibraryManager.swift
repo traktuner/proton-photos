@@ -5,6 +5,7 @@ import CryptoKit
 import PhotosCore
 import MediaCache
 import ProtonAuth
+import ProtonDriveBackend
 
 /// Owns the local offline-cache roots and bridges the Settings UI to the running thumbnail feed
 /// (Deliverables 1–3). One shared instance: the main window registers its feed here on appear, and

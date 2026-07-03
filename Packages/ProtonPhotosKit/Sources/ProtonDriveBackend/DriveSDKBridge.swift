@@ -24,39 +24,23 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     private let crypto: DriveCrypto
     private var streamSource: PhotoVideoStreamSource?
 
-    /// The SDK cache directory (`Caches/ProtonPhotos/sdk`) holding the SDK's entity SQLite store
-    /// (and the encrypted account-data cache). The app-owned timeline metadata store lives in
-    /// `LibraryDatabaseLocation` (Application Support) since the DB v1 reset; only its legacy
-    /// `timeline-v3` predecessor is still purged from here. Single source of truth for the path.
-    static var sdkCacheDirectory: URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("ProtonPhotos/sdk", isDirectory: true)
-    }
-
-    /// macOS desktop SQLite tuning for the app-owned library DB - adapter-injected, mirroring the
-    /// `GridTextureBudget` pattern. 256MB mmap + 8MiB page cache are fine on the Mac; iOS/iPadOS
-    /// adapters must build their own conservative policy instead of inheriting these numbers. The WAL
-    /// cap is still bounded so large refreshes cannot leave a permanently inflated sidecar behind.
-    private static let libraryDatabasePolicy = LibraryDatabasePolicy(
-        mmapBytes: 268_435_456,
-        cacheSizeKiB: 8_192,
-        busyTimeoutMs: 3_000,
-        journalSizeLimitBytes: 16 * 1024 * 1024,
-        walCheckpointRowThreshold: 10_000
-    )
-
     /// Full sign-out / master-reset: erase the SDK metadata SQLite stores for `uid` (security
     /// follow-up #2 - non-secret node metadata that must not survive sign-out) AND the app-owned
     /// `library-v1.sqlite` account directory. The encrypted caches, video blocks, and account-data
     /// cache are erased by their own paths; this covers the remaining account-tied data at rest.
     /// Wired from `AppModel.signOut`.
-    static func purgeMetadata(uid: String) {
-        SDKMetadataStore.purgeMetadata(in: sdkCacheDirectory, uid: uid)
-        LibraryDatabaseLocation.purgeAccountData(uid: uid)
+    static func purgeMetadata(uid: String, policy: ProtonDriveBackendPolicy) {
+        SDKMetadataStore.purgeMetadata(in: policy.sdkCacheDirectory, uid: uid)
+        LibraryDatabaseLocation.purgeAccountData(uid: uid, in: policy.libraryDatabaseBaseDirectory)
     }
 
-    init(session: ProtonSession, store: SessionKeychainStore) async throws {
-        let driveSession = DriveSession(session: session, store: store, config: .externalDriveProtonPhotos)
+    init(session: ProtonSession, store: SessionKeychainStore, policy: ProtonDriveBackendPolicy) async throws {
+        let driveSession = DriveSession(
+            session: session,
+            store: store,
+            config: .externalDriveProtonPhotos,
+            accountCacheDirectory: policy.sdkCacheDirectory
+        )
         self.driveSession = driveSession
 
         DebugLog.log("bridge: fetching account data…")
@@ -79,7 +63,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         // derive share/node keys and the per-file content session key on demand.
         self.crypto = DriveCrypto(account: account, keyPassword: session.keyPassword)
 
-        let caches = Self.sdkCacheDirectory
+        let caches = policy.sdkCacheDirectory
         try? FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
         // Purge any plaintext secret cache left by an older build (we now keep secrets in-memory only).
         for name in ["secrets.sqlite", "secrets.sqlite-wal", "secrets.sqlite-shm"] {
@@ -89,10 +73,13 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         // PhotosCore at Application Support/ProtonPhotos/<uid>/library-v1.sqlite (backup-excluded,
         // re-derivable). The superseded Caches-dir timeline-v3 store is deleted best-effort - no
         // data migration; the next refresh repopulates the new store.
-        let libraryDirectory = LibraryDatabaseLocation.prepareAccountDirectory(uid: session.uid)
+        let libraryDirectory = LibraryDatabaseLocation.prepareAccountDirectory(
+            uid: session.uid,
+            in: policy.libraryDatabaseBaseDirectory
+        )
         self.timelineStore = TimelineMetadataStore(
             url: libraryDirectory.appendingPathComponent(LibraryDatabaseLocation.databaseFileName),
-            policy: Self.libraryDatabasePolicy
+            policy: policy.libraryDatabasePolicy
         )
         // Sweep ALL superseded timeline formats (any account): the uid-scoped delete alone leaves
         // orphans behind for accounts that last signed in on older builds.
@@ -315,7 +302,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         var result: [PhotoAlbum] = []
         for a in raw {
             let title = (try? await source.nodeName(linkID: a.linkID)) ?? "Album"
-            result.append(PhotoAlbum(id: a.linkID, title: title ?? "Album",
+            result.append(PhotoAlbum(id: a.linkID, title: title,
                                      photoCount: a.photoCount ?? 0, coverLinkID: a.coverLinkID))
         }
         return result

@@ -9,8 +9,8 @@ import PhotosCore
 /// the page's memory and never persists them). A size budget with LRU eviction keeps disk bounded.
 ///
 /// Thread-safe (NSLock); the resource loader hits this from its serving queue + detached tasks.
-final class VideoByteRangeCache: @unchecked Sendable {
-    static let shared = VideoByteRangeCache()
+public final class VideoByteRangeCache: @unchecked Sendable {
+    public static let shared = VideoByteRangeCache()
 
     private let root: URL
     private let lock = NSLock()
@@ -67,7 +67,7 @@ final class VideoByteRangeCache: @unchecked Sendable {
     }
 
     /// Clears the whole video block cache (wired to the existing "delete cache" Settings action).
-    func clearAll() {
+    public func clearAll() {
         lock.withLock {
             try? fm.removeItem(at: root)
             try? fm.createDirectory(at: root, withIntermediateDirectories: true)

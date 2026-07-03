@@ -86,6 +86,7 @@ final class ProjectHygieneTests: XCTestCase {
             "TARGETED_DEVICE_FAMILY: \"1,2\"",
             "product: PhotosCore",
             "product: ProtonAuth",
+            "product: ProtonDriveBackend",
             "product: TimelineUIKitAdapter",
             "product: TimelineUIKitFeature",
             "product: MediaCacheUIKitAdapter",
@@ -139,6 +140,43 @@ final class ProjectHygieneTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: verifyScript.path), "iOS app shell build gate script is required")
         let rebuild = (try? String(contentsOf: repoRoot.appendingPathComponent("scripts/rebuild.sh"), encoding: .utf8)) ?? ""
         XCTAssertTrue(rebuild.contains("verify-ios-app-shell.sh"), "rebuild.sh must run the iOS app shell gate")
+    }
+
+    func testPlatformAppsUseSharedProtonDriveBackend() {
+        let projectYML = (try? String(contentsOf: repoRoot.appendingPathComponent("project.yml"), encoding: .utf8)) ?? ""
+        let macTarget = targetBlock(named: "ProtonPhotos", in: projectYML)
+        let mobileTarget = targetBlock(named: "ProtonPhotosMobile", in: projectYML)
+        XCTAssertTrue(macTarget.contains("product: ProtonDriveBackend"), "macOS app must use the shared Proton backend product")
+        XCTAssertTrue(mobileTarget.contains("product: ProtonDriveBackend"), "iOS app must use the shared Proton backend product")
+        XCTAssertFalse(macTarget.contains("product: ProtonDriveSDK"), "macOS app must not wire the Drive SDK directly")
+        XCTAssertFalse(mobileTarget.contains("product: ProtonDriveSDK"), "iOS app must not wire the Drive SDK directly")
+
+        let manifest = (try? String(
+            contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Package.swift"),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(
+            manifest.contains(".library(name: \"ProtonDriveBackend\", targets: [\"ProtonDriveBackend\"])"),
+            "ProtonDriveBackend must be a shared package product"
+        )
+        XCTAssertTrue(
+            manifest.contains(".product(name: \"ProtonDriveSDK\", package: \"ProtonDriveSDK\")"),
+            "Only the shared backend package target should depend on ProtonDriveSDK"
+        )
+
+        for url in appSourceFiles() + mobileAppSourceFiles() {
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            XCTAssertFalse(text.contains("import ProtonDriveSDK"), "\(url.lastPathComponent) must not import ProtonDriveSDK")
+            XCTAssertFalse(text.contains("DriveSDKBridge("), "\(url.lastPathComponent) must not instantiate the SDK bridge directly")
+            XCTAssertFalse(text.contains("MobileSyntheticThumbnailLoader"), "\(url.lastPathComponent) must not use fake mobile thumbnails")
+            XCTAssertFalse(text.contains("demoItems"), "\(url.lastPathComponent) must not use fake mobile timeline items")
+        }
+
+        let appSwiftFiles = appSourceFiles().map(\.path)
+        XCTAssertFalse(
+            appSwiftFiles.contains { $0.contains("/App/Drive/") },
+            "SDK/HTTP backend Swift files must live in ProtonDriveBackend, not App/Drive"
+        )
     }
 
     func testPlatformAppsUseSharedAuthLifecycleController() {
@@ -204,7 +242,7 @@ final class ProjectHygieneTests: XCTestCase {
 
     func testDebugLogUsesSandboxCompatibleLibraryDirectory() {
         let debugLog = (try? String(
-            contentsOf: repoRoot.appendingPathComponent("App/Drive/DebugLog.swift"),
+            contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DebugLog.swift"),
             encoding: .utf8
         )) ?? ""
         XCTAssertTrue(debugLog.contains(".libraryDirectory"), "debug logging must stay inside the app container")

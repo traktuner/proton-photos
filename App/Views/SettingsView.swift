@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import PhotosCore
 import DesignSystem
+import ProtonDriveBackend
 
 /// Native macOS Settings window (ProtonPhotos → Einstellungen…). Two panes: Library/Offline (the
 /// Offline Photo Library toggle + cache deletion) and Developer (the live cache-status surface).

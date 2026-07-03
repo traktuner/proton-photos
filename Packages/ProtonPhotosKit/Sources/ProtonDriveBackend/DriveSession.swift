@@ -8,15 +8,22 @@ import ProtonCoreDataModel
 final class DriveSession: @unchecked Sendable {
     let config: ProtonAPIConfig
     private let store: SessionKeychainStore
+    private let accountCacheDirectory: URL
     private let urlSession: URLSession
     private let lock = NSLock()
     private var session: ProtonSession
     private var refreshing: Task<Bool, Never>?
 
-    init(session: ProtonSession, store: SessionKeychainStore, config: ProtonAPIConfig = ProtonAPIConfig()) {
+    init(
+        session: ProtonSession,
+        store: SessionKeychainStore,
+        config: ProtonAPIConfig = ProtonAPIConfig(),
+        accountCacheDirectory: URL
+    ) {
         self.session = session
         self.store = store
         self.config = config
+        self.accountCacheDirectory = accountCacheDirectory
         let cfg = URLSessionConfiguration.ephemeral
         cfg.httpAdditionalHeaders = ["Accept": "application/vnd.protonmail.v1+json"]
         self.urlSession = URLSession(configuration: cfg)
@@ -338,14 +345,14 @@ extension DriveSession {
         async let addressesData = authedData(path: "/core/v4/addresses", method: "GET")
         let (uData, aData) = try await (usersData, addressesData)
         // Persist (encrypted) so a later OFFLINE cold start can rebuild the crypto without the network.
-        AccountDataCache.save(users: uData, addresses: aData, uid: current.uid, keyPassword: current.keyPassword)
+        AccountDataCache.save(users: uData, addresses: aData, uid: current.uid, keyPassword: current.keyPassword, in: accountCacheDirectory)
         return try Self.decodeAccountData(users: uData, addresses: aData)
     }
 
     /// The encrypted-on-disk account data from a previous online launch, or nil if absent/undecryptable. Lets
     /// `DriveSDKBridge.init` rebuild the (pure) Drive crypto + SDK account client when the network is unavailable.
     func cachedAccountData() -> AccountData? {
-        guard let blob = AccountDataCache.load(uid: current.uid, keyPassword: current.keyPassword) else { return nil }
+        guard let blob = AccountDataCache.load(uid: current.uid, keyPassword: current.keyPassword, in: accountCacheDirectory) else { return nil }
         return try? Self.decodeAccountData(users: blob.users, addresses: blob.addresses)
     }
 

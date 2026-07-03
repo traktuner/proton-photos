@@ -15,9 +15,14 @@ let disableDynamicActorIsolation: [SwiftSetting] = [
     .unsafeFlags(["-Xfrontend", "-disable-dynamic-actor-isolation"])
 ]
 
-// Pure-Swift feature modules. Deliberately has NO dependency on ProtonDriveSDK,
-// so it stays free of the SDK's `unsafeFlags` linker constraints. SDK-coupled glue
-// (HttpClient/AccountClient/Bridge) lives in the app target instead.
+let sdkBackendSwiftSettings: [SwiftSetting] = disableDynamicActorIsolation + [
+    // ProtonCore's public API still exposes process-global crypto state. Keep the SDK adapter in Swift 5
+    // language mode while the pure Core/feature modules stay on the package default.
+    .swiftLanguageMode(.v5),
+]
+
+// Pure Core/feature modules stay SDK-agnostic. SDK-coupled transport and feature composition live in the
+// shared ProtonDriveBackend product, not in any platform app target.
 let package = Package(
     name: "ProtonPhotosKit",
     // Source language for every package String Catalog. Required by SwiftPM before a target may carry
@@ -30,6 +35,7 @@ let package = Package(
         .library(name: "DesignSystemAppKitAdapter", targets: ["DesignSystemAppKitAdapter"]),
         .library(name: "DesignSystem", targets: ["DesignSystem"]),
         .library(name: "ProtonAuth", targets: ["ProtonAuth"]),
+        .library(name: "ProtonDriveBackend", targets: ["ProtonDriveBackend"]),
         .library(name: "MediaByteCache", targets: ["MediaByteCache"]),
         .library(name: "MediaDecodingCore", targets: ["MediaDecodingCore"]),
         .library(name: "MediaFeedCore", targets: ["MediaFeedCore"]),
@@ -61,6 +67,10 @@ let package = Package(
         .library(name: "MapUIKitAdapter", targets: ["MapUIKitAdapter"]),
         .library(name: "MapFeature", targets: ["MapFeature"]),
     ],
+    dependencies: [
+        .package(name: "ProtonDriveSDK", path: "../../Vendor/sdk-swift"),
+        .package(url: "https://github.com/ProtonMail/protoncore_ios.git", exact: "37.3.0"),
+    ],
     targets: [
         // PhotosCore owns the package-wide localization catalog (Resources/Localizable.xcstrings),
         // resolved via `L10n` / `Bundle.module`. Every package module depends on PhotosCore, so this is
@@ -72,6 +82,21 @@ let package = Package(
         .target(name: "DesignSystem", dependencies: ["DesignSystemCore", "DesignSystemAppKitAdapter"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "ProtonAuth", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "ProtonAuthTests", dependencies: ["ProtonAuth"], swiftSettings: disableDynamicActorIsolation),
+        .target(
+            name: "ProtonDriveBackend",
+            dependencies: [
+                "PhotosCore",
+                "ProtonAuth",
+                "AlbumCore",
+                "AlbumsFeature",
+                "UploadCore",
+                .product(name: "ProtonDriveSDK", package: "ProtonDriveSDK"),
+                .product(name: "ProtonCoreDataModel", package: "protoncore_ios"),
+                .product(name: "ProtonCoreCrypto", package: "protoncore_ios"),
+                .product(name: "ProtonCoreCryptoGoInterface", package: "protoncore_ios"),
+            ],
+            swiftSettings: sdkBackendSwiftSettings
+        ),
         .target(name: "MediaByteCache", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "MediaByteCacheTests", dependencies: ["MediaByteCache", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaDecodingCore", swiftSettings: disableDynamicActorIsolation),

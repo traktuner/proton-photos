@@ -2,9 +2,8 @@ import Foundation
 import AppKit
 import PhotosCore
 import ProtonAuth
+import ProtonDriveBackend
 import ProtonCoreCryptoPatchedGoImplementation
-
-typealias PhotosBackend = PhotosRepository & ThumbnailProvider & ThumbnailBatchLoader & FullMediaProvider & VideoStreamProvider & PhotoMetadataProvider & BurstGroupProvider & PhotoLibraryProvider & FavoritesProvider & TrashProvider & LibraryStatsProvider
 
 /// Root application state + composition. Owns the session lifecycle and builds the SDK-backed
 /// services once the user is signed in.
@@ -103,8 +102,10 @@ final class AppModel {
         // stays signed in) - do not converge the two.
         OfflineLibraryManager.shared.purgeOnSignOut()
         if let session = authController.currentSession {
-            AccountDataCache.clear(uid: session.uid)
-            DriveSDKBridge.purgeMetadata(uid: session.uid)
+            ProtonDriveBackendFactory.purgeLocalAccountData(
+                uid: session.uid,
+                policy: .standard(libraryDatabasePolicy: ProtonDriveBackendPolicy.desktopLibraryDatabasePolicy)
+            )
         }
         apply(authController.signOut(), prepareBackendOnSignedIn: false)
     }
@@ -123,10 +124,13 @@ final class AppModel {
         backendTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let bridge = try await DriveSDKBridge(session: session, store: sessionStore)
-                SDKCapabilities.current.log()
-                facade = ProtonClientFacade.make(bridge: bridge)
-                backend = .ready(bridge)
+                let client = try await ProtonDriveBackendFactory.makeFacade(
+                    session: session,
+                    store: sessionStore,
+                    policy: .standard(libraryDatabasePolicy: ProtonDriveBackendPolicy.desktopLibraryDatabasePolicy)
+                )
+                facade = client
+                backend = .ready(client.backend)
                 // Start coordinating cache footprint with system memory pressure / thermal state now
                 // that the account-configured caches exist. Idempotent across backend rebuilds.
                 AppMemoryPressureCoordinator.shared.install()

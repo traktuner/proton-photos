@@ -1,16 +1,14 @@
-import CoreGraphics
-import CryptoKit
 import DesignSystemCore
-import ImageIO
 import MediaByteCache
 import MediaCacheUIKitAdapter
 import Metal
 import PhotosCore
 import ProtonAuth
+import ProtonDriveBackend
+import ProtonCoreCryptoPatchedGoImplementation
 import SwiftUI
 import TimelineUIKitFeature
 import UIKit
-import UniformTypeIdentifiers
 
 @main
 struct ProtonPhotosMobileApp: App {
@@ -23,10 +21,10 @@ struct ProtonPhotosMobileApp: App {
                 .environmentObject(sessionModel)
                 .environmentObject(timelineModel)
                 .task {
-                    timelineModel.configure(session: sessionModel.session)
+                    timelineModel.configure(session: sessionModel.session, store: sessionModel.sessionStore)
                 }
                 .onChange(of: sessionModel.session) { _, session in
-                    timelineModel.configure(session: session)
+                    timelineModel.configure(session: session, store: sessionModel.sessionStore)
                 }
         }
     }
@@ -53,8 +51,20 @@ private struct MobileRootView: View {
                     thumbnailFeed: feed
                 )
             } else {
-                ProgressView()
-                    .tint(ProtonColor.primary)
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .tint(ProtonColor.primary)
+                    Text(timelineModel.statusText)
+                        .font(.footnote)
+                        .foregroundStyle(ProtonColor.textWeak)
+                    if let error = timelineModel.errorText {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                    }
+                }
             }
         }
     }
@@ -174,15 +184,19 @@ private final class MobileSessionModel: ObservableObject {
     @Published private(set) var statusText = "Sign in through Proton in Safari. The app stores only the resulting session in the iOS Keychain."
     @Published private(set) var errorText: String?
 
-    private let authController = ProtonAuthController(
-        authenticator: ProtonForkAuthenticator(config: .externalDriveProtonPhotos)
-    )
+    let sessionStore = SessionKeychainStore()
+    private let authController: ProtonAuthController
 
     var accountLabel: String {
         session?.uid ?? "Signed in"
     }
 
     init() {
+        injectDefaultCryptoImplementation()
+        self.authController = ProtonAuthController(
+            store: sessionStore,
+            authenticator: ProtonForkAuthenticator(config: .externalDriveProtonPhotos)
+        )
         apply(authController.bootstrap())
     }
 
@@ -241,58 +255,96 @@ private final class MobileSessionModel: ObservableObject {
 
 @MainActor
 private final class MobileTimelineModel: ObservableObject {
-    @Published private(set) var items: [PhotoItem] = MobileTimelineModel.demoItems
+    @Published private(set) var items: [PhotoItem] = []
     @Published private(set) var thumbnailFeed: UIKitThumbnailFeed?
+    @Published private(set) var statusText = "Preparing library"
+    @Published private(set) var errorText: String?
 
     private var configuredUID: String?
+    private var facade: ProtonClientFacade?
+    private var backendTask: Task<Void, Never>?
 
-    func configure(session: ProtonSession?) {
-        let accountUID = session?.uid ?? "mobile-smoke"
-        guard configuredUID != accountUID else { return }
-        configuredUID = accountUID
+    func configure(session: ProtonSession?, store: SessionKeychainStore) {
+        backendTask?.cancel()
+        guard let session else {
+            configuredUID = nil
+            facade = nil
+            items = []
+            thumbnailFeed = nil
+            statusText = "Signed out"
+            errorText = nil
+            return
+        }
+
+        guard configuredUID != session.uid || facade == nil else { return }
+        configuredUID = session.uid
+        facade = nil
+        items = []
+        thumbnailFeed = nil
+        statusText = "Preparing library"
+        errorText = nil
 
         let cache = ThumbnailCache(
             namespace: "mobile-thumbnails",
             derivative: "thumbnail",
             configuration: UIKitMediaCachePolicy.thumbnailByteCacheConfiguration()
         )
-        if let session {
-            cache.configure(
+        cache.configure(
+            accountUID: session.uid,
+            key: LocalCacheKeyDerivation.thumbnailPreviewCacheKey(
                 accountUID: session.uid,
-                key: LocalCacheKeyDerivation.thumbnailPreviewCacheKey(
-                    accountUID: session.uid,
-                    keyPassword: session.keyPassword
-                )
+                keyPassword: session.keyPassword
             )
-        } else {
-            cache.configure(accountUID: accountUID)
-        }
-
-        thumbnailFeed = UIKitThumbnailFeed(
-            cache: cache,
-            loader: MobileSyntheticThumbnailLoader(),
-            targetPixels: 288
         )
-        if let thumbnailFeed {
-            Task {
-                await thumbnailFeed.startPrefetch(items.map(\.uid))
+
+        backendTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let client = try await ProtonDriveBackendFactory.makeFacade(
+                    session: session,
+                    store: store,
+                    policy: .standard(
+                        libraryDatabasePolicy: ProtonDriveBackendPolicy.mobileLibraryDatabasePolicy,
+                        videoCacheBudgetBytes: 128 * 1024 * 1024
+                    )
+                )
+                let backend = client.backend
+                let dimensions = PhotoDimensionCoalescer(store: backend)
+                let feed = UIKitThumbnailFeed(
+                    cache: cache,
+                    loader: backend,
+                    dimensions: dimensions,
+                    targetPixels: 288
+                )
+
+                self.facade = client
+                self.thumbnailFeed = feed
+                self.statusText = "Loading library"
+
+                if let cached = await backend.cachedTimeline() {
+                    apply(cached)
+                    await feed.startPrefetch(items.map(\.uid))
+                }
+
+                let refreshed = try await backend.loadTimeline()
+                try Task.checkCancellation()
+                apply(refreshed)
+                await feed.startPrefetch(items.map(\.uid))
+                statusText = items.isEmpty ? "No photos" : "Ready"
+            } catch is CancellationError {
+                // A newer session/configuration replaced this task.
+            } catch {
+                facade = nil
+                thumbnailFeed = nil
+                statusText = "Library failed"
+                errorText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             }
         }
     }
 
-    private static let demoItems: [PhotoItem] = {
-        let now = Date()
-        return (0 ..< 360).map { index in
-            PhotoItem(
-                uid: PhotoUID(volumeID: "mobile-smoke", nodeID: "photo-\(index)"),
-                captureTime: now.addingTimeInterval(TimeInterval(-index * 900)),
-                mediaType: index.isMultiple(of: 11) ? "video/quicktime" : "image/jpeg",
-                isLivePhoto: index.isMultiple(of: 17),
-                durationSeconds: index.isMultiple(of: 11) ? 8 : nil,
-                tags: index.isMultiple(of: 13) ? [.favorites] : []
-            )
-        }
-    }()
+    private func apply(_ sections: [TimelineSection]) {
+        items = sections.flatMap(\.items).sorted(by: TimelineOrder.areInIncreasingOrder)
+    }
 }
 
 private struct MobileMetal3Runtime {
@@ -307,67 +359,5 @@ private struct MobileMetal3Runtime {
             return Self(isSupported: false, message: "Proton Photos for iOS/iPadOS requires a Metal 3-capable Apple GPU.")
         }
         return Self(isSupported: true, message: device.name)
-    }
-}
-
-private struct MobileSyntheticThumbnailLoader: ThumbnailBatchLoader {
-    func loadThumbnails(
-        for uids: [PhotoUID],
-        onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
-    ) async -> ThumbnailBatchLoadResult {
-        for uid in uids {
-            if let data = Self.thumbnailData(for: uid) {
-                onLoaded(uid, data)
-            }
-        }
-        return .delivered
-    }
-
-    private static func thumbnailData(for uid: PhotoUID) -> Data? {
-        let side = 288
-        let bytesPerRow = side * 4
-        var pixels = [UInt8](repeating: 0, count: bytesPerRow * side)
-        let seed = abs(uid.nodeID.hashValue)
-        let r = UInt8(50 + seed % 170)
-        let g = UInt8(50 + (seed / 7) % 170)
-        let b = UInt8(50 + (seed / 17) % 170)
-
-        for y in 0 ..< side {
-            for x in 0 ..< side {
-                let offset = y * bytesPerRow + x * 4
-                let shade = UInt8((x + y + seed % 97) % 48)
-                pixels[offset] = r &+ shade
-                pixels[offset + 1] = g &+ shade / 2
-                pixels[offset + 2] = b
-                pixels[offset + 3] = 255
-            }
-        }
-
-        guard let provider = CGDataProvider(data: Data(pixels) as CFData),
-              let image = CGImage(
-                width: side,
-                height: side,
-                bitsPerComponent: 8,
-                bitsPerPixel: 32,
-                bytesPerRow: bytesPerRow,
-                space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
-                provider: provider,
-                decode: nil,
-                shouldInterpolate: true,
-                intent: .defaultIntent
-              )
-        else { return nil }
-
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            data,
-            UTType.png.identifier as CFString,
-            1,
-            nil
-        ) else { return nil }
-        CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination) else { return nil }
-        return data as Data
     }
 }

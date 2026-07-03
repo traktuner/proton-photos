@@ -10,6 +10,7 @@ import PhotoViewerFeature
 import UploadCore
 import UploadFeature
 import MapFeature
+import ProtonDriveBackend
 
 struct MainView: View {
     let model: AppModel

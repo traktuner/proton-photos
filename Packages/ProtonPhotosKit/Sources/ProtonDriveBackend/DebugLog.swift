@@ -3,7 +3,7 @@ import Foundation
 /// Lightweight file logger for local debugging. Disabled by default because the messages can contain local
 /// filenames, node IDs, or API paths. Enable only for a deliberate Debug run with
 /// `PROTONPHOTOS_DEBUG_LOG=1`; Release never writes this log.
-enum DebugLog {
+public enum DebugLog {
     private static let queue = DispatchQueue(label: "protonphotos.debuglog")
     private static let url: URL = {
         let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
@@ -13,7 +13,7 @@ enum DebugLog {
         return logs.appendingPathComponent("protonphotos.log")
     }()
 
-    static func log(_ message: String) {
+    public static func log(_ message: String) {
         guard enabled else { return }
         let line = "\(Date().formatted(date: .omitted, time: .standard)) \(message)\n"
         queue.async {

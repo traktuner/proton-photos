@@ -42,14 +42,14 @@ targets:
     sources:
       - App
     dependencies:
-      - package: ProtonDriveSDK
-        product: ProtonDriveSDK
       - package: ProtonPhotosKit
         product: PhotosCore
       - package: ProtonPhotosKit
         product: DesignSystem
       - package: ProtonPhotosKit
         product: ProtonAuth
+      - package: ProtonPhotosKit
+        product: ProtonDriveBackend
       - package: ProtonPhotosKit
         product: MediaCache
       - package: ProtonPhotosKit
@@ -65,15 +65,7 @@ targets:
       - package: ProtonPhotosKit
         product: MapFeature
       - package: ProtonCore
-        product: ProtonCoreDataModel
-      - package: ProtonCore
-        product: ProtonCoreCrypto
-      - package: ProtonCore
-        product: ProtonCoreCryptoGoInterface
-      - package: ProtonCore
         product: ProtonCoreCryptoPatchedGoImplementation
-      - package: ProtonCore
-        product: ProtonCoreKeyManager
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.protonphotos.mac
@@ -104,6 +96,8 @@ targets:
         product: PhotosCore
       - package: ProtonPhotosKit
         product: ProtonAuth
+      - package: ProtonPhotosKit
+        product: ProtonDriveBackend
       - package: ProtonPhotosKit
         product: DesignSystemCore
       - package: ProtonPhotosKit
@@ -144,6 +138,8 @@ targets:
         product: MediaLocationCore
       - package: ProtonPhotosKit
         product: MapUIKitAdapter
+      - package: ProtonCore
+        product: ProtonCoreCryptoPatchedGoImplementation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: me.protonphotos.ios
