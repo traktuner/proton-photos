@@ -2005,7 +2005,8 @@ extension MetalGridCoordinator {
             drawCalls: renderer.lastDrawCalls,
             textureBinds: renderer.lastTextureBinds,
             instanceCount: renderer.lastInstanceCount,
-            gpuDrawMs: renderer.lastDrawMs
+            drawMs: renderer.lastEncodeMs,
+            gpuMs: renderer.lastGpuMs
         )
         var hud = MetalGridHUD()
         hud.stats = stats
@@ -2025,7 +2026,8 @@ extension MetalGridCoordinator {
             "drawCalls": "\(stats.drawCalls)",
             "textureBinds": "\(stats.textureBinds)",
             "instances": "\(stats.instanceCount)",
-            "gpuDrawMs": String(format: "%.2f", stats.gpuDrawMs),
+            "drawMs": String(format: "%.2f", stats.drawMs),
+            "gpuMs": String(format: "%.2f", stats.gpuMs),
             "uploads": "\(stats.textureUploads)",
             "uploadBytes": "\(stats.textureUploadBytes)",
             "deferredUploads": "\(stats.deferredTextureUploads)",

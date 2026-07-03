@@ -234,7 +234,8 @@ struct AppInfrastructureTests {
             drawCalls: 6,
             textureBinds: 7,
             instanceCount: 5,
-            gpuDrawMs: 0.75
+            drawMs: 0.75,
+            gpuMs: 0.25
         )
         #expect(stats.visibleItems == 7)
         #expect(stats.overscanItems == 3)
@@ -261,7 +262,20 @@ struct AppInfrastructureTests {
         #expect(stats.drawCalls == 6)
         #expect(stats.textureBinds == 7)
         #expect(stats.instanceCount == 5)
-        #expect(stats.gpuDrawMs == 0.75)
+        #expect(stats.drawMs == 0.75)
+        #expect(stats.gpuMs == 0.25)
+        #expect(stats.drawMs >= 0)
+        #expect(stats.gpuMs >= 0)
+        #expect(stats.summary.contains("drawMs=0.75"))
+        #expect(stats.summary.contains("gpuMs=0.25"))
+    }
+
+    @Test func metalGridStatsStartsWithNoCompletedGpuTiming() {
+        let stats = MetalGridStats()
+        #expect(stats.drawMs == 0)
+        #expect(stats.gpuMs == 0)
+        #expect(stats.summary.contains("drawMs=0.00"))
+        #expect(stats.summary.contains("gpuMs=0.00"))
     }
 
 }

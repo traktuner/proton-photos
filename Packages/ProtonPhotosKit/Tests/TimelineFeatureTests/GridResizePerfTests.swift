@@ -103,6 +103,17 @@ import GridCore
         #expect(src("GridZoomCommit.swift").contains("throttleSeconds: 0.5"), "MetalGridPerf signposts must be throttled")
     }
 
+    @Test func metalGridPerfSplitsCpuEncodeAndGpuTime() {
+        let coord = src("MetalGridCoordinator.swift")
+        let types = src("MetalGridTypes.swift")
+        #expect(coord.contains("\"drawMs\""))
+        #expect(coord.contains("\"gpuMs\""))
+        #expect(types.contains("var drawMs: Double"))
+        #expect(types.contains("var gpuMs: Double"))
+        #expect(!coord.contains("gpuDrawMs"))
+        #expect(!types.contains("gpuDrawMs"))
+    }
+
     // 5b - the old STEP-1 sidebar probe printed/logged every safe-area animation frame. That synchronous DEBUG
     // IO sits directly in the sidebar-toggle hot path and must not come back.
     @Test func sidebarAnimationHasNoPerFrameProbeLogging() {

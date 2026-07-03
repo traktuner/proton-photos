@@ -37,7 +37,8 @@ struct MetalGridStats: Equatable, Sendable {
     var cpuLayoutMs: Double = 0
     var cpuInstanceMs: Double = 0
     var textureUploadMs: Double = 0
-    var gpuDrawMs: Double = 0
+    var drawMs: Double = 0
+    var gpuMs: Double = 0
     var fpsEstimate: Double = 0
     var memoryEstimateBytes = 0
 
@@ -52,7 +53,7 @@ struct MetalGridStats: Equatable, Sendable {
         + "byteBudgetOverflow=\(byteBudgetOverflow) residencySaturated=\(residencySaturated) "
         + "drawCalls=\(drawCalls) textureBinds=\(textureBinds) "
         + "instanceCount=\(instanceCount) cpuLayoutMs=\(fmt(cpuLayoutMs)) cpuInstanceMs=\(fmt(cpuInstanceMs)) "
-        + "textureUploadMs=\(fmt(textureUploadMs)) gpuDrawMs=\(fmt(gpuDrawMs)) fpsEstimate=\(fmt(fpsEstimate)) "
+        + "textureUploadMs=\(fmt(textureUploadMs)) drawMs=\(fmt(drawMs)) gpuMs=\(fmt(gpuMs)) fpsEstimate=\(fmt(fpsEstimate)) "
         + "memoryEstimateMB=\(fmt(Double(memoryEstimateBytes) / 1_048_576))"
     }
 
@@ -95,7 +96,8 @@ struct MetalGridStats: Equatable, Sendable {
         drawCalls: Int,
         textureBinds: Int,
         instanceCount: Int,
-        gpuDrawMs: Double
+        drawMs: Double,
+        gpuMs: Double
     ) -> MetalGridStats {
         var stats = MetalGridStats()
         stats.visibleItems = visibleCount
@@ -123,7 +125,8 @@ struct MetalGridStats: Equatable, Sendable {
         stats.drawCalls = drawCalls
         stats.textureBinds = textureBinds
         stats.instanceCount = instanceCount
-        stats.gpuDrawMs = gpuDrawMs
+        stats.drawMs = drawMs
+        stats.gpuMs = gpuMs
         return stats
     }
 }

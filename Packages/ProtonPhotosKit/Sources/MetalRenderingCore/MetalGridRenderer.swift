@@ -25,10 +25,12 @@ package final class MetalGridRenderer {
     /// scrub reuses both offscreen textures and only re-runs the cheap composite.
     private var dissolveCache = DissolveLayerCache()
 
-    package private(set) var lastDrawMs: Double = 0
+    package private(set) var lastEncodeMs: Double = 0
+    package private(set) var lastGpuMs: Double = 0
     package private(set) var lastDrawCalls = 0
     package private(set) var lastInstanceCount = 0
     package private(set) var lastTextureBinds = 0
+    private var pendingGpuCommandBuffers: [MTLCommandBuffer] = []
 
     /// Triple-buffered vertex pool for the steady `render(...)` path: instead of allocating a fresh
     /// `MTLBuffer` per group every frame, each frame packs all groups' vertices into one growable,
@@ -100,6 +102,7 @@ package final class MetalGridRenderer {
 
     @MainActor
     package func render(to target: MetalGridDrawableTarget, viewportSize: CGSize, groups: [MetalGridRenderGroup]) {
+        drainCompletedGpuTimings()
         let start = CFAbsoluteTimeGetCurrent()
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return }
         let pass = target.renderPassDescriptor
@@ -117,8 +120,9 @@ package final class MetalGridRenderer {
         configure(encoder, viewportSize: viewportSize)
         let (drawCalls, instances, textureBinds) = encode(groups: groups, into: encoder, pooledSlot: slot)
         encoder.endEncoding()
+        pendingGpuCommandBuffers.append(commandBuffer)
         present(commandBuffer, to: target)
-        lastDrawMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
+        lastEncodeMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
         lastDrawCalls = drawCalls
         lastInstanceCount = instances
         lastTextureBinds = textureBinds
@@ -274,6 +278,7 @@ package final class MetalGridRenderer {
                                      redrawSource: Bool, redrawTarget: Bool,
                                      sourceGroups: () -> [MetalGridRenderGroup],
                                      targetGroups: () -> [MetalGridRenderGroup], t: Float) {
+        drainCompletedGpuTimings()
         let start = CFAbsoluteTimeGetCurrent()
         guard let composite = compositePipeline,
               let cmd = commandQueue.makeCommandBuffer() else {
@@ -304,11 +309,34 @@ package final class MetalGridRenderer {
         enc.setFragmentBytes(&tt, length: MemoryLayout<Float>.stride, index: 0)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)   // fullscreen triangle
         enc.endEncoding()
+        pendingGpuCommandBuffers.append(cmd)
         present(cmd, to: target)
-        lastDrawMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
+        lastEncodeMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
         lastDrawCalls = sourceStats.0 + targetStats.0 + 1
         lastInstanceCount = sourceStats.1 + targetStats.1
         lastTextureBinds = sourceStats.2 + targetStats.2 + 2
+    }
+
+    @MainActor
+    private func drainCompletedGpuTimings() {
+        guard !pendingGpuCommandBuffers.isEmpty else { return }
+        var stillPending: [MTLCommandBuffer] = []
+        stillPending.reserveCapacity(pendingGpuCommandBuffers.count)
+        for commandBuffer in pendingGpuCommandBuffers {
+            if commandBuffer.status == .completed {
+                lastGpuMs = Self.gpuDurationMs(commandBuffer)
+            } else {
+                stillPending.append(commandBuffer)
+            }
+        }
+        pendingGpuCommandBuffers = stillPending
+    }
+
+    private static func gpuDurationMs(_ commandBuffer: MTLCommandBuffer) -> Double {
+        let start = commandBuffer.gpuStartTime
+        let end = commandBuffer.gpuEndTime
+        guard start > 0, end >= start else { return 0 }
+        return (end - start) * 1000
     }
 
     private func present(_ commandBuffer: MTLCommandBuffer, to target: MetalGridDrawableTarget) {
