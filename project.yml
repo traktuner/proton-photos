@@ -149,6 +149,7 @@ targets:
         INFOPLIST_FILE: iOSApp/Info.plist
         TARGETED_DEVICE_FAMILY: "1,2"
         SUPPORTS_MACCATALYST: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # The Drive SDK's SwiftPM target only links the dotNET runtime bootstrapper for macOS.
         # The iOS app must link the platform-specific bootstrapper at the final app target so
         # SwiftPM's broad `.iOS` condition does not mix iphoneos and iphonesimulator objects.

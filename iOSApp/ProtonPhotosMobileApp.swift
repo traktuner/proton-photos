@@ -53,16 +53,16 @@ private struct MobileRootView: View {
 private struct MobileMainTabView: View {
     var body: some View {
         TabView {
-            Tab(String(localized: "Photos"), systemImage: "photo.on.rectangle.angled") {
+            Tab(String(localized: "tab.photos"), systemImage: "photo.on.rectangle.angled") {
                 MobileTimelineScreen()
             }
-            Tab(String(localized: "Albums"), systemImage: "rectangle.stack") {
+            Tab(String(localized: "tab.albums"), systemImage: "rectangle.stack") {
                 MobileAlbumsScreen()
             }
-            Tab(String(localized: "Map"), systemImage: "map") {
+            Tab(String(localized: "tab.map"), systemImage: "map") {
                 MobileMapScreen()
             }
-            Tab(String(localized: "Settings"), systemImage: "gearshape") {
+            Tab(String(localized: "tab.settings"), systemImage: "gearshape") {
                 MobileSettingsScreen()
             }
         }
@@ -79,7 +79,7 @@ private struct MobileUnsupportedDeviceView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 40, weight: .semibold))
                 .foregroundStyle(ProtonColor.warning)
-            Text("Unsupported device")
+            Text("device.unsupported_title")
                 .font(.title2.weight(.semibold))
                 .foregroundStyle(ProtonColor.textNorm)
             Text(message)
@@ -103,11 +103,11 @@ enum MobileMetal3Runtime {
     static func status() -> Status {
         guard let device = MTLCreateSystemDefaultDevice() else {
             return Status(isSupported: false,
-                          message: String(localized: "This device does not expose a Metal renderer."))
+                          message: String(localized: "device.no_metal_renderer"))
         }
         guard UIKitTimelineMetalCapability.supportsTimelineGrid(device: device) else {
             return Status(isSupported: false,
-                          message: String(localized: "\(ProductBrand.displayName) requires a Metal 3-capable Apple GPU."))
+                          message: String(localized: "device.requires_metal3 \(ProductBrand.displayName)"))
         }
         return Status(isSupported: true, message: device.name)
     }

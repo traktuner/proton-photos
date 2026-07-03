@@ -20,6 +20,11 @@ final class MobileLibraryModel: ObservableObject {
     @Published private(set) var loadState: LibraryLoadState = .initial
     @Published private(set) var items: [PhotoItem] = []
     @Published private(set) var thumbnailFeed: UIKitThumbnailFeed?
+    /// True while the background thumbnail crawl is still filling the library AFTER the grid became
+    /// presentable — drives the small persistent top-left indicator. Deliberately NOT part of
+    /// `LibraryLoadState` (which models the first-load lifecycle, see its docs): crawl coverage is a
+    /// background signal, so it is polled from the feed and ends the first time the crawl runs dry.
+    @Published private(set) var isBackgroundLoading = false
 
     /// The shared backend, exposed so the Albums / Map / Viewer tabs can reuse it without re-building anything.
     private(set) var backend: (any PhotosBackend)?
@@ -37,6 +42,7 @@ final class MobileLibraryModel: ObservableObject {
     private var session: ProtonSession?
     private var loadTask: Task<Void, Never>?
     private var firstContentGuard: Task<Void, Never>?
+    private var backgroundActivityTask: Task<Void, Never>?
 
     /// Safety net: if the grid never reports a first drawn frame (e.g. every visible thumbnail is unfetchable),
     /// the loading overlay must still lift onto whatever the grid shows rather than hang forever.
@@ -66,6 +72,24 @@ final class MobileLibraryModel: ObservableObject {
         firstContentGuard?.cancel()
         firstContentGuard = nil
         apply(.firstContentReady)
+        startBackgroundActivityMonitorIfNeeded()
+    }
+
+    /// Polls the feed's crawl backlog once the grid is presentable, keeping the small "still loading"
+    /// indicator honest, and stops for good the first time the crawl runs dry (later scroll-driven warms
+    /// are moments, not "the library is still loading").
+    private func startBackgroundActivityMonitorIfNeeded() {
+        guard backgroundActivityTask == nil, let feed = thumbnailFeed else { return }
+        backgroundActivityTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let pending = await feed.hasPendingThumbnailWork()
+                guard let self, !Task.isCancelled else { return }
+                if self.isBackgroundLoading != pending { self.isBackgroundLoading = pending }
+                if !pending { break }
+                try? await Task.sleep(for: .seconds(1))
+            }
+            self?.backgroundActivityTask = nil
+        }
     }
 
     /// Lazily kicks off the background GPS crawl that fills the Map's location index — once per session, only
@@ -111,6 +135,9 @@ final class MobileLibraryModel: ObservableObject {
         loadTask?.cancel()
         firstContentGuard?.cancel()
         firstContentGuard = nil
+        backgroundActivityTask?.cancel()
+        backgroundActivityTask = nil
+        isBackgroundLoading = false
         configuredUID = nil
         session = nil
         backend = nil
@@ -126,6 +153,9 @@ final class MobileLibraryModel: ObservableObject {
         loadTask?.cancel()
         firstContentGuard?.cancel()
         firstContentGuard = nil   // must re-nil so armFirstContentGuardIfNeeded re-arms the safety net next load
+        backgroundActivityTask?.cancel()
+        backgroundActivityTask = nil
+        isBackgroundLoading = false
         configuredUID = session.uid
         backend = nil
         facade = nil
@@ -207,7 +237,10 @@ final class MobileLibraryModel: ObservableObject {
         firstContentGuard = Task { [weak self] in
             try? await Task.sleep(for: self?.firstContentTimeout ?? .seconds(6))
             guard let self, !Task.isCancelled else { return }
-            if case .loadingContent = self.loadState { self.apply(.firstContentReady) }
+            if case .loadingContent = self.loadState {
+                self.apply(.firstContentReady)
+                self.startBackgroundActivityMonitorIfNeeded()
+            }
         }
     }
 

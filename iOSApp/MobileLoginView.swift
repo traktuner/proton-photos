@@ -9,9 +9,7 @@ struct MobileLoginView: View {
         VStack(spacing: 20) {
             Spacer()
 
-            Image(systemName: "photo.stack.fill")
-                .font(.system(size: 56, weight: .regular))
-                .foregroundStyle(ProtonColor.primary)
+            MobileBrandLogo(height: 72)
 
             VStack(spacing: 8) {
                 Text(ProductBrand.displayName)
@@ -40,7 +38,9 @@ struct MobileLoginView: View {
                     if sessionModel.isSigningIn {
                         ProgressView().controlSize(.small).tint(.white)
                     }
-                    Text(sessionModel.isSigningIn ? "Waiting for browser sign-in…" : "Sign in with Proton")
+                    Text(sessionModel.isSigningIn
+                        ? String(localized: "login.waiting_button")
+                        : String(localized: "login.sign_in_button"))
                         .font(.body.weight(.semibold))
                 }
                 .frame(maxWidth: .infinity)
@@ -50,7 +50,7 @@ struct MobileLoginView: View {
             .tint(ProtonColor.primary)
             .disabled(sessionModel.isSigningIn)
 
-            Text("Sign-in opens Safari. The app stores only the resulting session in the iOS Keychain.")
+            Text("login.footer")
                 .font(.caption)
                 .foregroundStyle(ProtonColor.textHint)
                 .multilineTextAlignment(.center)

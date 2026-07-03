@@ -21,10 +21,26 @@ import TimelineCore
         #expect(SquareTileGridEngine(sectionCounts: [100], profile: compact).resolvedMetrics(level: 0, width: 390).columns == 1)
 
         #expect(config.selectionRules == [
-            TimelineGridProfileSelectionRule(profileID: "compactTimeline", minLayoutWidth: nil, maxLayoutWidth: 640)
+            TimelineGridProfileSelectionRule(
+                profileID: "touchCompactTimeline", minLayoutWidth: nil, maxLayoutWidth: 640, inputAffinity: .touch
+            ),
+            TimelineGridProfileSelectionRule(
+                profileID: "touchRegularTimeline", minLayoutWidth: nil, maxLayoutWidth: nil, inputAffinity: .touch
+            ),
+            TimelineGridProfileSelectionRule(profileID: "compactTimeline", minLayoutWidth: nil, maxLayoutWidth: 640),
         ])
         #expect(config.resolver.profile(for: TimelineGridViewport(layoutWidth: 640)).id == "compactTimeline")
         #expect(config.resolver.profile(for: TimelineGridViewport(layoutWidth: 641)).id == "regularTimeline")
+
+        // Touch viewports resolve the dedicated touch ladders (same structure, ~25% gaps).
+        let touchCompact = try #require(config.profile(id: "touchCompactTimeline"))
+        let touchRegular = try #require(config.profile(id: "touchRegularTimeline"))
+        #expect(touchCompact.levels.map(\.nominalColumns) == compact.levels.map(\.nominalColumns))
+        #expect(touchRegular.levels.map(\.nominalColumns) == regular.levels.map(\.nominalColumns))
+        #expect(config.resolver.profile(
+            for: TimelineGridViewport(layoutWidth: 640, inputAffinity: .touch)).id == "touchCompactTimeline")
+        #expect(config.resolver.profile(
+            for: TimelineGridViewport(layoutWidth: 1024, inputAffinity: .touch)).id == "touchRegularTimeline")
     }
 
     @Test func invalidDefaultLevelIsRejected() throws {

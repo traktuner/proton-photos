@@ -1,15 +1,15 @@
 import AVFoundation
 import AVKit
 import DesignSystemCore
+import PhotosCore
 import PhotoViewerCore
 import PhotoViewerUIKitAdapter
-import PhotosCore
 import SwiftUI
 import UIKit
 
 /// Native full-screen photo/video viewer. Paging + chrome live here (pure presentation); the media decoding,
-/// titles and video-playback semantics come from shared `PhotoViewerCore` and the shared backend — no viewer
-/// business logic is reimplemented per platform.
+/// titles, video-playback and pinch-to-close semantics come from shared `PhotoViewerCore` and the shared
+/// backend — no viewer business logic is reimplemented per platform.
 struct MobilePhotoViewer: View {
     let items: [PhotoItem]
     let startIndex: Int
@@ -36,7 +36,8 @@ struct MobilePhotoViewer: View {
                         item: items[i],
                         isCurrent: i == index,
                         libraryModel: libraryModel,
-                        onToggleChrome: { withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() } }
+                        onToggleChrome: { withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() } },
+                        onCloseRequested: { dismiss() }
                     )
                     .tag(i)
                 }
@@ -65,6 +66,7 @@ struct MobilePhotoViewer: View {
                         .padding(10)
                         .background(.ultraThinMaterial, in: Circle())
                 }
+                .accessibilityLabel(String(localized: "viewer.close_a11y"))
 
                 Spacer()
 
@@ -104,12 +106,23 @@ private struct MobileViewerPage: View {
     let isCurrent: Bool
     let libraryModel: MobileLibraryModel
     let onToggleChrome: () -> Void
+    let onCloseRequested: () -> Void
 
     var body: some View {
         if item.isVideo {
-            MobileVideoPage(item: item, isCurrent: isCurrent, libraryModel: libraryModel)
+            MobileVideoPage(
+                item: item,
+                isCurrent: isCurrent,
+                libraryModel: libraryModel,
+                onCloseRequested: onCloseRequested
+            )
         } else {
-            MobileImagePage(item: item, libraryModel: libraryModel, onToggleChrome: onToggleChrome)
+            MobileImagePage(
+                item: item,
+                libraryModel: libraryModel,
+                onToggleChrome: onToggleChrome,
+                onCloseRequested: onCloseRequested
+            )
         }
     }
 }
@@ -119,6 +132,7 @@ private struct MobileImagePage: View {
     let item: PhotoItem
     let libraryModel: MobileLibraryModel
     let onToggleChrome: () -> Void
+    let onCloseRequested: () -> Void
 
     @State private var image: UIImage?
     @State private var isLoadingFull = false
@@ -126,7 +140,7 @@ private struct MobileImagePage: View {
     var body: some View {
         ZStack {
             if let image {
-                MobileZoomableImage(image: image, onSingleTap: onToggleChrome)
+                MobileZoomableImage(image: image, onSingleTap: onToggleChrome, onCloseRequested: onCloseRequested)
             } else {
                 ProgressView().tint(.white)
             }
@@ -153,17 +167,27 @@ private struct MobileImagePage: View {
     }
 }
 
-/// Native video playback via AVKit over the shared `VideoStreamProvider` streaming asset.
+/// Native video playback via AVKit over the shared `VideoStreamProvider` streaming asset. Until playback
+/// visibly starts, the grid's thumbnail stands in as a poster with a native centered spinner — never a
+/// black hole. A two-finger pinch (which the player's tap-driven controls ignore) shrinks the page onto
+/// the fingers and either springs back or closes, same shared policy as photos.
 private struct MobileVideoPage: View {
     let item: PhotoItem
     let isCurrent: Bool
     let libraryModel: MobileLibraryModel
+    let onCloseRequested: () -> Void
 
     @State private var player: AVPlayer?
     /// The streaming asset is the ONLY strong owner of the range resource-loader, which AVFoundation holds
     /// weakly — it must live as long as the player, or every protonvideo:// range request goes unserved.
     @State private var streamingAsset: StreamingVideoAsset?
     @State private var failed = false
+    @State private var poster: UIImage?
+    /// Set by the periodic time observer on the first advancing playback time — the moment frames are
+    /// actually rendering, which is when the poster and spinner may leave.
+    @State private var playbackStarted = false
+    @State private var timeObserverBox = VideoTimeObserverBox()
+    @State private var pinch = ViewerPinchState()
 
     var body: some View {
         ZStack {
@@ -171,12 +195,32 @@ private struct MobileVideoPage: View {
                 VideoPlayer(player: player)
                     .ignoresSafeArea()
             } else if failed {
-                ContentUnavailableView("Can't play this video", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.white)
-            } else {
-                ProgressView().tint(.white)
+                ContentUnavailableView(
+                    L10n.string("viewer.playback_failed"),
+                    systemImage: "exclamationmark.triangle"
+                )
+                .foregroundStyle(.white)
+            }
+
+            if !failed && !playbackStarted {
+                // Poster + native centered spinner until the first frame is on screen. Hit-testing stays
+                // off so the player's own controls are never blocked.
+                ZStack {
+                    if let poster {
+                        Image(uiImage: poster)
+                            .resizable()
+                            .scaledToFit()
+                    }
+                    ProgressView()
+                        .controlSize(.large)
+                        .tint(.white)
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
             }
         }
+        .scaleEffect(pinch.displayScale, anchor: pinch.anchor)
+        .simultaneousGesture(pinchToCloseGesture)
         .task(id: item.uid) { await prepare() }
         .onChange(of: isCurrent) { _, current in
             if current { player?.play() } else { player?.pause() }
@@ -184,20 +228,66 @@ private struct MobileVideoPage: View {
         .onDisappear { teardown() }
     }
 
+    /// Two-finger pinch-to-close: engages only on a pinch-in (shared policy), scales the page about the
+    /// pinch anchor, and on release either closes the viewer or springs back. Simultaneous, so the player's
+    /// tap-driven transport controls keep working untouched.
+    private var pinchToCloseGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                if !pinch.isActive {
+                    guard ViewerPinchDismissPolicy.engages(gestureScale: value.magnification, isZoomedIn: false)
+                    else { return }
+                    pinch.isActive = true
+                    pinch.anchor = value.startAnchor
+                }
+                pinch.displayScale = ViewerPinchDismissPolicy.displayScale(gestureScale: value.magnification)
+            }
+            .onEnded { value in
+                guard pinch.isActive else { return }
+                pinch.isActive = false
+                if ViewerPinchDismissPolicy.shouldDismiss(releaseScale: value.magnification) {
+                    onCloseRequested()
+                } else {
+                    withAnimation(.spring(
+                        duration: ViewerPinchDismissPolicy.springBackDuration,
+                        bounce: 1 - Double(ViewerPinchDismissPolicy.springBackDamping)
+                    )) {
+                        pinch.displayScale = 1
+                    }
+                }
+            }
+    }
+
     private func prepare() async {
         guard player == nil, let backend = libraryModel.backend else { return }
+        if poster == nil {
+            poster = libraryModel.thumbnailFeed?.memoryImage(for: item.uid)
+        }
         do {
             let streaming = try await backend.makeStreamingAsset(for: item.uid)
             let newPlayer = AVPlayer(playerItem: AVPlayerItem(asset: streaming.asset))
             streamingAsset = streaming   // retain the resource loader for the player's lifetime
             player = newPlayer
+            observeFirstFrame(of: newPlayer)
             if isCurrent { newPlayer.play() }
         } catch {
             failed = true
         }
     }
 
+    /// A playback time that actually advances is the reliable "frames are on screen" signal — player/item
+    /// status flips to ready well before the first frame renders, which would flash black.
+    private func observeFirstFrame(of player: AVPlayer) {
+        timeObserverBox.remove()
+        timeObserverBox.observe(player: player, interval: CMTime(value: 1, timescale: 10)) { time in
+            guard !playbackStarted, time.seconds > 0.05, player.timeControlStatus == .playing else { return }
+            withAnimation(.easeOut(duration: 0.2)) { playbackStarted = true }
+            timeObserverBox.remove()
+        }
+    }
+
     private func teardown() {
+        timeObserverBox.remove()
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil
@@ -205,11 +295,42 @@ private struct MobileVideoPage: View {
     }
 }
 
+/// Live pinch-to-close state for the SwiftUI (video) page.
+private struct ViewerPinchState {
+    var isActive = false
+    var displayScale: CGFloat = 1
+    var anchor: UnitPoint = .center
+}
+
+/// Owns an `AVPlayer` periodic time-observer token — the token must be removed from the SAME player
+/// instance it was added to, which a plain `@State Any?` cannot guarantee across view updates.
+private final class VideoTimeObserverBox {
+    private var token: Any?
+    private weak var player: AVPlayer?
+
+    func observe(player: AVPlayer, interval: CMTime, handler: @escaping (CMTime) -> Void) {
+        remove()
+        self.player = player
+        token = player.addPeriodicTimeObserver(forInterval: interval, queue: .main, using: handler)
+    }
+
+    func remove() {
+        if let token, let player {
+            player.removeTimeObserver(token)
+        }
+        token = nil
+        player = nil
+    }
+}
+
 /// UIScrollView-backed zoomable image: pinch + double-tap to zoom, single-tap toggles chrome. At minimum zoom
-/// the scroll view does not pan, so the enclosing page TabView keeps its swipe.
+/// the scroll view does not pan, so the enclosing page TabView keeps its swipe — and a pinch-IN at minimum
+/// zoom hands the image to the shared pinch-to-close interaction (`ViewerPinchDismissPolicy`): it sticks to
+/// the fingers, springs back below the threshold, closes past it.
 private struct MobileZoomableImage: UIViewRepresentable {
     let image: UIImage
     let onSingleTap: () -> Void
+    let onCloseRequested: () -> Void
 
     func makeUIView(context: Context) -> UIScrollView {
         let scrollView = UIScrollView()
@@ -228,6 +349,7 @@ private struct MobileZoomableImage: UIViewRepresentable {
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         scrollView.addSubview(imageView)
         context.coordinator.imageView = imageView
+        context.coordinator.scrollView = scrollView
 
         let doubleTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleTap(_:)))
         doubleTap.numberOfTapsRequired = 2
@@ -238,25 +360,47 @@ private struct MobileZoomableImage: UIViewRepresentable {
         singleTap.require(toFail: doubleTap)
         scrollView.addGestureRecognizer(singleTap)
 
+        // Pinch-to-close rides alongside the scroll view's own zoom pinch and takes over only when the
+        // image is unzoomed and the fingers move inward (shared policy). It never blocks zooming.
+        let dismissPinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDismissPinch(_:)))
+        dismissPinch.delegate = context.coordinator
+        scrollView.addGestureRecognizer(dismissPinch)
+
         return scrollView
     }
 
     func updateUIView(_ scrollView: UIScrollView, context: Context) {
         context.coordinator.onSingleTap = onSingleTap
+        context.coordinator.onCloseRequested = onCloseRequested
         if context.coordinator.imageView?.image !== image {
             context.coordinator.imageView?.image = image
         }
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(onSingleTap: onSingleTap) }
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onSingleTap: onSingleTap, onCloseRequested: onCloseRequested)
+    }
 
-    final class Coordinator: NSObject, UIScrollViewDelegate {
+    final class Coordinator: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate {
         var imageView: UIImageView?
+        weak var scrollView: UIScrollView?
         var onSingleTap: () -> Void
+        var onCloseRequested: () -> Void
 
-        init(onSingleTap: @escaping () -> Void) { self.onSingleTap = onSingleTap }
+        private var dismissPinchActive = false
+        private var pinchStartCentroid: CGPoint = .zero
+
+        init(onSingleTap: @escaping () -> Void, onCloseRequested: @escaping () -> Void) {
+            self.onSingleTap = onSingleTap
+            self.onCloseRequested = onCloseRequested
+        }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
+        }
 
         @objc func handleSingleTap() { onSingleTap() }
 
@@ -270,6 +414,50 @@ private struct MobileZoomableImage: UIViewRepresentable {
                 let zoomRect = CGRect(x: point.x - side.width / 6, y: point.y - side.height / 6,
                                       width: side.width / 3, height: side.height / 3)
                 scrollView.zoom(to: zoomRect, animated: true)
+            }
+        }
+
+        @objc func handleDismissPinch(_ gesture: UIPinchGestureRecognizer) {
+            guard let scrollView, let container = scrollView.superview else { return }
+            switch gesture.state {
+            case .began, .changed:
+                if !dismissPinchActive {
+                    let isZoomedIn = scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
+                    guard ViewerPinchDismissPolicy.engages(gestureScale: gesture.scale, isZoomedIn: isZoomedIn)
+                    else { return }
+                    dismissPinchActive = true
+                    pinchStartCentroid = gesture.location(in: container)
+                    // Take the gesture over from the scroll view's bounce-zoom for its remainder.
+                    scrollView.pinchGestureRecognizer?.isEnabled = false
+                    scrollView.setZoomScale(scrollView.minimumZoomScale, animated: false)
+                }
+                let scale = ViewerPinchDismissPolicy.displayScale(gestureScale: gesture.scale)
+                let centroid = gesture.location(in: container)
+                let center = scrollView.center
+                // Keep the image point that was under the fingers under the fingers: scale about the view
+                // center, then translate so the engaged centroid tracks the live centroid.
+                let tx = centroid.x - center.x - scale * (pinchStartCentroid.x - center.x)
+                let ty = centroid.y - center.y - scale * (pinchStartCentroid.y - center.y)
+                scrollView.transform = CGAffineTransform(translationX: tx, y: ty).scaledBy(x: scale, y: scale)
+            case .ended, .cancelled, .failed:
+                guard dismissPinchActive else { return }
+                dismissPinchActive = false
+                scrollView.pinchGestureRecognizer?.isEnabled = true
+                if gesture.state == .ended, ViewerPinchDismissPolicy.shouldDismiss(releaseScale: gesture.scale) {
+                    onCloseRequested()
+                } else {
+                    UIView.animate(
+                        withDuration: ViewerPinchDismissPolicy.springBackDuration,
+                        delay: 0,
+                        usingSpringWithDamping: ViewerPinchDismissPolicy.springBackDamping,
+                        initialSpringVelocity: 0,
+                        options: [.allowUserInteraction, .beginFromCurrentState]
+                    ) {
+                        scrollView.transform = .identity
+                    }
+                }
+            default:
+                break
             }
         }
     }

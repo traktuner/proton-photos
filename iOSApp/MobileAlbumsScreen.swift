@@ -15,7 +15,7 @@ struct MobileAlbumsScreen: View {
     var body: some View {
         NavigationStack {
             content
-                .navigationTitle("Albums")
+                .navigationTitle(String(localized: "tab.albums"))
                 .task(id: model.backend == nil) { await load() }
                 .refreshable { await load() }
         }
@@ -28,20 +28,20 @@ struct MobileAlbumsScreen: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message) where albums.isEmpty:
             ContentUnavailableView {
-                Label("Couldn't load albums", systemImage: "exclamationmark.icloud")
+                Label("albums.load_failed", systemImage: "exclamationmark.icloud")
             } description: {
                 Text(message)
             } actions: {
-                Button("Try again") { Task { await load() } }
+                Button(String(localized: "action.try_again")) { Task { await load() } }
                     .buttonStyle(.borderedProminent)
                     .tint(ProtonColor.primary)
             }
         default:
             if albums.isEmpty {
                 ContentUnavailableView {
-                    Label("No albums", systemImage: "rectangle.stack")
+                    Label("albums.empty_title", systemImage: "rectangle.stack")
                 } description: {
-                    Text("Albums you create in \(ProductBrand.displayName) will appear here.")
+                    Text("albums.empty_message \(ProductBrand.displayName)")
                 }
             } else {
                 List(albums) { album in
@@ -82,7 +82,7 @@ private struct MobileAlbumRow: View {
                 Text(album.title)
                     .font(.body.weight(.medium))
                     .foregroundStyle(ProtonColor.textNorm)
-                Text("^[\(album.photoCount) photo](inflect: true)")
+                Text("albums.photo_count \(album.photoCount)")
                     .font(.caption)
                     .foregroundStyle(ProtonColor.textWeak)
             }
@@ -110,10 +110,10 @@ private struct MobileAlbumDetailScreen: View {
             case .loading:
                 ProgressView().controlSize(.large).tint(ProtonColor.primary)
             case .failed(let message):
-                ContentUnavailableView("Couldn't load album", systemImage: "exclamationmark.icloud", description: Text(message))
+                ContentUnavailableView(String(localized: "albums.detail_load_failed"), systemImage: "exclamationmark.icloud", description: Text(message))
             case .loaded:
                 if items.isEmpty {
-                    ContentUnavailableView("Empty album", systemImage: "rectangle.stack")
+                    ContentUnavailableView(String(localized: "albums.detail_empty"), systemImage: "rectangle.stack")
                 } else if let feed = model.thumbnailFeed {
                     UIKitTimelineGrid(items: items, thumbnailFeed: feed, onOpenPhoto: open)
                         .ignoresSafeArea(edges: .bottom)

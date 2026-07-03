@@ -34,7 +34,9 @@ public struct UIKitTimelineGridProfileAdapter {
             safeAreaInsets: safeAreaInsets,
             additionalInsets: additionalInsets
         )
-        return resolver.profile(for: TimelineGridViewport(layoutWidth: size.width, layoutHeight: size.height))
+        // UIKit surfaces are finger-driven → the touch profile ladders (tighter gaps, same level semantics).
+        let viewport = TimelineGridViewport(layoutWidth: size.width, layoutHeight: size.height, inputAffinity: .touch)
+        return resolver.profile(for: viewport)
     }
 
     public static func layoutSize(

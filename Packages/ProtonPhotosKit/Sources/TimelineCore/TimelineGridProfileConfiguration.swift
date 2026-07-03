@@ -24,6 +24,7 @@ package enum TimelineGridProfileConfigurationError: Error, CustomStringConvertib
     case unknownSelectionProfileID(String)
     case invalidSelectionWidth(profileID: String, field: String, value: CGFloat)
     case invalidSelectionRange(profileID: String, min: CGFloat, max: CGFloat)
+    case invalidSelectionInputAffinity(profileID: String, value: String)
 
     package var description: String {
         switch self {
@@ -69,6 +70,8 @@ package enum TimelineGridProfileConfigurationError: Error, CustomStringConvertib
             return "grid profile selection rule for \(profileID) has invalid \(field) \(value)"
         case let .invalidSelectionRange(profileID, min, max):
             return "grid profile selection rule for \(profileID) has minLayoutWidth \(min) above maxLayoutWidth \(max)"
+        case let .invalidSelectionInputAffinity(profileID, value):
+            return "grid profile selection rule for \(profileID) has invalid inputAffinity \(value)"
         }
     }
 }
@@ -293,10 +296,17 @@ package struct TimelineGridProfileConfiguration: Equatable {
             if let min = dto.minLayoutWidth, let max = dto.maxLayoutWidth, min > max {
                 throw TimelineGridProfileConfigurationError.invalidSelectionRange(profileID: id, min: min, max: max)
             }
+            let inputAffinity = try dto.inputAffinity.map { raw -> TimelineGridInputAffinity in
+                guard let affinity = TimelineGridInputAffinity(rawValue: raw) else {
+                    throw TimelineGridProfileConfigurationError.invalidSelectionInputAffinity(profileID: id, value: raw)
+                }
+                return affinity
+            }
             return TimelineGridProfileSelectionRule(
                 profileID: id,
                 minLayoutWidth: dto.minLayoutWidth,
-                maxLayoutWidth: dto.maxLayoutWidth
+                maxLayoutWidth: dto.maxLayoutWidth,
+                inputAffinity: inputAffinity
             )
         }
     }
@@ -331,6 +341,7 @@ private struct SelectionRuleDTO: Decodable {
     let profileID: String
     let minLayoutWidth: CGFloat?
     let maxLayoutWidth: CGFloat?
+    let inputAffinity: String?
 }
 
 private struct ProfileDTO: Decodable {

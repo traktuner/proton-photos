@@ -7,6 +7,7 @@ import MetalGridComposeCore
 import MetalGridTextureCore
 import MetalGridTextureUIKitAdapter
 import MetalRenderingCore
+import os
 import PhotosCore
 import SwiftUI
 import TimelineCore
@@ -91,6 +92,15 @@ public final class UIKitTimelineGridHostView: UIView {
     /// cell resident or unfetchable), mirroring the macOS coordinator. Reset when a new non-empty UID set lands.
     private var firstContentReported = false
 
+    /// Coalesces every invalidation (scroll deltas, new items, layout, arrived thumbnails) into at most ONE
+    /// render per display-link tick. Rendering directly from scroll events acquires a drawable per touch delta —
+    /// the 3-deep CAMetalLayer pool exhausts within a frame and `nextDrawable()` then blocks the main thread,
+    /// which is exactly the scroll stutter this replaces. The pump also retries after a failed present, so a
+    /// transiently unavailable drawable (fresh mount, tab re-attach) can never strand a black grid until the
+    /// next scroll event.
+    private var framePump = GridFramePump()
+    private var perf = RenderPerfWindow()
+
     public private(set) var isMetal3Capable = false
 
     /// Called on the main actor the first time every visible cell is drawn for the current content — the shell's
@@ -151,17 +161,23 @@ public final class UIKitTimelineGridHostView: UIView {
             }
         }
         refreshContentSize()
-        renderNow()
+        requestRender()
     }
 
     public override func layoutSubviews() {
         super.layoutSubviews()
         metalView.frame = bounds
         scrollView.frame = bounds
+        applyContentInsets()
         metalView.updateDrawableSize()
         refreshTextureCacheIfNeeded()
         refreshContentSize()
-        renderNow()
+        requestRender()
+    }
+
+    public override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        setNeedsLayout()
     }
 
     public override func didMoveToWindow() {
@@ -171,7 +187,7 @@ public final class UIKitTimelineGridHostView: UIView {
             warmTask?.cancel()
         } else {
             metalView.updateDrawableSize()
-            renderNow()
+            requestRender()
         }
     }
 
@@ -232,6 +248,23 @@ public final class UIKitTimelineGridHostView: UIView {
         textureCache = UIKitMetalGridTextureCacheFactory.makeCache(device: device, policy: policy)
     }
 
+    /// Keeps the LAST row of content clear of the bottom bar / home indicator: the scroll surface extends
+    /// under the (translucent) bar for the full-bleed look, but the content range ends above it, so fully
+    /// scrolled to the newest photo every thumbnail of the final row stays visible and tappable. Safe-area
+    /// driven — tab bar, home indicator, orientation and iPad sidebar layouts all flow through the same inset.
+    private func applyContentInsets() {
+        let bottom = safeAreaInsets.bottom
+        if scrollView.contentInset.bottom != bottom {
+            scrollView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: bottom, right: 0)
+        }
+        scrollView.verticalScrollIndicatorInsets = UIEdgeInsets(top: safeAreaInsets.top, left: 0, bottom: bottom, right: 0)
+    }
+
+    /// The largest valid vertical content offset given the current content size and bottom inset.
+    private var maxContentOffsetY: CGFloat {
+        max(0, scrollView.contentSize.height - bounds.height + scrollView.contentInset.bottom)
+    }
+
     private func refreshContentSize() {
         let size = resolvedContentSize()
         scrollView.contentSize = size
@@ -246,7 +279,7 @@ public final class UIKitTimelineGridHostView: UIView {
               !itemUIDs.isEmpty
         else { return }
 
-        let bottomY = max(0, contentSize.height - bounds.height)
+        let bottomY = maxContentOffsetY
         isApplyingProgrammaticScroll = true
         scrollView.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)
         isApplyingProgrammaticScroll = false
@@ -266,15 +299,64 @@ public final class UIKitTimelineGridHostView: UIView {
         profile.clampLevel(interactiveLevel ?? levelOverride ?? profile.defaultLevel)
     }
 
-    private func renderNow() {
+    // MARK: - Coalesced render loop
+
+    /// Mark the on-screen state dirty and make sure the display link is ticking. All invalidations funnel
+    /// through here; actual drawing happens only in `tick`, at most once per vsync.
+    private func requestRender() {
+        guard isMetal3Capable else { return }
+        framePump.invalidate()
+        guard window != nil else { return }   // didMoveToWindow re-arms the loop on re-attach
+        if !displayLink.isRunning {
+            displayLink.start { [weak self] _ in
+                self?.tick()
+            }
+        }
+    }
+
+    private func tick() {
+        guard framePump.shouldTick else {
+            displayLink.stop()
+            return
+        }
+        let outcome = renderNow()
+        let keepTicking: Bool
+        switch outcome {
+        case .skippedNoSurface:
+            // Nothing drawable yet (zero bounds / no cache) — the event that changes that (layout,
+            // configure) re-requests a render, so don't spin.
+            keepTicking = framePump.completeTick(presented: true, hasPendingWork: false)
+        case .noDrawable:
+            // Transient drawable starvation — retry next tick so content can never strand off-screen.
+            keepTicking = framePump.completeTick(presented: false, hasPendingWork: false)
+        case let .drawn(hasPendingWork):
+            keepTicking = framePump.completeTick(presented: true, hasPendingWork: hasPendingWork)
+        }
+        var drawableFailed = false
+        if case .noDrawable = outcome { drawableFailed = true }
+        perf.noteTick(drawableFailed: drawableFailed)
+        if !keepTicking {
+            perf.flush(reason: "idle")
+            displayLink.stop()
+        }
+    }
+
+    private enum RenderOutcome {
+        case skippedNoSurface
+        case noDrawable
+        case drawn(hasPendingWork: Bool)
+    }
+
+    @discardableResult
+    private func renderNow() -> RenderOutcome {
         guard isMetal3Capable,
               bounds.width > 0,
               bounds.height > 0,
               let renderer,
               let textureCache,
-              let texturePolicy,
-              let target = MetalGridDrawableTarget(layer: metalView.metalLayer)
-        else { return }
+              let texturePolicy
+        else { return .skippedNoSurface }
+        guard let target = MetalGridDrawableTarget(layer: metalView.metalLayer) else { return .noDrawable }
 
         let viewportSize = bounds.size
         let profile = profileAdapter.profile(for: metalView)
@@ -305,7 +387,7 @@ public final class UIKitTimelineGridHostView: UIView {
         let ids = MetalGridFrameComposer.classifyVisibility(
             slots: renderSlots, flatUIDs: itemUIDs, viewportSize: viewportSize)
         let feed = thumbnailFeed
-        _ = MetalGridFrameComposer.stream(
+        let streamResult = MetalGridFrameComposer.stream(
             cache: textureCache,
             visibleIDs: ids.visible,
             overscanIDs: ids.overscan,
@@ -342,7 +424,10 @@ public final class UIKitTimelineGridHostView: UIView {
             }
         }
         scheduleWarmIfNeeded(missingVisible, pixelSize: uploadPixels)
-        updateDisplayLink(shouldRun: !missingVisible.isEmpty && !textureCache.residencySaturatedThisFrame)
+        let hasPendingWork = (!missingVisible.isEmpty && !textureCache.residencySaturatedThisFrame)
+            || streamResult.pendingVisibleQualityUpgrade
+        perf.noteDraw(visible: ids.visible.count, missing: missingVisible.count, cache: textureCache)
+        return .drawn(hasPendingWork: hasPendingWork)
     }
 
     /// The resolved grid geometry for the current viewport + active level, or nil when there is nothing to lay
@@ -377,8 +462,9 @@ public final class UIKitTimelineGridHostView: UIView {
             userHasScrolledTimeline = true
         case .changed:
             guard let startLevel = pinchStartLevel else { return }
-            // Pinch-out (scale > 1) → zoom in → fewer columns → LOWER level; each ~1.4× is one density step.
-            let steps = Int((log2(max(gesture.scale, 0.05)) / log2(1.4)).rounded())
+            // Pinch-out (scale > 1) → zoom in → fewer columns → LOWER level. The shared policy owns how much
+            // finger motion one density step costs (tested in GridCore) — the recognizer only reports scale.
+            let steps = GridPinchDensityPolicy.levelSteps(pinchScale: gesture.scale)
             let target = ctx.profile.clampLevel(startLevel - steps)
             guard target != ctx.level else { return }
             let focusViewportY = gesture.location(in: self).y
@@ -412,12 +498,11 @@ public final class UIKitTimelineGridHostView: UIView {
         interactiveLevel = targetLevel
         refreshContentSize()   // content size follows the new level; needsInitialNewestViewport is already spent
         if let anchoredY {
-            let maxY = max(0, scrollView.contentSize.height - bounds.height)
             isApplyingProgrammaticScroll = true
-            scrollView.setContentOffset(CGPoint(x: 0, y: min(max(anchoredY, 0), maxY)), animated: false)
+            scrollView.setContentOffset(CGPoint(x: 0, y: min(max(anchoredY, 0), maxContentOffsetY)), animated: false)
             isApplyingProgrammaticScroll = false
         }
-        renderNow()
+        requestRender()
     }
 
     private func newestFirst(_ uids: [PhotoUID]) -> [PhotoUID] {
@@ -436,18 +521,7 @@ public final class UIKitTimelineGridHostView: UIView {
         let requests = unique.map { ThumbnailRequest(uid: $0, pixelSize: pixelSize, cropMode: displayMode.rawValue) }
         warmTask = Task { [weak self, thumbnailFeed] in
             _ = await thumbnailFeed.warmDecoded(requests, priority: .visibleNow, limit: max(1, requests.count))
-            await MainActor.run { self?.renderNow() }
-        }
-    }
-
-    private func updateDisplayLink(shouldRun: Bool) {
-        if shouldRun {
-            guard !displayLink.isRunning else { return }
-            displayLink.start { [weak self] _ in
-                self?.renderNow()
-            }
-        } else {
-            displayLink.stop()
+            await MainActor.run { self?.requestRender() }
         }
     }
 }
@@ -458,7 +532,10 @@ extension UIKitTimelineGridHostView: UIScrollViewDelegate {
            scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating {
             userHasScrolledTimeline = true
         }
-        renderNow()
+        // Scroll deltas arrive faster than vsync — mark dirty only; the display link draws exactly once
+        // per frame with whatever offset is current by then.
+        perf.noteScrollEvent()
+        requestRender()
     }
 }
 
@@ -468,6 +545,75 @@ extension UIKitTimelineGridHostView: UIGestureRecognizerDelegate {
     public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                   shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         true
+    }
+}
+
+// MARK: - Low-noise render diagnostics
+
+/// One-second aggregation window for the render loop, logged at `.debug` (visible only with the category
+/// enabled — silent in normal use). One line per second while the loop runs answers the perf questions
+/// directly: how many input events were coalesced into how many draws, whether drawable acquisition ever
+/// failed, and what the streaming pipeline did (uploads / deferrals / residency).
+@MainActor
+private struct RenderPerfWindow {
+    private static let logger = Logger(subsystem: "me.protonphotos.ios", category: "MobileGridPerf")
+
+    private var windowStart: CFTimeInterval = 0
+    private var scrollEvents = 0
+    private var ticks = 0
+    private var draws = 0
+    private var drawableFailures = 0
+    private var uploads = 0
+    private var uploadMs: Double = 0
+    private var deferredUploads = 0
+    private var lastVisible = 0
+    private var lastMissing = 0
+    private var lastResidentBytes = 0
+
+    mutating func noteScrollEvent() {
+        scrollEvents += 1
+    }
+
+    mutating func noteDraw<ID>(visible: Int, missing: Int, cache: MetalGridTextureCache<ID>?) {
+        draws += 1
+        lastVisible = visible
+        lastMissing = missing
+        if let cache {
+            uploads += cache.uploadsThisFrame
+            uploadMs += cache.uploadMsThisFrame
+            deferredUploads += cache.deferredUploadsThisFrame
+            lastResidentBytes = cache.residentBytes
+        }
+    }
+
+    mutating func noteTick(drawableFailed: Bool) {
+        ticks += 1
+        if drawableFailed { drawableFailures += 1 }
+        let now = CACurrentMediaTime()
+        if windowStart == 0 { windowStart = now }
+        if now - windowStart >= 1.0 {
+            flush(reason: "window")
+            windowStart = now
+        }
+    }
+
+    mutating func flush(reason: String) {
+        guard ticks > 0 else { return }
+        let (t, d, s, f) = (ticks, draws, scrollEvents, drawableFailures)
+        let (u, um, du) = (uploads, String(format: "%.2f", uploadMs), deferredUploads)
+        let (vis, mis, mb) = (lastVisible, lastMissing, lastResidentBytes / 1_048_576)
+        Self.logger.debug("""
+        [MobileGridPerf] \(reason, privacy: .public) ticks=\(t) draws=\(d) scrollEvents=\(s) \
+        drawableFail=\(f) uploads=\(u) uploadMs=\(um, privacy: .public) deferred=\(du) \
+        visible=\(vis) missing=\(mis) residentMB=\(mb)
+        """)
+        scrollEvents = 0
+        ticks = 0
+        draws = 0
+        drawableFailures = 0
+        uploads = 0
+        uploadMs = 0
+        deferredUploads = 0
     }
 }
 #endif

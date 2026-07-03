@@ -20,9 +20,9 @@ struct MobileMapScreen: View {
             Group {
                 if model.locationIndex.coordinates.isEmpty {
                     ContentUnavailableView {
-                        Label("No places yet", systemImage: "mappin.slash")
+                        Label("map.empty_title", systemImage: "mappin.slash")
                     } description: {
-                        Text("Photos with location data appear here. If you just signed in, this can take a moment while your library is scanned.")
+                        Text("map.empty_message")
                     }
                 } else {
                     MobileLibraryMap(
@@ -34,7 +34,7 @@ struct MobileMapScreen: View {
                     .ignoresSafeArea(edges: .bottom)
                 }
             }
-            .navigationTitle("Map")
+            .navigationTitle(String(localized: "tab.map"))
             // Re-runs when the library finishes loading, so opening Map before the timeline is ready still starts
             // the crawl once items exist (the start is idempotent).
             .task(id: model.items.isEmpty) { model.startLocationCrawlIfNeeded() }

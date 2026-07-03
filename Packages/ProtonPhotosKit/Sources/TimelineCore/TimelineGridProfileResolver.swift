@@ -1,15 +1,29 @@
 import CoreGraphics
 import GridCore
 
+/// How the user manipulates the grid surface. This is a viewport *interaction fact* (fingers occlude and
+/// need tighter, denser ladders than a pointer), not a platform or device family — an adapter states how
+/// its surface is driven and the shared profile table decides what that means for the grid.
+package enum TimelineGridInputAffinity: String, Equatable, Sendable {
+    case pointer
+    case touch
+}
+
 /// The adapter-facing description of the grid surface available to the timeline.
 /// It deliberately describes viewport facts, not platform or device families.
 package struct TimelineGridViewport: Equatable, Sendable {
     package let layoutWidth: CGFloat
     package let layoutHeight: CGFloat
+    package let inputAffinity: TimelineGridInputAffinity
 
-    package init(layoutWidth: CGFloat, layoutHeight: CGFloat = 0) {
+    package init(
+        layoutWidth: CGFloat,
+        layoutHeight: CGFloat = 0,
+        inputAffinity: TimelineGridInputAffinity = .pointer
+    ) {
         self.layoutWidth = max(0, layoutWidth)
         self.layoutHeight = max(0, layoutHeight)
+        self.inputAffinity = inputAffinity
     }
 }
 
@@ -17,14 +31,23 @@ package struct TimelineGridProfileSelectionRule: Equatable, Sendable {
     package let profileID: String
     package let minLayoutWidth: CGFloat?
     package let maxLayoutWidth: CGFloat?
+    /// Restricts the rule to viewports driven by this input; `nil` matches any input.
+    package let inputAffinity: TimelineGridInputAffinity?
 
-    package init(profileID: String, minLayoutWidth: CGFloat?, maxLayoutWidth: CGFloat?) {
+    package init(
+        profileID: String,
+        minLayoutWidth: CGFloat?,
+        maxLayoutWidth: CGFloat?,
+        inputAffinity: TimelineGridInputAffinity? = nil
+    ) {
         self.profileID = profileID
         self.minLayoutWidth = minLayoutWidth
         self.maxLayoutWidth = maxLayoutWidth
+        self.inputAffinity = inputAffinity
     }
 
     package func matches(_ viewport: TimelineGridViewport) -> Bool {
+        if let inputAffinity, viewport.inputAffinity != inputAffinity { return false }
         if let minLayoutWidth, viewport.layoutWidth < minLayoutWidth { return false }
         if let maxLayoutWidth, viewport.layoutWidth > maxLayoutWidth { return false }
         return true

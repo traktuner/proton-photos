@@ -7,9 +7,7 @@ import UIKit
 /// `ProtonAuthController` — the same controller macOS drives — so auth behavior is not forked per platform.
 @MainActor
 final class MobileSessionModel: ObservableObject {
-    /// Natural-English copy is used directly as the localization key so the UI always shows real text (and a
-    /// String Catalog can translate it later) — never an internal identifier.
-    static let signInPrompt = String(localized: "Sign in with your Proton account to see your photos.")
+    static let signInPrompt = String(localized: "auth.sign_in_prompt")
 
     @Published private(set) var session: ProtonSession?
     @Published private(set) var isSigningIn = false
@@ -49,12 +47,12 @@ final class MobileSessionModel: ObservableObject {
             session = nil
             isSigningIn = false
             errorText = nil
-            statusText = String(localized: "Checking your session…")
+            statusText = String(localized: "auth.checking_session")
         case let .signedOut(error):
             session = nil
             isSigningIn = false
             errorText = error
-            statusText = error == nil ? Self.signInPrompt : String(localized: "Sign-in failed.")
+            statusText = error == nil ? Self.signInPrompt : String(localized: "auth.sign_in_failed")
         case let .authenticating(progress):
             session = nil
             isSigningIn = true
@@ -64,15 +62,15 @@ final class MobileSessionModel: ObservableObject {
             self.session = session
             isSigningIn = false
             errorText = nil
-            statusText = String(localized: "Signed in.")
+            statusText = String(localized: "auth.signed_in")
         }
     }
 
     private static func label(for progress: ProtonForkAuthenticator.Progress) -> String {
         switch progress {
-        case .requestingLink: String(localized: "Requesting a sign-in link…")
-        case .waitingForBrowser: String(localized: "Complete sign-in in Safari…")
-        case .finalizing: String(localized: "Finalizing your session…")
+        case .requestingLink: String(localized: "auth.requesting_link")
+        case .waitingForBrowser: String(localized: "auth.waiting_for_browser")
+        case .finalizing: String(localized: "auth.finalizing")
         }
     }
 }

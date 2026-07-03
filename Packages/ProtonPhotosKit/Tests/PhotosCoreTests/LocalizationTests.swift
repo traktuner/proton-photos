@@ -17,6 +17,7 @@ final class LocalizationTests: XCTestCase {
         return url
     }
     private var appCatalog: URL { repoRoot.appendingPathComponent("App/Localizable.xcstrings") }
+    private var mobileCatalog: URL { repoRoot.appendingPathComponent("iOSApp/Localizable.xcstrings") }
     private var packageCatalog: URL {
         repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotosCore/Resources/Localizable.xcstrings")
     }
@@ -66,6 +67,7 @@ final class LocalizationTests: XCTestCase {
 
     func testSourceLanguageIsEnglish() throws {
         XCTAssertEqual(try loadCatalog(appCatalog).sourceLanguage, "en")
+        XCTAssertEqual(try loadCatalog(mobileCatalog).sourceLanguage, "en")
         XCTAssertEqual(try loadCatalog(packageCatalog).sourceLanguage, "en")
     }
 
@@ -85,6 +87,20 @@ final class LocalizationTests: XCTestCase {
         }
     }
 
+    func testRepresentativeMobileKeysHaveEnglishAndGerman() throws {
+        let cov = try loadCatalog(mobileCatalog).coverage
+        let reps = [
+            "tab.photos", "loading.library_title", "loading.preparing_count %lld",
+            "empty.message %@", "settings.sign_out_confirm %@", "albums.photo_count %lld",
+            "map.empty_message", "auth.sign_in_prompt", "device.requires_metal3 %@",
+        ]
+        for key in reps {
+            let langs = cov[key] ?? []
+            XCTAssertTrue(langs.contains("en"), "Mobile catalog missing English for \(key)")
+            XCTAssertTrue(langs.contains("de"), "Mobile catalog missing German for \(key)")
+        }
+    }
+
     func testRepresentativePackageKeysHaveEnglishAndGerman() throws {
         let cov = try loadCatalog(packageCatalog).coverage
         let reps = [
@@ -101,7 +117,7 @@ final class LocalizationTests: XCTestCase {
     // MARK: Full coverage - every key carries both languages (no half-translated entries)
 
     func testEveryKeyHasEnglishAndGerman() throws {
-        for (name, url) in [("App", appCatalog), ("Package", packageCatalog)] {
+        for (name, url) in [("App", appCatalog), ("Mobile", mobileCatalog), ("Package", packageCatalog)] {
             let cov = try loadCatalog(url).coverage
             XCTAssertFalse(cov.isEmpty, "\(name) catalog is empty")
             for (key, langs) in cov {
@@ -168,6 +184,7 @@ final class LocalizationTests: XCTestCase {
         ]
         let roots = [
             repoRoot.appendingPathComponent("App"),
+            repoRoot.appendingPathComponent("iOSApp"),
             repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources"),
         ]
         let fm = FileManager.default
