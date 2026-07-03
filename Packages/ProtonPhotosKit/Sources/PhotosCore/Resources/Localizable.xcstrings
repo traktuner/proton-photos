@@ -1,6 +1,24 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "brand.product_name": {
+      "extractionState": "manual",
+      "comment": "Visible product name. Keep as a single key so rebranding is one catalog edit plus bundle metadata.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proton Photos"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proton Photos"
+          }
+        }
+      }
+    },
     "action.cancel": {
       "extractionState": "manual",
       "localizations": {

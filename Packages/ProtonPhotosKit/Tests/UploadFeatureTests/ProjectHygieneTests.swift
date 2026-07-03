@@ -257,6 +257,69 @@ final class ProjectHygieneTests: XCTestCase {
         }
     }
 
+    func testPlatformAppsShipPrivacyManifestsForRequiredReasonAPIs() throws {
+        for relativePath in ["App/PrivacyInfo.xcprivacy", "iOSApp/PrivacyInfo.xcprivacy"] {
+            let url = repoRoot.appendingPathComponent(relativePath)
+            let data = try Data(contentsOf: url)
+            let plist = try XCTUnwrap(
+                PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+                "\(relativePath) must be a dictionary plist"
+            )
+
+            XCTAssertEqual(plist["NSPrivacyTracking"] as? Bool, false, "\(relativePath) must not declare tracking")
+            XCTAssertEqual((plist["NSPrivacyCollectedDataTypes"] as? [Any])?.count, 0)
+
+            let apiTypes = try XCTUnwrap(
+                plist["NSPrivacyAccessedAPITypes"] as? [[String: Any]],
+                "\(relativePath) must declare required-reason API use"
+            )
+            let reasonsByType = Dictionary(
+                uniqueKeysWithValues: apiTypes.compactMap { entry -> (String, Set<String>)? in
+                    guard let type = entry["NSPrivacyAccessedAPIType"] as? String,
+                          let reasons = entry["NSPrivacyAccessedAPITypeReasons"] as? [String] else { return nil }
+                    return (type, Set(reasons))
+                }
+            )
+
+            XCTAssertEqual(reasonsByType["NSPrivacyAccessedAPICategoryUserDefaults"], ["CA92.1"])
+            XCTAssertEqual(reasonsByType["NSPrivacyAccessedAPICategoryDiskSpace"], ["E174.1"])
+            XCTAssertEqual(
+                reasonsByType["NSPrivacyAccessedAPICategoryFileTimestamp"],
+                ["C617.1", "3B52.1"]
+            )
+        }
+    }
+
+    func testVisibleProductNameStaysCentralized() throws {
+        let projectYML = try String(contentsOf: repoRoot.appendingPathComponent("project.yml"), encoding: .utf8)
+        XCTAssertTrue(projectYML.contains("APP_DISPLAY_NAME: \"Proton Photos\""))
+        XCTAssertTrue(projectYML.contains("INFOPLIST_KEY_CFBundleDisplayName: $(APP_DISPLAY_NAME)"))
+
+        let infoData = try Data(contentsOf: repoRoot.appendingPathComponent("iOSApp/Info.plist"))
+        let info = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: infoData, options: [], format: nil) as? [String: Any]
+        )
+        XCTAssertEqual(info["CFBundleDisplayName"] as? String, "$(APP_DISPLAY_NAME)")
+
+        let brandSource = try String(
+            contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotosCore/ProductBrand.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(brandSource.contains("brand.product_name"))
+
+        for relativePath in [
+            "App/Views/LoginView.swift",
+            "iOSApp/MobileLoginView.swift",
+            "iOSApp/MobileLibraryStateViews.swift",
+            "iOSApp/MobileAlbumsScreen.swift",
+            "iOSApp/MobileSettingsScreen.swift",
+            "iOSApp/ProtonPhotosMobileApp.swift"
+        ] {
+            let text = try String(contentsOf: repoRoot.appendingPathComponent(relativePath), encoding: .utf8)
+            XCTAssertTrue(text.contains("ProductBrand.displayName"), "\(relativePath) must use the centralized visible product name")
+        }
+    }
+
     func testDebugLogUsesSandboxCompatibleLibraryDirectory() {
         let debugLog = (try? String(
             contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DebugLog.swift"),

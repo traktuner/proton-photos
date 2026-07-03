@@ -1,4 +1,5 @@
 import DesignSystemCore
+import PhotosCore
 import SwiftUI
 
 struct MobileLoginView: View {
@@ -13,7 +14,7 @@ struct MobileLoginView: View {
                 .foregroundStyle(ProtonColor.primary)
 
             VStack(spacing: 8) {
-                Text("Proton Photos")
+                Text(ProductBrand.displayName)
                     .font(.largeTitle.weight(.bold))
                     .foregroundStyle(ProtonColor.textNorm)
                 Text(sessionModel.statusText)

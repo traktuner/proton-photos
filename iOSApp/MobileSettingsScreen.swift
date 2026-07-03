@@ -1,4 +1,5 @@
 import DesignSystemCore
+import PhotosCore
 import SwiftUI
 
 /// Account & settings tab. Deliberately minimal for this shell: it surfaces the library size and the sign-out
@@ -28,7 +29,7 @@ struct MobileSettingsScreen: View {
                 }
             }
             .navigationTitle("Settings")
-            .confirmationDialog("Sign out of Proton Photos?", isPresented: $confirmSignOut, titleVisibility: .visible) {
+            .confirmationDialog("Sign out of \(ProductBrand.displayName)?", isPresented: $confirmSignOut, titleVisibility: .visible) {
                 Button("Sign out", role: .destructive) { sessionModel.signOut() }
                 Button("Cancel", role: .cancel) {}
             }

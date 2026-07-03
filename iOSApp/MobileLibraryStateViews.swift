@@ -1,4 +1,5 @@
 import DesignSystemCore
+import PhotosCore
 import SwiftUI
 import TimelineCore
 
@@ -56,7 +57,7 @@ struct MobileEmptyLibraryView: View {
         ContentUnavailableView {
             Label("No photos yet", systemImage: "photo.on.rectangle.angled")
         } description: {
-            Text("Photos you back up to Proton Photos will appear here.")
+            Text("Photos you back up to \(ProductBrand.displayName) will appear here.")
         }
     }
 }

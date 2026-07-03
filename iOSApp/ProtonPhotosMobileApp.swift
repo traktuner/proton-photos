@@ -1,5 +1,6 @@
 import DesignSystemCore
 import Metal
+import PhotosCore
 import ProtonCoreCryptoPatchedGoImplementation
 import SwiftUI
 import TimelineUIKitAdapter
@@ -106,7 +107,7 @@ enum MobileMetal3Runtime {
         }
         guard UIKitTimelineMetalCapability.supportsTimelineGrid(device: device) else {
             return Status(isSupported: false,
-                          message: String(localized: "Proton Photos requires a Metal 3-capable Apple GPU."))
+                          message: String(localized: "\(ProductBrand.displayName) requires a Metal 3-capable Apple GPU."))
         }
         return Status(isSupported: true, message: device.name)
     }

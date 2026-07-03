@@ -20,4 +20,5 @@ Archiv.zip
 
 # SwiftPM
 Packages/*/.build/
+Packages/*/.swiftpm/xcode/xcuserdata/
 *.resolved

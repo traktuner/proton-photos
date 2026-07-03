@@ -1,5 +1,6 @@
 import SwiftUI
 import DesignSystem
+import PhotosCore
 
 struct LoginView: View {
     let model: AppModel
@@ -31,7 +32,7 @@ struct LoginView: View {
                     .font(.system(size: 38, weight: .medium))
                     .foregroundStyle(ProtonColor.primary)
             }
-            Text("Proton Photos")
+            Text(ProductBrand.displayName)
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(ProtonColor.textNorm)
             Text("login.tagline")

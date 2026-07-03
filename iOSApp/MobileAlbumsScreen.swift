@@ -41,7 +41,7 @@ struct MobileAlbumsScreen: View {
                 ContentUnavailableView {
                     Label("No albums", systemImage: "rectangle.stack")
                 } description: {
-                    Text("Albums you create in Proton Photos will appear here.")
+                    Text("Albums you create in \(ProductBrand.displayName) will appear here.")
                 }
             } else {
                 List(albums) { album in
