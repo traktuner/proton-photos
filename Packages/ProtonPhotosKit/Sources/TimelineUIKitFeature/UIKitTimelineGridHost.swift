@@ -365,6 +365,13 @@ public final class UIKitTimelineGridHostView: UIView {
         profile.clampLevel(interactiveLevel ?? levelOverride ?? profile.defaultLevel)
     }
 
+    /// True while the user is actively scrolling, decelerating, or pinching. The shared soft→sharp upgrade path
+    /// is gated OFF during interaction (so it never churns uploads and drops frames mid-gesture) and back ON once
+    /// the grid settles — the mobile-appropriate scheduling of the SAME shared composer upgrade, not a fork.
+    private var isInteracting: Bool {
+        scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating || pinchStartLevel != nil
+    }
+
     /// The grid profile for the current layout size, rebuilt only when that size changes (never mid-scroll).
     /// The profile is a pure function of the usable layout size, so caching on it keeps a plain scroll frame
     /// from re-resolving the density ladder every vsync.
@@ -490,13 +497,17 @@ public final class UIKitTimelineGridHostView: UIView {
         let ids = MetalGridFrameComposer.classifyVisibility(
             slots: renderSlots, flatUIDs: itemUIDs, viewportSize: viewportSize)
         let feed = thumbnailFeed
+        // Enable the shared soft→sharp upgrade ONLY when settled: a dense-grid tile uploaded at a tiny slot size
+        // must grow to the larger level's crisp size after a zoom, but never churn uploads mid-scroll/pinch. The
+        // old soft texture keeps drawing until the sharp one is ready (upgrade-in-place), so there is no flash.
+        let allowUpgrade = !isInteracting
         let streamResult = MetalGridFrameComposer.stream(
             cache: textureCache,
             visibleIDs: ids.visible,
             overscanIDs: ids.overscan,
             pinOverscan: true,
             effectiveUploadPixels: uploadPixels,
-            allowUpgrade: false,
+            allowUpgrade: allowUpgrade,
             hasImage: { feed?.memoryCGImage(for: $0) != nil },
             canRetry: { !(feed?.isKnownUnfetchable($0) ?? false) },
             provideImage: { feed?.memoryCGImage(for: $0) }
@@ -526,16 +537,23 @@ public final class UIKitTimelineGridHostView: UIView {
                 DispatchQueue.main.async { onFirstContentReady() }
             }
         }
-        scheduleWarmIfNeeded(missingVisible, pixelSize: uploadPixels)
+        // Warm the still-missing visible tiles (reliability) AND the composer's warm list, which — when settled —
+        // adds the sources of undersized resident textures whose RAM decode was evicted, so the upgrade can
+        // re-decode and sharpen instead of the loop spinning on a pending upgrade it can never satisfy. Mirrors
+        // the macOS host, which warms `result.warm`.
+        scheduleWarmIfNeeded(warmUnion(missingVisible, streamResult.warm), pixelSize: uploadPixels)
         // Keep ticking ONLY for work the render loop can actually make progress on this vsync: a visible tile
         // already decoded in RAM but held back by the per-frame upload budget (`uploadPending`), a soft→sharp
         // upgrade in flight, or a warm pass running. A visible tile that is still missing with NO RAM image is
         // waiting on the network/disk crawl — the feed's arrival wake (`handleImagesAvailable`) re-arms the loop
         // when its bytes land, so we idle through that wait instead of spinning full frames the whole time.
         let uploadPending = missingVisible.contains { feed?.memoryCGImage(for: $0) != nil }
+        // Residency saturation means neither a deferred upload nor a deferred upgrade can make progress until the
+        // streaming window changes (scroll/zoom, which re-arm on their own), so both are gated on it — matching
+        // the macOS coordinator and avoiding a spin on placeholders that cannot fill this frame.
+        let canMakeProgress = !textureCache.residencySaturatedThisFrame
         let hasPendingWork = warmInFlight
-            || (uploadPending && !textureCache.residencySaturatedThisFrame)
-            || streamResult.pendingVisibleQualityUpgrade
+            || ((uploadPending || streamResult.pendingVisibleQualityUpgrade) && canMakeProgress)
         perf.noteDraw(visible: ids.visible.count, missing: missingVisible.count, cache: textureCache)
         return .drawn(hasPendingWork: hasPendingWork)
     }
@@ -591,6 +609,8 @@ public final class UIKitTimelineGridHostView: UIView {
             )
         case .ended, .cancelled, .failed:
             pinchStartLevel = nil
+            // Settled at the new density → run an upgrade frame so the carried-over soft tiles sharpen.
+            requestRender()
         default:
             break
         }
@@ -623,6 +643,17 @@ public final class UIKitTimelineGridHostView: UIView {
         uids.sorted { lhs, rhs in
             (itemIndexByUID[lhs] ?? -1) > (itemIndexByUID[rhs] ?? -1)
         }
+    }
+
+    /// The still-missing visible tiles (newest-first, reliability-critical order) followed by any additional warm
+    /// UIDs the composer requested (upgrade re-decode sources), de-duplicated. A no-op-ish superset when settled
+    /// is off (the composer's warm list is then just the missing tiles).
+    private func warmUnion(_ missing: [PhotoUID], _ streamWarm: [PhotoUID]) -> [PhotoUID] {
+        guard !streamWarm.isEmpty else { return missing }
+        var out = missing
+        var seen = Set(missing)
+        for uid in streamWarm where seen.insert(uid).inserted { out.append(uid) }
+        return out
     }
 
     /// The shared selection decorations (blue outline + checkmark badge) for the current frame, or nil outside
@@ -690,6 +721,21 @@ extension UIKitTimelineGridHostView: UIScrollViewDelegate {
         perf.noteScrollEvent()
         requestRender()
     }
+
+    // Re-arm a render the moment the grid SETTLES (drag ended without deceleration, deceleration finished, or a
+    // programmatic scroll animation completed). `renderNow` then runs a frame with `isInteracting == false`, so
+    // the shared soft→sharp upgrade path (gated off during the gesture) runs and undersized visible tiles sharpen.
+    public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { requestRender() }
+    }
+
+    public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        requestRender()
+    }
+
+    public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        requestRender()
+    }
 }
 
 extension UIKitTimelineGridHostView: UIGestureRecognizerDelegate {
@@ -703,10 +749,11 @@ extension UIKitTimelineGridHostView: UIGestureRecognizerDelegate {
 
 // MARK: - Low-noise render diagnostics
 
-/// One-second aggregation window for the render loop, logged at `.debug` (visible only with the category
-/// enabled — silent in normal use). One line per second while the loop runs answers the perf questions
-/// directly: how many input events were coalesced into how many draws, whether drawable acquisition ever
-/// failed, and what the streaming pipeline did (uploads / deferrals / residency).
+/// One-second aggregation window for the render loop, logged at `.notice` so a plain `log stream` capture (no
+/// `--level debug`) separates render/upload/upgrade/warm work — one concise line per second WHILE the loop runs,
+/// silent when idle. It answers the perf questions directly: how many input events were coalesced into how many
+/// draws, whether drawable acquisition ever failed, and what the streaming pipeline did (uploads / deferrals /
+/// in-place quality upgrades / residency).
 @MainActor
 private struct RenderPerfWindow {
     private static let logger = Logger(subsystem: "me.protonphotos.ios", category: "MobileGridPerf")
@@ -719,6 +766,7 @@ private struct RenderPerfWindow {
     private var uploads = 0
     private var uploadMs: Double = 0
     private var deferredUploads = 0
+    private var upgrades = 0
     private var lastVisible = 0
     private var lastMissing = 0
     private var lastResidentBytes = 0
@@ -735,6 +783,7 @@ private struct RenderPerfWindow {
             uploads += cache.uploadsThisFrame
             uploadMs += cache.uploadMsThisFrame
             deferredUploads += cache.deferredUploadsThisFrame
+            upgrades += cache.upgradesThisFrame
             lastResidentBytes = cache.residentBytes
         }
     }
@@ -753,11 +802,11 @@ private struct RenderPerfWindow {
     mutating func flush(reason: String) {
         guard ticks > 0 else { return }
         let (t, d, s, f) = (ticks, draws, scrollEvents, drawableFailures)
-        let (u, um, du) = (uploads, String(format: "%.2f", uploadMs), deferredUploads)
+        let (u, um, du, up) = (uploads, String(format: "%.2f", uploadMs), deferredUploads, upgrades)
         let (vis, mis, mb) = (lastVisible, lastMissing, lastResidentBytes / 1_048_576)
-        Self.logger.debug("""
+        Self.logger.notice("""
         [MobileGridPerf] \(reason, privacy: .public) ticks=\(t) draws=\(d) scrollEvents=\(s) \
-        drawableFail=\(f) uploads=\(u) uploadMs=\(um, privacy: .public) deferred=\(du) \
+        drawableFail=\(f) uploads=\(u) uploadMs=\(um, privacy: .public) deferred=\(du) upgrades=\(up) \
         visible=\(vis) missing=\(mis) residentMB=\(mb)
         """)
         scrollEvents = 0
@@ -767,6 +816,7 @@ private struct RenderPerfWindow {
         uploads = 0
         uploadMs = 0
         deferredUploads = 0
+        upgrades = 0
     }
 }
 #endif

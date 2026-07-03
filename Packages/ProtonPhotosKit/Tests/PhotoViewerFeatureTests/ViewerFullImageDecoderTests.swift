@@ -19,6 +19,26 @@ final class ViewerFullImageDecoderTests: XCTestCase {
         XCTAssertNil(ViewerFullImageDecoder.decodeCGImage(Data("not image data".utf8)))
     }
 
+    func testBoundedDecodeCapsLongestSideAndNeverUpscales() throws {
+        let data = try pngData(width: 200, height: 100)   // 200×100 original
+
+        // A cap below the original downsamples proportionally (longest side == cap).
+        let bounded = try XCTUnwrap(ViewerFullImageDecoder.decodeCGImage(data, maxPixelSize: 50))
+        XCTAssertEqual(max(bounded.width, bounded.height), 50)
+        XCTAssertLessThanOrEqual(bounded.width, 50)
+        XCTAssertLessThanOrEqual(bounded.height, 50)
+
+        // A cap ABOVE the original never upscales — full resolution is preserved, not enlarged.
+        let notUpscaled = try XCTUnwrap(ViewerFullImageDecoder.decodeCGImage(data, maxPixelSize: 4096))
+        XCTAssertEqual(notUpscaled.width, 200)
+        XCTAssertEqual(notUpscaled.height, 100)
+
+        // nil cap == full resolution (the zoom/export path is unchanged).
+        let full = try XCTUnwrap(ViewerFullImageDecoder.decodeCGImage(data))
+        XCTAssertEqual(full.width, 200)
+        XCTAssertEqual(full.height, 100)
+    }
+
     private func pngData(width: Int, height: Int) throws -> Data {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         var pixels = [UInt8](repeating: 0, count: width * height * 4)

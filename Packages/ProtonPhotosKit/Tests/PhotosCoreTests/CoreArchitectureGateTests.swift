@@ -1644,7 +1644,9 @@ final class CoreArchitectureGateTests: XCTestCase {
                 "#if canImport(UIKit)",
                 "public enum UIKitViewerImageAdapter",
                 "UIImage(cgImage: cgImage",
-                "ViewerFullImageDecoder.decodeCGImage(data)"
+                // Prefix (no closing paren) so the adapter may pass the optional bounded `maxPixelSize` argument
+                // while the gate still proves it stays core-backed — decoding via the shared `ViewerFullImageDecoder`.
+                "ViewerFullImageDecoder.decodeCGImage(data"
             ] where !source.contains(symbol) {
                 violations.append("PhotoViewerUIKitAdapter/UIKitViewerImageAdapter.swift: missing \(symbol)")
             }

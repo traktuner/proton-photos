@@ -67,7 +67,7 @@ struct MobileCollectionsScreen: View {
             }
         default:
             if albums.isEmpty {
-                Text("collections.empty_albums").foregroundStyle(ProtonColor.textWeak)
+                Text("collections.empty_albums \(ProductBrand.displayName)").foregroundStyle(ProtonColor.textWeak)
             } else {
                 ForEach(albums) { album in
                     NavigationLink {

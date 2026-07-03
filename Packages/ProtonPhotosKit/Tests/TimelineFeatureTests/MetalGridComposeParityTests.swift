@@ -94,6 +94,59 @@ import PhotosCore
         #expect(cache.effectiveMaxTexturePixels == 64)
     }
 
+    // MARK: - Soft→sharp upgrade parity (the iOS regression: it must NOT keep low-res textures after a zoom)
+
+    @Test func streamUpgradesUndersizedResidentOnlyWhenAllowUpgrade() {
+        guard let cache = makeCache(), let image = makeImage(side: 64) else { return }
+        let a = uid("a")
+        let ram: [PhotoUID: CGImage] = [a: image]
+        func run(effective: Int, allowUpgrade: Bool) -> MetalGridFrameComposer.StreamResult<PhotoUID> {
+            MetalGridFrameComposer.stream(
+                cache: cache, visibleIDs: [a], overscanIDs: [],
+                pinOverscan: true, effectiveUploadPixels: effective, allowUpgrade: allowUpgrade,
+                hasImage: { ram[$0] != nil }, canRetry: { _ in true }, provideImage: { ram[$0] })
+        }
+
+        // Dense level: uploaded small.
+        _ = run(effective: 32, allowUpgrade: false)
+        #expect(cache.texture(for: a).width == 32)
+
+        // Zoom to a larger layout but STILL interacting (allowUpgrade:false) → no upgrade, no churn.
+        let interacting = run(effective: 64, allowUpgrade: false)
+        #expect(cache.texture(for: a).width == 32)
+        #expect(cache.upgradesThisFrame == 0)
+        #expect(!interacting.pendingVisibleQualityUpgrade)
+
+        // Settled (allowUpgrade:true) with the RAM source present → sharpen IN PLACE to the larger cap.
+        _ = run(effective: 64, allowUpgrade: true)
+        #expect(cache.texture(for: a).width == 64)
+        #expect(cache.upgradesThisFrame == 1)
+        #expect(cache.residentCount == 1)   // upgraded in place, no extra resident
+    }
+
+    @Test func streamRequestsWarmAndSignalsPendingWhenUpgradeSourceEvicted() {
+        guard let cache = makeCache(), let image = makeImage(side: 64) else { return }
+        let a = uid("a")
+
+        // Upload small with the source present.
+        _ = MetalGridFrameComposer.stream(
+            cache: cache, visibleIDs: [a], overscanIDs: [],
+            pinOverscan: true, effectiveUploadPixels: 32, allowUpgrade: false,
+            hasImage: { _ in true }, canRetry: { _ in true }, provideImage: { _ in image })
+        #expect(cache.texture(for: a).width == 32)
+
+        // Settled at a larger cap but the RAM source was EVICTED (hasImage:false): the composer cannot upgrade in
+        // place, so it must request the source in `warm` and signal a pending upgrade — the host then re-warms and
+        // keeps ticking until it sharpens, never a permanent low-res and never a silent forever-spin.
+        let settled = MetalGridFrameComposer.stream(
+            cache: cache, visibleIDs: [a], overscanIDs: [],
+            pinOverscan: true, effectiveUploadPixels: 64, allowUpgrade: true,
+            hasImage: { _ in false }, canRetry: { _ in true }, provideImage: { _ in nil })
+        #expect(cache.texture(for: a).width == 32)          // old soft texture still on screen (no placeholder gap)
+        #expect(settled.warm.contains(a))                   // source requested for re-decode
+        #expect(settled.pendingVisibleQualityUpgrade)       // host keeps ticking until it sharpens
+    }
+
     @Test func streamPinOverscanFalseClampsPinnedToVisibleCount() {
         guard let cache = makeCache() else { return }
         let vis = [uid("v0"), uid("v1")]

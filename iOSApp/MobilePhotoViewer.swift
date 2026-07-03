@@ -18,12 +18,16 @@ struct MobilePhotoViewer: View {
     @Environment(\.dismiss) private var dismiss
     @State private var index: Int
     @State private var chromeVisible = true
+    /// Bounded, shared image loader for the pages (thumbnail → screen-bounded preview, off-main + cached).
+    @State private var imageStore: MobileViewerImageStore
 
     init(items: [PhotoItem], startIndex: Int, libraryModel: MobileLibraryModel) {
         self.items = items
         self.startIndex = startIndex
         self.libraryModel = libraryModel
         _index = State(initialValue: min(max(startIndex, 0), max(items.count - 1, 0)))
+        _imageStore = State(initialValue: MobileViewerImageStore(
+            feed: libraryModel.thumbnailFeed, media: libraryModel.backend))
     }
 
     var body: some View {
@@ -36,6 +40,7 @@ struct MobilePhotoViewer: View {
                         item: items[i],
                         isCurrent: i == index,
                         libraryModel: libraryModel,
+                        imageStore: imageStore,
                         onToggleChrome: { withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() } },
                         onCloseRequested: { dismiss() }
                     )
@@ -105,6 +110,7 @@ private struct MobileViewerPage: View {
     let item: PhotoItem
     let isCurrent: Bool
     let libraryModel: MobileLibraryModel
+    let imageStore: MobileViewerImageStore
     let onToggleChrome: () -> Void
     let onCloseRequested: () -> Void
 
@@ -119,7 +125,8 @@ private struct MobileViewerPage: View {
         } else {
             MobileImagePage(
                 item: item,
-                libraryModel: libraryModel,
+                isCurrent: isCurrent,
+                imageStore: imageStore,
                 onToggleChrome: onToggleChrome,
                 onCloseRequested: onCloseRequested
             )
@@ -127,15 +134,22 @@ private struct MobileViewerPage: View {
     }
 }
 
-/// Loads the placeholder thumbnail immediately, then the full-resolution original, and shows it zoomable.
+/// Staged, bounded page loading (thumbnail → screen-bounded preview): the grid thumbnail shows instantly, then —
+/// for the CURRENT page ONLY — a mid-size preview is fetched and decoded off-main to a screen-bounded size and
+/// swapped in. Swipe-preview neighbours never fetch/decode (no fan-out), and swiping away cancels an in-flight
+/// load (the `.task(id:)` re-runs on the isCurrent flip). No full-resolution decode just because a page appeared.
 private struct MobileImagePage: View {
     let item: PhotoItem
-    let libraryModel: MobileLibraryModel
+    let isCurrent: Bool
+    let imageStore: MobileViewerImageStore
     let onToggleChrome: () -> Void
     let onCloseRequested: () -> Void
 
+    @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
-    @State private var isLoadingFull = false
+    @State private var viewport: CGSize = .zero
+
+    private struct LoadToken: Equatable { let uid: PhotoUID; let current: Bool }
 
     var body: some View {
         ZStack {
@@ -145,25 +159,25 @@ private struct MobileImagePage: View {
                 ProgressView().tint(.white)
             }
         }
-        .task(id: item.uid) { await load() }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { viewport = $0 }
+        .task(id: LoadToken(uid: item.uid, current: isCurrent)) { await load() }
+        .onAppear { MobileViewerLog.logger.notice("[ViewerPerf] page appear uid=\(MobileViewerLog.short(item.uid), privacy: .public) current=\(isCurrent) kind=photo") }
+        .onDisappear { MobileViewerLog.logger.notice("[ViewerPerf] page disappear uid=\(MobileViewerLog.short(item.uid), privacy: .public)") }
     }
 
     private func load() async {
-        // Instant placeholder from the in-memory thumbnail cache (already decoded for the grid).
-        if image == nil, let thumb = libraryModel.thumbnailFeed?.memoryImage(for: item.uid) {
+        // 1. Instant thumbnail (already decoded for the grid) — never DOWNGRADE a page that already shows a preview.
+        if image == nil, let thumb = imageStore.thumbnail(for: item.uid) {
             image = thumb
+            MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=thumbnail")
         }
-        guard !isLoadingFull, let backend = libraryModel.backend else { return }
-        isLoadingFull = true
-        defer { isLoadingFull = false }
-        do {
-            let data = try await backend.originalData(for: item.uid)
-            if let full = UIKitViewerImageAdapter.image(from: data) {
-                image = full
-            }
-        } catch {
-            // Keep the thumbnail placeholder on failure — better than a blank page.
-        }
+        // 2. Screen-bounded preview — CURRENT page only (bounded window), so neighbours never fan out fetches/decodes.
+        guard ViewerImageLoadPolicy.shouldLoadDisplay(distanceFromCurrent: isCurrent ? 0 : 1) else { return }
+        let cap = ViewerImageLoadPolicy.displayMaxPixelSize(viewportPoints: viewport, scale: displayScale)
+        guard let display = await imageStore.displayImage(for: item.uid, maxPixelSize: cap) else { return }
+        guard !Task.isCancelled else { return }
+        image = display
+        MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=preview")
     }
 }
 
@@ -226,12 +240,18 @@ private struct MobileVideoPage: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
         .simultaneousGesture(pinchToCloseGesture)
         .simultaneousGesture(dragToDismissGesture)
-        .task(id: item.uid) { await prepare() }
+        .task(id: LoadToken(uid: item.uid, current: isCurrent)) { await prepare() }
         .onChange(of: isCurrent) { _, current in
             if current { player?.play() } else { player?.pause() }
         }
-        .onDisappear { teardown() }
+        .onAppear { MobileViewerLog.logger.notice("[ViewerPerf] page appear uid=\(MobileViewerLog.short(item.uid), privacy: .public) current=\(isCurrent) kind=video") }
+        .onDisappear {
+            MobileViewerLog.logger.notice("[ViewerPerf] page disappear uid=\(MobileViewerLog.short(item.uid), privacy: .public)")
+            teardown()
+        }
     }
+
+    private struct LoadToken: Equatable { let uid: PhotoUID; let current: Bool }
 
     /// One-finger drag-to-close: engages only on a clearly VERTICAL drag (shared policy), tracks the finger with a
     /// gentle shrink, and on release closes the viewer or springs back. Simultaneous, so the page TabView keeps its
@@ -298,12 +318,16 @@ private struct MobileVideoPage: View {
     }
 
     private func prepare() async {
-        guard player == nil, let backend = libraryModel.backend else { return }
+        // Poster (grid thumbnail) shows instantly on any page. The player + streaming resource loader are created
+        // ONLY for the current page — a swipe-preview neighbour never spins up an AVPlayer / network loader.
         if poster == nil {
             poster = libraryModel.thumbnailFeed?.memoryImage(for: item.uid)
         }
+        guard isCurrent, player == nil, let backend = libraryModel.backend else { return }
+        MobileViewerLog.logger.notice("[ViewerPerf] video prepare start uid=\(MobileViewerLog.short(item.uid), privacy: .public)")
         do {
             let streaming = try await backend.makeStreamingAsset(for: item.uid)
+            guard !Task.isCancelled else { return }   // swiped away before the asset resolved → don't attach a player
             let newPlayer = AVPlayer(playerItem: AVPlayerItem(asset: streaming.asset))
             streamingAsset = streaming   // retain the resource loader for the player's lifetime
             player = newPlayer
