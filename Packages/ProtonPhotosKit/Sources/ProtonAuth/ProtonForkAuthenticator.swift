@@ -45,7 +45,7 @@ public struct ProtonAPIConfig: Sendable {
 /// official Drive CLI uses. No password/2FA UI is needed: the user authenticates in their
 /// browser and the resulting child session is pushed back to us.
 public actor ProtonForkAuthenticator {
-    public enum Progress: Sendable {
+    public enum Progress: Sendable, Equatable {
         case requestingLink
         case waitingForBrowser
         case finalizing

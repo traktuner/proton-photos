@@ -140,4 +140,28 @@ final class ProjectHygieneTests: XCTestCase {
         let rebuild = (try? String(contentsOf: repoRoot.appendingPathComponent("scripts/rebuild.sh"), encoding: .utf8)) ?? ""
         XCTAssertTrue(rebuild.contains("verify-ios-app-shell.sh"), "rebuild.sh must run the iOS app shell gate")
     }
+
+    func testPlatformAppsUseSharedAuthLifecycleController() {
+        let appModel = (try? String(
+            contentsOf: repoRoot.appendingPathComponent("App/AppModel.swift"),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(appModel.contains("ProtonAuthController"), "macOS app must compose the shared auth lifecycle")
+        XCTAssertFalse(
+            appModel.contains("ProtonForkAuthenticator()"),
+            "macOS app must not instantiate the concrete fork authenticator directly"
+        )
+
+        for url in mobileAppSourceFiles() {
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            XCTAssertFalse(
+                text.contains("ProtonForkAuthenticator()"),
+                "\(url.lastPathComponent) must not instantiate the concrete fork authenticator directly"
+            )
+        }
+        let mobileShell = mobileAppSourceFiles()
+            .compactMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .joined(separator: "\n")
+        XCTAssertTrue(mobileShell.contains("ProtonAuthController"), "iOS app must compose the shared auth lifecycle")
+    }
 }

@@ -174,56 +174,58 @@ private final class MobileSessionModel: ObservableObject {
     @Published private(set) var statusText = "Sign in through Proton in Safari. The app stores only the resulting session in the iOS Keychain."
     @Published private(set) var errorText: String?
 
-    private let store = SessionKeychainStore()
+    private let authController = ProtonAuthController()
 
     var accountLabel: String {
         session?.uid ?? "Signed in"
     }
 
     init() {
-        session = store.load()
-        if session != nil {
-            statusText = "Signed in"
-        }
+        apply(authController.bootstrap())
     }
 
     func signIn() {
-        guard !isSigningIn else { return }
-        isSigningIn = true
-        errorText = nil
-        statusText = "Requesting sign-in link"
-
-        Task {
-            do {
-                let authenticator = ProtonForkAuthenticator()
-                let session = try await authenticator.authenticate(
-                    openURL: { url in
-                        Task { @MainActor in
-                            UIApplication.shared.open(url)
-                        }
-                    },
-                    onProgress: { [weak self] progress in
-                        Task { @MainActor in
-                            self?.statusText = Self.label(for: progress)
-                        }
-                    }
-                )
-                store.save(session)
-                self.session = session
-                statusText = "Signed in"
-            } catch {
-                errorText = error.localizedDescription
-                statusText = "Sign-in failed"
+        authController.signIn(
+            openURL: { url in
+                Task { @MainActor in
+                    UIApplication.shared.open(url)
+                }
+            },
+            onStateChange: { [weak self] state in
+                self?.apply(state)
             }
-            isSigningIn = false
-        }
+        )
     }
 
     func signOut() {
-        store.clear()
-        session = nil
-        statusText = "Sign in through Proton in Safari. The app stores only the resulting session in the iOS Keychain."
-        errorText = nil
+        apply(authController.signOut())
+    }
+
+    private func apply(_ state: ProtonAuthState) {
+        switch state {
+        case .checking:
+            session = nil
+            isSigningIn = false
+            errorText = nil
+            statusText = "Checking session"
+        case let .signedOut(error):
+            session = nil
+            isSigningIn = false
+            errorText = error
+            statusText = error == nil
+                ? "Sign in through Proton in Safari. The app stores only the resulting session in the iOS Keychain."
+                : "Sign-in failed"
+        case let .authenticating(progress):
+            session = nil
+            isSigningIn = true
+            errorText = nil
+            statusText = Self.label(for: progress)
+        case let .signedIn(session):
+            self.session = session
+            isSigningIn = false
+            errorText = nil
+            statusText = "Signed in"
+        }
     }
 
     private static func label(for progress: ProtonForkAuthenticator.Progress) -> String {

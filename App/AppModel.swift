@@ -58,54 +58,34 @@ final class AppModel {
     /// Called by the main UI once the timeline has settled (loaded / empty / failed) so the launch veil fades.
     func markLibraryReady() { libraryReady = true }
 
-    private let store = SessionKeychainStore()
-    private let authenticator = ProtonForkAuthenticator()
-    private var signInTask: Task<Void, Never>?
+    private let sessionStore: SessionKeychainStore
+    private let authController: ProtonAuthController
     private var backendTask: Task<Void, Never>?
 
     init() {
+        let store = SessionKeychainStore()
+        self.sessionStore = store
+        self.authController = ProtonAuthController(store: store)
         // Wire ProtonCore's CryptoGo to the patched GopenPGP implementation before any crypto runs.
         injectDefaultCryptoImplementation()
     }
 
     /// Restore a persisted session on launch.
     func bootstrap() {
-        if let session = store.load() {
-            // Re-save once under the current app signature. This migrates older debug Keychain items whose
-            // ACL was bound to a previous local build identity, without introducing any plaintext fallback.
-            store.save(session)
-            auth = .signedIn(session)
-            prepareBackend(session)
-        } else {
-            auth = .signedOut(error: nil)
-        }
+        apply(authController.bootstrap(), prepareBackendOnSignedIn: true)
     }
 
     func signIn() {
-        signInTask?.cancel()
-        auth = .authenticating(status: String(localized: "auth.requesting_signin_link"))
-        signInTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let session = try await authenticator.authenticate(
-                    openURL: { url in Task { @MainActor in NSWorkspace.shared.open(url) } },
-                    onProgress: { progress in Task { @MainActor [weak self] in self?.apply(progress) } }
-                )
-                store.save(session)
-                auth = .signedIn(session)
-                prepareBackend(session)
-            } catch is CancellationError {
-                auth = .signedOut(error: nil)
-            } catch {
-                auth = .signedOut(error: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+        authController.signIn(
+            openURL: { url in Task { @MainActor in NSWorkspace.shared.open(url) } },
+            onStateChange: { [weak self] state in
+                self?.apply(state, prepareBackendOnSignedIn: true)
             }
-        }
+        )
     }
 
     func cancelSignIn() {
-        signInTask?.cancel()
-        signInTask = nil
-        auth = .signedOut(error: nil)
+        apply(authController.cancelSignIn(), prepareBackendOnSignedIn: false)
     }
 
     func signOut() {
@@ -119,12 +99,11 @@ final class AppModel {
         // Settings "Delete Offline Cache" button is deliberately NARROWER (cached media only, keeps the key,
         // stays signed in) - do not converge the two.
         OfflineLibraryManager.shared.purgeOnSignOut()
-        if case .signedIn(let session) = auth {
+        if let session = authController.currentSession {
             AccountDataCache.clear(uid: session.uid)
             DriveSDKBridge.purgeMetadata(uid: session.uid)
         }
-        store.clear()
-        auth = .signedOut(error: nil)
+        apply(authController.signOut(), prepareBackendOnSignedIn: false)
     }
 
     func retryBackend() {
@@ -141,7 +120,7 @@ final class AppModel {
         backendTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let bridge = try await DriveSDKBridge(session: session, store: store)
+                let bridge = try await DriveSDKBridge(session: session, store: sessionStore)
                 SDKCapabilities.current.log()
                 facade = ProtonClientFacade.make(bridge: bridge)
                 backend = .ready(bridge)
@@ -157,11 +136,27 @@ final class AppModel {
         }
     }
 
-    private func apply(_ progress: ProtonForkAuthenticator.Progress) {
+    private func apply(_ state: ProtonAuthState, prepareBackendOnSignedIn: Bool) {
+        switch state {
+        case .checking:
+            auth = .checking
+        case let .signedOut(error):
+            auth = .signedOut(error: error)
+        case let .authenticating(progress):
+            auth = .authenticating(status: Self.localizedStatus(for: progress))
+        case let .signedIn(session):
+            auth = .signedIn(session)
+            if prepareBackendOnSignedIn {
+                prepareBackend(session)
+            }
+        }
+    }
+
+    private static func localizedStatus(for progress: ProtonForkAuthenticator.Progress) -> String {
         switch progress {
-        case .requestingLink: auth = .authenticating(status: String(localized: "auth.requesting_signin_link"))
-        case .waitingForBrowser: auth = .authenticating(status: String(localized: "auth.waiting_for_browser"))
-        case .finalizing: auth = .authenticating(status: String(localized: "auth.finishing_signin"))
+        case .requestingLink: String(localized: "auth.requesting_signin_link")
+        case .waitingForBrowser: String(localized: "auth.waiting_for_browser")
+        case .finalizing: String(localized: "auth.finishing_signin")
         }
     }
 }
