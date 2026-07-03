@@ -2026,6 +2026,7 @@ final class CoreArchitectureGateTests: XCTestCase {
                 "MetalRenderingCore",
                 "MetalGridTextureCore",
                 "MetalGridTextureUIKitAdapter",
+                "MetalGridComposeCore",
                 "MediaCacheUIKitAdapter",
             ]
             if dependencies != expected {
@@ -2051,6 +2052,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             "MetalRenderingCore",
             "MetalGridTextureCore",
             "MetalGridTextureUIKitAdapter",
+            "MetalGridComposeCore",
             "MediaCacheUIKitAdapter",
         ] where !imports.contains(required) {
             violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: missing import \(required)")
@@ -2079,7 +2081,11 @@ final class CoreArchitectureGateTests: XCTestCase {
             "SquareTileGridEngine",
             "UIKitMetalGridTextureCacheFactory.makeCache",
             "UIKitThumbnailFeed",
-            "GridTextureStreamingPolicy.window",
+            // The frame-composition sequence is single-sourced in MetalGridComposeCore: this host delegates
+            // classification, streaming (window/pin/upload/warm), and group building instead of owning them.
+            "MetalGridFrameComposer.classifyVisibility",
+            "MetalGridFrameComposer.stream(",
+            "MetalGridFrameComposer.buildGroups(",
             "MetalGridRenderer",
             "MetalGridDrawableTarget(layer:",
             "device.supportsFamily(.apple7)",
@@ -2098,8 +2104,12 @@ final class CoreArchitectureGateTests: XCTestCase {
             "TimelineViewModel",
             "MetalGridScrollHost",
             "ProtonDriveSDK",
+            // The host must not re-implement the frame-composition sequence it delegates to the composer.
+            "GridTextureStreamingPolicy.window",
+            "func buildGroups",
+            "func classifyUIDs",
         ] where contains(forbidden, in: code) {
-            violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: forbidden macOS/SDK reference \(forbidden)")
+            violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: forbidden macOS/SDK/duplicated-sequence reference \(forbidden)")
         }
 
         XCTAssertTrue(

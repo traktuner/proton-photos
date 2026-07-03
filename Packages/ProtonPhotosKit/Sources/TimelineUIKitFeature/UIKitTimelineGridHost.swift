@@ -3,6 +3,7 @@ import CoreGraphics
 import GridCore
 import MediaCacheUIKitAdapter
 import Metal
+import MetalGridComposeCore
 import MetalGridTextureCore
 import MetalGridTextureUIKitAdapter
 import MetalRenderingCore
@@ -61,6 +62,8 @@ public final class UIKitTimelineGridHostView: UIView {
     private var texturePolicy: UIKitMetalGridTexturePolicy?
     private var thumbnailFeed: UIKitThumbnailFeed?
     private var items: [PhotoItem] = []
+    /// Flat UID order for the current items, cached so the per-frame composer input never re-maps the library.
+    private var itemUIDs: [PhotoUID] = []
     private var levelOverride: Int?
     private var displayMode: TileContentDisplayMode = .squareFillCrop
     private var warmTask: Task<Void, Never>?
@@ -90,13 +93,15 @@ public final class UIKitTimelineGridHostView: UIView {
         level: Int? = nil,
         displayMode: TileContentDisplayMode = .squareFillCrop
     ) {
-        let oldUIDs = self.items.map(\.uid)
+        let newUIDs = items.map(\.uid)
+        let uidsChanged = itemUIDs != newUIDs
         self.items = items
+        self.itemUIDs = newUIDs
         self.thumbnailFeed = thumbnailFeed
         self.levelOverride = level
         self.displayMode = displayMode
-        if oldUIDs != items.map(\.uid) {
-            Task { await thumbnailFeed.startPrefetch(items.map(\.uid)) }
+        if uidsChanged {
+            Task { await thumbnailFeed.startPrefetch(newUIDs) }
             lastWarmIDs = []
         }
         refreshContentSize()
@@ -218,74 +223,43 @@ public final class UIKitTimelineGridHostView: UIView {
             floor: 64,
             cap: textureCache.maxTexturePixels
         )
-        textureCache.setEffectiveMaxTexturePixels(uploadPixels)
 
-        let ids = classifyUIDs(in: plan.visibleSlots, viewportSize: viewportSize)
-        let window = GridTextureStreamingPolicy.window(
+        // Same universal composition sequence the macOS host uses (MetalGridFrameComposer), so a
+        // streaming/rendering fix lands on both platforms at once. This host owns only the iOS plumbing:
+        // the CAMetalLayer drawable, the level-aware upload size, the CADisplayLink, and the warm pump.
+        let renderSlots = plan.visibleSlots.map {
+            GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect)
+        }
+        let ids = MetalGridFrameComposer.classifyVisibility(
+            slots: renderSlots, flatUIDs: itemUIDs, viewportSize: viewportSize)
+        let feed = thumbnailFeed
+        _ = MetalGridFrameComposer.stream(
+            cache: textureCache,
             visibleIDs: ids.visible,
             overscanIDs: ids.overscan,
-            maxPinned: textureCache.maxSafePinnedCount
+            pinOverscan: true,
+            effectiveUploadPixels: uploadPixels,
+            allowUpgrade: false,
+            hasImage: { feed?.memoryCGImage(for: $0) != nil },
+            canRetry: { !(feed?.isKnownUnfetchable($0) ?? false) },
+            provideImage: { feed?.memoryCGImage(for: $0) }
         )
-
-        textureCache.beginFrame(pinned: window.pinned)
-        if let thumbnailFeed {
-            textureCache.uploadVisible(wanted: window.priority) { uid in
-                thumbnailFeed.memoryCGImage(for: uid)
-            }
-        }
-
-        let groups = buildGroups(slots: viewportSlots(plan.visibleSlots, viewportSize: viewportSize), cache: textureCache)
+        let groups = MetalGridFrameComposer.buildGroups(
+            slots: MetalGridFrameComposer.viewportDrawSlots(renderSlots, viewportSize: viewportSize),
+            flatUIDs: itemUIDs,
+            cache: textureCache,
+            displayMode: displayMode,
+            cornerRadius: GridVisualConstants.thumbnailCornerRadius,
+            decorations: nil
+        ).groups
         textureCache.evictToBudget()
         renderer.render(to: target, viewportSize: viewportSize, groups: groups)
 
         let missingVisible = ids.visible.filter { uid in
-            !textureCache.isResident(uid) && !(thumbnailFeed?.isKnownUnfetchable(uid) ?? false)
+            !textureCache.isResident(uid) && !(feed?.isKnownUnfetchable(uid) ?? false)
         }
         scheduleWarmIfNeeded(missingVisible, pixelSize: uploadPixels)
         updateDisplayLink(shouldRun: !missingVisible.isEmpty && !textureCache.residencySaturatedThisFrame)
-    }
-
-    private func classifyUIDs(in slots: [GridSlot], viewportSize: CGSize) -> (visible: [PhotoUID], overscan: [PhotoUID]) {
-        let viewport = CGRect(origin: .zero, size: viewportSize)
-        var visible: [PhotoUID] = []
-        var overscan: [PhotoUID] = []
-        visible.reserveCapacity(slots.count)
-        overscan.reserveCapacity(slots.count)
-        for slot in slots where slot.index < items.count {
-            let uid = items[slot.index].uid
-            if slot.viewportRect.intersects(viewport) { visible.append(uid) }
-            else { overscan.append(uid) }
-        }
-        return (visible, overscan)
-    }
-
-    private func viewportSlots(_ slots: [GridSlot], viewportSize: CGSize) -> [GridSlot] {
-        let viewport = CGRect(origin: .zero, size: viewportSize)
-        return slots.filter { $0.viewportRect.intersects(viewport) }
-    }
-
-    private func buildGroups(slots: [GridSlot], cache: MetalGridTextureCache<PhotoUID>) -> [MetalGridRenderGroup] {
-        var quads: [MetalGridQuad] = []
-        var textures: [MTLTexture] = []
-        quads.reserveCapacity(slots.count)
-        textures.reserveCapacity(slots.count)
-
-        for slot in slots where slot.index < items.count {
-            let uid = items[slot.index].uid
-            guard cache.isResident(uid) else { continue }
-            cache.noteUsed(uid)
-            let texture = cache.texture(for: uid)
-            let fit = TileContentFitter.fit(
-                slotRect: slot.viewportRect,
-                mediaPixelSize: CGSize(width: texture.width, height: texture.height),
-                displayMode: displayMode
-            )
-            quads.append(MetalGridQuad(rect: fit.contentRect, uvMin: fit.uvMin, uvMax: fit.uvMax, radius: 6))
-            textures.append(texture)
-        }
-
-        guard !quads.isEmpty else { return [] }
-        return [MetalGridRenderGroup(source: .perQuadTexture(textures), quads: quads)]
     }
 
     private func scheduleWarmIfNeeded(_ uids: [PhotoUID], pixelSize: Int) {
