@@ -134,10 +134,11 @@ private struct MobileViewerPage: View {
     }
 }
 
-/// Staged, bounded page loading (thumbnail → screen-bounded preview): the grid thumbnail shows instantly, then —
-/// for the CURRENT page ONLY — a mid-size preview is fetched and decoded off-main to a screen-bounded size and
-/// swapped in. Swipe-preview neighbours never fetch/decode (no fan-out), and swiping away cancels an in-flight
-/// load (the `.task(id:)` re-runs on the isCurrent flip). No full-resolution decode just because a page appeared.
+/// Staged, bounded page loading (thumbnail → screen-bounded display image): the grid thumbnail shows instantly,
+/// then — for the CURRENT page ONLY — a mid-size preview or bounded original fallback is fetched and decoded
+/// off-main to a screen-bounded size and swapped in. Swipe-preview neighbours never fetch/decode (no fan-out),
+/// and swiping away cancels an in-flight load (the `.task(id:)` re-runs on the isCurrent flip). No full-resolution
+/// decode just because a page appeared.
 private struct MobileImagePage: View {
     let item: PhotoItem
     let isCurrent: Bool
@@ -176,8 +177,8 @@ private struct MobileImagePage: View {
         let cap = ViewerImageLoadPolicy.displayMaxPixelSize(viewportPoints: viewport, scale: displayScale)
         guard let display = await imageStore.displayImage(for: item.uid, maxPixelSize: cap) else { return }
         guard !Task.isCancelled else { return }
-        image = display
-        MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=preview")
+        image = display.image
+        MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=\(display.source, privacy: .public)")
     }
 }
 
