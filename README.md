@@ -83,7 +83,7 @@ xcodebuild build \
   CODE_SIGNING_ALLOWED=NO
 ```
 
-Build, install, and launch the canonical local app at `/Applications/ProtonPhotos.app`:
+Build, install, and launch the canonical local app at `/Applications/Proton Photos.app`:
 
 ```bash
 ./scripts/rebuild.sh

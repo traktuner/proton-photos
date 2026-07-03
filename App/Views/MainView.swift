@@ -1030,14 +1030,6 @@ struct MainView: View {
                 }
                 aspectSquareToggleButton
             }
-            // Account - its own trailing item.
-            ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    Button("action.sign_out", role: .destructive) { model.signOut() }
-                } label: {
-                    Image(systemName: "person.crop.circle")
-                }
-            }
         }
     }
 

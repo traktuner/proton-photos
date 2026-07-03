@@ -64,9 +64,9 @@ struct ProtonPhotosApp: App {
             }
         }
 
-        // Native macOS Settings window → "ProtonPhotos ▸ Einstellungen…" (⌘,).
+        // Native macOS Settings window -> "Proton Photos > Einstellungen..." (Command-,).
         Settings {
-            SettingsView()
+            SettingsView(signOut: { model.signOut() })
         }
 
     }

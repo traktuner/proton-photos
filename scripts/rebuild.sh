@@ -1,8 +1,8 @@
 #!/bin/bash
-# Build the app and install it as the single canonical /Applications/ProtonPhotos.app, then launch.
+# Build the app and install it as the single canonical /Applications/Proton Photos.app, then launch.
 #
 # RULE (do not break): there must always, after every build without exception, be exactly ONE openable
-# ProtonPhotos.app, and it must live in /Applications - so Spotlight search only ever finds that one.
+# Proton Photos.app, and it must live in /Applications - so Spotlight search only ever finds that one.
 # To guarantee it, the build output lives under a `*.noindex` derived-data folder: Spotlight skips any
 # directory whose name ends in `.noindex` (the same reason Xcode's own `Intermediates.noindex` never
 # shows up while `Products` would). So the build product is never indexed, and /Applications is the only
@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 DD="build/DD.noindex"
 rm -rf build/DD   # remove any legacy INDEXED build dir so its product stops appearing in Spotlight
 find "$HOME/Library/Developer/Xcode/DerivedData" \
-  -path "*/Build/Products/*/ProtonPhotos.app" \
+  \( -path "*/Build/Products/*/ProtonPhotos.app" -o -path "*/Build/Products/*/Proton Photos.app" \) \
   -prune -exec rm -rf {} + 2>/dev/null || true
 PROJECT="ProtonPhotos.xcodeproj"
 SCHEME="ProtonPhotos"
@@ -58,16 +58,22 @@ xcodebuild build -project "$PROJECT" -scheme "$SCHEME" \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath "$DD" \
   -skipPackagePluginValidation -skipMacroValidation "${SIGN_ARGS[@]}"
 
-APP="$DD/Build/Products/Debug/ProtonPhotos.app"
-DST="/Applications/ProtonPhotos.app"
+APP="$DD/Build/Products/Debug/Proton Photos.app"
+DST="/Applications/Proton Photos.app"
+LEGACY_DST="/Applications/ProtonPhotos.app"
 
+pkill -9 -f "Proton Photos.app/Contents/MacOS" 2>/dev/null || true
 pkill -9 -f "ProtonPhotos.app/Contents/MacOS" 2>/dev/null || true
 sleep 1
 rm -rf "$DST"
+rm -rf "$LEGACY_DST"
 cp -R "$APP" "$DST"
 xattr -dr com.apple.quarantine "$DST" 2>/dev/null || true
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DST"
 open "$DST"
 echo "Installed + launched: $DST"
 echo "Spotlight bundles (must be exactly one - /Applications):"
-mdfind -name "ProtonPhotos.app" 2>/dev/null | grep -i "ProtonPhotos.app$" || true
+{
+  mdfind -name "Proton Photos.app" 2>/dev/null
+  mdfind -name "ProtonPhotos.app" 2>/dev/null
+} | grep -Ei "Proton ?Photos.app$" || true

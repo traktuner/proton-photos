@@ -4,12 +4,14 @@ import PhotosCore
 import DesignSystem
 import ProtonDriveBackend
 
-/// Native macOS Settings window (ProtonPhotos → Einstellungen…). Two panes: Library/Offline (the
+/// Native macOS Settings window (Proton Photos -> Einstellungen...). Two panes: Library/Offline (the
 /// Offline Photo Library toggle + cache deletion) and Developer (the live cache-status surface).
 struct SettingsView: View {
+    let signOut: () -> Void
+
     var body: some View {
         TabView {
-            LibrarySettingsTab()
+            LibrarySettingsTab(signOut: signOut)
                 .tabItem { Label("settings.library_tab", systemImage: "photo.on.rectangle.angled") }
             CacheStatusTab()
                 .tabItem { Label("settings.developer_tab", systemImage: "internaldrive") }
@@ -23,6 +25,8 @@ struct SettingsView: View {
 // MARK: - Library / Offline
 
 private struct LibrarySettingsTab: View {
+    let signOut: () -> Void
+
     @State private var offline = OfflineLibraryManager.shared
     @State private var account = AccountInfo.shared
     @AppStorage(AppSettingsKey.offlineOriginalsCapUnlimited) private var capUnlimited = AppSettingsDefault.offlineOriginalsCapUnlimited
@@ -112,6 +116,14 @@ private struct LibrarySettingsTab: View {
                     .disabled(deleting)
                 }
                 Text("settings.cache_deletion_help")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                Button("action.sign_out", role: .destructive, action: signOut)
+                Text("settings.sign_out_help")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

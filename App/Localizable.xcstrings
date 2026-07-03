@@ -142,18 +142,18 @@
     },
     "login.footer": {
       "extractionState": "manual",
-      "comment": "Login footer. “Proton AG” is a brand name.",
+      "comment": "Login footer that clarifies this is not an official Proton AG app.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Proton AG · Privacy by default"
+            "value": "Not affiliated with Proton AG"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Proton AG · Privacy by default"
+            "value": "Dies ist kein Produkt der Proton AG."
           }
         }
       }
@@ -1288,6 +1288,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "Löscht alles lokal Gecachte - Thumbnails, Vorschauen und Originale - für den aktuellen Account, wie frisch eingeloggt. Thumbnails werden automatisch neu geladen."
+          }
+        }
+      }
+    },
+    "settings.sign_out_help": {
+      "extractionState": "manual",
+      "comment": "Explains the sign-out button in Settings.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signs out of this Mac and removes local account data."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meldet diesen Mac ab und entfernt lokale Account-Daten."
           }
         }
       }
