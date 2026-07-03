@@ -610,7 +610,7 @@ public final class UIKitTimelineGridHostView: UIView {
             cache: textureCache,
             displayMode: displayMode,
             cornerRadius: GridVisualConstants.thumbnailCornerRadius,
-            decorations: selectionDecorations()
+            decorations: productionDecorations()
         ).groups
         textureCache.evictToBudget()
         renderer.render(to: target, viewportSize: viewportSize, groups: groups)
@@ -816,18 +816,21 @@ public final class UIKitTimelineGridHostView: UIView {
         return out
     }
 
-    /// The shared selection decorations (blue outline + checkmark badge) for the current frame, or nil outside
-    /// selection mode — normal browsing draws bare thumbnails, exactly as before. The Proton primary (0x6D4AFF)
-    /// is injected as neutral SIMD/glyph data at this adapter edge, keeping the composer platform-neutral.
-    private func selectionDecorations() -> MetalGridDecorations<PhotoUID>? {
-        guard selectionMode else { return nil }
+    /// The shared grid decorations for the current frame — always built, mirroring the macOS coordinator, so a
+    /// video badge shows during normal browsing and the checkmark badge shows in selection mode (the composer
+    /// makes the two mutually exclusive in the bottom-right corner, and the selection outline is drawn only for
+    /// selected cells). The Proton primary (0x6D4AFF) is injected as neutral SIMD/glyph data at this adapter
+    /// edge, keeping the composer platform-neutral.
+    private func productionDecorations() -> MetalGridDecorations<PhotoUID> {
         let accent = SIMD4<Float>(Float(0x6D) / 255, Float(0x4A) / 255, Float(0xFF) / 255, 1)
         return MetalGridDecorations(
             accent: accent,
             accentGlyphColor: MetalGridGlyphColor(
                 red: Double(accent.x), green: Double(accent.y), blue: Double(accent.z), alpha: 1),
-            selectionMode: true,
-            selected: selectedUIDs,
+            selectionMode: selectionMode,
+            // Outlines belong to selection mode only; normal browsing carries an empty set so a bare grid draws
+            // just thumbnails + video badges.
+            selected: selectionMode ? selectedUIDs : [],
             favorites: [],
             isVideo: { [videoUIDs] uid in videoUIDs.contains(uid) }
         )

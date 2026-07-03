@@ -37,6 +37,10 @@ final class MobileLibraryModel: ObservableObject {
     private let locationCrawl = LocationCrawl()
     private var locationCrawlStarted = false
 
+    /// The encrypted on-disk thumbnail cache, retained so Settings can report its size and clear it. It is the
+    /// app's only on-disk media cache (previews live in a RAM cache; video bytes are backend-managed).
+    private var thumbnailCache: ThumbnailCache?
+
     private var configuredUID: String?
     private var store: SessionKeychainStore?
     private var session: ProtonSession?
@@ -67,6 +71,24 @@ final class MobileLibraryModel: ObservableObject {
         guard let backend, !uids.isEmpty else { return }
         try await backend.trash(Array(uids))
         items.removeAll { uids.contains($0.uid) }
+    }
+
+    /// The on-disk size (bytes) of the encrypted thumbnail cache — the app's media-cache footprint, for Settings.
+    /// Computed off the main actor (it sums file sizes on disk), so a large cache never stalls the UI.
+    func cacheDiskSizeBytes() async -> Int64 {
+        guard let cache = thumbnailCache else { return 0 }
+        return await Task.detached { cache.diskSizeBytes() }.value
+    }
+
+    /// Clears the on-disk thumbnail cache, then restarts the crawl so the grid refills. Crash-safe with the
+    /// grid/viewer active: the feed keeps its already-decoded RAM thumbnails (no broken rendering) and misses are
+    /// re-downloaded. Only the app's own cache directory is touched — never anything outside it.
+    func clearCache() async {
+        guard let cache = thumbnailCache else { return }
+        await cache.clear()
+        if let feed = thumbnailFeed, !items.isEmpty {
+            await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
+        }
     }
 
     /// Retry after a failure — restarts the whole load for the current session.
@@ -153,6 +175,7 @@ final class MobileLibraryModel: ObservableObject {
         facade = nil
         items = []
         thumbnailFeed = nil
+        thumbnailCache = nil
         loadState = .initial
         locationCrawlStarted = false
         locationIndex.replaceAll([])
@@ -184,6 +207,7 @@ final class MobileLibraryModel: ObservableObject {
                 keyPassword: session.keyPassword
             )
         )
+        thumbnailCache = cache
 
         loadTask = Task { [weak self] in
             guard let self else { return }

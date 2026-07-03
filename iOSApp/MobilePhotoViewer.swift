@@ -127,6 +127,7 @@ private struct MobileViewerPage: View {
                 item: item,
                 isCurrent: isCurrent,
                 imageStore: imageStore,
+                streamer: libraryModel.backend,
                 onToggleChrome: onToggleChrome,
                 onCloseRequested: onCloseRequested
             )
@@ -143,27 +144,80 @@ private struct MobileImagePage: View {
     let item: PhotoItem
     let isCurrent: Bool
     let imageStore: MobileViewerImageStore
+    /// The shared streamer used to preload a Live Photo's paired motion clip (nil for non-Live items).
+    let streamer: (any VideoStreamProvider)?
     let onToggleChrome: () -> Void
     let onCloseRequested: () -> Void
 
     @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
     @State private var viewport: CGSize = .zero
+    /// Shared Live Photo motion controller — the SAME `PhotoViewerCore` type the macOS viewer uses. It preloads
+    /// the paired clip for the current page; a long press plays it with the shared still→motion transition and
+    /// release returns to the still. No motion work happens for a non-Live item.
+    @State private var motion = LivePhotoMotionController()
 
+    /// The shared still→motion transition timing/scale — identical to macOS.
+    private let transition = ViewerMediaTransitionStyle.standard
     private struct LoadToken: Equatable { let uid: PhotoUID; let current: Bool }
 
     var body: some View {
         ZStack {
             if let image {
-                MobileZoomableImage(image: image, onSingleTap: onToggleChrome, onCloseRequested: onCloseRequested)
+                MobileZoomableImage(
+                    image: image,
+                    onSingleTap: onToggleChrome,
+                    onCloseRequested: onCloseRequested,
+                    onMotionStart: item.isLivePhoto ? { motion.play() } : nil,
+                    onMotionStop: item.isLivePhoto ? { motion.stop() } : nil
+                )
             } else {
                 ProgressView().tint(.white)
             }
+
+            // The paired motion clip, crossfaded in over the still while the press is held (once preloaded).
+            if item.isLivePhoto, let player = motion.player {
+                MobileMotionPlayerLayer(player: player)
+                    .allowsHitTesting(false)
+                    .opacity(motion.isPlaying ? 1 : 0)
+                    .animation(.easeInOut(duration: transition.opacityDuration), value: motion.isPlaying)
+            }
+
+            // The LIVE affordance, top-leading — hidden while the motion is playing.
+            if item.isLivePhoto {
+                MobileLiveBadge()
+                    .opacity(motion.isPlaying ? 0 : 1)
+                    .animation(.easeInOut(duration: transition.opacityDuration), value: motion.isPlaying)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 64)
+                    .allowsHitTesting(false)
+            }
         }
+        // The same small still→motion transition macOS uses: a gentle scale under the opacity crossfade above.
+        .scaleEffect(motion.isPlaying ? transition.liveMotionScale : 1)
+        .animation(.easeInOut(duration: transition.scaleDuration), value: motion.isPlaying)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { viewport = $0 }
-        .task(id: LoadToken(uid: item.uid, current: isCurrent)) { await load() }
+        .task(id: LoadToken(uid: item.uid, current: isCurrent)) {
+            prepareOrStopMotion()
+            await load()
+        }
         .onAppear { MobileViewerLog.logger.notice("[ViewerPerf] page appear uid=\(MobileViewerLog.short(item.uid), privacy: .public) current=\(isCurrent) kind=photo") }
-        .onDisappear { MobileViewerLog.logger.notice("[ViewerPerf] page disappear uid=\(MobileViewerLog.short(item.uid), privacy: .public)") }
+        .onDisappear {
+            MobileViewerLog.logger.notice("[ViewerPerf] page disappear uid=\(MobileViewerLog.short(item.uid), privacy: .public)")
+            motion.teardown()
+        }
+    }
+
+    /// Preload the Live Photo motion clip for the CURRENT page only — a bounded window, so a swipe-preview
+    /// neighbour never spins up an AVPlayer / network loader; a page that is no longer current tears its clip down.
+    private func prepareOrStopMotion() {
+        guard item.isLivePhoto else { return }
+        if isCurrent {
+            motion.prepare(for: item, streamer: streamer) { isCurrent }
+        } else {
+            motion.teardown()
+        }
     }
 
     private func load() async {
@@ -402,6 +456,10 @@ private struct MobileZoomableImage: UIViewRepresentable {
     let image: UIImage
     let onSingleTap: () -> Void
     let onCloseRequested: () -> Void
+    /// Live Photo long-press: press-and-hold plays the paired motion clip, release stops it. Nil for a non-Live
+    /// photo, in which case no long-press recognizer is installed.
+    var onMotionStart: (() -> Void)? = nil
+    var onMotionStop: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> UIScrollView {
         let scrollView = UIScrollView()
@@ -446,19 +504,32 @@ private struct MobileZoomableImage: UIViewRepresentable {
         scrollView.addGestureRecognizer(dismissPan)
         context.coordinator.dismissPan = dismissPan
 
+        // Live Photo long-press: a stationary press-and-hold plays the paired motion clip; release/cancel stops
+        // it. Installed only for Live Photos (callbacks non-nil). Rides alongside the other recognizers, so any
+        // drag cancels it back to the still and pans/zooms as usual.
+        if onMotionStart != nil {
+            let longPress = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleLongPress(_:)))
+            longPress.minimumPressDuration = 0.3
+            longPress.delegate = context.coordinator
+            scrollView.addGestureRecognizer(longPress)
+        }
+
         return scrollView
     }
 
     func updateUIView(_ scrollView: UIScrollView, context: Context) {
         context.coordinator.onSingleTap = onSingleTap
         context.coordinator.onCloseRequested = onCloseRequested
+        context.coordinator.onMotionStart = onMotionStart
+        context.coordinator.onMotionStop = onMotionStop
         if context.coordinator.imageView?.image !== image {
             context.coordinator.imageView?.image = image
         }
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onSingleTap: onSingleTap, onCloseRequested: onCloseRequested)
+        Coordinator(onSingleTap: onSingleTap, onCloseRequested: onCloseRequested,
+                    onMotionStart: onMotionStart, onMotionStop: onMotionStop)
     }
 
     final class Coordinator: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate {
@@ -466,15 +537,38 @@ private struct MobileZoomableImage: UIViewRepresentable {
         weak var scrollView: UIScrollView?
         var onSingleTap: () -> Void
         var onCloseRequested: () -> Void
+        var onMotionStart: (() -> Void)?
+        var onMotionStop: (() -> Void)?
 
         private var dismissPinchActive = false
         private var pinchStartCentroid: CGPoint = .zero
         weak var dismissPan: UIPanGestureRecognizer?
         private var dismissPanActive = false
+        private var motionActive = false
 
-        init(onSingleTap: @escaping () -> Void, onCloseRequested: @escaping () -> Void) {
+        init(onSingleTap: @escaping () -> Void, onCloseRequested: @escaping () -> Void,
+             onMotionStart: (() -> Void)?, onMotionStop: (() -> Void)?) {
             self.onSingleTap = onSingleTap
             self.onCloseRequested = onCloseRequested
+            self.onMotionStart = onMotionStart
+            self.onMotionStop = onMotionStop
+        }
+
+        /// Live Photo playback: begin on the long-press threshold, end on release/cancel. The `motionActive`
+        /// guard means a stray terminal state without a matching `.began` can never fire a spurious stop.
+        @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+            switch gesture.state {
+            case .began:
+                motionActive = true
+                onMotionStart?()
+            case .ended, .cancelled, .failed:
+                if motionActive {
+                    motionActive = false
+                    onMotionStop?()
+                }
+            default:
+                break
+            }
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
@@ -593,5 +687,43 @@ private struct MobileZoomableImage: UIViewRepresentable {
                 break
             }
         }
+    }
+}
+
+/// Hosts the Live Photo motion clip's `AVPlayerLayer` over the still — aspect-fit, transparent, non-interactive
+/// (the still underneath keeps the zoom/tap gestures). Mirrors the macOS `MotionPlayerLayerView`.
+private struct MobileMotionPlayerLayer: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerLayerView {
+        let view = PlayerLayerView()
+        view.backgroundColor = .clear
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = .resizeAspect
+        return view
+    }
+
+    func updateUIView(_ view: PlayerLayerView, context: Context) {
+        if view.playerLayer.player !== player { view.playerLayer.player = player }
+    }
+
+    final class PlayerLayerView: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
+}
+
+/// The small "LIVE" affordance shown on a Live Photo page — signals the press-and-hold-to-play interaction.
+private struct MobileLiveBadge: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "livephoto")
+            Text(verbatim: "LIVE")
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.ultraThinMaterial, in: Capsule())
     }
 }

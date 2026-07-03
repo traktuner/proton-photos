@@ -107,11 +107,13 @@ struct ProductionRouteGuardTests {
     }
 
     @Test func viewerNeverPersistsDecryptedMotionVideoTempFiles() throws {
-        let viewer = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoViewerFeature/PhotoViewerModel.swift"), encoding: .utf8)
-        #expect(!viewer.contains("temporaryDirectory"), "Live Photo motion must not write decrypted video bytes to /tmp")
-        #expect(!viewer.contains("proton-motion-"), "Live Photo motion must not synthesize plaintext local movie files")
-        #expect(!viewer.contains("AVPlayer(url:"), "Viewer playback must not rely on decrypted local temp files")
-        #expect(viewer.contains("plaintext local motion-video files are forbidden by the local E2EE contract"))
+        // The Live Photo motion path lives in the shared `LivePhotoMotionController` (driven by both the macOS
+        // and iOS viewers), so the E2EE guard checks that file — its true home.
+        let motion = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoViewerCore/LivePhotoMotionController.swift"), encoding: .utf8)
+        #expect(!motion.contains("temporaryDirectory"), "Live Photo motion must not write decrypted video bytes to /tmp")
+        #expect(!motion.contains("proton-motion-"), "Live Photo motion must not synthesize plaintext local movie files")
+        #expect(!motion.contains("AVPlayer(url:"), "Viewer playback must not rely on decrypted local temp files")
+        #expect(motion.contains("plaintext local motion-video files are forbidden by the local E2EE contract"))
     }
 
     @Test func videoBlockCacheStoreDoesNotWalkWholeTreePerBlock() throws {

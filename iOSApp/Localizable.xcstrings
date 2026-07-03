@@ -552,23 +552,6 @@
         }
       }
     },
-    "loading.background_a11y" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Weitere Fotos werden geladen"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Loading more photos"
-          }
-        }
-      }
-    },
     "loading.library_title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -752,13 +735,13 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld ausgewählt"
+            "value" : "%lld Objekte ausgewählt"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld Selected"
+            "value" : "%lld Items Selected"
           }
         }
       }
@@ -950,19 +933,196 @@
         }
       }
     },
-    "settings.count_loading" : {
+    "settings.account_email" : {
       "extractionState" : "manual",
       "localizations" : {
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wird geladen …"
+            "value" : "E-Mail"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Loading…"
+            "value" : "Email"
+          }
+        }
+      }
+    },
+    "settings.cache_size" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache-Größe"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache Size"
+          }
+        }
+      }
+    },
+    "settings.clear_cache" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache leeren"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Cache"
+          }
+        }
+      }
+    },
+    "settings.clear_cache_message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zwischengespeicherte Vorschaubilder werden bei Bedarf erneut geladen."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cached thumbnails will be re-downloaded as needed."
+          }
+        }
+      }
+    },
+    "settings.clear_cache_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache leeren?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Cache?"
+          }
+        }
+      }
+    },
+    "settings.library_loading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mediathek wird geladen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading library"
+          }
+        }
+      }
+    },
+    "settings.library_still_loading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weitere Fotos werden geladen …"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loading more photos…"
+          }
+        }
+      }
+    },
+    "settings.photo_count %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Foto"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Fotos"
+                }
+              }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Photo"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld Photos"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "settings.section_account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account"
+          }
+        }
+      }
+    },
+    "settings.section_cache" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache"
           }
         }
       }
@@ -997,6 +1157,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sign out of %@?"
+          }
+        }
+      }
+    },
+    "settings.storage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speicher"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Storage"
           }
         }
       }

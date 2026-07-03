@@ -359,9 +359,14 @@ extension DriveSession {
     private static func decodeAccountData(users: Data, addresses: Data) throws -> AccountData {
         let u = try JSONDecoder().decode(UsersResponse.self, from: users)
         let a = try JSONDecoder().decode(AddressesResponse.self, from: addresses)
-        // Surface the storage quota for Settings (works offline too - both the live and cached paths decode here).
+        // Surface the storage quota + primary address for Settings (works offline too - both the live and cached
+        // paths decode here).
         if let used = u.user.usedSpace, let max = u.user.maxSpace, max > 0 {
             Task { @MainActor in AccountInfo.shared.update(usedBytes: used, maxBytes: max) }
+        }
+        // The primary address is the lowest-ordered one (Proton lists the account's main address first).
+        if let primaryEmail = a.addresses.min(by: { ($0.order ?? 0) < ($1.order ?? 0) })?.email {
+            Task { @MainActor in AccountInfo.shared.update(primaryEmail: primaryEmail) }
         }
         return AccountData(userKeys: u.user.keys.map(makeKey), addresses: a.addresses.map(makeAddress))
     }

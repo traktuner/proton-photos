@@ -1,4 +1,5 @@
 import DesignSystemCore
+import GridCore
 import PhotosCore
 import SwiftUI
 import TimelineUIKitFeature
@@ -74,15 +75,8 @@ struct MobileTimelineScreen: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
-        // The background-crawl indicator lives on the nav-bar row, aligned top-left with the "Photos" title.
-        if model.loadState.isContentReady, model.isBackgroundLoading, !selectionMode {
-            ToolbarItem(placement: .topBarLeading) {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(ProtonColor.primary)
-                    .accessibilityLabel(String(localized: "loading.background_a11y"))
-            }
-        }
+        // Browsing shows only "Select" on the trailing edge — no photo count (that lives in Settings) and no
+        // on-grid loading indicator (library-load status now lives in Settings too).
         if canSelect {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(selectionMode ? String(localized: "action.done") : String(localized: "action.select")) {
@@ -90,54 +84,55 @@ struct MobileTimelineScreen: View {
                 }
             }
         }
-        // The library count sits on the right only while browsing (selection shows its own count in the bottom bar).
-        if !selectionMode, let count = model.loadState.knownCount, count > 0 {
-            ToolbarItem(placement: .topBarTrailing) {
-                Text("\(count)")
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(ProtonColor.textHint)
-            }
-        }
+        // Selection action bar: Share (left) and Trash (right) as native glass toolbar buttons, with the shared
+        // `SelectionToolbarText` policy's center text as a plain label between them. Separate items divided by
+        // flexible `ToolbarSpacer`s (NOT one grouped pill) keep the two buttons individually glassed and the
+        // label a bare, non-truncating white string — never the old "Ob…"-clipped pill.
         if selectionMode {
-            ToolbarItemGroup(placement: .bottomBar) { selectionActions }
-        }
-    }
-
-    @ViewBuilder private var selectionActions: some View {
-        Button {
-            startShare()
-        } label: {
-            if isExporting {
-                ProgressView()
-            } else {
-                Image(systemName: "square.and.arrow.up")
+            ToolbarItem(placement: .bottomBar) {
+                Button {
+                    startShare()
+                } label: {
+                    if isExporting {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+                .disabled(selected.isEmpty || isExporting)
+                .accessibilityLabel(String(localized: "selection.share_a11y"))
+            }
+            ToolbarSpacer(.flexible, placement: .bottomBar)
+            if let centerText = selectionCenterText {
+                ToolbarItem(placement: .bottomBar) {
+                    Text(centerText)
+                        .font(.body)
+                        .monospacedDigit()
+                        .foregroundStyle(.white)
+                        .fixedSize()
+                }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
+            }
+            ToolbarItem(placement: .bottomBar) {
+                Button(role: .destructive) {
+                    showTrashConfirm = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .disabled(selected.isEmpty || isExporting)
+                .accessibilityLabel(String(localized: "selection.trash_a11y"))
             }
         }
-        .disabled(selected.isEmpty || isExporting)
-        .accessibilityLabel(String(localized: "selection.share_a11y"))
-
-        Spacer()
-
-        Text(selectionCountLabel)
-            .font(.body)
-            .foregroundStyle(ProtonColor.textNorm)
-            .monospacedDigit()
-
-        Spacer()
-
-        Button(role: .destructive) {
-            showTrashConfirm = true
-        } label: {
-            Image(systemName: "trash")
-        }
-        .disabled(selected.isEmpty || isExporting)
-        .accessibilityLabel(String(localized: "selection.trash_a11y"))
     }
 
-    private var selectionCountLabel: String {
-        selected.isEmpty
-            ? String(localized: "selection.select_items")
-            : String(localized: "selection.count_selected \(selected.count)")
+    /// The bottom-bar center text for the current selection, via the shared `SelectionToolbarText` policy — a
+    /// prompt at zero, nothing at exactly one, the count beyond that — localized here at the platform edge.
+    private var selectionCenterText: String? {
+        switch SelectionToolbarText.centerLabel(selectedCount: selected.count) {
+        case .prompt: return String(localized: "selection.select_items")
+        case .hidden: return nil
+        case let .count(count): return String(localized: "selection.count_selected \(count)")
+        }
     }
 
     @ViewBuilder private var content: some View {
