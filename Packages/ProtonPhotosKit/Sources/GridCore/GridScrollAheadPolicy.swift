@@ -1,5 +1,3 @@
-import Foundation
-
 /// Scroll-direction-biased prefetch range — the shared calculation behind "warm the NEXT viewport in the
 /// direction the user is travelling" on the settled grid.
 ///

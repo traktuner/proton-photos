@@ -1541,7 +1541,9 @@ final class CoreArchitectureGateTests: XCTestCase {
                 "ThumbnailFeedCore(",
                 "UIKitMediaCachePolicy.decodedRAMBudgetBytes()",
                 "UIKitMediaCachePolicy.maxConcurrentDecodes()",
-                "NSCache<NSString, UIImage>",
+                // The UIImage wrapper RAM tier is the shared, memory-pressure-aware `WrapperImageCache`
+                // (MediaCacheCore) rather than a bare NSCache, so both platforms scale/purge identically.
+                "WrapperImageCache<UIImage>",
                 "memoryCGImage(for uid: PhotoUID) -> CGImage?",
                 "decoded.decodedCostBytes",
                 "UIKitThumbnailImageDecoder.image(from: decoded)"
@@ -1555,8 +1557,10 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if FileManager.default.fileExists(atPath: policyFile.path) {
             let imports = try importedModules(in: policyFile)
-            if imports != ["Foundation", "MediaByteCache"] {
-                violations.append("MediaCacheUIKitAdapter/UIKitMediaCachePolicy.swift: imports \(imports.sorted()) != [Foundation, MediaByteCache]")
+            // `os` is the system module exposing `os_proc_available_memory()` — the live jetsam-headroom
+            // signal the decoded-RAM budget consults on device. It carries no macOS policy.
+            if imports != ["Foundation", "MediaByteCache", "os"] {
+                violations.append("MediaCacheUIKitAdapter/UIKitMediaCachePolicy.swift: imports \(imports.sorted()) != [Foundation, MediaByteCache, os]")
             }
 
             let source = try String(contentsOf: policyFile, encoding: .utf8)
@@ -1620,8 +1624,12 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if let targetLine = manifestLine(forTarget: "PhotoViewerUIKitAdapter", in: manifest) {
             let dependencies = Set(dependencies(inTargetLine: targetLine))
-            if dependencies != ["PhotoViewerCore"] {
-                violations.append("PhotoViewerUIKitAdapter: dependencies \(dependencies.sorted()) != [PhotoViewerCore]")
+            // The shared viewer display store (UIKitViewerImageStore) lives here and needs universal Core:
+            // PhotosCore (PhotoUID / FullMediaProvider) and MediaCacheCore (the shared WrapperImageCache with
+            // memory-pressure semantics). Both are platform-neutral Core — NOT the macOS MediaCache umbrella.
+            let expected: Set<String> = ["PhotoViewerCore", "PhotosCore", "MediaCacheCore"]
+            if dependencies != expected {
+                violations.append("PhotoViewerUIKitAdapter: dependencies \(dependencies.sorted()) != \(expected.sorted())")
             }
         } else {
             violations.append("PhotoViewerUIKitAdapter: missing Package.swift target declaration")
