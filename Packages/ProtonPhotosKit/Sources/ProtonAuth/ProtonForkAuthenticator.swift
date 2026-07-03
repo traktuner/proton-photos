@@ -31,8 +31,8 @@ public struct ProtonAPIConfig: Sendable {
     public init(
         baseURL: URL = URL(string: "https://drive-api.proton.me")!,
         accountURL: URL = URL(string: "https://account.proton.me")!,
-        appVersion: String = "external-drive-photos@1.0.0-stable",
-        authClientID: String = "external-drive"
+        appVersion: String = "protonphotos@1.0.0-stable",
+        authClientID: String = "protonphotos"
     ) {
         self.baseURL = baseURL
         self.accountURL = accountURL
