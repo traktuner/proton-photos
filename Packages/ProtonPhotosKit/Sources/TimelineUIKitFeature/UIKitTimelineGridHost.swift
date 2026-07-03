@@ -23,23 +23,32 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
     private let thumbnailFeed: UIKitThumbnailFeed
     private let level: Int?
     private let displayMode: TileContentDisplayMode
+    private let selectionMode: Bool
+    private let selectedUIDs: Set<PhotoUID>
     private let onFirstContentReady: (() -> Void)?
     private let onOpenPhoto: ((PhotoItem) -> Void)?
+    private let onToggleSelection: ((PhotoItem) -> Void)?
 
     public init(
         items: [PhotoItem],
         thumbnailFeed: UIKitThumbnailFeed,
         level: Int? = nil,
         displayMode: TileContentDisplayMode = .squareFillCrop,
+        selectionMode: Bool = false,
+        selectedUIDs: Set<PhotoUID> = [],
         onFirstContentReady: (() -> Void)? = nil,
-        onOpenPhoto: ((PhotoItem) -> Void)? = nil
+        onOpenPhoto: ((PhotoItem) -> Void)? = nil,
+        onToggleSelection: ((PhotoItem) -> Void)? = nil
     ) {
         self.items = items
         self.thumbnailFeed = thumbnailFeed
         self.level = level
         self.displayMode = displayMode
+        self.selectionMode = selectionMode
+        self.selectedUIDs = selectedUIDs
         self.onFirstContentReady = onFirstContentReady
         self.onOpenPhoto = onOpenPhoto
+        self.onToggleSelection = onToggleSelection
     }
 
     @MainActor
@@ -47,7 +56,9 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         let view = UIKitTimelineGridHostView()
         view.onFirstContentReady = onFirstContentReady
         view.onOpenPhoto = onOpenPhoto
-        view.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, displayMode: displayMode)
+        view.onToggleSelection = onToggleSelection
+        view.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, displayMode: displayMode,
+                       selectionMode: selectionMode, selectedUIDs: selectedUIDs)
         return view
     }
 
@@ -55,7 +66,9 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
     public func updateUIView(_ uiView: UIKitTimelineGridHostView, context: Context) {
         uiView.onFirstContentReady = onFirstContentReady
         uiView.onOpenPhoto = onOpenPhoto
-        uiView.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, displayMode: displayMode)
+        uiView.onToggleSelection = onToggleSelection
+        uiView.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, displayMode: displayMode,
+                         selectionMode: selectionMode, selectedUIDs: selectedUIDs)
     }
 }
 
@@ -83,8 +96,38 @@ public final class UIKitTimelineGridHostView: UIView {
     /// The level captured at pinch-gesture start (the cumulative-scale reference).
     private var pinchStartLevel: Int?
     private var displayMode: TileContentDisplayMode = .squareFillCrop
+    /// Selection state, mirrored from SwiftUI each `configure`. In selection mode a tap toggles a cell instead of
+    /// opening it, and the grid draws the shared selection decorations (blue outline + checkmark badge).
+    private var selectionMode = false
+    private var selectedUIDs: Set<PhotoUID> = []
+    /// Cached video-UID set for the video badge decoration, rebuilt only when the item set changes.
+    private var videoUIDs: Set<PhotoUID> = []
     private var warmTask: Task<Void, Never>?
     private var lastWarmIDs: [PhotoUID] = []
+    /// True while a `warmDecoded` pass is running, so passes never stack. Replaces the old exact-set dedup as the
+    /// re-warm gate: a still-missing visible set is re-warmed on the next pass whenever the set changed OR
+    /// `warmNeedsRepass` was raised (an arrival / demand move), so a tile that lands on disk under a STATIC
+    /// viewport is decoded disk→RAM without needing a scroll nudge.
+    private var warmInFlight = false
+    /// Monotonic id for the in-flight warm pass. A pass's completion only mutates `warmInFlight` when its id is
+    /// still current, so a stale pass cancelled by a detach can never clear the flag out from under a newer pass
+    /// (which would briefly permit two overlapping warms right after a tab re-attach).
+    private var warmGeneration = 0
+    /// Raised by the feed's arrival wake (a download landed on disk) or when demand moved mid-pass: the next warm
+    /// must re-issue even if the visible set is unchanged, so the just-arrived bytes get decoded to RAM.
+    private var warmNeedsRepass = false
+    /// The feed the arrival wake is currently wired to (reference identity), so `configure` re-subscribes only
+    /// when a new feed instance arrives (a new session/route), never on every SwiftUI update pass.
+    private weak var wiredFeed: UIKitThumbnailFeed?
+    /// Cached grid profile + engine so a plain finger-scroll frame reuses them instead of reconstructing a
+    /// `SquareTileGridEngine` (+ its section arrays) and re-resolving the profile every vsync. The profile is a
+    /// pure function of the layout size; the engine of (item count, profile) — both change only on
+    /// configure / resize, never mid-scroll — so this removes the per-frame allocation churn.
+    private var cachedProfile: GridLevelProfile?
+    private var cachedProfileLayoutSize: CGSize = .zero
+    private var cachedEngine: SquareTileGridEngine?
+    private var cachedEngineItemCount = -1
+    private var cachedEngineProfileID: String?
     private var needsInitialNewestViewport = true
     private var userHasScrolledTimeline = false
     private var isApplyingProgrammaticScroll = false
@@ -110,6 +153,10 @@ public final class UIKitTimelineGridHostView: UIView {
     /// Called on the main actor when the user taps a photo cell, with the tapped item. The shell presents the viewer.
     public var onOpenPhoto: ((PhotoItem) -> Void)?
 
+    /// Called on the main actor when the user taps a cell WHILE in selection mode, with the tapped item. The shell
+    /// toggles that item's membership in the selection set.
+    public var onToggleSelection: ((PhotoItem) -> Void)?
+
     public override init(frame: CGRect = .zero) {
         super.init(frame: frame)
         configureSubviews()
@@ -130,14 +177,27 @@ public final class UIKitTimelineGridHostView: UIView {
         items: [PhotoItem],
         thumbnailFeed: UIKitThumbnailFeed,
         level: Int? = nil,
-        displayMode: TileContentDisplayMode = .squareFillCrop
+        displayMode: TileContentDisplayMode = .squareFillCrop,
+        selectionMode: Bool = false,
+        selectedUIDs: Set<PhotoUID> = []
     ) {
+        self.selectionMode = selectionMode
+        self.selectedUIDs = selectedUIDs
         let newUIDs = items.map(\.uid)
         let uidsChanged = itemUIDs != newUIDs
         let shouldOpenAtNewest = uidsChanged && !newUIDs.isEmpty && !userHasScrolledTimeline
         self.items = items
         self.itemUIDs = newUIDs
         self.thumbnailFeed = thumbnailFeed
+        // Subscribe to the feed's arrival wake ONCE per feed instance (a new session/route builds a new feed):
+        // a background download landing on disk then re-warms + redraws this host, so a visible tile fills
+        // without the user having to scroll a nudge further. Mirrors the macOS `installImageAvailabilityCallback`.
+        if wiredFeed !== thumbnailFeed {
+            wiredFeed = thumbnailFeed
+            thumbnailFeed.setOnImagesAvailable { [weak self] in
+                Task { @MainActor in self?.handleImagesAvailable() }
+            }
+        }
         // An explicit external level is authoritative: it clears any pinch-driven level so the host follows the
         // caller again (a nil level leaves the user's pinch level in place).
         if let level, level != levelOverride { interactiveLevel = nil }
@@ -148,6 +208,7 @@ public final class UIKitTimelineGridHostView: UIView {
                 newUIDs.enumerated().map { ($0.element, $0.offset) },
                 uniquingKeysWith: { _, latest in latest }
             )
+            videoUIDs = Set(items.filter(\.isVideo).map(\.uid))
             lastWarmIDs = []
             if !newUIDs.isEmpty {
                 // A new content set must report its own first drawn frame.
@@ -185,8 +246,13 @@ public final class UIKitTimelineGridHostView: UIView {
         if window == nil {
             displayLink.stop()
             warmTask?.cancel()
+            warmGeneration &+= 1   // retire the cancelled pass so its late completion can't touch a newer one
+            warmInFlight = false   // never leave the warm gate latched shut after a detach cancels the pass
         } else {
             metalView.updateDrawableSize()
+            // Thumbnails may have landed on disk while detached (tab switch); re-warm the visible set on return
+            // even if it is unchanged, so the grid fills without needing a scroll nudge.
+            warmNeedsRepass = true
             requestRender()
         }
     }
@@ -288,15 +354,52 @@ public final class UIKitTimelineGridHostView: UIView {
 
     private func resolvedContentSize() -> CGSize {
         guard bounds.width > 0, !items.isEmpty else { return bounds.size }
-        let profile = profileAdapter.profile(for: metalView)
+        let profile = currentProfile()
         let level = activeLevel(profile: profile)
-        let engine = SquareTileGridEngine(sectionCounts: [items.count], profile: profile)
+        let engine = currentEngine(profile: profile)
         let content = engine.contentSize(level: level, width: bounds.width)
         return CGSize(width: max(bounds.width, content.width), height: max(bounds.height + 1, content.height))
     }
 
     private func activeLevel(profile: GridLevelProfile) -> Int {
         profile.clampLevel(interactiveLevel ?? levelOverride ?? profile.defaultLevel)
+    }
+
+    /// The grid profile for the current layout size, rebuilt only when that size changes (never mid-scroll).
+    /// The profile is a pure function of the usable layout size, so caching on it keeps a plain scroll frame
+    /// from re-resolving the density ladder every vsync.
+    private func currentProfile() -> GridLevelProfile {
+        let layoutSize = UIKitTimelineGridProfileAdapter.layoutSize(
+            forBounds: metalView.bounds, safeAreaInsets: metalView.safeAreaInsets)
+        if let cachedProfile, cachedProfileLayoutSize == layoutSize { return cachedProfile }
+        let profile = profileAdapter.profile(for: metalView)
+        cachedProfile = profile
+        cachedProfileLayoutSize = layoutSize
+        // A profile change can change the level ladder, so the engine keyed on it must rebuild too.
+        cachedEngine = nil
+        return profile
+    }
+
+    /// The canonical geometry engine for the current item count + profile, rebuilt only when either changes.
+    /// A finger-scroll changes neither, so the engine (and its section arrays) is constructed once, not per frame.
+    private func currentEngine(profile: GridLevelProfile) -> SquareTileGridEngine {
+        if let cachedEngine, cachedEngineItemCount == items.count, cachedEngineProfileID == profile.id {
+            return cachedEngine
+        }
+        let engine = SquareTileGridEngine(sectionCounts: [items.count], profile: profile)
+        cachedEngine = engine
+        cachedEngineItemCount = items.count
+        cachedEngineProfileID = profile.id
+        return engine
+    }
+
+    /// Arrival wake from the shared feed (a background download landed thumbnails on disk while this viewport is
+    /// live). Re-warm the still-missing visible cells (decoding the new bytes disk→RAM) and redraw — this is what
+    /// lets the render loop legitimately idle through a network wait instead of spinning, since an arrival always
+    /// re-arms it. One-hop to the main actor; the pump coalesces the redraw to at most one frame.
+    private func handleImagesAvailable() {
+        warmNeedsRepass = true
+        requestRender()
     }
 
     // MARK: - Coalesced render loop
@@ -359,9 +462,9 @@ public final class UIKitTimelineGridHostView: UIView {
         guard let target = MetalGridDrawableTarget(layer: metalView.metalLayer) else { return .noDrawable }
 
         let viewportSize = bounds.size
-        let profile = profileAdapter.profile(for: metalView)
+        let profile = currentProfile()
         let level = activeLevel(profile: profile)
-        let engine = SquareTileGridEngine(sectionCounts: [items.count], profile: profile)
+        let engine = currentEngine(profile: profile)
         let overscan = texturePolicy.budget.overscanFraction * viewportSize.height
         let plan = engine.framePlan(
             level: level,
@@ -404,7 +507,7 @@ public final class UIKitTimelineGridHostView: UIView {
             cache: textureCache,
             displayMode: displayMode,
             cornerRadius: GridVisualConstants.thumbnailCornerRadius,
-            decorations: nil
+            decorations: selectionDecorations()
         ).groups
         textureCache.evictToBudget()
         renderer.render(to: target, viewportSize: viewportSize, groups: groups)
@@ -424,7 +527,14 @@ public final class UIKitTimelineGridHostView: UIView {
             }
         }
         scheduleWarmIfNeeded(missingVisible, pixelSize: uploadPixels)
-        let hasPendingWork = (!missingVisible.isEmpty && !textureCache.residencySaturatedThisFrame)
+        // Keep ticking ONLY for work the render loop can actually make progress on this vsync: a visible tile
+        // already decoded in RAM but held back by the per-frame upload budget (`uploadPending`), a soft→sharp
+        // upgrade in flight, or a warm pass running. A visible tile that is still missing with NO RAM image is
+        // waiting on the network/disk crawl — the feed's arrival wake (`handleImagesAvailable`) re-arms the loop
+        // when its bytes land, so we idle through that wait instead of spinning full frames the whole time.
+        let uploadPending = missingVisible.contains { feed?.memoryCGImage(for: $0) != nil }
+        let hasPendingWork = warmInFlight
+            || (uploadPending && !textureCache.residencySaturatedThisFrame)
             || streamResult.pendingVisibleQualityUpgrade
         perf.noteDraw(visible: ids.visible.count, missing: missingVisible.count, cache: textureCache)
         return .drawn(hasPendingWork: hasPendingWork)
@@ -434,23 +544,27 @@ public final class UIKitTimelineGridHostView: UIView {
     /// out. Built the same way `renderNow` builds it, so hit-testing and rendering never diverge.
     private func currentGridContext() -> (engine: SquareTileGridEngine, level: Int, profile: GridLevelProfile)? {
         guard bounds.width > 0, !items.isEmpty else { return nil }
-        let profile = profileAdapter.profile(for: metalView)
+        let profile = currentProfile()
         let level = activeLevel(profile: profile)
-        let engine = SquareTileGridEngine(sectionCounts: [items.count], profile: profile)
+        let engine = currentEngine(profile: profile)
         return (engine, level, profile)
     }
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        // A tap that merely halts a decelerating scroll must not also open a photo.
-        guard gesture.state == .ended, !scrollView.isDecelerating,
-              let onOpenPhoto, let ctx = currentGridContext() else { return }
+        // A tap that merely halts a decelerating scroll must not also open/select a photo.
+        guard gesture.state == .ended, !scrollView.isDecelerating, let ctx = currentGridContext() else { return }
         // contentView spans the full content size at origin .zero, so its coordinate space IS the engine's
         // content space (y down, origin at the library top).
         let contentPoint = gesture.location(in: contentView)
         guard let slot = ctx.engine.hitTest(contentPoint: contentPoint, level: ctx.level, width: bounds.width),
               slot.index >= 0, slot.index < items.count
         else { return }
-        onOpenPhoto(items[slot.index])
+        // In selection mode a tap toggles the cell (and never opens the viewer); otherwise it opens.
+        if selectionMode {
+            onToggleSelection?(items[slot.index])
+        } else {
+            onOpenPhoto?(items[slot.index])
+        }
     }
 
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
@@ -486,8 +600,8 @@ public final class UIKitTimelineGridHostView: UIView {
     /// engine so the photo under the fingers stays put (no jump to top/newest).
     private func applyLevelChange(from sourceLevel: Int, to targetLevel: Int,
                                   cursorContentPoint: CGPoint, sourceOffsetY: CGFloat) {
-        let profile = profileAdapter.profile(for: metalView)
-        let engine = SquareTileGridEngine(sectionCounts: [items.count], profile: profile)
+        let profile = currentProfile()
+        let engine = currentEngine(profile: profile)
         let anchoredY = engine.cursorAnchoredScrollOffsetY(
             levelChangeFrom: sourceLevel,
             to: targetLevel,
@@ -511,17 +625,56 @@ public final class UIKitTimelineGridHostView: UIView {
         }
     }
 
+    /// The shared selection decorations (blue outline + checkmark badge) for the current frame, or nil outside
+    /// selection mode — normal browsing draws bare thumbnails, exactly as before. The Proton primary (0x6D4AFF)
+    /// is injected as neutral SIMD/glyph data at this adapter edge, keeping the composer platform-neutral.
+    private func selectionDecorations() -> MetalGridDecorations<PhotoUID>? {
+        guard selectionMode else { return nil }
+        let accent = SIMD4<Float>(Float(0x6D) / 255, Float(0x4A) / 255, Float(0xFF) / 255, 1)
+        return MetalGridDecorations(
+            accent: accent,
+            accentGlyphColor: MetalGridGlyphColor(
+                red: Double(accent.x), green: Double(accent.y), blue: Double(accent.z), alpha: 1),
+            selectionMode: true,
+            selected: selectedUIDs,
+            favorites: [],
+            isVideo: { [videoUIDs] uid in videoUIDs.contains(uid) }
+        )
+    }
+
+    /// Decode the still-missing visible cells disk→RAM (queuing network for the rest), at most one pass at a time.
+    ///
+    /// The gate is `warmInFlight`, NOT exact-set equality: a pass is re-issued whenever the missing set changed OR
+    /// `warmNeedsRepass` was raised (a feed arrival / demand move). That is what fixes "black until the user
+    /// scrolls a nudge further" — under a STATIC viewport, a tile whose bytes land on disk (via the crawl worker,
+    /// which only stores to disk) is re-warmed on the next pass and decoded into the RAM tier the renderer reads,
+    /// instead of being permanently deduped away because the visible set never changed. On completion it redraws;
+    /// if cells are still missing the next frame re-invokes this, so the fill continues to convergence.
     private func scheduleWarmIfNeeded(_ uids: [PhotoUID], pixelSize: Int) {
-        guard !uids.isEmpty, let thumbnailFeed else { return }
+        guard let thumbnailFeed else { return }
         var seen = Set<PhotoUID>()
         let unique = uids.filter { seen.insert($0).inserted }
-        guard unique != lastWarmIDs else { return }
+        guard !unique.isEmpty else { lastWarmIDs = []; warmNeedsRepass = false; return }
+        if warmInFlight {
+            // A pass is running; if demand moved, remember to re-issue once it finishes.
+            if unique != lastWarmIDs { warmNeedsRepass = true }
+            return
+        }
+        guard unique != lastWarmIDs || warmNeedsRepass else { return }
+        warmNeedsRepass = false
         lastWarmIDs = unique
-        warmTask?.cancel()
+        warmInFlight = true
+        warmGeneration &+= 1
+        let generation = warmGeneration
         let requests = unique.map { ThumbnailRequest(uid: $0, pixelSize: pixelSize, cropMode: displayMode.rawValue) }
         warmTask = Task { [weak self, thumbnailFeed] in
             _ = await thumbnailFeed.warmDecoded(requests, priority: .visibleNow, limit: max(1, requests.count))
-            await MainActor.run { self?.requestRender() }
+            await MainActor.run {
+                guard let self, self.warmGeneration == generation else { return }
+                self.warmInFlight = false
+                // Redraw to upload whatever decoded; renderNow re-invokes this for any cells still missing.
+                self.requestRender()
+            }
         }
     }
 }

@@ -86,6 +86,14 @@ private final class MutableClock: @unchecked Sendable {
     func advance(_ seconds: TimeInterval) { lock.withLock { current = current.addingTimeInterval(seconds) } }
 }
 
+/// Thread-safe fire counter for the `onImagesAvailable` arrival-wake tests (the callback is `@Sendable`).
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func increment() { lock.withLock { count += 1 } }
+    func value() -> Int { lock.withLock { count } }
+}
+
 @Suite("MediaFeedCore")
 struct ThumbnailFeedCoreTests {
     @Test func diskOnlyBytesWarmIntoDecodedRamWithoutNetwork() async throws {
@@ -118,6 +126,47 @@ struct ThumbnailFeedCoreTests {
         let after = await feed.cacheState(for: ThumbnailRequest(uid: uid))
         #expect(after.diskThumbnail)
         #expect(after.ramDecoded)
+    }
+
+    @Test func networkDeliveryWakesHostWhenViewportLive() async throws {
+        // The crawl worker stores network arrivals to DISK ONLY. Without an arrival wake, a grid host whose
+        // visible set is unchanged never re-warms those bytes into RAM → "black until the user scrolls a nudge
+        // further". This proves the shared wake fires when a delivery lands while a viewport is live.
+        let uid = Self.uid("wake-live")
+        let cache = Self.cache("wake-live")   // empty disk → the item must be fetched over the (fake) network
+        let loader = RecordingLoader(payloads: [uid: Self.pngData(width: 8, height: 8)])
+        let feed = ThumbnailFeedCore(
+            cache: cache, loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 1)
+        )
+        let wakes = Counter()
+        await feed.setOnImagesAvailable { wakes.increment() }
+
+        feed.noteVisibleDemand()                                   // a viewport is live → arrivals must wake it
+        await feed.requestPriority(uid, priority: .visibleNow)     // enqueue the disk-miss for the crawl worker
+
+        try await Self.waitUntil { wakes.value() > 0 }
+        #expect(wakes.value() > 0)
+        #expect(await loader.fetched(uid))
+    }
+
+    @Test func backgroundCrawlDeliveryDoesNotWakeHostWithoutDemand() async throws {
+        // A purely background crawl (no live viewport) must NOT spin the host's display loop: the wake stays
+        // silent when there has been no recent visible demand.
+        let uid = Self.uid("wake-idle")
+        let cache = Self.cache("wake-idle")
+        let loader = RecordingLoader(payloads: [uid: Self.pngData(width: 8, height: 8)])
+        let feed = ThumbnailFeedCore(
+            cache: cache, loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 1)
+        )
+        let wakes = Counter()
+        await feed.setOnImagesAvailable { wakes.increment() }
+
+        await feed.startPrefetch([uid])                            // crawl only — never sets visible demand
+        try await Self.waitUntil { await loader.fetched(uid) }
+        try await Task.sleep(for: .milliseconds(120))              // give any (erroneous) wake time to fire
+        #expect(wakes.value() == 0)
     }
 
     @Test func corruptDiskBlobDoesNotStarveVisibleFetch() async throws {

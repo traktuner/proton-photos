@@ -117,6 +117,14 @@ public actor ThumbnailFeedCore {
     private nonisolated let lastDemand = LastDemandBox()
     private var crawlBackoffUntil: Date?
 
+    /// Fired (on the feed actor) after a background download batch lands thumbnails on disk while a viewport is
+    /// live — the "images available" arrival signal a grid host subscribes to so it re-warms the still-missing
+    /// visible cells (decoding the just-arrived bytes disk→RAM) and redraws, WITHOUT needing a scroll nudge.
+    /// This is the platform-neutral analogue of the macOS `MetalGridDataSource.onImagesAvailable` wake: the
+    /// crawl worker stores network arrivals to disk only, so without this signal a host that has gone idle (or
+    /// whose visible warm set is unchanged) never learns the bytes arrived. Set once by the platform adapter.
+    private var onImagesAvailable: (@Sendable () -> Void)?
+
     public init(
         cache: ThumbnailCache,
         loader: ThumbnailBatchLoader,
@@ -131,6 +139,22 @@ public actor ThumbnailFeedCore {
         self.onDecoded = onDecoded
         self.decoded = DecodedThumbnailCache(costLimit: configuration.decodedMemoryBudgetBytes)
         targetConcurrency = configuration.initialDownloadConcurrency
+    }
+
+    /// Subscribe to the "images available" arrival wake (see `onImagesAvailable`). The callback fires on the feed
+    /// actor whenever a background download batch delivers thumbnails to disk while a viewport is recently live;
+    /// the host hops to its own actor and redraws / re-warms. Idempotent — set once per feed lifetime.
+    public func setOnImagesAvailable(_ callback: (@Sendable () -> Void)?) {
+        onImagesAvailable = callback
+    }
+
+    /// A generous "a live viewport is (or was very recently) waiting on content" gate for the arrival wake: wide
+    /// enough to span a slow network delivery (bounded by the download timeout), so a tile that lands seconds
+    /// after its warm still wakes the grid, yet closed when no viewport has demanded anything recently, so a
+    /// purely background crawl (user not looking) never spins the host's display loop.
+    private nonisolated func hostArrivalWakeIsLive(now: Date) -> Bool {
+        guard let last = lastDemand.get() else { return false }
+        return now.timeIntervalSince(last) < configuration.downloadTimeoutSeconds + 5
     }
 
     /// Governor-driven memory-pressure response for the decoded-thumbnail RAM tier. `scale` lowers the
@@ -603,6 +627,12 @@ public actor ThumbnailFeedCore {
             }
             if let checkpointKey, sequentialIndex > 0 {
                 UserDefaults.standard.set(sequentialIndex, forKey: checkpointKey)
+            }
+            // Arrival wake: bytes just landed on disk. If a viewport is (recently) live, tell the host so it
+            // re-warms the still-missing visible cells (disk→RAM) and redraws — closing the "black until the
+            // user scrolls a nudge further" gap, since the crawl worker only stores to disk and never decodes.
+            if completed > 0, hostArrivalWakeIsLive(now: clock()) {
+                onImagesAvailable?()
             }
             emitPrefetchSummary()
         }

@@ -76,6 +76,13 @@ public actor UIKitThumbnailFeed {
         core.memoryDecoded(for: uid)?.image
     }
 
+    /// Subscribe to the shared feed's "images available" arrival wake (see `ThumbnailFeedCore.onImagesAvailable`).
+    /// Fire-and-forget so the grid host can wire it synchronously from `makeUIView`/`configure`; the callback then
+    /// fires on the feed actor whenever a background download lands thumbnails on disk while a viewport is live.
+    public nonisolated func setOnImagesAvailable(_ callback: @escaping @Sendable () -> Void) {
+        Task { await core.setOnImagesAvailable(callback) }
+    }
+
     public nonisolated func isKnownUnfetchable(_ uid: PhotoUID) -> Bool {
         core.isKnownUnfetchable(uid)
     }

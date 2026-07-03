@@ -60,6 +60,15 @@ final class MobileLibraryModel: ObservableObject {
         start(session: session, store: store)
     }
 
+    /// Move the given items to Trash via the shared backend — a REAL, recoverable move (never a permanent
+    /// delete), matching the only capability the backend exposes (`TrashProvider`). On success the items are
+    /// dropped from the visible library; the call throws so the caller can surface a failure honestly.
+    func trashItems(_ uids: Set<PhotoUID>) async throws {
+        guard let backend, !uids.isEmpty else { return }
+        try await backend.trash(Array(uids))
+        items.removeAll { uids.contains($0.uid) }
+    }
+
     /// Retry after a failure — restarts the whole load for the current session.
     func retry() {
         guard let session, let store else { return }

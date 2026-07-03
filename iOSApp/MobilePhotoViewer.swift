@@ -188,6 +188,8 @@ private struct MobileVideoPage: View {
     @State private var playbackStarted = false
     @State private var timeObserverBox = VideoTimeObserverBox()
     @State private var pinch = ViewerPinchState()
+    @State private var drag = ViewerDragState()
+    @State private var viewportHeight: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -219,13 +221,50 @@ private struct MobileVideoPage: View {
                 .transition(.opacity)
             }
         }
-        .scaleEffect(pinch.displayScale, anchor: pinch.anchor)
+        .scaleEffect(pinch.displayScale * drag.scale, anchor: drag.isActive ? .center : pinch.anchor)
+        .offset(drag.offset)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
         .simultaneousGesture(pinchToCloseGesture)
+        .simultaneousGesture(dragToDismissGesture)
         .task(id: item.uid) { await prepare() }
         .onChange(of: isCurrent) { _, current in
             if current { player?.play() } else { player?.pause() }
         }
         .onDisappear { teardown() }
+    }
+
+    /// One-finger drag-to-close: engages only on a clearly VERTICAL drag (shared policy), tracks the finger with a
+    /// gentle shrink, and on release closes the viewer or springs back. Simultaneous, so the page TabView keeps its
+    /// horizontal paging swipe and the player's tap-driven transport controls keep working untouched.
+    private var dragToDismissGesture: some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { value in
+                if !drag.isActive {
+                    guard ViewerDragDismissPolicy.engages(translation: value.translation, isZoomedIn: false) else { return }
+                    drag.isActive = true
+                }
+                let progress = ViewerDragDismissPolicy.progress(
+                    translationY: value.translation.height, viewportHeight: viewportHeight)
+                drag.offset = value.translation
+                drag.scale = ViewerDragDismissPolicy.displayScale(progress: progress)
+            }
+            .onEnded { value in
+                guard drag.isActive else { return }
+                drag.isActive = false
+                if ViewerDragDismissPolicy.shouldDismiss(
+                    translationY: value.translation.height, velocityY: value.velocity.height,
+                    viewportHeight: viewportHeight) {
+                    onCloseRequested()
+                } else {
+                    withAnimation(.spring(
+                        duration: ViewerDragDismissPolicy.springBackDuration,
+                        bounce: 1 - Double(ViewerDragDismissPolicy.springBackDamping)
+                    )) {
+                        drag.offset = .zero
+                        drag.scale = 1
+                    }
+                }
+            }
     }
 
     /// Two-finger pinch-to-close: engages only on a pinch-in (shared policy), scales the page about the
@@ -302,6 +341,13 @@ private struct ViewerPinchState {
     var anchor: UnitPoint = .center
 }
 
+/// Live one-finger drag-to-close state for the SwiftUI (video) page.
+private struct ViewerDragState {
+    var isActive = false
+    var offset: CGSize = .zero
+    var scale: CGFloat = 1
+}
+
 /// Owns an `AVPlayer` periodic time-observer token — the token must be removed from the SAME player
 /// instance it was added to, which a plain `@State Any?` cannot guarantee across view updates.
 private final class VideoTimeObserverBox {
@@ -366,6 +412,15 @@ private struct MobileZoomableImage: UIViewRepresentable {
         dismissPinch.delegate = context.coordinator
         scrollView.addGestureRecognizer(dismissPinch)
 
+        // One-finger drag-to-close: begins ONLY on a clearly vertical drag while unzoomed (shared policy +
+        // `gestureRecognizerShouldBegin`), so a horizontal drag falls through to the page TabView's swipe and a
+        // zoomed image still pans normally. It tracks the finger and closes / springs back on release.
+        let dismissPan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDismissPan(_:)))
+        dismissPan.delegate = context.coordinator
+        dismissPan.maximumNumberOfTouches = 1
+        scrollView.addGestureRecognizer(dismissPan)
+        context.coordinator.dismissPan = dismissPan
+
         return scrollView
     }
 
@@ -389,6 +444,8 @@ private struct MobileZoomableImage: UIViewRepresentable {
 
         private var dismissPinchActive = false
         private var pinchStartCentroid: CGPoint = .zero
+        weak var dismissPan: UIPanGestureRecognizer?
+        private var dismissPanActive = false
 
         init(onSingleTap: @escaping () -> Void, onCloseRequested: @escaping () -> Void) {
             self.onSingleTap = onSingleTap
@@ -400,6 +457,57 @@ private struct MobileZoomableImage: UIViewRepresentable {
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
             true
+        }
+
+        /// Gate the dismiss pan so it begins ONLY on a clearly vertical drag while the image is unzoomed — a
+        /// horizontal drag then falls through to the page TabView's paging swipe, and a zoomed image keeps its
+        /// scroll-view pan. Every other recognizer begins normally.
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard gestureRecognizer === dismissPan, let scrollView else { return true }
+            let isZoomedIn = scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
+            guard !isZoomedIn else { return false }
+            let v = (gestureRecognizer as? UIPanGestureRecognizer)?.velocity(in: scrollView) ?? .zero
+            return abs(v.y) > abs(v.x)
+        }
+
+        @objc func handleDismissPan(_ gesture: UIPanGestureRecognizer) {
+            guard let scrollView, let container = scrollView.superview else { return }
+            let translation = gesture.translation(in: container)
+            switch gesture.state {
+            case .began, .changed:
+                if !dismissPanActive {
+                    let isZoomedIn = scrollView.zoomScale > scrollView.minimumZoomScale + 0.01
+                    guard ViewerDragDismissPolicy.engages(
+                        translation: CGSize(width: translation.x, height: translation.y), isZoomedIn: isZoomedIn)
+                    else { return }
+                    dismissPanActive = true
+                }
+                let progress = ViewerDragDismissPolicy.progress(
+                    translationY: translation.y, viewportHeight: container.bounds.height)
+                let scale = ViewerDragDismissPolicy.displayScale(progress: progress)
+                scrollView.transform = CGAffineTransform(translationX: translation.x, y: translation.y)
+                    .scaledBy(x: scale, y: scale)
+            case .ended, .cancelled, .failed:
+                guard dismissPanActive else { return }
+                dismissPanActive = false
+                let velocity = gesture.velocity(in: container)
+                if gesture.state == .ended, ViewerDragDismissPolicy.shouldDismiss(
+                    translationY: translation.y, velocityY: velocity.y, viewportHeight: container.bounds.height) {
+                    onCloseRequested()
+                } else {
+                    UIView.animate(
+                        withDuration: ViewerDragDismissPolicy.springBackDuration,
+                        delay: 0,
+                        usingSpringWithDamping: ViewerDragDismissPolicy.springBackDamping,
+                        initialSpringVelocity: 0,
+                        options: [.allowUserInteraction, .beginFromCurrentState]
+                    ) {
+                        scrollView.transform = .identity
+                    }
+                }
+            default:
+                break
+            }
         }
 
         @objc func handleSingleTap() { onSingleTap() }

@@ -56,8 +56,8 @@ private struct MobileMainTabView: View {
             Tab(String(localized: "tab.photos"), systemImage: "photo.on.rectangle.angled") {
                 MobileTimelineScreen()
             }
-            Tab(String(localized: "tab.albums"), systemImage: "rectangle.stack") {
-                MobileAlbumsScreen()
+            Tab(String(localized: "tab.collections"), systemImage: "square.stack") {
+                MobileCollectionsScreen()
             }
             Tab(String(localized: "tab.map"), systemImage: "map") {
                 MobileMapScreen()

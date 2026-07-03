@@ -15,7 +15,7 @@ struct MobileLibraryLoadingView: View {
     static let spinnerGeometryID = "library-loading-spinner"
 
     let state: LibraryLoadState
-    var spinnerNamespace: Namespace.ID?
+    var spinnerNamespace: Namespace.ID? = nil
 
     var body: some View {
         VStack(spacing: 18) {

@@ -3,68 +3,111 @@ import PhotosCore
 import SwiftUI
 import TimelineUIKitFeature
 
-/// Albums tab. Always visible with a polished empty state; when albums exist it lists them and opens a detail
-/// grid. Album data comes from the shared backend (`PhotoLibraryProvider.albums()` / `timeline(filter:)`).
-struct MobileAlbumsScreen: View {
+/// The Collections tab: a generic, extensible hub over the shared `PhotoFilter` routes. It lists the
+/// smart-filter categories that are backed by REAL backend capabilities (Favorites, Videos, Live Photos —
+/// server-side `PhotoTag` filters), the user's Albums (`PhotoLibraryProvider.albums()`), and Trash — each
+/// opening the same shared timeline grid filtered to that route. Adding a category is a new row, not a new
+/// screen: everything flows through `PhotoFilter` + `backend.timeline(filter:)`.
+///
+/// Album CREATE / add-to-album are deliberately absent: the backend does not support them yet
+/// (`AlbumCapabilities.canCreate/canAddPhotos == false`), so no affordance is shown that would fail.
+struct MobileCollectionsScreen: View {
     @EnvironmentObject private var model: MobileLibraryModel
     @State private var albums: [PhotoAlbum] = []
-    @State private var phase: Phase = .loading
+    @State private var albumsPhase: Phase = .loading
 
     private enum Phase: Equatable { case loading, loaded, failed(String) }
 
+    /// Smart categories backed by real, present capabilities in this repo (server-side `PhotoTag` filters). The
+    /// titles + icons come from the shared `PhotoTag` (already localized), so no per-category strings live here.
+    private let smartCategories: [PhotoTag] = [.favorites, .videos, .livePhotos]
+
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle(String(localized: "tab.albums"))
-                .task(id: model.backend == nil) { await load() }
-                .refreshable { await load() }
+            List {
+                Section(String(localized: "collections.section_library")) {
+                    ForEach(smartCategories, id: \.rawValue) { tag in
+                        NavigationLink {
+                            MobileFilterGridScreen(title: tag.title, filter: .tag(tag))
+                        } label: {
+                            MobileCollectionRow(systemImage: tag.systemImage, title: tag.title)
+                        }
+                    }
+                    NavigationLink {
+                        MobileFilterGridScreen(title: String(localized: "collections.trash"), filter: .trash)
+                    } label: {
+                        MobileCollectionRow(systemImage: "trash", title: String(localized: "collections.trash"))
+                    }
+                }
+
+                Section(String(localized: "collections.section_albums")) {
+                    albumsSection
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle(String(localized: "tab.collections"))
+            .task(id: model.backend == nil) { await loadAlbums() }
+            .refreshable { await loadAlbums() }
         }
     }
 
-    @ViewBuilder private var content: some View {
-        switch phase {
+    @ViewBuilder private var albumsSection: some View {
+        switch albumsPhase {
         case .loading where albums.isEmpty:
-            ProgressView().controlSize(.large).tint(ProtonColor.primary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            HStack {
+                ProgressView().controlSize(.small).tint(ProtonColor.primary)
+                Text("collections.loading_albums").foregroundStyle(ProtonColor.textWeak)
+            }
         case .failed(let message) where albums.isEmpty:
-            ContentUnavailableView {
-                Label("albums.load_failed", systemImage: "exclamationmark.icloud")
-            } description: {
-                Text(message)
-            } actions: {
-                Button(String(localized: "action.try_again")) { Task { await load() } }
-                    .buttonStyle(.borderedProminent)
-                    .tint(ProtonColor.primary)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("albums.load_failed").foregroundStyle(ProtonColor.textNorm)
+                Text(message).font(.caption).foregroundStyle(ProtonColor.textWeak)
+                Button(String(localized: "action.try_again")) { Task { await loadAlbums() } }
+                    .font(.caption)
             }
         default:
             if albums.isEmpty {
-                ContentUnavailableView {
-                    Label("albums.empty_title", systemImage: "rectangle.stack")
-                } description: {
-                    Text("albums.empty_message \(ProductBrand.displayName)")
-                }
+                Text("collections.empty_albums").foregroundStyle(ProtonColor.textWeak)
             } else {
-                List(albums) { album in
+                ForEach(albums) { album in
                     NavigationLink {
-                        MobileAlbumDetailScreen(album: album)
+                        MobileFilterGridScreen(title: album.title, filter: .album(id: album.id, title: album.title))
                     } label: {
                         MobileAlbumRow(album: album)
                     }
                 }
-                .listStyle(.plain)
             }
         }
     }
 
-    private func load() async {
+    private func loadAlbums() async {
         guard let backend = model.backend else { return }
-        if albums.isEmpty { phase = .loading }
+        if albums.isEmpty { albumsPhase = .loading }
         do {
             albums = try await backend.albums()
-            phase = .loaded
+            albumsPhase = .loaded
         } catch {
-            phase = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            albumsPhase = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
+    }
+}
+
+private struct MobileCollectionRow: View {
+    let systemImage: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.title3)
+                .foregroundStyle(ProtonColor.primary)
+                .frame(width: 44, height: 44)
+                .background(ProtonColor.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            Text(title)
+                .font(.body.weight(.medium))
+                .foregroundStyle(ProtonColor.textNorm)
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -91,10 +134,12 @@ private struct MobileAlbumRow: View {
     }
 }
 
-/// Album detail — the shared timeline grid, filtered to the album, with the same tap-to-open viewer.
-private struct MobileAlbumDetailScreen: View {
+/// The shared timeline grid, filtered to ANY `PhotoFilter` route (smart tag, album, or trash), with the same
+/// tap-to-open viewer as the main timeline. One screen serves every collection — the route is the only input.
+private struct MobileFilterGridScreen: View {
     @EnvironmentObject private var model: MobileLibraryModel
-    let album: PhotoAlbum
+    let title: String
+    let filter: PhotoFilter
 
     @State private var items: [PhotoItem] = []
     @State private var phase: Phase = .loading
@@ -110,29 +155,33 @@ private struct MobileAlbumDetailScreen: View {
             case .loading:
                 ProgressView().controlSize(.large).tint(ProtonColor.primary)
             case .failed(let message):
-                ContentUnavailableView(String(localized: "albums.detail_load_failed"), systemImage: "exclamationmark.icloud", description: Text(message))
+                ContentUnavailableView(
+                    String(localized: "albums.detail_load_failed"),
+                    systemImage: "exclamationmark.icloud",
+                    description: Text(message)
+                )
             case .loaded:
                 if items.isEmpty {
-                    ContentUnavailableView(String(localized: "albums.detail_empty"), systemImage: "rectangle.stack")
+                    ContentUnavailableView(String(localized: "collections.filter_empty"), systemImage: "photo.on.rectangle")
                 } else if let feed = model.thumbnailFeed {
                     UIKitTimelineGrid(items: items, thumbnailFeed: feed, onOpenPhoto: open)
                         .ignoresSafeArea(edges: .bottom)
                 }
             }
         }
-        .navigationTitle(album.title)
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: album.id) { await load() }
+        .task(id: filter) { await load() }
         .fullScreenCover(item: $viewer) { presentation in
             MobilePhotoViewer(items: presentation.items, startIndex: presentation.index, libraryModel: model)
         }
     }
 
     private func load() async {
-        guard let backend = model.backend else { return }
+        guard let backend = model.backend, filter.hasTimeline else { return }
         phase = .loading
         do {
-            let sections = try await backend.timeline(filter: .album(id: album.id, title: album.title))
+            let sections = try await backend.timeline(filter: filter)
             items = sections.flatMap(\.items).sorted(by: TimelineOrder.areInIncreasingOrder)
             phase = .loaded
         } catch {
