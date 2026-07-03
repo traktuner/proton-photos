@@ -43,7 +43,7 @@ public final class ProtonAuthController {
 
     public init(
         store: any ProtonSessionStorage = SessionKeychainStore(),
-        authenticator: any ProtonAuthenticating = ProtonForkAuthenticator()
+        authenticator: any ProtonAuthenticating
     ) {
         self.store = store
         self.authenticator = authenticator

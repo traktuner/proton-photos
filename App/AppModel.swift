@@ -65,7 +65,10 @@ final class AppModel {
     init() {
         let store = SessionKeychainStore()
         self.sessionStore = store
-        self.authController = ProtonAuthController(store: store)
+        self.authController = ProtonAuthController(
+            store: store,
+            authenticator: ProtonForkAuthenticator(config: .externalDriveProtonPhotos)
+        )
         // Wire ProtonCore's CryptoGo to the patched GopenPGP implementation before any crypto runs.
         injectDefaultCryptoImplementation()
     }

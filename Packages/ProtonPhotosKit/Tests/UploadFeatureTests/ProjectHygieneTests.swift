@@ -151,6 +151,10 @@ final class ProjectHygieneTests: XCTestCase {
             appModel.contains("ProtonForkAuthenticator()"),
             "macOS app must not instantiate the concrete fork authenticator directly"
         )
+        XCTAssertTrue(
+            appModel.contains("ProtonForkAuthenticator(config: .externalDriveProtonPhotos)"),
+            "macOS app must inject the documented Proton API client identity explicitly"
+        )
 
         for url in mobileAppSourceFiles() {
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
@@ -163,5 +167,9 @@ final class ProjectHygieneTests: XCTestCase {
             .compactMap { try? String(contentsOf: $0, encoding: .utf8) }
             .joined(separator: "\n")
         XCTAssertTrue(mobileShell.contains("ProtonAuthController"), "iOS app must compose the shared auth lifecycle")
+        XCTAssertTrue(
+            mobileShell.contains("ProtonForkAuthenticator(config: .externalDriveProtonPhotos)"),
+            "iOS app must inject the documented Proton API client identity explicitly"
+        )
     }
 }

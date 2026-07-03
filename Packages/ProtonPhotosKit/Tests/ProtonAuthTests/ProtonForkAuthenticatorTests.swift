@@ -5,11 +5,16 @@ import Testing
 
 @Suite("Proton fork authentication")
 struct ProtonForkAuthenticatorTests {
-    @Test func defaultProtonAPIConfigIdentifiesProtonPhotos() {
+    @Test func defaultProtonAPIConfigUsesOfficialExternalDriveIdentifierShape() {
         let config = ProtonAPIConfig()
 
-        #expect(config.appVersion == "protonphotos@1.0.0-stable")
-        #expect(config.authClientID == "protonphotos")
+        #expect(config.appVersion == "external-drive-protonphotos@1.0.0-stable")
+        #expect(config.authClientID == "external-drive")
+    }
+
+    @Test func sharedClientConfigUsesProtonDocumentedExternalDriveNamespace() {
+        #expect(ProtonAPIConfig.externalDriveProtonPhotos.appVersion == "external-drive-protonphotos@1.0.0-stable")
+        #expect(ProtonAPIConfig.externalDriveProtonPhotos.authClientID == "external-drive")
     }
 
     @Test func defaultSignInPayloadIdentifiesProtonPhotosClient() async throws {
@@ -23,7 +28,6 @@ struct ProtonForkAuthenticatorTests {
 
         #expect(url.absoluteString.hasPrefix("https://account.proton.me/desktop/login?app=drive&pv=3#payload="))
         #expect(payload.hasPrefix("0:USER-CODE:"))
-        #expect(payload.hasSuffix(":protonphotos"))
-        #expect(!payload.hasSuffix(":external-drive"))
+        #expect(payload.hasSuffix(":external-drive"))
     }
 }

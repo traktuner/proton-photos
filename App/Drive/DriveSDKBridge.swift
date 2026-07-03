@@ -56,7 +56,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     }
 
     init(session: ProtonSession, store: SessionKeychainStore) async throws {
-        let driveSession = DriveSession(session: session, store: store)
+        let driveSession = DriveSession(session: session, store: store, config: .externalDriveProtonPhotos)
         self.driveSession = driveSession
 
         DebugLog.log("bridge: fetching account data…")

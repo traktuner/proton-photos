@@ -28,11 +28,13 @@ public struct ProtonAPIConfig: Sendable {
     public let appVersion: String
     public let authClientID: String
 
+    public static let externalDriveProtonPhotos = ProtonAPIConfig()
+
     public init(
         baseURL: URL = URL(string: "https://drive-api.proton.me")!,
         accountURL: URL = URL(string: "https://account.proton.me")!,
-        appVersion: String = "protonphotos@1.0.0-stable",
-        authClientID: String = "protonphotos"
+        appVersion: String = "external-drive-protonphotos@1.0.0-stable",
+        authClientID: String = "external-drive"
     ) {
         self.baseURL = baseURL
         self.accountURL = accountURL

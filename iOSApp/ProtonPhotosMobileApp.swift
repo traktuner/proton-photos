@@ -174,7 +174,9 @@ private final class MobileSessionModel: ObservableObject {
     @Published private(set) var statusText = "Sign in through Proton in Safari. The app stores only the resulting session in the iOS Keychain."
     @Published private(set) var errorText: String?
 
-    private let authController = ProtonAuthController()
+    private let authController = ProtonAuthController(
+        authenticator: ProtonForkAuthenticator(config: .externalDriveProtonPhotos)
+    )
 
     var accountLabel: String {
         session?.uid ?? "Signed in"
