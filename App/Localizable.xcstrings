@@ -147,13 +147,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Proton AG · Encrypted by default"
+            "value": "Proton AG · Privacy by default"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Proton AG · Standardmäßig verschlüsselt"
+            "value": "Proton AG · Privacy by default"
           }
         }
       }
