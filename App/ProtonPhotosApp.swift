@@ -5,6 +5,7 @@ import TimelineFeature
 
 @main
 struct ProtonPhotosApp: App {
+    @NSApplicationDelegateAdaptor(ProtonPhotosAppDelegate.self) private var appDelegate
     @State private var model = AppModel()
 
     init() {
@@ -68,6 +69,24 @@ struct ProtonPhotosApp: App {
             SettingsView()
         }
 
+    }
+}
+
+final class ProtonPhotosAppDelegate: NSObject, NSApplicationDelegate {
+    private let singleInstanceGuard = SingleInstanceGuard()
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard singleInstanceGuard.acquire() else {
+            NSApp.terminate(nil)
+            return
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            sender.windows.first?.makeKeyAndOrderFront(nil)
+        }
+        return true
     }
 }
 

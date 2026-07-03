@@ -210,4 +210,29 @@ final class ProjectHygieneTests: XCTestCase {
         XCTAssertTrue(debugLog.contains(".libraryDirectory"), "debug logging must stay inside the app container")
         XCTAssertFalse(debugLog.contains("/tmp/protonphotos.log"), "sandboxed app must not hard-code /tmp for debug logs")
     }
+
+    func testMacAppKeepsSingleInstanceLaunchGuard() {
+        let app = (try? String(
+            contentsOf: repoRoot.appendingPathComponent("App/ProtonPhotosApp.swift"),
+            encoding: .utf8
+        )) ?? ""
+        let guardSource = (try? String(
+            contentsOf: repoRoot.appendingPathComponent("App/SingleInstanceGuard.swift"),
+            encoding: .utf8
+        )) ?? ""
+
+        XCTAssertTrue(
+            app.contains("@NSApplicationDelegateAdaptor(ProtonPhotosAppDelegate.self)"),
+            "macOS app must install its process-level launch guard before creating windows"
+        )
+        XCTAssertTrue(app.contains("singleInstanceGuard.acquire()"))
+        XCTAssertTrue(app.contains("NSApp.terminate(nil)"), "duplicate launches must exit immediately")
+
+        XCTAssertTrue(guardSource.contains("flock("), "single-instance guard must use a real process lock")
+        XCTAssertTrue(guardSource.contains("LOCK_EX | LOCK_NB"), "duplicate launches must never block startup")
+        XCTAssertTrue(
+            guardSource.contains(".applicationSupportDirectory"),
+            "lock file must stay sandbox-compatible"
+        )
+    }
 }
