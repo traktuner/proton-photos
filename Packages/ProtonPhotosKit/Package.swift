@@ -48,6 +48,7 @@ let package = Package(
         .library(name: "MetalGridTextureCore", targets: ["MetalGridTextureCore"]),
         .library(name: "MetalGridTextureAppKitAdapter", targets: ["MetalGridTextureAppKitAdapter"]),
         .library(name: "MetalGridTextureUIKitAdapter", targets: ["MetalGridTextureUIKitAdapter"]),
+        .library(name: "MetalGridComposeCore", targets: ["MetalGridComposeCore"]),
         .library(name: "MediaCache", targets: ["MediaCache"]),
         .library(name: "TimelineCore", targets: ["TimelineCore"]),
         .library(name: "TimelineUIKitAdapter", targets: ["TimelineUIKitAdapter"]),
@@ -113,6 +114,10 @@ let package = Package(
         .testTarget(name: "MetalGridTextureCoreTests", dependencies: ["MetalGridTextureCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalGridTextureAppKitAdapter", dependencies: ["MetalGridTextureCore", "GridCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MetalGridTextureUIKitAdapter", dependencies: ["MetalGridTextureCore", "GridCore"], swiftSettings: disableDynamicActorIsolation),
+        // Universal frame-composition core: the single source of truth for the settled-grid streaming +
+        // render-group sequence shared by the macOS (TimelineFeature) and iOS (TimelineUIKitFeature) hosts.
+        // Metal-tier Core: no platform view framework, no photo-domain IDs (generic over the item ID).
+        .target(name: "MetalGridComposeCore", dependencies: ["GridCore", "MetalGridTextureCore", "MetalRenderingCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCacheAppKitAdapter", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaCacheCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCacheUIKitAdapter", dependencies: ["PhotosCore", "MediaByteCache", "MediaDecodingCore", "MediaFeedCore", "MediaCacheCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaCache", dependencies: ["MediaByteCache", "MediaLocationCore", "MediaCacheCore", "MediaCacheAppKitAdapter"], swiftSettings: disableDynamicActorIsolation),
@@ -121,7 +126,7 @@ let package = Package(
         .target(name: "TimelineUIKitFeature", dependencies: ["PhotosCore", "GridCore", "TimelineCore", "TimelineUIKitAdapter", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureUIKitAdapter", "MediaCacheUIKitAdapter"], swiftSettings: disableDynamicActorIsolation),
         .target(
             name: "TimelineFeature",
-            dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "GridCore", "TimelineCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter"],
+            dependencies: ["PhotosCore", "DesignSystem", "MediaCache", "GridCore", "TimelineCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter", "MetalGridComposeCore"],
             swiftSettings: disableDynamicActorIsolation
         ),
         .target(name: "PhotoViewerCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
@@ -134,7 +139,7 @@ let package = Package(
         .testTarget(name: "PhotoViewerFeatureTests", dependencies: ["PhotoViewerFeature", "PhotoViewerCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(
             name: "TimelineFeatureTests",
-            dependencies: ["TimelineFeature", "TimelineCore", "GridCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter", "MetalGridTextureUIKitAdapter", "MediaCache", "PhotosCore"],
+            dependencies: ["TimelineFeature", "TimelineCore", "GridCore", "MetalRenderingCore", "MetalGridTextureCore", "MetalGridTextureAppKitAdapter", "MetalGridTextureUIKitAdapter", "MetalGridComposeCore", "MediaCache", "PhotosCore"],
             swiftSettings: disableDynamicActorIsolation
         ),
         // Albums: universal management protocols + repository over an injected backend. The app's

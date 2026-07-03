@@ -27,6 +27,7 @@ SHARED_UI_TARGETS=(
 RENDERING_CORE_TARGETS=(
   MetalRenderingCore
   MetalGridTextureCore
+  MetalGridComposeCore
 )
 
 IOS_PLATFORM_ADAPTER_TARGETS=(

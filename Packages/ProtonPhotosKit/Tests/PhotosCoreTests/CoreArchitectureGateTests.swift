@@ -229,6 +229,55 @@ final class CoreArchitectureGateTests: XCTestCase {
         "ProcessInfo.processInfo.activeProcessorCount",
     ]
 
+    private static let composeCoreAllowedImports: Set<String> = [
+        "CoreGraphics",
+        "GridCore",
+        "Metal",
+        "MetalGridTextureCore",
+        "MetalRenderingCore",
+        "simd",
+    ]
+
+    private static let composeCoreForbiddenImports: Set<String> = [
+        "AppKit",
+        "UIKit",
+        "SwiftUI",
+        "MapKit",
+        "AVKit",
+        "MetalKit",
+        "PhotosCore",
+        "MediaCache",
+        "TimelineFeature",
+        "TimelineUIKitFeature",
+    ]
+
+    private static let composeCoreForbiddenTokens: [String] = [
+        "MTKView",
+        "NSView",
+        "UIView",
+        "NSImage",
+        "UIImage",
+        "NSScrollView",
+        "UIScrollView",
+        "NSColor",
+        "UIColor",
+        "NSFont",
+        "UIFont",
+        "PhotoUID",
+        "PhotoItem",
+        "ThumbnailFeed",
+        "MediaCache",
+        "MTKView",
+        "CAMetalDrawable",
+        "CAMetalLayer",
+        "CADisplayLink",
+        "CALayer",
+        "PhotoDiagnostics",
+        "PhotoPerformanceSignposts",
+        "ProcessInfo.processInfo.physicalMemory",
+        "ProcessInfo.processInfo.activeProcessorCount",
+    ]
+
     private static let textureCoreAllowedImports: Set<String> = [
         "CoreGraphics",
         "GridCore",
@@ -684,6 +733,75 @@ final class CoreArchitectureGateTests: XCTestCase {
             This target may own reusable Metal texture resources and upload/cache mechanics. Platform views,
             glyph rasterization implementations, render command encoding, photo-domain IDs, media feeds, and
             hardware-budget defaults remain outside this target.
+            """
+        )
+    }
+
+    func testMetalGridComposeCoreStaysCompositionOnly() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let sourceRoot = sourcesRoot.appendingPathComponent("MetalGridComposeCore")
+        var violations: [String] = []
+
+        // Package boundary: a matching library product, dependencies only toward lower Metal/Grid Core.
+        if !manifest.contains(".library(name: \"MetalGridComposeCore\", targets: [\"MetalGridComposeCore\"])") {
+            violations.append("MetalGridComposeCore: missing matching library product")
+        }
+        if let targetLine = manifestLine(forTarget: "MetalGridComposeCore", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            if dependencies != ["GridCore", "MetalGridTextureCore", "MetalRenderingCore"] {
+                violations.append("MetalGridComposeCore: dependencies \(dependencies.sorted()) != [GridCore, MetalGridTextureCore, MetalRenderingCore]")
+            }
+        } else {
+            violations.append("MetalGridComposeCore: missing Package.swift target declaration")
+        }
+
+        let files = try swiftFiles(in: sourceRoot)
+        XCTAssertFalse(files.isEmpty, "Expected source files for MetalGridComposeCore")
+
+        for file in files {
+            let imports = try importedModules(in: file)
+            let unexpected = imports.subtracting(Self.composeCoreAllowedImports)
+            if !unexpected.isEmpty {
+                violations.append("MetalGridComposeCore/\(file.lastPathComponent): unexpected imports \(unexpected.sorted())")
+            }
+            let forbiddenImports = imports.intersection(Self.composeCoreForbiddenImports)
+            if !forbiddenImports.isEmpty {
+                violations.append("MetalGridComposeCore/\(file.lastPathComponent): forbidden imports \(forbiddenImports.sorted())")
+            }
+            let source = try String(contentsOf: file, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: source)
+            for token in Self.composeCoreForbiddenTokens where contains(token, in: code) {
+                violations.append("MetalGridComposeCore/\(file.lastPathComponent): forbidden token \(token)")
+            }
+        }
+
+        // The universal composer must own the settled-frame sequence as a generic, data-in/data-out API.
+        let composerFile = sourceRoot.appendingPathComponent("MetalGridFrameComposer.swift")
+        if FileManager.default.fileExists(atPath: composerFile.path) {
+            let source = try String(contentsOf: composerFile, encoding: .utf8)
+            for symbol in [
+                "package enum MetalGridFrameComposer",
+                "func classifyVisibility",
+                "func viewportDrawSlots",
+                "func stream",
+                "func buildGroups",
+                "GridTextureStreamingPolicy.window",
+            ] where !source.contains(symbol) {
+                violations.append("MetalGridComposeCore/MetalGridFrameComposer.swift: missing \(symbol)")
+            }
+        } else {
+            violations.append("MetalGridComposeCore/MetalGridFrameComposer.swift: missing universal frame composer")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            MetalGridComposeCore composition-only gate failed:
+            \(violations.joined(separator: "\n"))
+
+            The universal frame composer may own the settled-grid streaming + render-group sequence over the
+            injected texture cache, generic in the item ID. Platform views, photo-domain IDs, native colours,
+            media feeds, and host diagnostics belong in the macOS/iOS hosts that call it.
             """
         )
     }

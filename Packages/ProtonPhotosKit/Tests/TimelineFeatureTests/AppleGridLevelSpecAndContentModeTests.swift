@@ -28,7 +28,7 @@ import TimelineCore
         (try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8)) ?? ""
     }
     private func source(_ name: String) -> String {
-        for target in ["TimelineFeature", "GridCore"] {
+        for target in ["TimelineFeature", "GridCore", "MetalGridComposeCore"] {
             let source = readSource("Packages/ProtonPhotosKit/Sources/\(target)/\(name)")
             if !source.isEmpty { return source }
         }
@@ -367,13 +367,14 @@ import TimelineCore
     }
 
     // 28 - the renderer composes square slot (engine) + content fit (fitter); it computes NO outer geometry from aspect.
+    // The settled composition now lives in the universal MetalGridFrameComposer (shared by the macOS + iOS hosts).
     @Test func rendererDoesNotComputeAspectGeometry() {
-        let c = source("MetalGridCoordinator.swift")
-        #expect(c.contains("let cell = s.rect"), "the renderer must take the square slot from the engine")
+        let c = source("MetalGridFrameComposer.swift")
+        #expect(c.contains("let cell = s.rect"), "the composer must take the square slot from the engine")
         #expect(c.contains("TileContentFitter.fit(slotRect: cell"), "media aspect enters ONLY via the fitter, on the square cell")
         #expect(c.contains("MetalGridQuad(rect: fit.contentRect"), "the image quad must use the fitter's in-slot content rect")
         // mediaPixelSize is used solely as the fitter's input, never to size the outer cell.
-        #expect(!c.contains("cell.width * ") && !c.contains("aspect * cell") , "no aspect-scaled outer cell math in the renderer")
+        #expect(!c.contains("cell.width * ") && !c.contains("aspect * cell") , "no aspect-scaled outer cell math in the composer")
     }
 
     // 29

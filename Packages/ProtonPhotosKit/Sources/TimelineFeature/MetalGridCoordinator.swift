@@ -1,6 +1,7 @@
 import AppKit
 import MetalKit
 import CoreGraphics
+import MetalGridComposeCore
 import MetalRenderingCore
 import MetalGridTextureCore
 import MetalGridTextureAppKitAdapter
@@ -242,6 +243,16 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             headroom: Self.uploadPixelsHeadroom,
             floor: Self.uploadPixelsFloor,
             cap: cache.maxTexturePixels
+        )
+    }
+
+    /// Wires the composer's upload/upgrade work into this host's `Grid` signpost category so the
+    /// `streamTextures.upload` / `streamTextures.upgrade` Instruments intervals survive the extraction. The iOS
+    /// host omits this (the no-op default) - it has no signpost instrumentation yet.
+    private var composeSignposts: MetalGridComposeSignposts {
+        MetalGridComposeSignposts(
+            uploadInterval: { PhotoPerformanceSignposts.grid.interval("streamTextures.upload", $0) },
+            upgradeInterval: { PhotoPerformanceSignposts.grid.interval("streamTextures.upgrade", $0) }
         )
     }
 
@@ -1661,13 +1672,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                                viewportSize: layoutViewportSize, scrollY: bridgeScrollY,
                                                overscan: overscan, progress: commitBridgeProgress, columnPhase: currentPhase()))
         let settledContentSize = engine.contentSize(level: bridgeLevel, width: layoutWidth, columnPhase: currentPhase())
-        let pureViewport = CGRect(origin: .zero, size: viewportSize)
         let flatUIDs = dataSource.flatUIDs
-        var visibleUIDs: [PhotoUID] = []
-        var overscanUIDs: [PhotoUID] = []
-        for s in slots where s.index < flatUIDs.count {
-            if s.rect.intersects(pureViewport) { visibleUIDs.append(flatUIDs[s.index]) } else { overscanUIDs.append(flatUIDs[s.index]) }
-        }
+        let (visibleUIDs, overscanUIDs) = MetalGridFrameComposer.classifyVisibility(
+            slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
         streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs)
         let realCount = renderRealSlots(in: view, slots: Self.viewportDrawSlots(slots, viewportSize: viewportSize),
                                         flatUIDs: flatUIDs, viewportSize: viewportSize)
@@ -1730,14 +1737,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
             contentSizeForDiag = plan.contentSize
         }
 
-        let pureViewport = CGRect(origin: .zero, size: viewportSize)
         let flatUIDs = dataSource.flatUIDs
-        var visibleUIDs: [PhotoUID] = []
-        var overscanUIDs: [PhotoUID] = []
-        for s in slots where s.index < flatUIDs.count {
-            if s.rect.intersects(pureViewport) { visibleUIDs.append(flatUIDs[s.index]) }
-            else { overscanUIDs.append(flatUIDs[s.index]) }
-        }
+        let (visibleUIDs, overscanUIDs) = MetalGridFrameComposer.classifyVisibility(
+            slots: slots, flatUIDs: flatUIDs, viewportSize: viewportSize)
         // Fully settled (no live focus-row transaction) → allow the soft→sharp upgrade of carried-over textures.
         let pendingVisibleQualityUpgrade = streamTextures(visibleUIDs: visibleUIDs, overscanUIDs: overscanUIDs,
                                                           allowUpgrade: zoomTransaction == nil)
@@ -1759,8 +1761,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// - never changes the slot), directly over the single uniform grid background, plus production decorations.
     /// Missing thumbnails draw nothing, so the bottom-most clear surface remains one continuous field.
     nonisolated static func viewportDrawSlots(_ slots: [GridRenderSlot], viewportSize: CGSize) -> [GridRenderSlot] {
-        let viewport = CGRect(origin: .zero, size: viewportSize)
-        return slots.filter { $0.rect.intersects(viewport) }
+        MetalGridFrameComposer.viewportDrawSlots(slots, viewportSize: viewportSize)
     }
 
     @discardableResult
@@ -1780,94 +1781,24 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// OWN mode). Pure builder - no eviction, no draw. Returns (groups, resident-texture count).
     private func buildRealGroups(slots: [GridRenderSlot], flatUIDs: [PhotoUID], viewportSize: CGSize,
                                  displayMode: TileContentDisplayMode) -> (groups: [MetalGridRenderGroup], realCount: Int) {
-        let cardRadius = Float(GridVisualConstants.thumbnailCornerRadius)
-        let accent = Self.colorVector(.controlAccentColor)
-        var images: [MetalGridQuad] = []
-        var imageTextures: [MTLTexture] = []
-        var outlineQuads: [MetalGridQuad] = []
-        var favoriteQuads: [MetalGridQuad] = []
-        var checkFilledQuads: [MetalGridQuad] = []
-        var checkEmptyQuads: [MetalGridQuad] = []
-        var videoQuads: [MetalGridQuad] = []
-        var realCount = 0
-        for s in slots where s.index < flatUIDs.count {
-            let uid = flatUIDs[s.index]
-            let cell = s.rect                               // viewport-space, ALWAYS square (engine guarantee)
-            let r = cellRadius(cardRadius, cell: cell)
-            if cache.isResident(uid) {
-                cache.noteUsed(uid)
-                let texture = cache.texture(for: uid)
-                // Compose: square slot rect + content fit (TileContentFitter) + texture (cache). The fitter is
-                // the ONLY thing that sees media aspect; the slot is square regardless. `displayMode` is the
-                // aspect/square toggle (forced to squareFillCrop on the overview levels). NO per-cell card: the
-                // rounded thumbnail sits directly on the uniform background, so gaps + aspectFit letterbox show
-                // the same surface (no visible grid cells / lines).
-                let fit = TileContentFitter.fit(slotRect: cell,
-                                                mediaPixelSize: CGSize(width: texture.width, height: texture.height),
-                                                displayMode: displayMode)
-                images.append(MetalGridQuad(rect: fit.contentRect, uvMin: fit.uvMin, uvMax: fit.uvMax, radius: r))
-                imageTextures.append(texture)
-                realCount += 1
-            }
-            if decorationsEnabled {
-                appendDecorations(uid: uid, cell: cell, displayed: cell, cardRadius: r, accent: accent,
-                                  outline: &outlineQuads, favorite: &favoriteQuads,
-                                  checkFilled: &checkFilledQuads, checkEmpty: &checkEmptyQuads, video: &videoQuads)
-            }
-        }
-        var groups: [MetalGridRenderGroup] = [
-            MetalGridRenderGroup(source: .perQuadTexture(imageTextures), quads: images),
-        ]
-        if !outlineQuads.isEmpty {
-            groups.append(MetalGridRenderGroup(source: .sharedTexture(cache.placeholderTexture), quads: outlineQuads))
-        }
-        if !videoQuads.isEmpty, let texture = cache.glyphTexture(symbol: "video.fill", color: .white) {
-            groups.append(MetalGridRenderGroup(source: .sharedTexture(texture), quads: videoQuads))
-        }
-        if !favoriteQuads.isEmpty, let texture = cache.glyphTexture(symbol: "heart.fill", color: .white) {
-            groups.append(MetalGridRenderGroup(source: .sharedTexture(texture), quads: favoriteQuads))
-        }
-        if !checkEmptyQuads.isEmpty, let texture = cache.glyphTexture(symbol: "circle", color: .white) {
-            groups.append(MetalGridRenderGroup(source: .sharedTexture(texture), quads: checkEmptyQuads))
-        }
-        if !checkFilledQuads.isEmpty,
-           let texture = cache.glyphTexture(
-               symbol: "checkmark.circle.fill",
-               color: MetalGridGlyphColor(.controlAccentColor)
-           ) {
-            groups.append(MetalGridRenderGroup(source: .sharedTexture(texture), quads: checkFilledQuads))
-        }
-        return (groups, realCount)
-    }
-
-    // MARK: - Decorations (selection outline + badges, production only)
-
-    private func appendDecorations(
-        uid: PhotoUID, cell: CGRect, displayed: CGRect, cardRadius: Float, accent: SIMD4<Float>,
-        outline: inout [MetalGridQuad], favorite: inout [MetalGridQuad],
-        checkFilled: inout [MetalGridQuad], checkEmpty: inout [MetalGridQuad], video: inout [MetalGridQuad]
-    ) {
-        let side = cell.height
-        let badge = min(22, max(11, side * 0.3))
-        let pad = max(3, side * 0.06)
-        // Blue selection outline hugging the displayed image (border mode → no layout impact).
-        if selectedUIDs.contains(uid) {
-            let radius = min(cardRadius, Float(min(displayed.width, displayed.height) * 0.5))
-            outline.append(MetalGridQuad(rect: displayed, radius: radius, color: accent, mode: .border, borderWidth: 3.5))
-        }
-        // Favorite heart, bottom-left.
-        if favoriteUIDs.contains(uid) {
-            favorite.append(MetalGridQuad(rect: CGRect(x: cell.minX + pad, y: cell.maxY - badge - pad, width: badge, height: badge), radius: 0))
-        }
-        let brCorner = CGRect(x: cell.maxX - badge - pad, y: cell.maxY - badge - pad, width: badge, height: badge)
-        if selectionMode {
-            // Checkmark badge, bottom-right (filled+accent when selected, empty circle otherwise).
-            if selectedUIDs.contains(uid) { checkFilled.append(MetalGridQuad(rect: brCorner, radius: 0)) }
-            else { checkEmpty.append(MetalGridQuad(rect: brCorner, radius: 0)) }
-        } else if dataSource.isVideo(uid) {
-            // Video marker, bottom-right (no duration text yet).
-            video.append(MetalGridQuad(rect: brCorner, radius: 0))
-        }
+        // Delegates to the universal `MetalGridFrameComposer` (shared with the iOS host). Production decorations
+        // are injected as neutral data; the native AppKit accent colour is converted at this adapter edge - a
+        // SIMD vector for the selection outline, `MetalGridGlyphColor(.controlAccentColor)` for the checkmark
+        // glyph. NO per-cell card: the rounded thumbnail sits directly on the uniform background, so gaps +
+        // aspectFit letterbox reveal the same surface. Pure builder - no eviction, no draw.
+        let decorations = decorationsEnabled ? MetalGridDecorations<PhotoUID>(
+            accent: Self.colorVector(.controlAccentColor),
+            accentGlyphColor: MetalGridGlyphColor(.controlAccentColor),
+            selectionMode: selectionMode,
+            selected: selectedUIDs,
+            favorites: favoriteUIDs,
+            isVideo: { [dataSource] uid in dataSource.isVideo(uid) }
+        ) : nil
+        return MetalGridFrameComposer.buildGroups(
+            slots: slots, flatUIDs: flatUIDs, cache: cache,
+            displayMode: displayMode, cornerRadius: GridVisualConstants.thumbnailCornerRadius,
+            decorations: decorations
+        )
     }
 
     private static func colorVector(_ color: NSColor) -> SIMD4<Float> {
@@ -1894,57 +1825,28 @@ extension MetalGridCoordinator {
 
     @discardableResult
     private func streamTextures(visibleUIDs: [PhotoUID], overscanUIDs: [PhotoUID], allowUpgrade: Bool = false) -> Bool {
-        // Level-aware upload size: dense levels upload smaller textures (10–30× less GPU memory + bandwidth at
-        // L4/L5), sparse levels saturate at the adapter cap (unchanged quality). Set BEFORE `maxSafePinnedCount`
-        // is read below, so at dense levels each texture is cheap and far more of the visible tiles can be
-        // pinned within the same byte budget instead of degrading to placeholders.
-        cache.setEffectiveMaxTexturePixels(effectiveUploadPixels())
-        // Pinning is clamped to what the byte budget can guarantee (visible first, then nearest overscan)
-        // so dense zoom levels degrade to placeholders instead of pinning more than the budget can hold.
-        // While visible items are still missing, keep overscan uploadable/warmable but evictable: otherwise
-        // already-resident overscan can occupy the pinned byte floor and starve newly visible thumbnails.
+        // The settled streaming sequence - level-aware effective-pixel cap (set BEFORE `maxSafePinnedCount`,
+        // so dense levels pin more cheap textures), visible-first window + byte-budget pin clamp, `beginFrame`,
+        // visible upload, soft→sharp upgrade, and warm selection - is single-sourced in `MetalGridFrameComposer`
+        // so iOS and macOS stream identically. This host supplies only the platform inputs: the upload size, the
+        // cold-visible pin policy, the warm PUMP (`dataSource.warm`), and the cold-start `[FirstContent]` trace.
+        // While visible items are still missing, overscan stays uploadable/warmable but evictable (pinOverscan
+        // false), so already-resident overscan cannot occupy the pinned byte floor and starve newly visible ones.
         let pinOverscan = visibleUIDs.allSatisfy { cache.isResident($0) || !dataSource.canRetryThumbnail(for: $0) }
-        let window = GridTextureStreamingPolicy.window(visibleIDs: visibleUIDs, overscanIDs: overscanUIDs,
-                                                       maxPinned: cache.maxSafePinnedCount,
-                                                       pinOverscan: pinOverscan)
-        cache.beginFrame(pinned: window.pinned)
-        let priority = window.priority
-        var wanted: [PhotoUID] = []
-        for uid in priority where !cache.isResident(uid) && dataSource.hasImage(for: uid) { wanted.append(uid) }
-        let upgradeCandidates = allowUpgrade ? visibleUIDs.filter { cache.residentTextureNeedsMeaningfulUpgrade($0) } : []
-        PhotoPerformanceSignposts.grid.interval("streamTextures.upload") {
-            cache.uploadVisible(wanted: wanted) { [dataSource] uid in dataSource.image(for: uid) }
-        }
-        // Settled only: after fresh uploads spend their share of the budget, grow any visible texture still
-        // below the current cap (carried over from a denser level) to full crispness, in place. Skipped during
-        // transitions/dissolve - the settle frame that follows handles it, and the apparent size is in flux.
-        if allowUpgrade {
-            PhotoPerformanceSignposts.grid.interval("streamTextures.upgrade") {
-                cache.upgradeUndersizedResident(upgradeCandidates) { [dataSource] uid in dataSource.image(for: uid) }
-            }
-        }
-        var warm: [PhotoUID] = []
-        var queuedWarm = Set<PhotoUID>()
-        func appendWarm(_ uid: PhotoUID) {
-            guard queuedWarm.insert(uid).inserted else { return }
-            warm.append(uid)
-        }
-        for uid in priority where !cache.isResident(uid) && !cache.isInFlight(uid) && !dataSource.hasImage(for: uid) && dataSource.canRetryThumbnail(for: uid) {
-            appendWarm(uid)
-        }
-        var pendingVisibleQualityUpgrade = cache.pendingUpgradesThisFrame
-        if allowUpgrade {
-            for uid in upgradeCandidates where cache.residentTextureNeedsMeaningfulUpgrade(uid) {
-                // A low-res resident texture keeps drawing while the RAM decode is missing; request/wait for
-                // the source image so a settled sparse frame can replace it with a sharp texture. If the source
-                // is present but source-limited or the pinned floor cannot fit the replacement, there is no
-                // retryable work, so do not keep the display link awake forever.
-                guard !dataSource.hasImage(for: uid), dataSource.canRetryThumbnail(for: uid) else { continue }
-                appendWarm(uid)
-                pendingVisibleQualityUpgrade = true
-            }
-        }
-        if !warm.isEmpty { dataSource.warm(warm) }
+        let result = MetalGridFrameComposer.stream(
+            cache: cache,
+            visibleIDs: visibleUIDs,
+            overscanIDs: overscanUIDs,
+            pinOverscan: pinOverscan,
+            effectiveUploadPixels: effectiveUploadPixels(),
+            allowUpgrade: allowUpgrade,
+            hasImage: { [dataSource] uid in dataSource.hasImage(for: uid) },
+            canRetry: { [dataSource] uid in dataSource.canRetryThumbnail(for: uid) },
+            provideImage: { [dataSource] uid in dataSource.image(for: uid) },
+            signposts: composeSignposts
+        )
+        let pendingVisibleQualityUpgrade = result.pendingVisibleQualityUpgrade
+        if !result.warm.isEmpty { dataSource.warm(result.warm) }
         // Cold-start latency trace: mark the first on-screen frame that has real visible cells, then measure how
         // long until they are resident. One-shot, DEBUG-only sink; grep `[FirstContent]`.
         if !firstContentTraced, !visibleUIDs.isEmpty {
