@@ -22,28 +22,38 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
     private let thumbnailFeed: UIKitThumbnailFeed
     private let level: Int?
     private let displayMode: TileContentDisplayMode
+    private let onFirstContentReady: (() -> Void)?
+    private let onOpenPhoto: ((PhotoItem) -> Void)?
 
     public init(
         items: [PhotoItem],
         thumbnailFeed: UIKitThumbnailFeed,
         level: Int? = nil,
-        displayMode: TileContentDisplayMode = .squareFillCrop
+        displayMode: TileContentDisplayMode = .squareFillCrop,
+        onFirstContentReady: (() -> Void)? = nil,
+        onOpenPhoto: ((PhotoItem) -> Void)? = nil
     ) {
         self.items = items
         self.thumbnailFeed = thumbnailFeed
         self.level = level
         self.displayMode = displayMode
+        self.onFirstContentReady = onFirstContentReady
+        self.onOpenPhoto = onOpenPhoto
     }
 
     @MainActor
     public func makeUIView(context: Context) -> UIKitTimelineGridHostView {
         let view = UIKitTimelineGridHostView()
+        view.onFirstContentReady = onFirstContentReady
+        view.onOpenPhoto = onOpenPhoto
         view.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, displayMode: displayMode)
         return view
     }
 
     @MainActor
     public func updateUIView(_ uiView: UIKitTimelineGridHostView, context: Context) {
+        uiView.onFirstContentReady = onFirstContentReady
+        uiView.onOpenPhoto = onOpenPhoto
         uiView.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, displayMode: displayMode)
     }
 }
@@ -66,14 +76,30 @@ public final class UIKitTimelineGridHostView: UIView {
     private var itemUIDs: [PhotoUID] = []
     private var itemIndexByUID: [PhotoUID: Int] = [:]
     private var levelOverride: Int?
+    /// The user-driven density level set by pinch. Takes precedence over the profile default so pinch survives
+    /// item refreshes; cleared when an explicit external `level` arrives. `nil` → profile default (data-driven).
+    private var interactiveLevel: Int?
+    /// Pinch gesture bookkeeping: the level and focal content point captured at gesture start.
+    private var pinchStartLevel: Int?
+    private var pinchFocusContentPoint: CGPoint = .zero
     private var displayMode: TileContentDisplayMode = .squareFillCrop
     private var warmTask: Task<Void, Never>?
     private var lastWarmIDs: [PhotoUID] = []
     private var needsInitialNewestViewport = true
     private var userHasScrolledTimeline = false
     private var isApplyingProgrammaticScroll = false
+    /// One-shot per content set: fires once the first fully-populated on-screen frame is drawn (every visible
+    /// cell resident or unfetchable), mirroring the macOS coordinator. Reset when a new non-empty UID set lands.
+    private var firstContentReported = false
 
     public private(set) var isMetal3Capable = false
+
+    /// Called on the main actor the first time every visible cell is drawn for the current content — the shell's
+    /// signal that the launch/loading UI can lift onto a real grid (never blank cells). One-shot per content set.
+    public var onFirstContentReady: (() -> Void)?
+
+    /// Called on the main actor when the user taps a photo cell, with the tapped item. The shell presents the viewer.
+    public var onOpenPhoto: ((PhotoItem) -> Void)?
 
     public override init(frame: CGRect = .zero) {
         super.init(frame: frame)
@@ -111,6 +137,10 @@ public final class UIKitTimelineGridHostView: UIView {
                 uniquingKeysWith: { _, latest in latest }
             )
             lastWarmIDs = []
+            if !newUIDs.isEmpty {
+                // A new content set must report its own first drawn frame.
+                firstContentReported = false
+            }
             if shouldOpenAtNewest {
                 needsInitialNewestViewport = true
             } else if newUIDs.isEmpty {
@@ -166,6 +196,17 @@ public final class UIKitTimelineGridHostView: UIView {
         contentView.backgroundColor = .clear
         scrollView.addSubview(contentView)
         addSubview(scrollView)
+
+        // Tap-to-open and pinch-to-change-density ride on the scroll surface so they coexist with the pan/scroll
+        // gesture. The tap requires no movement (never fights a scroll); the pinch drives a discrete, focal-anchored
+        // density step through the shared GridCore geometry — no bespoke iOS layout math.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        tap.delegate = self
+        scrollView.addGestureRecognizer(tap)
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        pinch.delegate = self
+        scrollView.addGestureRecognizer(pinch)
     }
 
     private func configureMetal() {
@@ -220,7 +261,7 @@ public final class UIKitTimelineGridHostView: UIView {
     }
 
     private func activeLevel(profile: GridLevelProfile) -> Int {
-        profile.clampLevel(levelOverride ?? profile.defaultLevel)
+        profile.clampLevel(interactiveLevel ?? levelOverride ?? profile.defaultLevel)
     }
 
     private func renderNow() {
@@ -289,8 +330,90 @@ public final class UIKitTimelineGridHostView: UIView {
                 !textureCache.isResident(uid) && !(feed?.isKnownUnfetchable(uid) ?? false)
             }
         )
+        // First fully-populated on-screen frame → tell the shell to lift the loading UI onto a real grid.
+        // One-shot per content set; deferred to the next runloop tick so it never mutates observed shell
+        // state during a SwiftUI update pass (renderNow can run inside updateUIView → layoutSubviews).
+        if !firstContentReported, !ids.visible.isEmpty, missingVisible.isEmpty {
+            firstContentReported = true
+            if let onFirstContentReady {
+                DispatchQueue.main.async { onFirstContentReady() }
+            }
+        }
         scheduleWarmIfNeeded(missingVisible, pixelSize: uploadPixels)
         updateDisplayLink(shouldRun: !missingVisible.isEmpty && !textureCache.residencySaturatedThisFrame)
+    }
+
+    /// The resolved grid geometry for the current viewport + active level, or nil when there is nothing to lay
+    /// out. Built the same way `renderNow` builds it, so hit-testing and rendering never diverge.
+    private func currentGridContext() -> (engine: SquareTileGridEngine, level: Int, profile: GridLevelProfile)? {
+        guard bounds.width > 0, !items.isEmpty else { return nil }
+        let profile = profileAdapter.profile(for: metalView)
+        let level = activeLevel(profile: profile)
+        let engine = SquareTileGridEngine(sectionCounts: [items.count], profile: profile)
+        return (engine, level, profile)
+    }
+
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended, let onOpenPhoto, let ctx = currentGridContext() else { return }
+        // contentView spans the full content size at origin .zero, so its coordinate space IS the engine's
+        // content space (y down, origin at the library top).
+        let contentPoint = gesture.location(in: contentView)
+        guard let slot = ctx.engine.hitTest(contentPoint: contentPoint, level: ctx.level, width: bounds.width),
+              slot.index >= 0, slot.index < items.count
+        else { return }
+        onOpenPhoto(items[slot.index])
+    }
+
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        guard let ctx = currentGridContext() else { return }
+        switch gesture.state {
+        case .began:
+            pinchStartLevel = ctx.level
+            // Engage the user so the newest-bottom auto-pin never fights the zoom.
+            userHasScrolledTimeline = true
+        case .changed:
+            guard let startLevel = pinchStartLevel else { return }
+            // Pinch-out (scale > 1) → zoom in → fewer columns → LOWER level; each ~1.4× is one density step.
+            let steps = Int((log2(max(gesture.scale, 0.05)) / log2(1.4)).rounded())
+            let target = ctx.profile.clampLevel(startLevel - steps)
+            guard target != ctx.level else { return }
+            let focusViewportY = gesture.location(in: self).y
+            let sourceOffsetY = scrollView.contentOffset.y
+            applyLevelChange(
+                from: ctx.level,
+                to: target,
+                cursorContentPoint: CGPoint(x: 0, y: focusViewportY + sourceOffsetY),
+                sourceOffsetY: sourceOffsetY
+            )
+        case .ended, .cancelled, .failed:
+            pinchStartLevel = nil
+        default:
+            break
+        }
+    }
+
+    /// Applies a discrete density change, carrying the pinch focal point across the level boundary via the shared
+    /// engine so the photo under the fingers stays put (no jump to top/newest).
+    private func applyLevelChange(from sourceLevel: Int, to targetLevel: Int,
+                                  cursorContentPoint: CGPoint, sourceOffsetY: CGFloat) {
+        let profile = profileAdapter.profile(for: metalView)
+        let engine = SquareTileGridEngine(sectionCounts: [items.count], profile: profile)
+        let anchoredY = engine.cursorAnchoredScrollOffsetY(
+            levelChangeFrom: sourceLevel,
+            to: targetLevel,
+            width: bounds.width,
+            cursorContentPoint: cursorContentPoint,
+            sourceScrollOriginY: sourceOffsetY
+        )
+        interactiveLevel = targetLevel
+        refreshContentSize()   // content size follows the new level; needsInitialNewestViewport is already spent
+        if let anchoredY {
+            let maxY = max(0, scrollView.contentSize.height - bounds.height)
+            isApplyingProgrammaticScroll = true
+            scrollView.setContentOffset(CGPoint(x: 0, y: min(max(anchoredY, 0), maxY)), animated: false)
+            isApplyingProgrammaticScroll = false
+        }
+        renderNow()
     }
 
     private func newestFirst(_ uids: [PhotoUID]) -> [PhotoUID] {
@@ -332,6 +455,15 @@ extension UIKitTimelineGridHostView: UIScrollViewDelegate {
             userHasScrolledTimeline = true
         }
         renderNow()
+    }
+}
+
+extension UIKitTimelineGridHostView: UIGestureRecognizerDelegate {
+    /// Let tap / pinch coexist with the scroll view's own pan (and each other) — a two-finger pinch and a
+    /// one-finger scroll never contend, and a tap requires no movement.
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                                  shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
     }
 }
 #endif
