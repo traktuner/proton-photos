@@ -1041,13 +1041,13 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Weitere Fotos werden geladen …"
+            "value" : "Vorschauen werden geladen …"
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Loading more photos…"
+            "value" : "Loading previews…"
           }
         }
       }
