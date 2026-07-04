@@ -95,6 +95,15 @@ final class DriveCrypto: @unchecked Sendable {
         try decryptArmored(armored, with: [node]).data ?? Data()
     }
 
+    /// Decrypts a folder's armored `NodeHashKey` with the folder's OWN node key → the plaintext
+    /// hash-key string. For the photos root this string (Proton generates the base64 of 32 random
+    /// bytes) is the HMAC key for photo name/content hashes. Signature verification is skipped,
+    /// matching the reference clients' use-even-if-unverified stance (and this class's other
+    /// decrypt paths).
+    func decryptNodeHashKey(_ armored: String, node: UnlockableKey) throws -> String {
+        try decryptArmored(armored, with: [node]).getString()
+    }
+
     /// Decrypts a link's armored `Name` with its PARENT node key → the cleartext filename. (Names are
     /// encrypted to the parent node key, unlike XAttr which uses the file's own node key.)
     func decryptName(_ armored: String, parent: UnlockableKey) throws -> String {

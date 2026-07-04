@@ -1205,6 +1205,24 @@
         }
       }
     },
+    "upload.state_skipped_duplicate": {
+      "extractionState": "manual",
+      "comment": "Upload queue item state: the photo already exists in the Proton library, so nothing was uploaded.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Already in your library"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bereits in deiner Mediathek"
+          }
+        }
+      }
+    },
     "upload.state_uploading %lld": {
       "extractionState": "manual",
       "comment": "Upload progress. %lld is a percentage.",

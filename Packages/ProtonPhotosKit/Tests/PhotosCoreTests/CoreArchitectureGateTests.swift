@@ -89,7 +89,13 @@ final class CoreArchitectureGateTests: XCTestCase {
         ),
         CoreTargetRule(
             name: "UploadCore",
-            allowedImports: ["Foundation", "Observation", "PhotosCore"],
+            // CryptoKit: the streaming `Insecure.SHA1` for the universal upload dedupe identity
+            // (a protocol fingerprint Proton mandates, not a security primitive). SQLite3: the
+            // system C SQLite module backing the app-owned `upload-manifest-v1.sqlite` identity
+            // manifest - same public, supported API (QA1809) rationale as PhotosCore. Both are
+            // platform-universal; the dedupe pipeline must stay ONE implementation for
+            // macOS/iOS/iPadOS, so it lives here rather than in a platform adapter.
+            allowedImports: ["CryptoKit", "Foundation", "Observation", "PhotosCore", "SQLite3"],
             expectedDependencies: ["PhotosCore"],
             extraForbiddenTokens: []
         ),

@@ -23,6 +23,9 @@ public actor UploadManager: UploadManaging {
 
     private let uploader: any PhotoUploading
     private let albums: (any AlbumAttaching)?
+    /// The universal dedupe pipeline. Optional so the queue also works for backends without a
+    /// duplicate service (and for focused queue tests); when nil, every item uploads as before.
+    private let identityResolver: (any UploadIdentityResolving)?
     private let maxConcurrent: Int
     private let now: @Sendable () -> Date
 
@@ -50,11 +53,13 @@ public actor UploadManager: UploadManaging {
     public init(
         uploader: any PhotoUploading,
         albums: (any AlbumAttaching)? = nil,
+        identityResolver: (any UploadIdentityResolving)? = nil,
         maxConcurrent: Int = 3,
         now: @Sendable @escaping () -> Date = { Date() }
     ) {
         self.uploader = uploader
         self.albums = albums
+        self.identityResolver = identityResolver
         self.maxConcurrent = max(1, maxConcurrent)
         self.now = now
     }
@@ -99,7 +104,35 @@ public actor UploadManager: UploadManaging {
         }
         notify()    // broadcast the freshly-queued items before the scheduler advances them
         pump()
+        primeDedupe(for: ids)
         return ids
+    }
+
+    /// Kick the pipeline's batched duplicate prefetch for a fresh enqueue (Proton-sized chunks of
+    /// name hashes), so per-item resolution becomes a cache hit. Fire-and-forget: failures simply
+    /// mean per-item lookups later.
+    private func primeDedupe(for ids: [UploadQueueItemID]) {
+        guard let identityResolver else { return }
+        let urls = ids.compactMap { jobs[$0] }
+            .filter { !$0.item.state.isTerminal }
+            .map(\.item.fileURL)
+        guard !urls.isEmpty else { return }
+        let fallbackDate = now()
+        Task.detached(priority: .utility) {
+            let descriptors = urls.map { Self.descriptor(forFile: $0, fallbackDate: fallbackDate) }
+            await identityResolver.prime(descriptors)
+        }
+    }
+
+    private static func descriptor(forFile url: URL, fallbackDate: Date) -> UploadResourceDescriptor {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return UploadResourceDescriptor(
+            source: .file(url),
+            fileURL: url,
+            filename: url.lastPathComponent,
+            fileSize: (attrs?[.size] as? NSNumber)?.int64Value ?? 0,
+            modificationDate: (attrs?[.modificationDate] as? Date) ?? fallbackDate
+        )
     }
 
     @discardableResult
@@ -187,11 +220,50 @@ public actor UploadManager: UploadManaging {
 
     private func run(_ id: UploadQueueItemID, request: PhotoUploadRequest) async {
         do {
-            let uid = try await uploader.upload(request) { [weak self] progress in
+            var effectiveRequest = request
+            var preflight: UploadPreflightResult?
+            // The descriptor mirrors the request snapshot (same name/size/mtime), so manifest rows
+            // written here validate against the exact attributes that were uploaded.
+            let descriptor = UploadResourceDescriptor(
+                source: .file(request.fileURL),
+                fileURL: request.fileURL,
+                filename: request.name,
+                fileSize: request.fileSize,
+                modificationDate: request.modificationDate
+            )
+
+            // Universal dedupe: hash + duplicate check BEFORE any bytes are uploaded. `.hashing`
+            // covers both (the duplicate lookup rides the same phase). Cancellation lands here
+            // via the task's cancellation - the streaming hash checks between chunks.
+            if let identityResolver {
+                transition(id, to: .hashing)
+                let result = try await identityResolver.resolve(descriptor)
+                if currentState(id) == .cancelled { finish(id); return }
+                if result.decision.skipsPrimaryUpload {
+                    // Already in the library (active/trashed/draft/manifest-known). For manual
+                    // single-file uploads a "missing secondaries" outcome also means the primary
+                    // itself is present, so nothing uploads. No album attach for skipped items -
+                    // there is no fresh PhotoUID and album add is unsupported anyway.
+                    transition(id, to: .skippedDuplicate)
+                    finish(id)
+                    return
+                }
+                preflight = result
+                effectiveRequest = request.applying(identity: result.identity)
+            }
+
+            let uid = try await uploader.upload(effectiveRequest) { [weak self] progress in
                 Task { await self?.applyProgress(id, progress) }
             }
             // Library upload finished. If cancelled meanwhile, honour the cancel.
             if currentState(id) == .cancelled { finish(id); return }
+            if let identityResolver, let preflight {
+                // Remember the upload so future runs skip this exact file without a remote query.
+                await identityResolver.recordUploaded(
+                    descriptor, identity: preflight.identity,
+                    remoteVolumeID: uid.volumeID, remoteLinkID: uid.nodeID
+                )
+            }
             setUploadedUID(id, uid)
             emitCompletedUpload(id)
 
@@ -384,6 +456,7 @@ public actor UploadManager: UploadManaging {
             case .queued: s.queued += 1
             case .preparing, .hashing, .uploading, .finalizing: s.active += 1
             case .completed: s.completed += 1
+            case .skippedDuplicate: s.skippedDuplicates += 1
             case .failed: s.failed += 1
             case .cancelled: s.cancelled += 1
             case .paused: s.paused += 1

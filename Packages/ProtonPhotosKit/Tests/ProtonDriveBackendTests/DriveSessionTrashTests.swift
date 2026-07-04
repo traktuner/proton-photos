@@ -86,8 +86,14 @@ private func linkIDs(inBodyOf request: StubURLProtocol.Recorded) throws -> [Stri
     return try #require(json["LinkIDs"] as? [String])
 }
 
+/// Serialized parent for EVERY suite that touches the process-global `StubURLProtocol` - sibling
+/// suites otherwise run in parallel and clobber each other's route tables. Nest new stub-based
+/// suites here (see `PhotoDuplicatesEndpointTests`).
+@Suite(.serialized) enum DriveSessionStubSuite {}
+
+extension DriveSessionStubSuite {
 /// These tests are serialized because the URLProtocol stub's route table is process-global.
-@Suite(.serialized) struct DriveSessionTrashTests {
+@Suite struct DriveSessionTrashTests {
     @Test func trashPostsLinkIDsToV2VolumeTrashMultiple() async throws {
         StubURLProtocol.reset()
         StubURLProtocol.route("POST /drive/v2/volumes/vol1/trash_multiple", json: #"""
@@ -208,4 +214,5 @@ private func linkIDs(inBodyOf request: StubURLProtocol.Recorded) throws -> [Stri
         #expect(decoded.links[1].type == 2)
         #expect(decoded.links[2].captureTime == 0)
     }
+}
 }

@@ -23,6 +23,10 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     /// Drive key-derivation + block decryption for video streaming (built once at sign-in).
     private let crypto: DriveCrypto
     private var streamSource: PhotoVideoStreamSource?
+    /// Where the per-account upload-identity manifest lives (next to `library-v1.sqlite`, so the
+    /// sign-out purge covers it) and the platform SQLite tuning it opens with.
+    private let uploadManifestURL: URL
+    private let uploadManifestPolicy: LibraryDatabasePolicy
 
     /// Full sign-out / master-reset: erase the SDK metadata SQLite stores for `uid` (security
     /// follow-up #2 - non-secret node metadata that must not survive sign-out) AND the app-owned
@@ -81,6 +85,8 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             url: libraryDirectory.appendingPathComponent(LibraryDatabaseLocation.databaseFileName),
             policy: policy.libraryDatabasePolicy
         )
+        self.uploadManifestURL = libraryDirectory.appendingPathComponent(UploadIdentityManifestStore.databaseFileName)
+        self.uploadManifestPolicy = policy.libraryDatabasePolicy
         // Sweep ALL superseded timeline formats (any account): the uid-scoped delete alone leaves
         // orphans behind for accounts that last signed in on older builds.
         SDKMetadataStore.purgeOrphanedLegacyTimelineStores(in: caches)
@@ -281,6 +287,14 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         photosRoot = root
         photosShareID = share.shareID
         return root
+    }
+
+    /// The photos share context for the dedupe service - same discovery + cache as every other
+    /// photos feature (`resolvePhotosRoot`).
+    func photosShareContext() async throws -> PhotosShareContext {
+        let root = try await resolvePhotosRoot()
+        guard let shareID = photosShareID else { throw DriveBridgeError.noPhotosShare }
+        return PhotosShareContext(volumeID: root.volumeID, shareID: shareID, rootLinkID: root.nodeID)
     }
 
     /// Lazily builds (and caches) the streaming/metadata source once the photos share id is known.
@@ -572,6 +586,21 @@ extension DriveSDKBridge: PhotoUploading {
         .sdkUploader
     }
 
+    /// The universal dedupe pipeline for this account: the SQLite identity manifest (per-account
+    /// directory, purged on sign-out) + the Proton-keyed duplicate service. Built once at facade
+    /// composition; nil only if the manifest database cannot be opened, in which case uploads
+    /// simply run without dedupe rather than failing the whole feature.
+    nonisolated func makeUploadIdentityResolver() -> UploadDedupePipeline? {
+        guard let store = UploadIdentityManifestStore(url: uploadManifestURL, policy: uploadManifestPolicy) else {
+            DebugLog.log("[Dedupe] manifest store unavailable - uploads run without dedupe")
+            return nil
+        }
+        let service = ProtonUploadDedupeService(session: driveSession, crypto: crypto) { [self] in
+            try await photosShareContext()
+        }
+        return UploadDedupePipeline(store: store, checker: service)
+    }
+
     func upload(
         _ request: PhotoUploadRequest,
         onProgress: @Sendable @escaping (UploadProgress) -> Void
@@ -587,12 +616,16 @@ extension DriveSDKBridge: PhotoUploading {
                 fileSize: request.fileSize,
                 modificationDate: request.modificationDate,
                 captureTime: request.captureTime,
-                mainPhotoUid: nil,
+                // Secondary resources (a Live Photo's paired video) reference their primary; nil
+                // for primaries - which is every manual upload today.
+                mainPhotoUid: request.mainPhotoUID.map { SDKNodeUid(volumeID: $0.volumeID, nodeID: $0.nodeID) },
                 mediaType: request.mediaType,
                 thumbnails: thumbnails,
                 tags: [],                       // let the server classify; avoids tag-mapping upload failures
                 additionalMetadata: [],
-                expectedSHA1: nil,
+                // From the dedupe pipeline's hashing phase - the SDK verifies the streamed bytes
+                // against this digest server-side.
+                expectedSHA1: request.expectedSHA1,
                 cancellationToken: request.cancellationToken,
                 progressCallback: { p in
                     onProgress(UploadProgress(phase: .uploading, fraction: p.fractionCompleted))

@@ -39,9 +39,16 @@ public final class ProtonClientFacade {
         )
         let albumsRepo = AlbumsRepository(backend: albumBackend)
 
-        // Uploads: pure manager over the SDK uploader (the bridge) + the album-attaching shim.
+        // Uploads: pure manager over the SDK uploader (the bridge) + the album-attaching shim +
+        // the universal dedupe pipeline (hash → duplicate check → skip/upload), so every upload
+        // path shares ONE duplicate semantic.
         let attaching = AlbumAttachingAdapter(albums: albumsRepo)
-        let manager = UploadManager(uploader: bridge, albums: attaching, maxConcurrent: 3)
+        let manager = UploadManager(
+            uploader: bridge,
+            albums: attaching,
+            identityResolver: bridge.makeUploadIdentityResolver(),
+            maxConcurrent: 3
+        )
 
         let coordinator = UploadCoordinator(
             manager: manager,

@@ -59,17 +59,20 @@ public struct UploadDestination: Sendable, Equatable {
 public enum UploadItemState: Sendable, Equatable {
     case queued
     case preparing          // building thumbnails / reading attributes
-    case hashing            // computing the content hash
+    case hashing            // computing the content hash + checking the server for duplicates
     case uploading(progress: Double)
     case finalizing         // upload done, applying album membership
     case completed
+    /// The photo already exists in the Proton library (or its trash) - nothing was uploaded.
+    /// Terminal and successful from the user's perspective: their photo IS backed up.
+    case skippedDuplicate
     case failed(message: String)
     case cancelled
     case paused
 
     public var isTerminal: Bool {
         switch self {
-        case .completed, .failed, .cancelled: return true
+        case .completed, .skippedDuplicate, .failed, .cancelled: return true
         default: return false
         }
     }
@@ -90,6 +93,7 @@ public enum UploadItemState: Sendable, Equatable {
         case let .uploading(p): return L10n.string("upload.state_uploading \(Int(p * 100))")
         case .finalizing: return L10n.string("upload.state_finalizing")
         case .completed: return L10n.string("upload.state_completed")
+        case .skippedDuplicate: return L10n.string("upload.state_skipped_duplicate")
         case let .failed(message): return L10n.string("upload.state_failed \(message)")
         case .cancelled: return L10n.string("upload.state_cancelled")
         case .paused: return L10n.string("upload.state_paused")
@@ -174,6 +178,8 @@ public struct UploadQueueStats: Sendable, Equatable {
     public var queued = 0
     public var active = 0
     public var completed = 0
+    /// Items resolved as already-in-library duplicates - done without uploading bytes.
+    public var skippedDuplicates = 0
     public var failed = 0
     public var cancelled = 0
     public var paused = 0
@@ -181,15 +187,16 @@ public struct UploadQueueStats: Sendable, Equatable {
 
     public init() {}
 
-    public var total: Int { queued + active + completed + failed + cancelled + paused }
+    public var total: Int { queued + active + completed + skippedDuplicates + failed + cancelled + paused }
 
     public var totalProgress: Double {
         guard total > 0 else { return 0 }
-        return Double(completed) / Double(total)
+        return Double(completed + skippedDuplicates) / Double(total)
     }
 
     public var summaryText: String {
-        L10n.string("upload.queue_stats \(completed) \(active) \(failed)")
+        // Skipped duplicates count as done - the user's photo is in the library either way.
+        L10n.string("upload.queue_stats \(completed + skippedDuplicates) \(active) \(failed)")
     }
 }
 
@@ -211,13 +218,13 @@ public enum UploadQueuePresentation {
             return capabilities.supportsPauseResume ? [.pause, .cancel] : [.cancel]
         case .paused:
             return [.resume]
-        case .completed, .finalizing:
+        case .completed, .skippedDuplicate, .finalizing:
             return []
         }
     }
 
     public static func canClearFinished(_ stats: UploadQueueStats) -> Bool {
-        stats.completed + stats.failed + stats.cancelled > 0
+        stats.completed + stats.skippedDuplicates + stats.failed + stats.cancelled > 0
     }
 }
 
@@ -235,6 +242,12 @@ public struct PhotoUploadRequest: Sendable {
     public let captureTime: Date
     public let modificationDate: Date
     public let tags: [Int]
+    /// 20-byte SHA-1 of the file, from the dedupe pipeline's hashing phase. The backend forwards
+    /// it to the SDK for server-side integrity verification of the streamed bytes.
+    public let expectedSHA1: Data?
+    /// The compound's primary photo when THIS request uploads a secondary resource (a Live
+    /// Photo's paired video). Nil for primaries - which is every manual file upload today.
+    public let mainPhotoUID: PhotoUID?
 
     public init(
         queueItemID: UploadQueueItemID,
@@ -245,7 +258,9 @@ public struct PhotoUploadRequest: Sendable {
         fileSize: Int64,
         captureTime: Date,
         modificationDate: Date,
-        tags: [Int]
+        tags: [Int],
+        expectedSHA1: Data? = nil,
+        mainPhotoUID: PhotoUID? = nil
     ) {
         self.queueItemID = queueItemID
         self.cancellationToken = cancellationToken
@@ -256,6 +271,26 @@ public struct PhotoUploadRequest: Sendable {
         self.captureTime = captureTime
         self.modificationDate = modificationDate
         self.tags = tags
+        self.expectedSHA1 = expectedSHA1
+        self.mainPhotoUID = mainPhotoUID
+    }
+
+    /// The same request with the dedupe pipeline's findings applied: the Proton-corrected name
+    /// (what actually gets hashed remotely) and the integrity digest.
+    public func applying(identity: UploadIdentity) -> PhotoUploadRequest {
+        PhotoUploadRequest(
+            queueItemID: queueItemID,
+            cancellationToken: cancellationToken,
+            fileURL: fileURL,
+            name: identity.correctedName,
+            mediaType: mediaType,
+            fileSize: fileSize,
+            captureTime: captureTime,
+            modificationDate: modificationDate,
+            tags: tags,
+            expectedSHA1: identity.sha1Digest,
+            mainPhotoUID: mainPhotoUID
+        )
     }
 }
 

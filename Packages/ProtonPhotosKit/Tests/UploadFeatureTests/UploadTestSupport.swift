@@ -14,6 +14,7 @@ final class MockUploader: PhotoUploading, @unchecked Sendable {
     private var concurrent = 0
     private var _peakConcurrent = 0
     private var _startedOrder: [String] = []
+    private var _requests: [PhotoUploadRequest] = []
     private var _cancelledTokens: [UUID] = []
     private var _pausedTokens: [UUID] = []
     private var _resumedTokens: [UUID] = []
@@ -41,12 +42,16 @@ final class MockUploader: PhotoUploading, @unchecked Sendable {
     var peakConcurrent: Int { lock.withLock { _peakConcurrent } }
     var startedOrder: [String] { lock.withLock { _startedOrder } }
     var cancelledTokens: [UUID] { lock.withLock { _cancelledTokens } }
+    /// Every request that reached the backend - lets dedupe tests assert corrected names and
+    /// `expectedSHA1` pass-through.
+    var requests: [PhotoUploadRequest] { lock.withLock { _requests } }
 
     func upload(_ request: PhotoUploadRequest, onProgress: @Sendable @escaping (UploadProgress) -> Void) async throws -> PhotoUID {
         lock.withLock {
             concurrent += 1
             _peakConcurrent = max(_peakConcurrent, concurrent)
             _startedOrder.append(request.name)
+            _requests.append(request)
         }
         defer { lock.withLock { concurrent -= 1 } }
 
