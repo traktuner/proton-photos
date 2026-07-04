@@ -251,4 +251,33 @@ final class UploadManagerTests: XCTestCase {
             cursor = r.upperBound
         }
     }
+
+    func testUploadPreparationStatusCountsPreUploadCheck() throws {
+        let (_, urls) = try jpegs(["one"])
+        let url = urls[0]
+        let items = [
+            UploadItem(id: UUID(), ordinal: 0, fileURL: url, displayName: "queued.jpg",
+                       mediaType: "image/jpeg", byteCount: 1, state: .queued),
+            UploadItem(id: UUID(), ordinal: 1, fileURL: url, displayName: "checking.jpg",
+                       mediaType: "image/jpeg", byteCount: 1, state: .hashing),
+            UploadItem(id: UUID(), ordinal: 2, fileURL: url, displayName: "uploading.jpg",
+                       mediaType: "image/jpeg", byteCount: 1, state: .uploading(progress: 0.2)),
+            UploadItem(id: UUID(), ordinal: 3, fileURL: url, displayName: "duplicate.jpg",
+                       mediaType: "image/jpeg", byteCount: 1, state: .skippedDuplicate),
+            UploadItem(id: UUID(), ordinal: 4, fileURL: url, displayName: "failed.jpg",
+                       mediaType: "image/jpeg", byteCount: 1, state: .failed(message: "boom")),
+        ]
+
+        let status = UploadPreparationStatus(items: items)
+
+        XCTAssertEqual(status.total, 5)
+        XCTAssertEqual(status.waiting, 1)
+        XCTAssertEqual(status.checking, 1)
+        XCTAssertEqual(status.checked, 2)
+        XCTAssertEqual(status.skippedDuplicates, 1)
+        XCTAssertEqual(status.failed, 1)
+        XCTAssertEqual(status.resolved, 3)
+        XCTAssertEqual(status.progressFraction, 0.6, accuracy: 0.0001)
+        XCTAssertTrue(status.isRunning)
+    }
 }

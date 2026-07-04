@@ -66,7 +66,7 @@ struct ProtonPhotosApp: App {
 
         // Native macOS Settings window -> "Proton Photos > Einstellungen..." (Command-,).
         Settings {
-            SettingsView(signOut: { model.signOut() })
+            SettingsView(uploadCoordinator: model.facade?.uploadCoordinator, signOut: { model.signOut() })
         }
 
     }

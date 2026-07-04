@@ -324,6 +324,7 @@ final class MobileLibraryModel {
                     targetPixels: 288
                 )
                 self.facade = client
+                await client.uploadCoordinator.start()
                 self.backend = backend
                 self.thumbnailFeed = feed
                 // The live feed's RAM tiers (UIImage wrappers + decoded core) respond to pressure tiers.

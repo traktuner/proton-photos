@@ -9,6 +9,7 @@ import PhotosCore
 public final class UploadCoordinator {
     public private(set) var items: [UploadItem] = []
     public private(set) var stats = UploadQueueStats()
+    public var preparationStatus: UploadPreparationStatus { UploadPreparationStatus(items: items) }
 
     /// Albums offered in the destination picker (supplied by the app, which already loads them).
     public var albums: [PhotoAlbum] = []

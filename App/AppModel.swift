@@ -130,6 +130,7 @@ final class AppModel {
                     policy: .standard(libraryDatabasePolicy: ProtonDriveBackendPolicy.desktopLibraryDatabasePolicy)
                 )
                 facade = client
+                await client.uploadCoordinator.start()
                 backend = .ready(client.backend)
                 // Start coordinating cache footprint with system memory pressure / thermal state now
                 // that the account-configured caches exist. Idempotent across backend rebuilds.

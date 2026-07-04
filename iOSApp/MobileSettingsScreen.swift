@@ -4,6 +4,7 @@ import PhotosCore
 import ProtonDriveBackend
 import SwiftUI
 import TimelineCore
+import UploadCore
 
 /// Account, library status, cache and sign-out settings for the mobile app.
 struct MobileSettingsScreen: View {
@@ -96,6 +97,7 @@ struct MobileSettingsScreen: View {
                     detail: previewLoadingDetail
                 )
             }
+            uploadPreparationRow
         }
     }
 
@@ -121,6 +123,61 @@ struct MobileSettingsScreen: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder private var uploadPreparationRow: some View {
+        let status = libraryModel.facade?.uploadCoordinator.preparationStatus ?? UploadPreparationStatus()
+        HStack(spacing: 10) {
+            Image(systemName: status.isRunning ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
+                .foregroundStyle(status.isRunning ? ProtonColor.primary : ProtonColor.textWeak)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(uploadPreparationTitle(status))
+                        .foregroundStyle(ProtonColor.textNorm)
+                    Spacer()
+                    if status.hasItems {
+                        Text(String(localized: "settings.upload_check_progress \(status.resolved) \(status.total)"))
+                            .font(.footnote)
+                            .foregroundStyle(ProtonColor.textWeak)
+                            .monospacedDigit()
+                    }
+                }
+                if status.hasItems {
+                    ProgressView(value: status.progressFraction)
+                        .tint(ProtonColor.primary)
+                    uploadPreparationDetail(status)
+                } else {
+                    Text(String(localized: "settings.upload_check_idle_help"))
+                        .font(.footnote)
+                        .foregroundStyle(ProtonColor.textWeak)
+                }
+            }
+        }
+    }
+
+    private func uploadPreparationTitle(_ status: UploadPreparationStatus) -> String {
+        if !status.hasItems { return String(localized: "settings.upload_check_idle") }
+        return status.isRunning
+            ? String(localized: "settings.upload_check_active")
+            : String(localized: "settings.upload_check_done")
+    }
+
+    @ViewBuilder private func uploadPreparationDetail(_ status: UploadPreparationStatus) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if status.checking > 0 {
+                Text(String(localized: "settings.upload_check_running \(status.checking)"))
+            }
+            if status.skippedDuplicates > 0 {
+                Text(String(localized: "settings.upload_check_duplicates \(status.skippedDuplicates)"))
+            }
+            if status.needsAttention > 0 {
+                Text(String(localized: "settings.upload_check_attention \(status.needsAttention)"))
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(ProtonColor.textWeak)
+        .monospacedDigit()
     }
 
     /// On-disk encrypted thumbnail-cache size and clear action.

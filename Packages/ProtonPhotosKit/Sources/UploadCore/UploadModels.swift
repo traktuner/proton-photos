@@ -200,6 +200,64 @@ public struct UploadQueueStats: Sendable, Equatable {
     }
 }
 
+/// User-facing aggregate of the pre-upload duplicate check. The UI deliberately presents this
+/// as "checking before upload" rather than "hashing", because most of the time it means the app is
+/// proving an item is already backed up and will not upload bytes again.
+public struct UploadPreparationStatus: Sendable, Equatable {
+    public var total = 0
+    public var waiting = 0
+    public var checking = 0
+    public var checked = 0
+    public var skippedDuplicates = 0
+    public var failed = 0
+    public var cancelled = 0
+    public var paused = 0
+
+    public init() {}
+
+    public init(items: [UploadItem]) {
+        for item in items {
+            total += 1
+            switch item.state {
+            case .queued, .preparing:
+                waiting += 1
+            case .hashing:
+                checking += 1
+            case .uploading, .finalizing, .completed:
+                checked += 1
+            case .skippedDuplicate:
+                checked += 1
+                skippedDuplicates += 1
+            case .failed:
+                failed += 1
+            case .cancelled:
+                cancelled += 1
+            case .paused:
+                paused += 1
+            }
+        }
+    }
+
+    public var hasItems: Bool { total > 0 }
+
+    public var isRunning: Bool {
+        waiting > 0 || checking > 0
+    }
+
+    public var resolved: Int {
+        max(0, total - waiting - checking - paused)
+    }
+
+    public var progressFraction: Double {
+        guard total > 0 else { return 0 }
+        return Double(resolved) / Double(total)
+    }
+
+    public var needsAttention: Int {
+        failed + cancelled + paused
+    }
+}
+
 // MARK: - Queue presentation
 
 public enum UploadQueueRowAction: Sendable, Hashable {

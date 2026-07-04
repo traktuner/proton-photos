@@ -3,16 +3,18 @@ import Combine
 import PhotosCore
 import DesignSystem
 import ProtonDriveBackend
+import UploadCore
 
 /// Native macOS Settings window (Proton Photos -> Einstellungen...).
 struct SettingsView: View {
+    let uploadCoordinator: UploadCoordinator?
     let signOut: () -> Void
 
     var body: some View {
         TabView {
             AccountSettingsTab(signOut: signOut)
                 .tabItem { Label("settings.account_tab", systemImage: "person.crop.circle") }
-            LibrarySettingsTab()
+            LibrarySettingsTab(uploadCoordinator: uploadCoordinator)
                 .tabItem { Label("settings.library_tab", systemImage: "photo.on.rectangle.angled") }
             CacheStatusTab()
                 .tabItem { Label("settings.diagnostics_tab", systemImage: "internaldrive") }
@@ -68,6 +70,8 @@ private struct AccountSettingsTab: View {
 // MARK: - Library / Cache
 
 private struct LibrarySettingsTab: View {
+    let uploadCoordinator: UploadCoordinator?
+
     @State private var offline = OfflineLibraryManager.shared
     @AppStorage(AppSettingsKey.offlineOriginalsCapUnlimited) private var capUnlimited = AppSettingsDefault.offlineOriginalsCapUnlimited
     @AppStorage(AppSettingsKey.offlineOriginalsCapGB) private var capGB = AppSettingsDefault.offlineOriginalsCapGB
@@ -89,6 +93,12 @@ private struct LibrarySettingsTab: View {
                     .fixedSize(horizontal: false, vertical: true)
             } header: {
                 Text("settings.library_offline_section")
+            }
+
+            Section {
+                UploadPreparationSettingsRow(status: uploadCoordinator?.preparationStatus ?? UploadPreparationStatus())
+            } header: {
+                Text("settings.upload_check_section")
             }
 
             Section {
@@ -185,6 +195,53 @@ private struct LibrarySettingsTab: View {
         await OfflineLibraryManager.shared.deleteOfflineCache()
         await refreshSize()
         deleting = false
+    }
+}
+
+private struct UploadPreparationSettingsRow: View {
+    let status: UploadPreparationStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Label(title, systemImage: status.isRunning ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                if status.hasItems {
+                    Text(String(localized: "settings.upload_check_progress \(status.resolved) \(status.total)"))
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if status.hasItems {
+                ProgressView(value: status.progressFraction)
+                VStack(alignment: .leading, spacing: 2) {
+                    if status.checking > 0 {
+                        Text("settings.upload_check_running \(status.checking)")
+                    }
+                    if status.skippedDuplicates > 0 {
+                        Text("settings.upload_check_duplicates \(status.skippedDuplicates)")
+                    }
+                    if status.needsAttention > 0 {
+                        Text("settings.upload_check_attention \(status.needsAttention)")
+                    }
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            } else {
+                Text("settings.upload_check_idle_help")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var title: LocalizedStringKey {
+        if !status.hasItems { return "settings.upload_check_idle" }
+        return status.isRunning ? "settings.upload_check_active" : "settings.upload_check_done"
     }
 }
 

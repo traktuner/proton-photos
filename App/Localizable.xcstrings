@@ -1443,6 +1443,240 @@
         }
       }
     },
+    "settings.upload_check_section": {
+      "extractionState": "manual",
+      "comment": "Settings section header for the pre-upload duplicate check.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload Check"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload-Prüfung"
+          }
+        }
+      }
+    },
+    "settings.upload_check_idle": {
+      "extractionState": "manual",
+      "comment": "No upload duplicate check is currently active.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No upload check running"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Upload-Prüfung aktiv"
+          }
+        }
+      }
+    },
+    "settings.upload_check_idle_help": {
+      "extractionState": "manual",
+      "comment": "Explains that files are checked before upload and duplicates are skipped.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Before uploading, the app checks whether photos are already in your library. Existing photos are skipped instead of being uploaded again."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vor dem Hochladen prüft die App, ob Fotos bereits in deiner Mediathek sind. Vorhandene Fotos werden übersprungen und nicht erneut hochgeladen."
+          }
+        }
+      }
+    },
+    "settings.upload_check_active": {
+      "extractionState": "manual",
+      "comment": "Active pre-upload duplicate check status title.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking photos before upload"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fotos werden vor dem Hochladen geprüft"
+          }
+        }
+      }
+    },
+    "settings.upload_check_done": {
+      "extractionState": "manual",
+      "comment": "Finished pre-upload duplicate check status title.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload check complete"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upload-Prüfung abgeschlossen"
+          }
+        }
+      }
+    },
+    "settings.upload_check_progress %lld %lld": {
+      "extractionState": "manual",
+      "comment": "Pre-upload duplicate-check progress. First number is resolved files; second is total files.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld checked"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld von %lld geprüft"
+          }
+        }
+      }
+    },
+    "settings.upload_check_running %lld": {
+      "extractionState": "manual",
+      "comment": "Number of files currently being checked before upload.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld file is being checked"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld files are being checked"
+                }
+              }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Datei wird geprüft"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Dateien werden geprüft"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "settings.upload_check_duplicates %lld": {
+      "extractionState": "manual",
+      "comment": "Number of files skipped because they already exist in the Proton photo library.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld already in your library"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld already in your library"
+                }
+              }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld bereits in deiner Mediathek"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld bereits in deiner Mediathek"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "settings.upload_check_attention %lld": {
+      "extractionState": "manual",
+      "comment": "Number of files in the upload check that failed, paused, or were cancelled.",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld needs attention"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld need attention"
+                }
+              }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld benötigt Aufmerksamkeit"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld benötigen Aufmerksamkeit"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "settings.offline_cache_label": {
       "extractionState": "manual",
       "comment": "Label for the cache-size row.",
