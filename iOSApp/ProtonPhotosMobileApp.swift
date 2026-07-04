@@ -29,10 +29,12 @@ struct ProtonPhotosMobileApp: App {
     }
 }
 
-/// The mobile tabs, as explicit selection values so the Photos grid can be told when it is NOT the active
-/// surface (and stop its render loop). `name` feeds the `[UIHitch]` tab-transition diagnostic.
-enum MobileTab: Hashable {
+/// Top-level mobile routes. They are shared by the compact iPhone tab shell and the regular-width iPad sidebar
+/// shell, so navigation chrome can adapt without duplicating feature screens or Core logic.
+enum MobileTab: CaseIterable, Hashable, Identifiable {
     case photos, collections, map, settings
+
+    var id: Self { self }
 
     var name: String {
         switch self {
@@ -40,6 +42,24 @@ enum MobileTab: Hashable {
         case .collections: "collections"
         case .map: "map"
         case .settings: "settings"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .photos: String(localized: "tab.photos")
+        case .collections: String(localized: "tab.collections")
+        case .map: String(localized: "tab.map")
+        case .settings: String(localized: "tab.settings")
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .photos: "photo.on.rectangle.angled"
+        case .collections: "square.stack"
+        case .map: "map"
+        case .settings: "gearshape"
         }
     }
 }
@@ -74,33 +94,107 @@ private struct MobileRootView: View {
     }
 }
 
-/// Adaptive navigation: on a compact iPhone this renders a native bottom tab bar; on iPad and other regular-width
-/// surfaces `.sidebarAdaptable` promotes the same tabs to a sidebar/split layout — one declaration, no per-model
-/// branching, no stretched-iPhone iPad UI.
+/// Adaptive navigation: compact widths get the native bottom tab bar, while regular-width iPadOS uses a native
+/// split-view sidebar. The selected route is the only state; every feature screen below stays shared.
 private struct MobileMainTabView: View {
-    /// Explicit selection so the Photos grid knows when it is NOT the active surface and can stop its render
-    /// loop + ahead-warm, keeping menu/tab/settings interaction smooth while thumbnails load.
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selection: MobileTab = .photos
 
     var body: some View {
+        if horizontalSizeClass == .regular {
+            MobilePadSidebarShell(selection: $selection)
+        } else {
+            MobilePhoneTabShell(selection: $selection)
+        }
+    }
+}
+
+private struct MobilePhoneTabShell: View {
+    @Binding var selection: MobileTab
+
+    var body: some View {
         TabView(selection: $selection) {
-            Tab(String(localized: "tab.photos"), systemImage: "photo.on.rectangle.angled", value: MobileTab.photos) {
+            Tab(MobileTab.photos.title, systemImage: MobileTab.photos.systemImage, value: MobileTab.photos) {
                 MobileTimelineScreen(isActive: selection == .photos)
             }
-            Tab(String(localized: "tab.collections"), systemImage: "square.stack", value: MobileTab.collections) {
+            Tab(MobileTab.collections.title, systemImage: MobileTab.collections.systemImage, value: MobileTab.collections) {
                 MobileCollectionsScreen()
             }
-            Tab(String(localized: "tab.map"), systemImage: "map", value: MobileTab.map) {
+            Tab(MobileTab.map.title, systemImage: MobileTab.map.systemImage, value: MobileTab.map) {
                 MobileMapScreen()
             }
-            Tab(String(localized: "tab.settings"), systemImage: "gearshape", value: MobileTab.settings) {
+            Tab(MobileTab.settings.title, systemImage: MobileTab.settings.systemImage, value: MobileTab.settings) {
                 MobileSettingsScreen()
             }
         }
-        .tabViewStyle(.sidebarAdaptable)
         .tint(ProtonColor.primary)
         .onChange(of: selection) { _, tab in
             MobileTabActivityLog.note(tab: tab)
+        }
+    }
+}
+
+private struct MobilePadSidebarShell: View {
+    @Binding var selection: MobileTab
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+
+    private var optionalSelection: Binding<MobileTab?> {
+        Binding {
+            selection
+        } set: { tab in
+            if let tab { selection = tab }
+        }
+    }
+
+    var body: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            List(MobileTab.allCases, selection: optionalSelection) { tab in
+                Label(tab.title, systemImage: tab.systemImage)
+                    .tag(tab)
+            }
+            .listStyle(.sidebar)
+            .navigationTitle(ProductBrand.displayName)
+            .navigationSplitViewColumnWidth(
+                min: SidebarMetrics.minWidth,
+                ideal: SidebarMetrics.defaultWidth,
+                max: SidebarMetrics.maxWidth
+            )
+        } detail: {
+            MobileRouteScreen(tab: selection, isPhotosActive: selection == .photos)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+                            }
+                        } label: {
+                            Image(systemName: "sidebar.left")
+                        }
+                        .accessibilityLabel("Show or Hide Sidebar")
+                    }
+                }
+        }
+        .tint(ProtonColor.primary)
+        .onChange(of: selection) { _, tab in
+            MobileTabActivityLog.note(tab: tab)
+        }
+    }
+}
+
+private struct MobileRouteScreen: View {
+    let tab: MobileTab
+    let isPhotosActive: Bool
+
+    var body: some View {
+        switch tab {
+        case .photos:
+            MobileTimelineScreen(isActive: isPhotosActive)
+        case .collections:
+            MobileCollectionsScreen()
+        case .map:
+            MobileMapScreen()
+        case .settings:
+            MobileSettingsScreen()
         }
     }
 }

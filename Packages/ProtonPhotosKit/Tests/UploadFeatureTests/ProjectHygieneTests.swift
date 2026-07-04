@@ -159,6 +159,48 @@ final class ProjectHygieneTests: XCTestCase {
         )
     }
 
+    func testMobileShellUsesAdaptiveIPadSidebarWithoutFeatureForking() throws {
+        let mobileApp = try String(
+            contentsOf: repoRoot.appendingPathComponent("iOSApp/ProtonPhotosMobileApp.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            mobileApp.contains("@Environment(\\.horizontalSizeClass)"),
+            "mobile navigation must adapt from size class, not fixed device assumptions"
+        )
+        XCTAssertTrue(
+            mobileApp.contains("MobilePhoneTabShell(selection: $selection)") &&
+            mobileApp.contains("MobilePadSidebarShell(selection: $selection)"),
+            "iPhone and iPad shells must share one route selection state"
+        )
+        XCTAssertTrue(
+            mobileApp.contains("NavigationSplitView(columnVisibility: $columnVisibility)"),
+            "iPadOS regular-width shell must use the native split-view sidebar"
+        )
+        XCTAssertTrue(
+            mobileApp.contains(".navigationSplitViewColumnWidth(") &&
+            mobileApp.contains("SidebarMetrics.minWidth") &&
+            mobileApp.contains("SidebarMetrics.maxWidth"),
+            "iPad sidebar width policy must use shared sidebar metrics"
+        )
+        XCTAssertTrue(
+            mobileApp.contains("private struct MobileRouteScreen: View"),
+            "feature screens must be routed through one shared mobile route surface"
+        )
+        XCTAssertTrue(
+            mobileApp.contains("MobileTimelineScreen(isActive: isPhotosActive)") &&
+            mobileApp.contains("MobileCollectionsScreen()") &&
+            mobileApp.contains("MobileMapScreen()") &&
+            mobileApp.contains("MobileSettingsScreen()"),
+            "iPadOS must reuse the same platform-shared feature screens as iPhone"
+        )
+        XCTAssertFalse(
+            mobileApp.contains(".tabViewStyle(.sidebarAdaptable)"),
+            "iPadOS sidebar must not depend on TabView's adaptive promotion"
+        )
+    }
+
     func testPlatformAppsUseSharedProtonDriveBackend() {
         let projectYML = (try? String(contentsOf: repoRoot.appendingPathComponent("project.yml"), encoding: .utf8)) ?? ""
         let macTarget = targetBlock(named: "ProtonPhotos", in: projectYML)
