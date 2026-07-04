@@ -32,10 +32,12 @@ import TimelineCore
         #expect(config.resolver.profile(for: TimelineGridViewport(layoutWidth: 640)).id == "compactTimeline")
         #expect(config.resolver.profile(for: TimelineGridViewport(layoutWidth: 641)).id == "regularTimeline")
 
-        // Touch viewports resolve the dedicated touch ladders (same structure, ~25% gaps).
+        // Touch viewports resolve dedicated touch ladders. Touch-compact is intentionally not a pointer
+        // mirror: it starts at two columns so iPhone never renders a giant single-thumbnail tile.
         let touchCompact = try #require(config.profile(id: "touchCompactTimeline"))
         let touchRegular = try #require(config.profile(id: "touchRegularTimeline"))
-        #expect(touchCompact.levels.map(\.nominalColumns) == compact.levels.map(\.nominalColumns))
+        #expect(touchCompact.defaultLevel == 1)
+        #expect(touchCompact.levels.map(\.nominalColumns) == [2, 3, 5, 7, 12, 20])
         #expect(touchRegular.levels.map(\.nominalColumns) == regular.levels.map(\.nominalColumns))
         #expect(config.resolver.profile(
             for: TimelineGridViewport(layoutWidth: 640, inputAffinity: .touch)).id == "touchCompactTimeline")

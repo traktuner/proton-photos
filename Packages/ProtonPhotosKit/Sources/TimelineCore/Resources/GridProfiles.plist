@@ -360,14 +360,14 @@
 			<key>id</key>
 			<string>touchCompactTimeline</string>
 			<key>defaultLevel</key>
-			<integer>2</integer>
+			<integer>1</integer>
 			<key>levels</key>
 			<array>
 				<dict>
 					<key>id</key>
 					<integer>0</integer>
 					<key>nominalColumns</key>
-					<integer>1</integer>
+					<integer>2</integer>
 					<key>gap</key>
 					<real>0</real>
 					<key>monthLabels</key>
@@ -384,7 +384,7 @@
 					<key>id</key>
 					<integer>1</integer>
 					<key>nominalColumns</key>
-					<integer>2</integer>
+					<integer>3</integer>
 					<key>gap</key>
 					<real>3</real>
 					<key>monthLabels</key>
@@ -401,7 +401,7 @@
 					<key>id</key>
 					<integer>2</integer>
 					<key>nominalColumns</key>
-					<integer>3</integer>
+					<integer>5</integer>
 					<key>gap</key>
 					<real>2.5</real>
 					<key>monthLabels</key>
@@ -418,7 +418,7 @@
 					<key>id</key>
 					<integer>3</integer>
 					<key>nominalColumns</key>
-					<integer>5</integer>
+					<integer>7</integer>
 					<key>gap</key>
 					<real>2</real>
 					<key>monthLabels</key>

@@ -2,8 +2,8 @@ import XCTest
 @testable import TimelineCore
 
 /// Locks the production grid-profile selection table: pointer surfaces keep the original ladders
-/// (macOS spacing must not change), touch surfaces resolve the dedicated touch ladders whose gaps are
-/// ~25% of the pointer gaps at every level (same level count / columns / semantics — only spacing differs).
+/// (macOS spacing must not change), touch surfaces resolve dedicated touch ladders with tighter gaps.
+/// Touch-compact intentionally starts at two columns so iPhone never renders a giant single-thumbnail tile.
 final class TimelineGridProfileResolverTests: XCTestCase {
 
     private let resolver = TimelineGridProfileConfiguration.production.resolver
@@ -43,18 +43,15 @@ final class TimelineGridProfileResolverTests: XCTestCase {
         }
     }
 
-    // MARK: Touch ladders mirror the pointer ladders, only tighter
+    // MARK: Touch ladders are touch-specific, with compact capped at two-column maximum zoom
 
-    func testTouchProfilesMatchPointerStructureWithQuarterGaps() throws {
+    func testTouchProfilesUseTouchSpecificLaddersWithQuarterGaps() throws {
         let pairs = [("compactTimeline", "touchCompactTimeline"), ("regularTimeline", "touchRegularTimeline")]
         for (pointerID, touchID) in pairs {
             let pointer = try XCTUnwrap(resolver.profile(id: pointerID))
             let touch = try XCTUnwrap(resolver.profile(id: touchID))
             XCTAssertEqual(touch.levels.count, pointer.levels.count, touchID)
-            XCTAssertEqual(touch.defaultLevel, pointer.defaultLevel, touchID)
             for (touchLevel, pointerLevel) in zip(touch.levels, pointer.levels) {
-                XCTAssertEqual(touchLevel.nominalColumns, pointerLevel.nominalColumns,
-                               "\(touchID) level \(touchLevel.levelID) columns")
                 XCTAssertEqual(touchLevel.supportedContentModes, pointerLevel.supportedContentModes,
                                "\(touchID) level \(touchLevel.levelID) content modes")
                 XCTAssertEqual(touchLevel.monthLabels, pointerLevel.monthLabels,
@@ -66,6 +63,14 @@ final class TimelineGridProfileResolverTests: XCTestCase {
                                          "\(touchID) level \(touchLevel.levelID) gap \(touchLevel.gap)")
             }
         }
+        let touchCompact = try XCTUnwrap(resolver.profile(id: "touchCompactTimeline"))
+        XCTAssertEqual(touchCompact.defaultLevel, 1)
+        XCTAssertEqual(touchCompact.levels.map(\.nominalColumns), [2, 3, 5, 7, 12, 20])
+
+        let touchRegular = try XCTUnwrap(resolver.profile(id: "touchRegularTimeline"))
+        let pointerRegular = try XCTUnwrap(resolver.profile(id: "regularTimeline"))
+        XCTAssertEqual(touchRegular.defaultLevel, pointerRegular.defaultLevel)
+        XCTAssertEqual(touchRegular.levels.map(\.nominalColumns), pointerRegular.levels.map(\.nominalColumns))
     }
 
     // MARK: Rule decoding
