@@ -38,10 +38,11 @@ exports the matching symbols. So 0.19.0 + ProtonCore 37.3.0 is the current coher
 The `ProtonPhotosClient` surface the app consumes (`enumerateTimeline`, `downloadThumbnails`,
 `download`, upload/cancel) remains source-compatible except for the HTTP adapter stream initializer:
 `HttpClientStream` now takes `source: .stream(...)` or `source: .file(...)`. `ProtonDriveClient`
-adds public generic Drive APIs we can use where they match photos behavior; the app now routes
-move-to-trash through `ProtonDriveClient.trash(nodes:)`. Photos album/favorite/list-trash/restore
-capabilities are still not exposed as public Swift SDK methods, so those remain behind the direct-HTTP
-backend seams.
+adds public generic Drive APIs, but they are only used when they match Photos behavior. Generic
+`trash(nodes:)` was evaluated and left unused because it does not populate the Photos trash route used
+by our UI; Photos trash/list/restore therefore stay behind the same direct-HTTP backend seam. Photos
+album/favorite capabilities are still not exposed as public Swift SDK methods, so those also remain
+behind direct-HTTP backend seams.
 
 All SDK-specific types stay isolated in `App/Drive/` (`DriveSDKBridge`, `SDKHttpClient`,
 `SDKAccountClient`, `DriveSession`). The feature package `Packages/ProtonPhotosKit` has **no** SDK or

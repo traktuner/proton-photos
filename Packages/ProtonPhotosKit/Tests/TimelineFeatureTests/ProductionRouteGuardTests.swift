@@ -79,6 +79,21 @@ struct ProductionRouteGuardTests {
         #expect(!config.contains("secretCacheEncryptionKey:"), "do not claim encrypted SDK secret persistence until the native core actually honors it")
     }
 
+    @Test func photosTrashUsesPhotosV2EndpointNotGenericDriveTrash() throws {
+        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DriveSDKBridge.swift"), encoding: .utf8)
+        let trashBody = try Self.body(of: bridge, from: "func trash(_ uids: [PhotoUID]) async throws {", to: "    func restore(_ uids: [PhotoUID]) async throws {")
+        #expect(trashBody.contains("driveSession.trash(volumeID: root.volumeID"),
+                "Photos trash must use the Photos-compatible v2 trash seam so Recently Deleted can list the item")
+        #expect(!trashBody.contains("driveClient.trash"),
+                "Generic Drive SDK trash does not populate the Photos trash route used by the library UI")
+
+        let session = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DriveSession.swift"), encoding: .utf8)
+        #expect(session.contains("/drive/v2/volumes/\\(volumeID)/trash_multiple"))
+
+        let capabilities = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/SDK/SDKCapabilities.swift"), encoding: .utf8)
+        #expect(capabilities.contains("var trashViaSDK = false"))
+    }
+
     @Test func viewerOriginalsCacheIsReadBeforeNetworkAndPurgedBySettings() throws {
         let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
         #expect(mainView.contains("originalsCache: offline.originalsCache"))

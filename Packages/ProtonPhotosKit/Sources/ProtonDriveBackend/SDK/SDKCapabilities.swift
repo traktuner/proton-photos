@@ -17,9 +17,8 @@ struct SDKCapabilities {
     var download = true
     var downloadOperation = true
     var cancelPhotoDownload = true
-    // ProtonDriveClient - generic Drive APIs used where the public SDK has feature coverage.
-    var driveClientAvailable = true
-    var trashViaSDK = true
+    // Generic Drive SDK trash does not update the Photos trash route used by our library UI.
+    var trashViaSDK = false
 
     /// Upload capabilities, as the UI sees them (the wired SDK uploader). Single source of truth.
     var upload = UploadBackendCapabilities.sdkUploader
@@ -41,7 +40,6 @@ struct SDKCapabilities {
         uploadPauseResume=\(upload.supportsPauseResume)
         cancelPhotoDownload=\(cancelPhotoDownload)
         downloadOperation=\(downloadOperation)
-        driveClientAvailable=\(driveClientAvailable)
         trashViaSDK=\(trashViaSDK)
         albumsViaSDK=\(albumsViaSDK)
         albumList=\(albums.canList)

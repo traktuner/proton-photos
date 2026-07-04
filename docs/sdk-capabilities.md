@@ -26,7 +26,7 @@ direct-HTTP layer behind a clean feature interface; where neither can do it, sur
 
 | Method | Used by app | Wrapper location | Status | Notes |
 |---|---|---|---|---|
-| `trash(nodes:)` | **yes** | `DriveSDKBridge.trash` | implemented | replaces the direct `trash_multiple` HTTP write path |
+| `trash(nodes:)` | no | - | evaluated, not used | generic Drive trash does not populate the Photos trash route used by the library UI |
 | `downloadFile` / `downloadToStreamOperation` | no | - | available | generic Drive revision download; useful for future file/export surfaces, not AVFoundation byte-range video playback |
 | Device APIs | no | - | available | not part of the Photos MVP |
 
