@@ -10,18 +10,13 @@ import TimelineCore
 /// underneath (`loadingContent`) it becomes a translucent glass scrim, so the photos visibly build behind
 /// the spinner until the first full screen is ready.
 struct MobileLibraryLoadingView: View {
-    /// Shared `matchedGeometryEffect` id with the small persistent corner indicator, so dismissing this
-    /// overlay animates the spinner flying to the top-left instead of blinking out.
-    static let spinnerGeometryID = "library-loading-spinner"
-
     let state: LibraryLoadState
-    var spinnerNamespace: Namespace.ID? = nil
 
     var body: some View {
         VStack(spacing: 18) {
             MobileBrandLogo(height: 44)
 
-            spinner
+            ProgressView()
                 .controlSize(.large)
                 .tint(ProtonColor.primary)
 
@@ -40,15 +35,6 @@ struct MobileLibraryLoadingView: View {
         .padding(28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background { scrim }
-    }
-
-    @ViewBuilder private var spinner: some View {
-        if let spinnerNamespace {
-            ProgressView()
-                .matchedGeometryEffect(id: Self.spinnerGeometryID, in: spinnerNamespace)
-        } else {
-            ProgressView()
-        }
     }
 
     @ViewBuilder private var scrim: some View {

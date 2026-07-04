@@ -82,6 +82,8 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
 
 @MainActor
 public final class UIKitTimelineGridHostView: UIView {
+    private static let gridClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+
     private let metalView = UIKitTimelineMetalHostView()
     private let scrollView = UIScrollView()
     private let contentView = UIView()
@@ -353,12 +355,7 @@ public final class UIKitTimelineGridHostView: UIView {
     }
 
     private func configureSubviews() {
-        backgroundColor = UIColor(
-            red: CGFloat(MetalGridRenderPalette.backgroundRGBA.r),
-            green: CGFloat(MetalGridRenderPalette.backgroundRGBA.g),
-            blue: CGFloat(MetalGridRenderPalette.backgroundRGBA.b),
-            alpha: CGFloat(MetalGridRenderPalette.backgroundRGBA.a)
-        )
+        backgroundColor = .black
 
         metalView.translatesAutoresizingMaskIntoConstraints = true
         metalView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -396,7 +393,7 @@ public final class UIKitTimelineGridHostView: UIView {
         isMetal3Capable = UIKitTimelineMetalCapability.supportsTimelineGrid(device: device)
         guard isMetal3Capable else { return }
         self.device = device
-        renderer = MetalGridRenderer(device: device)
+        renderer = MetalGridRenderer(device: device, clearColor: Self.gridClearColor)
         metalView.configure(device: device)
         refreshTextureCacheIfNeeded()
     }
@@ -581,7 +578,9 @@ public final class UIKitTimelineGridHostView: UIView {
               let textureCache,
               let texturePolicy
         else { return .skippedNoSurface }
-        guard let target = MetalGridDrawableTarget(layer: metalView.metalLayer) else { return .noDrawable }
+        guard let target = MetalGridDrawableTarget(layer: metalView.metalLayer, clearColor: Self.gridClearColor) else {
+            return .noDrawable
+        }
 
         let viewportSize = bounds.size
         let overscan = texturePolicy.budget.overscanFraction * viewportSize.height
