@@ -30,6 +30,9 @@ struct MobileSettingsScreen: View {
             }
             .navigationTitle(String(localized: "tab.settings"))
             .task { await refreshCacheSize() }
+            .task(id: libraryModel.isBackgroundLoading) {
+                await refreshCacheSizeWhilePreviewsLoad()
+            }
             .alert(
                 String(localized: "settings.sign_out_confirm \(ProductBrand.displayName)"),
                 isPresented: $confirmSignOut
@@ -88,9 +91,18 @@ struct MobileSettingsScreen: View {
                     detail: libraryModel.loadState.knownCount.map { String(localized: "loading.preparing_count \($0)") }
                 )
             } else if libraryModel.isBackgroundLoading {
-                libraryStatusRow(title: String(localized: "settings.library_still_loading"), detail: nil)
+                libraryStatusRow(
+                    title: String(localized: "settings.library_still_loading"),
+                    detail: previewLoadingDetail
+                )
             }
         }
+    }
+
+    private var previewLoadingDetail: String? {
+        let remaining = libraryModel.previewLoadStatus.remaining
+        guard remaining > 0 else { return nil }
+        return String(localized: "settings.previews_remaining \(remaining)")
     }
 
     private func libraryStatusRow(title: String, detail: String?) -> some View {
@@ -168,6 +180,14 @@ struct MobileSettingsScreen: View {
 
     private func refreshCacheSize() async {
         cacheSize = await libraryModel.cacheDiskSizeBytes()
+    }
+
+    private func refreshCacheSizeWhilePreviewsLoad() async {
+        guard libraryModel.isBackgroundLoading else { return }
+        while !Task.isCancelled, libraryModel.isBackgroundLoading {
+            try? await Task.sleep(for: .seconds(3))
+            await refreshCacheSize()
+        }
     }
 
     private func clearCache() {

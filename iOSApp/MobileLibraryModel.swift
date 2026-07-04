@@ -10,6 +10,32 @@ import ProtonDriveBackend
 import SwiftUI
 import TimelineCore
 
+struct MobilePreviewLoadStatus: Equatable {
+    var total = 0
+    var onDisk = 0
+    var unavailable = 0
+    var queueDepth = 0
+    var activeJobs = 0
+
+    init() {}
+
+    init(status: UIKitThumbnailFeed.PrefetchStatus) {
+        total = status.diskThumbnailTotal
+        onDisk = status.diskFileCount
+        unavailable = status.unfetchableCount
+        queueDepth = status.currentQueueLength
+        activeJobs = status.activeJobs
+    }
+
+    var remaining: Int {
+        max(0, total - onDisk - unavailable)
+    }
+
+    var hasWork: Bool {
+        queueDepth > 0 || activeJobs > 0
+    }
+}
+
 /// Owns the signed-in library for iOS/iPadOS: it builds the shared backend + thumbnail feed and drives the
 /// timeline load through the shared `LibraryLoadState` machine so the first-load experience matches macOS.
 ///
@@ -38,6 +64,9 @@ final class MobileLibraryModel {
     /// `LibraryLoadState` (which models the first-load lifecycle, see its docs): crawl coverage is a
     /// background signal, so it is polled from the feed and ends the first time the crawl runs dry.
     private(set) var isBackgroundLoading = false
+    /// Lightweight status for the mandatory preview crawl. Derived from the feed actor's existing counters, so
+    /// Settings can be transparent for large libraries without walking the cache directory.
+    private(set) var previewLoadStatus = MobilePreviewLoadStatus()
 
     /// The shared backend, exposed so the Albums / Map / Viewer tabs can reuse it without re-building anything.
     private(set) var backend: (any PhotosBackend)?
@@ -139,9 +168,12 @@ final class MobileLibraryModel {
         guard backgroundActivityTask == nil, let feed = thumbnailFeed else { return }
         backgroundActivityTask = Task { [weak self] in
             while !Task.isCancelled {
-                let pending = await feed.hasPendingThumbnailWork()
+                let status = await feed.prefetchStatus()
+                let previewStatus = MobilePreviewLoadStatus(status: status)
+                let pending = previewStatus.hasWork
                 guard let self, !Task.isCancelled else { return }
                 if self.isBackgroundLoading != pending { self.isBackgroundLoading = pending }
+                if self.previewLoadStatus != previewStatus { self.previewLoadStatus = previewStatus }
                 if !pending { break }
                 try? await Task.sleep(for: .seconds(1))
             }
@@ -196,6 +228,7 @@ final class MobileLibraryModel {
         backgroundActivityTask?.cancel()
         backgroundActivityTask = nil
         isBackgroundLoading = false
+        previewLoadStatus = MobilePreviewLoadStatus()
         configuredUID = nil
         session = nil
         backend = nil
@@ -216,6 +249,7 @@ final class MobileLibraryModel {
         backgroundActivityTask?.cancel()
         backgroundActivityTask = nil
         isBackgroundLoading = false
+        previewLoadStatus = MobilePreviewLoadStatus()
         configuredUID = session.uid
         backend = nil
         facade = nil
