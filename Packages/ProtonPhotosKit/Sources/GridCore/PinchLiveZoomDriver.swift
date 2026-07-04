@@ -69,6 +69,13 @@ package struct PinchLiveZoomDriver: Equatable, Sendable {
         package var segmentTarget: Int     // larger-tile (lower index) end     => shown at segmentQ = 1
         package var segmentQ: Double
         package var hasSegment: Bool       // false before the first move clears the rest dead-band
+
+        package init(segmentSource: Int, segmentTarget: Int, segmentQ: Double, hasSegment: Bool) {
+            self.segmentSource = segmentSource
+            self.segmentTarget = segmentTarget
+            self.segmentQ = segmentQ
+            self.hasSegment = hasSegment
+        }
     }
 
     package private(set) var phase: Phase = .idle

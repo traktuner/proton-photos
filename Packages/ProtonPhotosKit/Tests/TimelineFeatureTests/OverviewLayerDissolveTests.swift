@@ -24,7 +24,7 @@ import GridCore
         return u
     }
     private func source(_ name: String) -> String {
-        for target in ["TimelineFeature", "GridCore", "MetalRenderingCore"] {
+        for target in ["TimelineFeature", "TimelineUIKitFeature", "GridCore", "MetalRenderingCore"] {
             let rel = "Packages/ProtonPhotosKit/Sources/\(target)/\(name)"
             if let source = try? String(contentsOf: repoRoot().appendingPathComponent(rel), encoding: .utf8) { return source }
         }
@@ -257,6 +257,18 @@ import GridCore
         } else {
             Issue.record("missing +/- overview dissolve or snap fallback source")
         }
+    }
+
+    @Test func uiKitPinchUsesSharedTransitionPresentations() {
+        let host = source("UIKitTimelineGridHost.swift")
+        #expect(host.contains("GridTransitionController"))
+        #expect(host.contains("PinchLiveZoomDriver"))
+        #expect(host.contains("gridTransition.beginPinch("))
+        #expect(host.contains("renderer.renderLayerDissolve("))
+        #expect(host.contains("engine.overviewLayerDissolvePlan("))
+        #expect(host.contains("transitionGroups(draws:"))
+        #expect(host.contains("commitPinchChain(toLevel:"))
+        #expect(host.contains("commitOverviewDissolve()"))
     }
 
     // Guard: the overview layer dissolve must not reuse the relocation lattice / transition controller.
