@@ -84,92 +84,92 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
 public final class UIKitTimelineGridHostView: UIView {
     private static let gridClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
-    private let metalView = UIKitTimelineMetalHostView()
-    private let scrollView = UIScrollView()
+    let metalView = UIKitTimelineMetalHostView()
+    let scrollView = UIScrollView()
     private let contentView = UIView()
     private let profileAdapter = UIKitTimelineGridProfileAdapter()
     private let displayLink = UIKitTimelineDisplayLinkDriver()
 
     private var device: MTLDevice?
-    private var renderer: MetalGridRenderer?
-    private var textureCache: MetalGridTextureCache<PhotoUID>?
-    private var texturePolicy: UIKitMetalGridTexturePolicy?
-    private var thumbnailFeed: UIKitThumbnailFeed?
+    var renderer: MetalGridRenderer?
+    var textureCache: MetalGridTextureCache<PhotoUID>?
+    var texturePolicy: UIKitMetalGridTexturePolicy?
+    var thumbnailFeed: UIKitThumbnailFeed?
     private var items: [PhotoItem] = []
     /// Flat UID order for the current items, cached so the per-frame composer input never re-maps the library.
-    private var itemUIDs: [PhotoUID] = []
-    private var itemIndexByUID: [PhotoUID: Int] = [:]
+    var itemUIDs: [PhotoUID] = []
+    var itemIndexByUID: [PhotoUID: Int] = [:]
     private var levelOverride: Int?
     /// The user-driven density level set by pinch. Takes precedence over the profile default so pinch survives
     /// item refreshes; cleared when an explicit external `level` arrives. `nil` → profile default (data-driven).
-    private var interactiveLevel: Int?
+    var interactiveLevel: Int?
     /// The level captured at pinch-gesture start (the cumulative-scale reference).
-    private var pinchStartLevel: Int?
+    var pinchStartLevel: Int?
     /// Engine-owned live pinch transaction. This mirrors the macOS grid path at the Core boundary: the item under
     /// the fingers is captured once, then every live frame is resolved by `GridZoomTransaction` instead of discrete
     /// per-change reflow.
-    private var zoomTransaction: GridZoomTransaction?
-    private var zoomTransactionLevel: CGFloat = 0
-    private var pinchLockedOffsetY: CGFloat?
+    var zoomTransaction: GridZoomTransaction?
+    var zoomTransactionLevel: CGFloat = 0
+    var pinchLockedOffsetY: CGFloat?
     /// Optional cursor-aligned column phase committed after a live pinch. Settled iOS layout must use it everywhere
     /// the macOS layout does (rendering, hit-testing, content size), or the release seam can jump horizontally.
-    private var committedPhase: Int?
-    private var commitBridgeTransaction: GridZoomTransaction?
-    private var commitBridgeLevel = 0
-    private var commitBridgeScrollY: CGFloat = 0
-    private var commitBridgePhase: Int?
-    private var commitBridgeStart: CFTimeInterval = 0
+    var committedPhase: Int?
+    var commitBridgeTransaction: GridZoomTransaction?
+    var commitBridgeLevel = 0
+    var commitBridgeScrollY: CGFloat = 0
+    var commitBridgePhase: Int?
+    var commitBridgeStart: CFTimeInterval = 0
     /// Same shared presentation lattice macOS uses for focus-row levels. iOS owns only gesture/lifecycle
     /// plumbing; GridCore owns the reversible alpha/geometry plan so photos crossfade instead of popping.
-    private var gridTransition = GridTransitionController()
-    private var pinchDriver = PinchLiveZoomDriver()
-    private enum PinchMode { case undecided, lattice, reflow, overviewDissolve }
-    private var pinchMode: PinchMode = .undecided
-    private var pinchSettling = false
-    private var pinchBuiltSegment: (Int, Int)?
-    private var pinchChainBand: (lo: Int, hi: Int) = (0, 0)
-    private var pinchPrevSampleTime: CFTimeInterval = 0
-    private var pinchAdvancePrevTime: CFTimeInterval = 0
-    private var pinchOverviewSource = 0
-    private var pinchOverviewTarget = 0
-    private var pinchOverviewQ: Double = 0
-    private var pinchOverviewSettleFrom: Double = 0
-    private var pinchOverviewSettleTo: Double = 0
-    private var pinchOverviewSettleStart: CFTimeInterval = 0
-    private let pinchOverviewSettleDuration: CFTimeInterval = 0.16
-    private var overviewDissolve: OverviewLayerDissolvePlan?
-    private var displayMode: TileContentDisplayMode = .squareFillCrop
+    var gridTransition = GridTransitionController()
+    var pinchDriver = PinchLiveZoomDriver()
+    enum PinchMode { case undecided, lattice, reflow, overviewDissolve }
+    var pinchMode: PinchMode = .undecided
+    var pinchSettling = false
+    var pinchBuiltSegment: (Int, Int)?
+    var pinchChainBand: (lo: Int, hi: Int) = (0, 0)
+    var pinchPrevSampleTime: CFTimeInterval = 0
+    var pinchAdvancePrevTime: CFTimeInterval = 0
+    var pinchOverviewSource = 0
+    var pinchOverviewTarget = 0
+    var pinchOverviewQ: Double = 0
+    var pinchOverviewSettleFrom: Double = 0
+    var pinchOverviewSettleTo: Double = 0
+    var pinchOverviewSettleStart: CFTimeInterval = 0
+    let pinchOverviewSettleDuration: CFTimeInterval = 0.16
+    var overviewDissolve: OverviewLayerDissolvePlan?
+    var displayMode: TileContentDisplayMode = .squareFillCrop
     /// Selection state, mirrored from SwiftUI each `configure`. In selection mode a tap toggles a cell instead of
     /// opening it, and the grid draws the shared selection decorations (blue outline + checkmark badge).
-    private var selectionMode = false
-    private var selectedUIDs: Set<PhotoUID> = []
+    var selectionMode = false
+    var selectedUIDs: Set<PhotoUID> = []
     /// Cached video-UID set for the video badge decoration, rebuilt only when the item set changes.
     private var videoUIDs: Set<PhotoUID> = []
-    private var warmTask: Task<Void, Never>?
-    private var lastWarmIDs: [PhotoUID] = []
+    var warmTask: Task<Void, Never>?
+    var lastWarmIDs: [PhotoUID] = []
     /// Scroll-direction-biased prefetch (shared `GridScrollAheadPolicy`): the user's last vertical travel
     /// direction, learned from finger scrolls only (`nil` until the first real scroll — no direction, no
     /// ahead-warm). Reset when the content set changes.
-    private var scrollDirectionDown: Bool?
+    var scrollDirectionDown: Bool?
     private var lastScrollY: CGFloat = 0
     /// One ahead-warm at a time, keyed by (range, direction, level) so a settled static viewport never
     /// re-issues the same prefetch. RAM-neutral: it decodes into the existing budgets at
     /// `.nearViewportScrollAhead` priority and never runs while visible warm work is pending.
-    private var aheadWarmTask: Task<Void, Never>?
-    private var aheadWarmInFlight = false
-    private var lastAheadKey = ""
+    var aheadWarmTask: Task<Void, Never>?
+    var aheadWarmInFlight = false
+    var lastAheadKey = ""
     /// True while a `warmDecoded` pass is running, so passes never stack. Replaces the old exact-set dedup as the
     /// re-warm gate: a still-missing visible set is re-warmed on the next pass whenever the set changed OR
     /// `warmNeedsRepass` was raised (an arrival / demand move), so a tile that lands on disk under a STATIC
     /// viewport is decoded disk→RAM without needing a scroll nudge.
-    private var warmInFlight = false
+    var warmInFlight = false
     /// Monotonic id for the in-flight warm pass. A pass's completion only mutates `warmInFlight` when its id is
     /// still current, so a stale pass cancelled by a detach can never clear the flag out from under a newer pass
     /// (which would briefly permit two overlapping warms right after a tab re-attach).
-    private var warmGeneration = 0
+    var warmGeneration = 0
     /// Raised by the feed's arrival wake (a download landed on disk) or when demand moved mid-pass: the next warm
     /// must re-issue even if the visible set is unchanged, so the just-arrived bytes get decoded to RAM.
-    private var warmNeedsRepass = false
+    var warmNeedsRepass = false
     /// The feed the arrival wake is currently wired to (reference identity), so `configure` re-subscribes only
     /// when a new feed instance arrives (a new session/route), never on every SwiftUI update pass.
     private weak var wiredFeed: UIKitThumbnailFeed?
@@ -183,8 +183,8 @@ public final class UIKitTimelineGridHostView: UIView {
     private var cachedEngineItemCount = -1
     private var cachedEngineProfileID: String?
     private var needsInitialNewestViewport = true
-    private var userHasScrolledTimeline = false
-    private var isApplyingProgrammaticScroll = false
+    var userHasScrolledTimeline = false
+    var isApplyingProgrammaticScroll = false
     /// One-shot per content set: fires once the first fully-populated on-screen frame is drawn (every visible
     /// cell resident or unfetchable), mirroring the macOS coordinator. Reset when a new non-empty UID set lands.
     private var firstContentReported = false
@@ -195,7 +195,7 @@ public final class UIKitTimelineGridHostView: UIView {
     /// which is exactly the scroll stutter this replaces. The pump also retries after a failed present, so a
     /// transiently unavailable drawable (fresh mount, tab re-attach) can never strand a black grid until the
     /// next scroll event.
-    private var framePump = GridFramePump()
+    var framePump = GridFramePump()
     private var perf = RenderPerfWindow()
 
     public private(set) var isMetal3Capable = false
@@ -237,11 +237,19 @@ public final class UIKitTimelineGridHostView: UIView {
     ) {
         self.selectionMode = selectionMode
         self.selectedUIDs = selectedUIDs
-        let newUIDs = items.map(\.uid)
-        let uidsChanged = itemUIDs != newUIDs
-        let shouldOpenAtNewest = uidsChanged && !newUIDs.isEmpty && !userHasScrolledTimeline
-        self.items = items
-        self.itemUIDs = newUIDs
+        // SwiftUI re-runs configure on EVERY update pass of the hosting screen (selection taps, sheet/cover
+        // presentation, load-state flips), almost always with the same immutable snapshot array. `==` hits
+        // its O(1) storage-identity fast path then, so an unchanged pass never pays the O(n) UID re-map.
+        let uidsChanged: Bool
+        if items == self.items {
+            uidsChanged = false
+        } else {
+            let newUIDs = items.map(\.uid)
+            uidsChanged = itemUIDs != newUIDs
+            self.items = items
+            self.itemUIDs = newUIDs
+        }
+        let shouldOpenAtNewest = uidsChanged && !itemUIDs.isEmpty && !userHasScrolledTimeline
         self.thumbnailFeed = thumbnailFeed
         // Subscribe to the feed's arrival wake ONCE per feed instance (a new session/route builds a new feed):
         // a background download landing on disk then re-warms + redraws this host, so a visible tile fills
@@ -265,20 +273,20 @@ public final class UIKitTimelineGridHostView: UIView {
             committedPhase = nil
             cancelLiveZoomState()
             itemIndexByUID = Dictionary(
-                newUIDs.enumerated().map { ($0.element, $0.offset) },
+                itemUIDs.enumerated().map { ($0.element, $0.offset) },
                 uniquingKeysWith: { _, latest in latest }
             )
             videoUIDs = Set(items.filter(\.isVideo).map(\.uid))
             lastWarmIDs = []
             scrollDirectionDown = nil
             lastAheadKey = ""
-            if !newUIDs.isEmpty {
+            if !itemUIDs.isEmpty {
                 // A new content set must report its own first drawn frame.
                 firstContentReported = false
             }
             if shouldOpenAtNewest {
                 needsInitialNewestViewport = true
-            } else if newUIDs.isEmpty {
+            } else if itemUIDs.isEmpty {
                 needsInitialNewestViewport = true
                 userHasScrolledTimeline = false
             }
@@ -428,11 +436,11 @@ public final class UIKitTimelineGridHostView: UIView {
     }
 
     /// The largest valid vertical content offset given the current content size and bottom inset.
-    private var maxContentOffsetY: CGFloat {
+    var maxContentOffsetY: CGFloat {
         max(0, scrollView.contentSize.height - bounds.height + scrollView.contentInset.bottom)
     }
 
-    private func refreshContentSize() {
+    func refreshContentSize() {
         let size = resolvedContentSize()
         scrollView.contentSize = size
         contentView.frame = CGRect(origin: .zero, size: size)
@@ -478,7 +486,7 @@ public final class UIKitTimelineGridHostView: UIView {
     /// The grid profile for the current layout size, rebuilt only when that size changes (never mid-scroll).
     /// The profile is a pure function of the usable layout size, so caching on it keeps a plain scroll frame
     /// from re-resolving the density ladder every vsync.
-    private func currentProfile() -> GridLevelProfile {
+    func currentProfile() -> GridLevelProfile {
         let layoutSize = UIKitTimelineGridProfileAdapter.layoutSize(
             forBounds: metalView.bounds, safeAreaInsets: metalView.safeAreaInsets)
         if let cachedProfile, cachedProfileLayoutSize == layoutSize { return cachedProfile }
@@ -496,7 +504,7 @@ public final class UIKitTimelineGridHostView: UIView {
 
     /// The canonical geometry engine for the current item count + profile, rebuilt only when either changes.
     /// A finger-scroll changes neither, so the engine (and its section arrays) is constructed once, not per frame.
-    private func currentEngine(profile: GridLevelProfile) -> SquareTileGridEngine {
+    func currentEngine(profile: GridLevelProfile) -> SquareTileGridEngine {
         if let cachedEngine, cachedEngineItemCount == items.count, cachedEngineProfileID == profile.id {
             return cachedEngine
         }
@@ -507,20 +515,11 @@ public final class UIKitTimelineGridHostView: UIView {
         return engine
     }
 
-    /// Arrival wake from the shared feed (a background download landed thumbnails on disk while this viewport is
-    /// live). Re-warm the still-missing visible cells (decoding the new bytes disk→RAM) and redraw — this is what
-    /// lets the render loop legitimately idle through a network wait instead of spinning, since an arrival always
-    /// re-arms it. One-hop to the main actor; the pump coalesces the redraw to at most one frame.
-    private func handleImagesAvailable() {
-        warmNeedsRepass = true
-        requestRender()
-    }
-
     // MARK: - Coalesced render loop
 
     /// Mark the on-screen state dirty and make sure the display link is ticking. All invalidations funnel
     /// through here; actual drawing happens only in `tick`, at most once per vsync.
-    private func requestRender() {
+    func requestRender() {
         guard isMetal3Capable else { return }
         framePump.invalidate()
         // Start the loop only when the surface can actually draw: in a window AND active (the pump gates
@@ -664,9 +663,7 @@ public final class UIKitTimelineGridHostView: UIView {
             target: target,
             renderer: renderer,
             textureCache: textureCache,
-            slots: plan.visibleSlots.map {
-                GridRenderSlot(index: $0.index, column: $0.column, row: $0.row, rect: $0.viewportRect)
-            },
+            slots: renderSlots(from: plan.visibleSlots),
             slotSidePoints: plan.slotSide,
             viewportSize: viewportSize,
             allowUpgrade: !isInteracting,
@@ -699,12 +696,21 @@ public final class UIKitTimelineGridHostView: UIView {
         let groups = transitionGroups(draws: draws, textureCache: textureCache, displayMode: displayMode)
         textureCache.evictToBudget()
         renderer.render(to: target, viewportSize: viewportSize, groups: groups)
+        return finishTransitionDraw(uids: uids, slotSidePoints: slotSide, textureCache: textureCache)
+    }
 
+    /// Shared tail of every transition/dissolve frame: warm the still-missing tiles at the transition's
+    /// upload size, record the draw, and keep ticking only while settle/warm/upload progress is possible.
+    private func finishTransitionDraw(
+        uids: [PhotoUID],
+        slotSidePoints: CGFloat,
+        textureCache: MetalGridTextureCache<PhotoUID>
+    ) -> RenderOutcome {
         let feed = thumbnailFeed
         let missing = newestFirst(uids.filter { uid in
             !textureCache.isResident(uid) && !(feed?.isKnownUnfetchable(uid) ?? false)
         })
-        scheduleWarmIfNeeded(missing, pixelSize: transitionUploadPixels(slotSidePoints: slotSide, textureCache: textureCache))
+        scheduleWarmIfNeeded(missing, pixelSize: transitionUploadPixels(slotSidePoints: slotSidePoints, textureCache: textureCache))
         let ramReadyMissing = missing.reduce(into: 0) { count, uid in
             if feed?.memoryCGImage(for: uid) != nil { count += 1 }
         }
@@ -763,19 +769,7 @@ public final class UIKitTimelineGridHostView: UIView {
             },
             t: Float(plan.targetOpacity)
         )
-
-        let feed = thumbnailFeed
-        let missing = newestFirst(uids.filter { uid in
-            !textureCache.isResident(uid) && !(feed?.isKnownUnfetchable(uid) ?? false)
-        })
-        scheduleWarmIfNeeded(missing, pixelSize: transitionUploadPixels(slotSidePoints: slotSide, textureCache: textureCache))
-        let ramReadyMissing = missing.reduce(into: 0) { count, uid in
-            if feed?.memoryCGImage(for: uid) != nil { count += 1 }
-        }
-        perf.noteDraw(visible: uids.count, missing: missing.count,
-                      ramHitGpuMiss: ramReadyMissing, saturated: textureCache.residencySaturatedThisFrame,
-                      cache: textureCache)
-        return .drawn(hasPendingWork: pinchSettling || warmInFlight || ramReadyMissing > 0)
+        return finishTransitionDraw(uids: uids, slotSidePoints: slotSide, textureCache: textureCache)
     }
 
     private func transitionGroups(
@@ -823,7 +817,7 @@ public final class UIKitTimelineGridHostView: UIView {
         textureCache.uploadVisible(wanted: uids) { feed?.memoryCGImage(for: $0) }
     }
 
-    private func transitionUploadPixels(
+    func transitionUploadPixels(
         slotSidePoints: CGFloat,
         textureCache: MetalGridTextureCache<PhotoUID>
     ) -> Int {
@@ -847,7 +841,7 @@ public final class UIKitTimelineGridHostView: UIView {
         }
     }
 
-    private func uniqueUIDs(_ uids: [PhotoUID]) -> [PhotoUID] {
+    func uniqueUIDs(_ uids: [PhotoUID]) -> [PhotoUID] {
         var seen = Set<PhotoUID>()
         return uids.filter { seen.insert($0).inserted }
     }
@@ -944,7 +938,7 @@ public final class UIKitTimelineGridHostView: UIView {
 
     /// The resolved grid geometry for the current viewport + active level, or nil when there is nothing to lay
     /// out. Built the same way `renderNow` builds it, so hit-testing and rendering never diverge.
-    private func currentGridContext() -> (engine: SquareTileGridEngine, level: Int, profile: GridLevelProfile)? {
+    func currentGridContext() -> (engine: SquareTileGridEngine, level: Int, profile: GridLevelProfile)? {
         guard bounds.width > 0, !items.isEmpty else { return nil }
         let profile = currentProfile()
         let level = activeLevel(profile: profile)
@@ -975,507 +969,6 @@ public final class UIKitTimelineGridHostView: UIView {
         }
     }
 
-    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-        guard let ctx = currentGridContext() else { return }
-        let viewportPoint = gesture.location(in: self)
-        switch gesture.state {
-        case .began:
-            beginLivePinch(ctx: ctx, viewportPoint: viewportPoint)
-        case .changed:
-            guard let startLevel = pinchStartLevel, zoomTransaction != nil else { return }
-            let rawLevel = livePinchRawLevel(startLevel: startLevel, scale: gesture.scale)
-            driveLivePinch(rawLevel: rawLevel, ctx: ctx)
-            requestRender()
-        case .ended, .cancelled, .failed:
-            guard let startLevel = pinchStartLevel else {
-                cancelLiveZoomState()
-                requestRender()
-                return
-            }
-            let rawLevel = livePinchRawLevel(startLevel: startLevel, scale: gesture.scale)
-            endLivePinch(cancelled: gesture.state != .ended, rawLevel: rawLevel, startLevel: startLevel, ctx: ctx)
-        default:
-            break
-        }
-    }
-
-    /// UIKit reports a cumulative scale; GridCore owns the shared logarithmic ladder tuning. Scale > 1 means zoom
-    /// in, so the raw level moves toward lower ids.
-    private func livePinchRawLevel(startLevel: Int, scale: CGFloat) -> CGFloat {
-        CGFloat(startLevel) - GridPinchDensityPolicy.continuousLevelDelta(pinchScale: scale)
-    }
-
-    private func beginLivePinch(
-        ctx: (engine: SquareTileGridEngine, level: Int, profile: GridLevelProfile),
-        viewportPoint: CGPoint
-    ) {
-        finishInFlightPinchPresentation(engine: ctx.engine)
-        commitBridgeTransaction = nil
-        commitBridgeStart = 0
-        pinchStartLevel = ctx.level
-        pinchLockedOffsetY = scrollView.contentOffset.y
-        let contentPoint = CGPoint(x: viewportPoint.x, y: viewportPoint.y + scrollView.contentOffset.y)
-        zoomTransaction = ctx.engine.beginZoomTransaction(
-            cursorContentPoint: contentPoint,
-            viewportPoint: viewportPoint,
-            level: ctx.level,
-            width: bounds.width,
-            columnPhase: committedPhase
-        )
-        guard zoomTransaction != nil else { return }
-        zoomTransactionLevel = CGFloat(ctx.level)
-        pinchMode = .undecided
-        pinchSettling = false
-        pinchBuiltSegment = nil
-        pinchChainBand = eligiblePinchChainBand(engine: ctx.engine, startLevel: ctx.level)
-        pinchDriver = PinchLiveZoomDriver(tuning: .init(from: gridTransition.tuning))
-        pinchPrevSampleTime = CACurrentMediaTime()
-        pinchAdvancePrevTime = 0
-        userHasScrolledTimeline = true
-        requestRender()
-    }
-
-    private func driveLivePinch(
-        rawLevel: CGFloat,
-        ctx: (engine: SquareTileGridEngine, level: Int, profile: GridLevelProfile)
-    ) {
-        let now = CACurrentMediaTime()
-        let dt = pinchPrevSampleTime == 0 ? 1.0 / 60.0 : max(0, now - pinchPrevSampleTime)
-        pinchPrevSampleTime = now
-        switch pinchMode {
-        case .lattice:
-            let update = pinchDriver.update(continuousLevel: Double(rawLevel), dt: dt)
-            if !applyLatticeSegment(update, engine: ctx.engine) {
-                pinchMode = .reflow
-                updateReflow(rawLevel: rawLevel, engine: ctx.engine)
-            }
-        case .overviewDissolve:
-            driveOverviewDissolve(rawLevel: rawLevel)
-        case .reflow:
-            updateReflow(rawLevel: rawLevel, engine: ctx.engine)
-        case .undecided:
-            guard let start = pinchStartLevel else { return }
-            let delta = Double(rawLevel) - Double(start)
-            guard abs(delta) >= pinchDriver.tuning.directionResolveQ else { return }
-            let next = start + (rawLevel < CGFloat(start) ? -1 : 1)
-            if next >= pinchChainBand.lo, next <= pinchChainBand.hi {
-                pinchMode = .lattice
-                pinchDriver.begin(startLevel: start, chainLo: pinchChainBand.lo, chainHi: pinchChainBand.hi)
-                let update = pinchDriver.update(continuousLevel: Double(rawLevel), dt: dt)
-                if !applyLatticeSegment(update, engine: ctx.engine) {
-                    pinchMode = .reflow
-                    updateReflow(rawLevel: rawLevel, engine: ctx.engine)
-                }
-            } else if beginOverviewDissolveIfPossible(source: start, target: next, engine: ctx.engine) {
-                pinchMode = .overviewDissolve
-                pinchOverviewSource = start
-                pinchOverviewTarget = next
-                driveOverviewDissolve(rawLevel: rawLevel)
-            } else {
-                pinchMode = .reflow
-                updateReflow(rawLevel: rawLevel, engine: ctx.engine)
-            }
-        }
-    }
-
-    private func updateReflow(rawLevel: CGFloat, engine: SquareTileGridEngine) {
-        zoomTransactionLevel = GridLiveZoomBounds.visualLevel(rawLevel: rawLevel, levelCount: engine.levelCount)
-    }
-
-    private func endLivePinch(
-        cancelled: Bool,
-        rawLevel: CGFloat,
-        startLevel: Int,
-        ctx: (engine: SquareTileGridEngine, level: Int, profile: GridLevelProfile)
-    ) {
-        switch pinchMode {
-        case .lattice:
-            pinchDriver.release(cancelled: cancelled)
-            pinchSettling = true
-            pinchAdvancePrevTime = 0
-            requestRender()
-        case .overviewDissolve:
-            pinchOverviewSettleFrom = pinchOverviewQ
-            pinchOverviewSettleTo = (!cancelled && pinchOverviewQ >= 0.5) ? 1 : 0
-            pinchOverviewSettleStart = CACurrentMediaTime()
-            pinchSettling = true
-            requestRender()
-        case .reflow:
-            let finalLevel = ctx.profile.clampLevel(Int(rawLevel.rounded()))
-            if !cancelled, finalLevel != startLevel {
-                commitLiveZoom(to: finalLevel, engine: ctx.engine)
-            } else {
-                returnLiveZoomToCurrentLevel()
-            }
-        case .undecided:
-            if !beginShortPinchStep(cancelled: cancelled, rawLevel: rawLevel, startLevel: startLevel, engine: ctx.engine) {
-                returnLiveZoomToCurrentLevel()
-            }
-        }
-    }
-
-    @discardableResult
-    private func applyLatticeSegment(_ update: PinchLiveZoomDriver.Update, engine: SquareTileGridEngine) -> Bool {
-        guard update.hasSegment else { return false }
-        let segment = (update.segmentSource, update.segmentTarget)
-        if pinchBuiltSegment == nil || pinchBuiltSegment! != segment {
-            guard tryBuildPinchSegment(source: update.segmentSource, target: update.segmentTarget, engine: engine) else {
-                gridTransition.end()
-                pinchBuiltSegment = nil
-                return false
-            }
-            pinchBuiltSegment = segment
-        }
-        gridTransition.setProgress(update.segmentQ)
-        return true
-    }
-
-    private func tryBuildPinchSegment(source: Int, target: Int, engine: SquareTileGridEngine) -> Bool {
-        guard let tx = zoomTransaction else { return false }
-        let s = engine.clampLevel(source)
-        let t = engine.clampLevel(target)
-        guard abs(s - t) == 1 else { return false }
-        guard engine.metrics(level: min(s, t)).transitionKindToNext == .focusRowRelayout else { return false }
-        let viewportSize = bounds.size
-        let overscan = (texturePolicy?.budget.overscanFraction ?? 0.8) * viewportSize.height
-        let sp = pinchDetentParams(level: s, engine: engine, viewportSize: viewportSize)
-        let tp = pinchDetentParams(level: t, engine: engine, viewportSize: viewportSize)
-        let sourcePlan = engine.framePlan(
-            level: s,
-            viewportSize: viewportSize,
-            scrollOffset: CGPoint(x: 0, y: sp.scrollY),
-            overscan: overscan,
-            columnPhase: sp.phase
-        )
-        let targetPlan = engine.framePlan(
-            level: t,
-            viewportSize: viewportSize,
-            scrollOffset: CGPoint(x: 0, y: tp.scrollY),
-            overscan: overscan,
-            columnPhase: tp.phase
-        )
-        let built = gridTransition.beginPinch(
-            source: sourcePlan,
-            target: targetPlan,
-            anchorIndex: tx.anchorGlobalIndex,
-            viewportSize: viewportSize,
-            selection: selectedFlatIndices()
-        )
-        if built {
-            let targetUIDs = targetPlan.visibleSlots.compactMap { slot -> PhotoUID? in
-                slot.index >= 0 && slot.index < itemUIDs.count ? itemUIDs[slot.index] : nil
-            }
-            warmTargetDetent(targetUIDs, slotSidePoints: targetPlan.slotSide)
-        }
-        return built
-    }
-
-    private func pinchDetentParams(
-        level: Int,
-        engine: SquareTileGridEngine,
-        viewportSize: CGSize
-    ) -> (phase: Int?, scrollY: CGFloat) {
-        if level == pinchStartLevel {
-            return (committedPhase, min(max(pinchLockedOffsetY ?? scrollView.contentOffset.y, 0), maxContentOffsetY))
-        }
-        guard let tx = zoomTransaction else {
-            return (committedPhase, min(max(pinchLockedOffsetY ?? scrollView.contentOffset.y, 0), maxContentOffsetY))
-        }
-        let desiredColumn = engine.cursorColumn(viewportX: tx.anchorViewportPoint.x, level: level, width: bounds.width)
-        let phase = engine.columnPhase(forItem: tx.anchorGlobalIndex, targetColumn: desiredColumn, level: level, width: bounds.width)
-        let rawY = engine.anchoredScrollOffset(
-            flatIndex: tx.anchorGlobalIndex,
-            localFraction: tx.anchorLocalFraction,
-            viewportPoint: tx.anchorViewportPoint,
-            level: level,
-            width: bounds.width,
-            columnPhase: phase
-        ).y
-        let maxY = engine.clampScrollOffsetY(
-            rawY,
-            level: level,
-            width: bounds.width,
-            viewportHeight: viewportSize.height,
-            columnPhase: phase
-        )
-        return (phase, maxY)
-    }
-
-    private func eligiblePinchChainBand(engine: SquareTileGridEngine, startLevel: Int) -> (lo: Int, hi: Int) {
-        var lo = startLevel
-        while lo > 0, engine.metrics(level: lo - 1).transitionKindToNext == .focusRowRelayout { lo -= 1 }
-        var hi = startLevel
-        while hi < engine.levelCount - 1, engine.metrics(level: hi).transitionKindToNext == .focusRowRelayout { hi += 1 }
-        return (lo, hi)
-    }
-
-    private func selectedFlatIndices() -> Set<Int> {
-        guard selectionMode, !selectedUIDs.isEmpty else { return [] }
-        return Set(selectedUIDs.compactMap { itemIndexByUID[$0] })
-    }
-
-    private func beginOverviewDissolveIfPossible(source: Int, target: Int, engine: SquareTileGridEngine) -> Bool {
-        guard let tx = zoomTransaction,
-              target >= 0, target < engine.levelCount,
-              engine.isOverviewBoundary(source, target),
-              let renderer else { return false }
-        let viewportSize = bounds.size
-        let sourceScrollY = min(max(pinchLockedOffsetY ?? scrollView.contentOffset.y, 0), maxContentOffsetY)
-        let anchorContentPoint = CGPoint(x: tx.anchorViewportPoint.x, y: tx.anchorViewportPoint.y + sourceScrollY)
-        let overscan = (texturePolicy?.budget.overscanFraction ?? 0.8) * viewportSize.height
-        guard let plan = engine.overviewLayerDissolvePlan(
-            from: source,
-            to: target,
-            viewportSize: viewportSize,
-            targetViewportSize: viewportSize,
-            sourceScrollY: sourceScrollY,
-            sourceColumnPhase: committedPhase,
-            preferredNormalMode: displayMode,
-            anchorContentPoint: anchorContentPoint,
-            anchorViewportPoint: tx.anchorViewportPoint,
-            overscan: overscan
-        ) else { return false }
-        overviewDissolve = plan
-        renderer.invalidateDissolveLayers()
-        return true
-    }
-
-    private func driveOverviewDissolve(rawLevel: CGFloat) {
-        let s = CGFloat(pinchOverviewSource)
-        let t = CGFloat(pinchOverviewTarget)
-        let q = t > s ? rawLevel - s : s - rawLevel
-        pinchOverviewQ = Double(min(1, max(0, q)))
-        if let plan = overviewDissolve {
-            overviewDissolve = plan.withProgress(pinchOverviewQ)
-        }
-    }
-
-    private func beginShortPinchStep(cancelled: Bool, rawLevel: CGFloat, startLevel: Int, engine: SquareTileGridEngine) -> Bool {
-        guard !cancelled, abs(rawLevel - CGFloat(startLevel)) > 1e-6 else { return false }
-        let direction = rawLevel < CGFloat(startLevel) ? -1 : 1
-        let next = startLevel + direction
-        guard next >= 0, next < engine.levelCount else { return false }
-        if next >= pinchChainBand.lo, next <= pinchChainBand.hi {
-            pinchMode = .lattice
-            pinchDriver.begin(startLevel: startLevel, chainLo: pinchChainBand.lo, chainHi: pinchChainBand.hi)
-            let update = pinchDriver.releaseTowardAdjacent(direction: direction)
-            guard applyLatticeSegment(update, engine: engine) else { return false }
-            pinchSettling = true
-            pinchAdvancePrevTime = 0
-            requestRender()
-            return true
-        }
-        if beginOverviewDissolveIfPossible(source: startLevel, target: next, engine: engine) {
-            pinchMode = .overviewDissolve
-            pinchOverviewSource = startLevel
-            pinchOverviewTarget = next
-            pinchOverviewQ = 0
-            if let plan = overviewDissolve { overviewDissolve = plan.withProgress(0) }
-            pinchOverviewSettleFrom = 0
-            pinchOverviewSettleTo = 1
-            pinchOverviewSettleStart = CACurrentMediaTime()
-            pinchSettling = true
-            requestRender()
-            return true
-        }
-        return false
-    }
-
-    private func commitLiveZoom(to targetLevel: Int, engine: SquareTileGridEngine) {
-        guard let tx = zoomTransaction else {
-            cancelLiveZoomState()
-            requestRender()
-            return
-        }
-        let level = engine.clampLevel(targetLevel)
-        let desiredColumn = engine.cursorColumn(viewportX: tx.anchorViewportPoint.x, level: level, width: bounds.width)
-        let phase = engine.columnPhase(forItem: tx.anchorGlobalIndex, targetColumn: desiredColumn, level: level, width: bounds.width)
-        let rawY = engine.anchoredScrollOffset(
-            flatIndex: tx.anchorGlobalIndex,
-            localFraction: tx.anchorLocalFraction,
-            viewportPoint: tx.anchorViewportPoint,
-            level: level,
-            width: bounds.width,
-            columnPhase: phase
-        ).y
-        let targetContent = engine.contentSize(level: level, width: bounds.width, columnPhase: phase)
-        let targetMaxY = max(0, max(bounds.height + 1, targetContent.height) - bounds.height + scrollView.contentInset.bottom)
-        let scrollY = min(max(0, rawY), targetMaxY)
-
-        committedPhase = phase
-        interactiveLevel = level
-        commitBridgeTransaction = tx
-        commitBridgeLevel = level
-        commitBridgeScrollY = scrollY
-        commitBridgePhase = phase
-        commitBridgeStart = CACurrentMediaTime()
-        zoomTransaction = nil
-        pinchStartLevel = nil
-        pinchLockedOffsetY = nil
-
-        refreshContentSize()
-        isApplyingProgrammaticScroll = true
-        scrollView.setContentOffset(CGPoint(x: 0, y: scrollY), animated: false)
-        isApplyingProgrammaticScroll = false
-        requestRender()
-    }
-
-    private func returnLiveZoomToCurrentLevel() {
-        guard let tx = zoomTransaction, let startLevel = pinchStartLevel else {
-            cancelLiveZoomState()
-            requestRender()
-            return
-        }
-        let scrollY = min(max(pinchLockedOffsetY ?? scrollView.contentOffset.y, 0), maxContentOffsetY)
-        commitBridgeTransaction = tx
-        commitBridgeLevel = startLevel
-        commitBridgeScrollY = scrollY
-        commitBridgePhase = committedPhase
-        commitBridgeStart = CACurrentMediaTime()
-        zoomTransaction = nil
-        pinchStartLevel = nil
-        pinchLockedOffsetY = nil
-        requestRender()
-    }
-
-    private func advancePinchSettleIfNeeded() {
-        guard pinchSettling else { return }
-        let profile = currentProfile()
-        let engine = currentEngine(profile: profile)
-        switch pinchMode {
-        case .lattice:
-            let now = CACurrentMediaTime()
-            let dt = pinchAdvancePrevTime == 0 ? 1.0 / 60.0 : max(0, now - pinchAdvancePrevTime)
-            pinchAdvancePrevTime = now
-            let q = pinchDriver.advance(dt: dt)
-            let update = PinchLiveZoomDriver.Update(
-                segmentSource: pinchDriver.segmentSource,
-                segmentTarget: pinchDriver.segmentTarget,
-                segmentQ: q,
-                hasSegment: true
-            )
-            _ = applyLatticeSegment(update, engine: engine)
-            if pinchDriver.isCommitted {
-                commitPinchChain(toLevel: pinchDriver.finalLevel, engine: engine)
-            }
-        case .overviewDissolve:
-            let elapsed = CACurrentMediaTime() - pinchOverviewSettleStart
-            let f = pinchOverviewSettleDuration > 0 ? min(1, elapsed / pinchOverviewSettleDuration) : 1
-            pinchOverviewQ = pinchOverviewSettleFrom + (pinchOverviewSettleTo - pinchOverviewSettleFrom) * f
-            if let plan = overviewDissolve { overviewDissolve = plan.withProgress(pinchOverviewQ) }
-            if f >= 1 { commitOverviewDissolve() }
-        case .reflow, .undecided:
-            pinchSettling = false
-        }
-    }
-
-    private func finishInFlightPinchPresentation(engine: SquareTileGridEngine) {
-        guard pinchSettling || gridTransition.isActive || overviewDissolve != nil else { return }
-        switch pinchMode {
-        case .lattice:
-            pinchDriver.advance(dt: 10)
-            commitPinchChain(toLevel: pinchDriver.finalLevel, engine: engine)
-        case .overviewDissolve:
-            commitOverviewDissolve()
-        case .reflow, .undecided:
-            cancelLiveZoomState()
-        }
-    }
-
-    private func commitPinchChain(toLevel finalLevel: Int, engine: SquareTileGridEngine) {
-        let level = engine.clampLevel(finalLevel)
-        let params = pinchDetentParams(level: level, engine: engine, viewportSize: bounds.size)
-        if level != pinchStartLevel {
-            committedPhase = params.phase
-            interactiveLevel = level
-        }
-        gridTransition.end()
-        zoomTransaction = nil
-        pinchSettling = false
-        pinchMode = .undecided
-        pinchBuiltSegment = nil
-        pinchStartLevel = nil
-        pinchLockedOffsetY = nil
-        pinchAdvancePrevTime = 0
-        refreshContentSize()
-        isApplyingProgrammaticScroll = true
-        scrollView.setContentOffset(CGPoint(x: 0, y: min(max(0, params.scrollY), maxContentOffsetY)), animated: false)
-        isApplyingProgrammaticScroll = false
-        requestRender()
-    }
-
-    private func commitOverviewDissolve() {
-        guard let plan = overviewDissolve else {
-            cancelLiveZoomState()
-            return
-        }
-        let toTarget = pinchOverviewSettleTo >= 0.5
-        let scrollY: CGFloat
-        if toTarget {
-            committedPhase = plan.targetColumnPhase
-            interactiveLevel = plan.targetLevel
-            scrollY = plan.targetScrollY
-        } else {
-            scrollY = min(max(pinchLockedOffsetY ?? scrollView.contentOffset.y, 0), maxContentOffsetY)
-        }
-        overviewDissolve = nil
-        renderer?.endLayerDissolve()
-        zoomTransaction = nil
-        gridTransition.end()
-        pinchSettling = false
-        pinchMode = .undecided
-        pinchBuiltSegment = nil
-        pinchStartLevel = nil
-        pinchLockedOffsetY = nil
-        refreshContentSize()
-        isApplyingProgrammaticScroll = true
-        scrollView.setContentOffset(CGPoint(x: 0, y: min(max(0, scrollY), maxContentOffsetY)), animated: false)
-        isApplyingProgrammaticScroll = false
-        requestRender()
-    }
-
-    private func warmTargetDetent(_ uids: [PhotoUID], slotSidePoints: CGFloat) {
-        guard let textureCache else { return }
-        scheduleWarmIfNeeded(
-            newestFirst(uniqueUIDs(uids)),
-            pixelSize: transitionUploadPixels(slotSidePoints: slotSidePoints, textureCache: textureCache)
-        )
-    }
-
-    private func cancelLiveZoomState() {
-        zoomTransaction = nil
-        pinchStartLevel = nil
-        pinchLockedOffsetY = nil
-        commitBridgeTransaction = nil
-        commitBridgeStart = 0
-        gridTransition.end()
-        overviewDissolve = nil
-        renderer?.endLayerDissolve()
-        pinchDriver.reset()
-        pinchMode = .undecided
-        pinchSettling = false
-        pinchBuiltSegment = nil
-        pinchPrevSampleTime = 0
-        pinchAdvancePrevTime = 0
-    }
-
-    private func newestFirst(_ uids: [PhotoUID]) -> [PhotoUID] {
-        uids.sorted { lhs, rhs in
-            (itemIndexByUID[lhs] ?? -1) > (itemIndexByUID[rhs] ?? -1)
-        }
-    }
-
-    /// The still-missing visible tiles (newest-first, reliability-critical order) followed by any additional warm
-    /// UIDs the composer requested (upgrade re-decode sources), de-duplicated. A no-op-ish superset when settled
-    /// is off (the composer's warm list is then just the missing tiles).
-    private func warmUnion(_ missing: [PhotoUID], _ streamWarm: [PhotoUID]) -> [PhotoUID] {
-        guard !streamWarm.isEmpty else { return missing }
-        var out = missing
-        var seen = Set(missing)
-        for uid in streamWarm where seen.insert(uid).inserted { out.append(uid) }
-        return out
-    }
-
     /// The shared grid decorations for the current frame — always built, mirroring the macOS coordinator, so a
     /// video badge shows during normal browsing and the checkmark badge shows in selection mode (the composer
     /// makes the two mutually exclusive in the bottom-right corner, and the selection outline is drawn only for
@@ -1494,92 +987,6 @@ public final class UIKitTimelineGridHostView: UIView {
             favorites: [],
             isVideo: { [videoUIDs] uid in videoUIDs.contains(uid) }
         )
-    }
-
-    /// Pre-decode the rows just beyond the streamed window in the user's travel direction, disk→RAM, at
-    /// `.nearViewportScrollAhead` priority — the shared `GridScrollAheadPolicy` range over this host's flat
-    /// UID order. Strictly subordinate to visible work: it runs only on settled frames with NO visible warm
-    /// pass in flight, decodes in small chunks, and aborts between chunks the moment a visible pass starts.
-    /// RAM-neutral by design — it fills the EXISTING decoded budget ahead of need; no cache grows.
-    private func scheduleScrollAheadWarmIfIdle(plan: GridFramePlan) {
-        // Never pre-warm ahead for an inactive/hidden grid — that would decode disk→RAM off-screen while the
-        // user is in another tab/menu. (renderNow only runs when active, so this is defense-in-depth.)
-        guard framePump.isActive else { return }
-        guard let thumbnailFeed, let down = scrollDirectionDown, !itemUIDs.isEmpty else { return }
-        guard !warmInFlight, !aheadWarmInFlight else { return }
-        let indices = plan.visibleSlots.map(\.index)
-        guard let minIndex = indices.min(), let maxIndex = indices.max() else { return }
-        let range = GridScrollAheadPolicy.aheadRange(
-            coveredIndexRange: minIndex ... maxIndex,
-            itemCount: itemUIDs.count,
-            columns: plan.columns,
-            rowsAhead: 3,
-            direction: down ? .towardHigherIndices : .towardLowerIndices
-        )
-        guard !range.isEmpty else { return }
-        let key = "\(range.lowerBound)-\(range.upperBound)-\(down)-\(plan.levelID)"
-        guard key != lastAheadKey else { return }
-        lastAheadKey = key
-        let missing = range
-            .map { itemUIDs[$0] }
-            .filter { thumbnailFeed.memoryCGImage(for: $0) == nil && !thumbnailFeed.isKnownUnfetchable($0) }
-        guard !missing.isEmpty else { return }
-        let pixelSize = GridTextureUploadSizing.uploadPixels(
-            slotSidePoints: plan.slotSide,
-            backingScale: metalView.metalLayer.contentsScale,
-            headroom: 1.15,
-            floor: 64,
-            cap: textureCache?.maxTexturePixels ?? 320
-        )
-        let requests = missing.map { ThumbnailRequest(uid: $0, pixelSize: pixelSize, cropMode: displayMode.rawValue) }
-        aheadWarmInFlight = true
-        aheadWarmTask = Task { [weak self, thumbnailFeed] in
-            // Small chunks so a visible warm pass (which takes strict priority) never waits behind a long
-            // ahead batch on the serial feed actor; abort the remainder the moment visible work starts.
-            for chunk in stride(from: 0, to: requests.count, by: 12).map({ Array(requests[$0 ..< min($0 + 12, requests.count)]) }) {
-                if Task.isCancelled { break }
-                let visibleBusy = await MainActor.run { [weak self] in self?.warmInFlight ?? true }
-                if visibleBusy { break }
-                _ = await thumbnailFeed.warmDecoded(chunk, priority: .nearViewportScrollAhead, limit: chunk.count)
-            }
-            await MainActor.run { [weak self] in self?.aheadWarmInFlight = false }
-        }
-    }
-
-    /// Decode the still-missing visible cells disk→RAM (queuing network for the rest), at most one pass at a time.
-    ///
-    /// The gate is `warmInFlight`, NOT exact-set equality: a pass is re-issued whenever the missing set changed OR
-    /// `warmNeedsRepass` was raised (a feed arrival / demand move). That is what fixes "black until the user
-    /// scrolls a nudge further" — under a STATIC viewport, a tile whose bytes land on disk (via the crawl worker,
-    /// which only stores to disk) is re-warmed on the next pass and decoded into the RAM tier the renderer reads,
-    /// instead of being permanently deduped away because the visible set never changed. On completion it redraws;
-    /// if cells are still missing the next frame re-invokes this, so the fill continues to convergence.
-    private func scheduleWarmIfNeeded(_ uids: [PhotoUID], pixelSize: Int) {
-        guard let thumbnailFeed else { return }
-        var seen = Set<PhotoUID>()
-        let unique = uids.filter { seen.insert($0).inserted }
-        guard !unique.isEmpty else { lastWarmIDs = []; warmNeedsRepass = false; return }
-        if warmInFlight {
-            // A pass is running; if demand moved, remember to re-issue once it finishes.
-            if unique != lastWarmIDs { warmNeedsRepass = true }
-            return
-        }
-        guard unique != lastWarmIDs || warmNeedsRepass else { return }
-        warmNeedsRepass = false
-        lastWarmIDs = unique
-        warmInFlight = true
-        warmGeneration &+= 1
-        let generation = warmGeneration
-        let requests = unique.map { ThumbnailRequest(uid: $0, pixelSize: pixelSize, cropMode: displayMode.rawValue) }
-        warmTask = Task { [weak self, thumbnailFeed] in
-            _ = await thumbnailFeed.warmDecoded(requests, priority: .visibleNow, limit: max(1, requests.count))
-            await MainActor.run {
-                guard let self, self.warmGeneration == generation else { return }
-                self.warmInFlight = false
-                // Redraw to upload whatever decoded; renderNow re-invokes this for any cells still missing.
-                self.requestRender()
-            }
-        }
     }
 }
 
@@ -1631,143 +1038,6 @@ extension UIKitTimelineGridHostView: UIGestureRecognizerDelegate {
     public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                   shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         true
-    }
-}
-
-// MARK: - Low-noise render diagnostics
-
-/// One-second aggregation window for the render loop, logged at `.notice` so a plain `log stream` capture (no
-/// `--level debug`) separates render/upload/upgrade/warm work — one concise line per second WHILE the loop runs,
-/// silent when idle. It answers the perf questions directly: how many input events were coalesced into how many
-/// draws, whether drawable acquisition ever failed, and what the streaming pipeline did (uploads / deferrals /
-/// in-place quality upgrades / residency).
-@MainActor
-private struct RenderPerfWindow {
-    private static let logger = Logger(subsystem: "me.protonphotos.ios", category: "MobileGridPerf")
-
-    private var windowStart: CFTimeInterval = 0
-    private var scrollEvents = 0
-    private var ticks = 0
-    private var draws = 0
-    private var drawableFailures = 0
-    private var uploads = 0
-    private var uploadMs: Double = 0
-    private var deferredUploads = 0
-    private var upgrades = 0
-    private var lastVisible = 0
-    private var lastMissing = 0
-    private var lastResidentBytes = 0
-    private var lastResidentCapBytes = 0
-    /// Frames this window in which the resident byte/count budget refused an upload (residency saturation).
-    private var saturatedDraws = 0
-    /// Last frame's RAM-decoded-but-not-GPU-resident visible count (`ramHitGpuMissing`).
-    private var lastRamHitGpuMiss = 0
-    /// Timestamp of the previous tick, and how many inter-tick gaps this window exceeded ~2 frames (33 ms) —
-    /// a cheap proxy for a visible render-loop hitch. Reset to 0 when the loop stops so a resume after an
-    /// idle stretch is never counted as one giant gap.
-    private var lastTickAt: CFTimeInterval = 0
-    private var hitches = 0
-    private var maxGapMs: Double = 0
-
-    mutating func noteScrollEvent() {
-        scrollEvents += 1
-    }
-
-    /// The loop stopped (idle or suspended) — forget the last tick time so the next run's first gap is not
-    /// measured against a stale timestamp.
-    mutating func noteLoopStopped() {
-        lastTickAt = 0
-    }
-
-    mutating func noteDraw<ID>(visible: Int, missing: Int, ramHitGpuMiss: Int, saturated: Bool,
-                               cache: MetalGridTextureCache<ID>?) {
-        draws += 1
-        lastVisible = visible
-        lastMissing = missing
-        lastRamHitGpuMiss = ramHitGpuMiss
-        if saturated { saturatedDraws += 1 }
-        if let cache {
-            uploads += cache.uploadsThisFrame
-            uploadMs += cache.uploadMsThisFrame
-            deferredUploads += cache.deferredUploadsThisFrame
-            upgrades += cache.upgradesThisFrame
-            lastResidentBytes = cache.residentBytes
-            lastResidentCapBytes = cache.residentByteBudget
-        }
-    }
-
-    mutating func noteTick(drawableFailed: Bool) {
-        ticks += 1
-        if drawableFailed { drawableFailures += 1 }
-        let now = CACurrentMediaTime()
-        if lastTickAt != 0 {
-            let gapMs = (now - lastTickAt) * 1000
-            if gapMs > 33 { hitches += 1; maxGapMs = max(maxGapMs, gapMs) }
-        }
-        lastTickAt = now
-        if windowStart == 0 { windowStart = now }
-        if now - windowStart >= 1.0 {
-            flush(reason: "window")
-            windowStart = now
-        }
-    }
-
-    mutating func flush(reason: String) {
-        guard ticks > 0 else { return }
-        let (t, d, s, f) = (ticks, draws, scrollEvents, drawableFailures)
-        let (u, um, du, up) = (uploads, String(format: "%.2f", uploadMs), deferredUploads, upgrades)
-        let (vis, mis, mb) = (lastVisible, lastMissing, lastResidentBytes / 1_048_576)
-        let (capMB, sat, ramGpu) = (lastResidentCapBytes / 1_048_576, saturatedDraws, lastRamHitGpuMiss)
-        let (hit, gap) = (hitches, String(format: "%.0f", maxGapMs))
-        Self.logger.notice("""
-        [MobileGridPerf] \(reason, privacy: .public) ticks=\(t) draws=\(d) scrollEvents=\(s) \
-        drawableFail=\(f) uploads=\(u) uploadMs=\(um, privacy: .public) deferred=\(du) upgrades=\(up) \
-        visible=\(vis) missing=\(mis) ramGpuMiss=\(ramGpu) residentMB=\(mb)/\(capMB) saturated=\(sat) \
-        hitches=\(hit) maxGapMs=\(gap, privacy: .public)
-        """)
-        // A visible hitch during grid activity gets its own low-noise [UIHitch] line (1 s throttled via the
-        // window) so a `log stream` filtered to [UIHitch] shows both tab transitions AND grid frame stalls.
-        if hitches > 0 {
-            UIHitchLog.frameGap(hitches: hitches, maxGapMs: maxGapMs, ticks: ticks, draws: draws)
-        }
-        scrollEvents = 0
-        ticks = 0
-        draws = 0
-        drawableFailures = 0
-        uploads = 0
-        uploadMs = 0
-        deferredUploads = 0
-        upgrades = 0
-        saturatedDraws = 0
-        hitches = 0
-        maxGapMs = 0
-    }
-}
-
-// MARK: - UI hitch diagnostics
-
-/// Low-noise `[UIHitch]` diagnostics for menu/tab smoothness: emits only on grid ACTIVITY transitions and,
-/// at most once per second, when the render loop measured a frame gap over ~2 frames. It never logs per
-/// frame. The app shell emits its own `[UIHitch] tab=…` line on tab changes (same category), so a single
-/// `log stream --predicate 'category == "UIHitch"'` shows the whole interaction picture.
-@MainActor
-enum UIHitchLog {
-    private static let logger = Logger(subsystem: "me.protonphotos.ios", category: "UIHitch")
-
-    static func gridActivity(active: Bool, hasWindow: Bool, displayLinkRunning: Bool,
-                             warmInFlight: Bool, aheadWarmInFlight: Bool, items: Int) {
-        logger.notice("""
-        [UIHitch] event=gridActivity gridActive=\(active) window=\(hasWindow) \
-        displayLink=\(displayLinkRunning) warmInFlight=\(warmInFlight) aheadWarm=\(aheadWarmInFlight) \
-        items=\(items)
-        """)
-    }
-
-    static func frameGap(hitches: Int, maxGapMs: Double, ticks: Int, draws: Int) {
-        logger.notice("""
-        [UIHitch] event=gridFrameGap hitches=\(hitches) maxGapMs=\(String(format: "%.0f", maxGapMs), privacy: .public) \
-        ticks=\(ticks) draws=\(draws)
-        """)
     }
 }
 #endif

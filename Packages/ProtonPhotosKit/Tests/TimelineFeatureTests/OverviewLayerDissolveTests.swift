@@ -260,7 +260,8 @@ import GridCore
     }
 
     @Test func uiKitPinchUsesSharedTransitionPresentations() {
-        let host = source("UIKitTimelineGridHost.swift")
+        // The host class spans two files: the render loop and the pinch state machine.
+        let host = source("UIKitTimelineGridHost.swift") + source("UIKitTimelineGridHostPinch.swift")
         #expect(host.contains("GridTransitionController"))
         #expect(host.contains("PinchLiveZoomDriver"))
         #expect(host.contains("gridTransition.beginPinch("))

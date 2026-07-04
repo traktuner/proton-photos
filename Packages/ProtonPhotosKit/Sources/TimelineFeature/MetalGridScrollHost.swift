@@ -366,10 +366,6 @@ final class MetalGridScrollHost: NSView {
 
     // MARK: - Live focus-row pinch zoom (engine-owned GridZoomTransaction)
 
-    /// Magnification → continuous level position. Pinch OPEN (positive magnification) = zoom IN = lower level
-    /// index. Smaller = more sensitive.
-    private let magnificationPerLevel: CGFloat = 0.42
-
     /// A trackpad pinch drives an engine-owned `GridZoomTransaction`: the item under the cursor is the anchor,
     /// the focus row keeps its photos as the level position glides, and on release we snap to the nearest
     /// level (cursor re-anchored). NOT a per-frame stateless re-resolve - no focus-row rewrap.
@@ -405,7 +401,7 @@ final class MetalGridScrollHost: NSView {
             guard pinchActive else { return }
             lastMagnifyEventTime = CACurrentMediaTime()
             pinchCumulativeMagnification += event.magnification
-            let pos = CGFloat(pinchBaseLevel) - pinchCumulativeMagnification / magnificationPerLevel
+            let pos = CGFloat(pinchBaseLevel) - GridPinchDensityPolicy.continuousLevelDelta(magnification: pinchCumulativeMagnification)
             driveLivePinch(continuousLevel: pos)
             requestFrame()
         case .ended:

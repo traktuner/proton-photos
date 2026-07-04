@@ -40,6 +40,16 @@ final class GridPinchDensityPolicyTests: XCTestCase {
         XCTAssertLessThan(GridPinchDensityPolicy.levelSteps(pinchScale: 8.0), 4)
     }
 
+    func testMagnificationMappingMatchesTrackpadTuning() {
+        // The macOS trackpad curve is linear in the ADDITIVE magnification sum: 0.42 per step, sign = direction.
+        XCTAssertEqual(GridPinchDensityPolicy.magnificationPerLevel, 0.42)
+        XCTAssertEqual(GridPinchDensityPolicy.continuousLevelDelta(magnification: 0), 0, accuracy: 0.0001)
+        XCTAssertEqual(GridPinchDensityPolicy.continuousLevelDelta(magnification: 0.42), 1, accuracy: 0.0001)
+        XCTAssertEqual(GridPinchDensityPolicy.continuousLevelDelta(magnification: -0.84), -2, accuracy: 0.0001)
+        XCTAssertEqual(GridPinchDensityPolicy.continuousLevelDelta(magnification: .nan), 0)
+        XCTAssertEqual(GridPinchDensityPolicy.continuousLevelDelta(magnification: .infinity), 0)
+    }
+
     func testDegenerateScalesAreSafe() {
         // Non-finite or non-positive recognizer readings are ignored outright (0 steps)…
         XCTAssertEqual(GridPinchDensityPolicy.levelSteps(pinchScale: 0), 0)

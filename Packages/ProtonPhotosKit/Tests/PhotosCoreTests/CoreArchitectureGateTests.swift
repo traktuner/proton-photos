@@ -2085,21 +2085,6 @@ final class CoreArchitectureGateTests: XCTestCase {
         ] where !imports.contains(required) {
             violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: missing import \(required)")
         }
-        for forbidden in [
-            "AppKit",
-            "MetalKit",
-            "TimelineFeature",
-            "MediaCache",
-            "MediaCacheAppKitAdapter",
-            "DesignSystem",
-            "DesignSystemAppKitAdapter",
-            "PhotoViewerFeature",
-            "MapFeature",
-            "ProtonDriveSDK",
-        ] where imports.contains(forbidden) {
-            violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: forbidden import \(forbidden)")
-        }
-
         let source = try String(contentsOf: hostFile, encoding: .utf8)
         for required in [
             "public struct UIKitTimelineGrid: UIViewRepresentable",
@@ -2127,25 +2112,48 @@ final class CoreArchitectureGateTests: XCTestCase {
             violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: missing \(required)")
         }
 
-        let code = stripCommentsAndStringLiterals(from: source)
-        for forbidden in [
-            "NSView",
-            "NSScrollView",
-            "NSImage",
-            "MTKView",
-            "MacMediaCachePolicy",
-            "AppKitMetalGrid",
-            "TimelineViewModel",
-            "MetalGridScrollHost",
-            "ProtonDriveSDK",
-            // The host must not re-implement the frame-composition sequence it delegates to the composer.
-            "GridTextureStreamingPolicy.window",
-            "func buildGroups",
-            "func classifyUIDs",
-            // Full-library background crawl order belongs to the shared timeline/app model, not the view host.
-            "startPrefetch(",
-        ] where contains(forbidden, in: code) {
-            violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: forbidden macOS/SDK/duplicated-sequence reference \(forbidden)")
+        // The boundary holds for the WHOLE target: the host class spans several files (render loop, pinch
+        // machine, warm pipeline, diagnostics), so forbidden imports/references are scanned across every
+        // file in the feature, not just the named host file.
+        let featureFiles = try FileManager.default.contentsOfDirectory(at: featureRoot, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        for file in featureFiles {
+            let fileImports = try importedModules(in: file)
+            for forbidden in [
+                "AppKit",
+                "MetalKit",
+                "TimelineFeature",
+                "MediaCache",
+                "MediaCacheAppKitAdapter",
+                "DesignSystem",
+                "DesignSystemAppKitAdapter",
+                "PhotoViewerFeature",
+                "MapFeature",
+                "ProtonDriveSDK",
+            ] where fileImports.contains(forbidden) {
+                violations.append("TimelineUIKitFeature/\(file.lastPathComponent): forbidden import \(forbidden)")
+            }
+            let code = stripCommentsAndStringLiterals(from: try String(contentsOf: file, encoding: .utf8))
+            for forbidden in [
+                "NSView",
+                "NSScrollView",
+                "NSImage",
+                "MTKView",
+                "MacMediaCachePolicy",
+                "AppKitMetalGrid",
+                "TimelineViewModel",
+                "MetalGridScrollHost",
+                "ProtonDriveSDK",
+                // The host must not re-implement the frame-composition sequence it delegates to the composer.
+                "GridTextureStreamingPolicy.window",
+                "func buildGroups",
+                "func classifyUIDs",
+                // Full-library background crawl order belongs to the shared timeline/app model, not the view host.
+                "startPrefetch(",
+            ] where contains(forbidden, in: code) {
+                violations.append("TimelineUIKitFeature/\(file.lastPathComponent): forbidden macOS/SDK/duplicated-sequence reference \(forbidden)")
+            }
         }
 
         XCTAssertTrue(

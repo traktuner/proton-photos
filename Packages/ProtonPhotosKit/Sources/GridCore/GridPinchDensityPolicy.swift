@@ -33,4 +33,17 @@ public enum GridPinchDensityPolicy {
         let clamped = min(max(pinchScale, clampedScaleRange.lowerBound), clampedScaleRange.upperBound)
         return log2(clamped) / log2(scaleRatioPerStep)
     }
+
+    /// AppKit trackpad tuning: `NSEvent.magnification` accumulates ADDITIVELY (a running sum of per-event
+    /// deltas, not a scale factor), so the macOS host maps it linearly — this much accumulated magnification
+    /// is worth one density step. Lives beside the UIKit scale tuning so the two platform curves cannot
+    /// drift apart unseen.
+    public static let magnificationPerLevel: CGFloat = 0.42
+
+    /// Continuous ladder displacement for a cumulative AppKit `magnification` sum. Positive means zoom IN
+    /// (toward lower level ids), mirroring `continuousLevelDelta(pinchScale:)` for UIKit's multiplicative scale.
+    public static func continuousLevelDelta(magnification: CGFloat) -> CGFloat {
+        guard magnification.isFinite else { return 0 }
+        return magnification / magnificationPerLevel
+    }
 }
