@@ -143,4 +143,75 @@ final class OriginalFileNamingTests: XCTestCase {
         XCTAssertNil(OriginalFileNaming.recognizedExtension(fromFilename: ""))
         XCTAssertEqual(OriginalFileNaming.recognizedExtension(fromFilename: "clip.MOV"), "mov")
     }
+
+    // MARK: - exportFilename (the metadata-first naming decision shared by export + Photos-save)
+
+    /// THE acceptance criterion: a real HEIC original keeps its exact name — no `ProtonPhotos-*`, no `.jpg`.
+    /// Extension case is preserved verbatim (the base filename must remain the original).
+    func testExportFilenameKeepsRealHeicNameVerbatim() {
+        XCTAssertEqual(
+            OriginalFileNaming.exportFilename(
+                metadataFilename: "IMG_0001.HEIC", fallbackBase: "ProtonPhotos-20260101-000000-abcdef", ext: "heic"
+            ),
+            "IMG_0001.HEIC"
+        )
+        // A real MOV likewise stays a MOV, not the generated name.
+        XCTAssertEqual(
+            OriginalFileNaming.exportFilename(
+                metadataFilename: "clip.MOV", fallbackBase: "ProtonPhotos-x", ext: "mov"
+            ),
+            "clip.MOV"
+        )
+    }
+
+    /// No usable original name → the generated fallback base + resolved extension (the ONLY time a
+    /// `ProtonPhotos-*` name is allowed).
+    func testExportFilenameFallsBackWhenNoMetadataName() {
+        XCTAssertEqual(
+            OriginalFileNaming.exportFilename(
+                metadataFilename: nil, fallbackBase: "ProtonPhotos-20260704-120000-abcdef", ext: "jpg"
+            ),
+            "ProtonPhotos-20260704-120000-abcdef.jpg"
+        )
+        // Empty / whitespace-only names are treated as "no name".
+        XCTAssertEqual(
+            OriginalFileNaming.exportFilename(metadataFilename: "   ", fallbackBase: "Base", ext: "png"),
+            "Base.png"
+        )
+    }
+
+    /// A real base name that lacks a (recognised) extension keeps the base and gains the sniffed extension —
+    /// never dropping the original name, never mislabelling the format.
+    func testExportFilenameAppendsSniffedExtensionWhenNameHasNone() {
+        XCTAssertEqual(
+            OriginalFileNaming.exportFilename(metadataFilename: "IMG_0001", fallbackBase: "Base", ext: "heic"),
+            "IMG_0001.heic"
+        )
+        XCTAssertEqual(
+            OriginalFileNaming.exportFilename(metadataFilename: "notes.txt", fallbackBase: "Base", ext: "jpg"),
+            "notes.txt.jpg"
+        )
+    }
+
+    /// A hostile / path-bearing link name can never escape the export directory: it is reduced to its last
+    /// component before use, so no traversal or nested-folder creation is possible.
+    func testExportFilenameSanitisesPathTraversal() {
+        XCTAssertEqual(
+            OriginalFileNaming.exportFilename(
+                metadataFilename: "../../etc/passwd.heic", fallbackBase: "Base", ext: "heic"
+            ),
+            "passwd.heic"
+        )
+    }
+
+    /// The sanitiser rejects unusable names and flattens paths to their last component.
+    func testSanitizedOriginalName() {
+        XCTAssertNil(OriginalFileNaming.sanitizedOriginalName(nil))
+        XCTAssertNil(OriginalFileNaming.sanitizedOriginalName(""))
+        XCTAssertNil(OriginalFileNaming.sanitizedOriginalName("   "))
+        XCTAssertNil(OriginalFileNaming.sanitizedOriginalName("."))
+        XCTAssertNil(OriginalFileNaming.sanitizedOriginalName(".."))
+        XCTAssertEqual(OriginalFileNaming.sanitizedOriginalName("a/b/IMG.HEIC"), "IMG.HEIC")
+        XCTAssertEqual(OriginalFileNaming.sanitizedOriginalName("IMG_0001.HEIC"), "IMG_0001.HEIC")
+    }
 }

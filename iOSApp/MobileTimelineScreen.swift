@@ -11,14 +11,22 @@ struct MobileTimelineScreen: View {
     /// Whether the Photos tab is the active surface. Threaded into the grid so a hidden grid stops its
     /// render loop; defaults to true so previews/other embeds keep the grid live.
     var isActive: Bool = true
+    /// Bumped by the tab shell when the already-active Fotos tab is retapped → the grid scrolls to the newest
+    /// photos. A pass-through value only; the scroll math stays inside the grid host.
+    var scrollToLatestSignal: Int = 0
     @State private var viewer: MobileViewerPresentation?
     @State private var selectionMode = false
     @State private var selected: Set<PhotoUID> = []
     @State private var sharePayload: MobileSharePayload?
     @State private var partialShare: MobilePartialShare?
     @State private var isExporting = false
+    /// Non-nil while a save-to-Apple-Photos run is in flight; drives the centered progress overlay.
+    @State private var saveProgress: MobileSaveProgress?
     @State private var showTrashConfirm = false
     @State private var actionError: MobileSelectionError?
+
+    /// True while any selection action is running, so the other toolbar buttons disable together.
+    private var selectionBusy: Bool { isExporting || saveProgress != nil }
 
     private var canSelect: Bool { model.loadState.isContentReady && !model.items.isEmpty }
 
@@ -91,8 +99,17 @@ struct MobileTimelineScreen: View {
                         Image(systemName: "square.and.arrow.up")
                     }
                 }
-                .disabled(selected.isEmpty || isExporting)
+                .disabled(selected.isEmpty || selectionBusy)
                 .accessibilityLabel(String(localized: "selection.share_a11y"))
+            }
+            ToolbarItem(placement: .bottomBar) {
+                Button {
+                    startSave()
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                }
+                .disabled(selected.isEmpty || selectionBusy)
+                .accessibilityLabel(String(localized: "selection.save_a11y"))
             }
             ToolbarSpacer(.flexible, placement: .bottomBar)
             if let centerText = selectionCenterText {
@@ -111,7 +128,7 @@ struct MobileTimelineScreen: View {
                 } label: {
                     Image(systemName: "trash")
                 }
-                .disabled(selected.isEmpty || isExporting)
+                .disabled(selected.isEmpty || selectionBusy)
                 .accessibilityLabel(String(localized: "selection.trash_a11y"))
             }
         }
@@ -137,14 +154,25 @@ struct MobileTimelineScreen: View {
                     selectionMode: selectionMode,
                     selectedUIDs: selected,
                     isActive: isActive,
+                    scrollToLatestSignal: scrollToLatestSignal,
                     onFirstContentReady: { withAnimation(.spring(duration: 0.55)) { model.markFirstContentReady() } },
                     onOpenPhoto: open,
-                    onToggleSelection: toggleSelection
+                    onToggleSelection: toggleSelection,
+                    onDragSelectionChanged: applyDragSelection
                 )
                 .ignoresSafeArea(edges: .bottom)
             }
 
             overlay
+            savingOverlay
+        }
+    }
+
+    /// Centered "Saving…" scrim while a save-to-Apple-Photos run is in flight, with an honest item count.
+    @ViewBuilder private var savingOverlay: some View {
+        if let progress = saveProgress {
+            MobileSavingOverlay(progress: progress)
+                .transition(.opacity)
         }
     }
 
@@ -177,6 +205,12 @@ struct MobileTimelineScreen: View {
         if selected.contains(item.uid) { selected.remove(item.uid) } else { selected.insert(item.uid) }
     }
 
+    /// Commit the result of a finger-drag selection — called ONCE when the drag ends, so a drag never rebuilds
+    /// the screen per frame (the grid host paints the in-progress selection itself).
+    private func applyDragSelection(_ uids: Set<PhotoUID>) {
+        selected = uids
+    }
+
     private func startShare() {
         guard let backend = model.backend else { return }
         let chosen = model.selectedItems(selected)   // O(k log k) from the index, not an O(n) filter
@@ -196,6 +230,40 @@ struct MobileTimelineScreen: View {
                 partialShare = MobilePartialShare(urls: result.urls, failed: result.failed)
             } else {
                 sharePayload = MobileSharePayload(urls: result.urls)
+            }
+        }
+    }
+
+    private func startSave() {
+        guard let backend = model.backend else { return }
+        let chosen = model.selectedItems(selected)   // O(k log k) from the index, not an O(n) filter
+        guard !chosen.isEmpty else { return }
+        saveProgress = MobileSaveProgress(completed: 0, total: chosen.count)
+        Task {
+            let prepared = await MobilePhotoLibrarySaver.prepare(
+                backend: backend, cache: model.originalsCache, cacheCapBytes: model.originalsCacheCapBytes
+            )
+            guard case let .ready(session) = prepared else {
+                saveProgress = nil
+                // Denied/restricted Photos access — surface it, never a silent no-op.
+                actionError = MobileSelectionError(message: String(localized: "selection.save_denied"))
+                return
+            }
+            // The per-item loop runs on the main actor so the overlay count stays live; each item's
+            // decrypt/download/PhotoKit write suspends off-main inside `session.save`.
+            var tally = MobilePhotoLibrarySaver.Tally()
+            for (offset, item) in chosen.enumerated() {
+                tally.add(await session.save(item))
+                saveProgress = MobileSaveProgress(completed: offset + 1, total: chosen.count)
+            }
+            session.cleanup()
+            saveProgress = nil
+            // Surface honestly: hard failures first, then a Live-Photo degrade note; full success is silent
+            // (the overlay simply lifts).
+            if tally.failed > 0 {
+                actionError = MobileSelectionError(message: String(localized: "selection.save_failed \(tally.failed)"))
+            } else if tally.livePhotoDegraded > 0 {
+                actionError = MobileSelectionError(message: String(localized: "selection.save_live_degraded \(tally.livePhotoDegraded)"))
             }
         }
     }
@@ -236,4 +304,38 @@ struct MobilePartialShare: Identifiable {
     let id = UUID()
     let urls: [URL]
     let failed: Int
+}
+
+/// Progress of an in-flight save-to-Apple-Photos run, driving the centered overlay.
+struct MobileSaveProgress: Equatable {
+    var completed: Int
+    var total: Int
+}
+
+/// Centered "Saving…" scrim shown while saving selected originals into Apple Photos. Mirrors the app's loading
+/// HUD idiom (a large tinted `ProgressView` + label over an ultra-thin material) with an honest item count.
+private struct MobileSavingOverlay: View {
+    let progress: MobileSaveProgress
+
+    var body: some View {
+        VStack(spacing: 18) {
+            ProgressView()
+                .controlSize(.large)
+                .tint(ProtonColor.primary)
+            Text(String(localized: "selection.saving"))
+                .font(.headline)
+                .foregroundStyle(ProtonColor.textNorm)
+            if progress.total > 0 {
+                Text(String(localized: "selection.saving_progress \(progress.completed) \(progress.total)"))
+                    .font(.subheadline)
+                    .foregroundStyle(ProtonColor.textWeak)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background { Rectangle().fill(.ultraThinMaterial).ignoresSafeArea() }
+        .accessibilityElement(children: .combine)
+    }
 }

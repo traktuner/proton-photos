@@ -111,11 +111,27 @@ private struct MobileMainTabView: View {
 
 private struct MobilePhoneTabShell: View {
     @Binding var selection: MobileTab
+    /// Bumped when the already-active Photos tab is retapped, so the timeline scrolls to the newest photos.
+    @State private var photosScrollSignal = 0
+
+    /// A custom selection binding so retapping the ALREADY-active Photos tab is observable: a retap routes the
+    /// same value through the setter (which `.onChange(of:)` cannot see, since the value doesn't change). We
+    /// only bump a scroll signal — the route, library, grid level and selection are all left untouched.
+    private var tabSelection: Binding<MobileTab> {
+        Binding {
+            selection
+        } set: { newValue in
+            if newValue == .photos, selection == .photos {
+                photosScrollSignal &+= 1
+            }
+            selection = newValue
+        }
+    }
 
     var body: some View {
-        TabView(selection: $selection) {
+        TabView(selection: tabSelection) {
             Tab(MobileTab.photos.title, systemImage: MobileTab.photos.systemImage, value: MobileTab.photos) {
-                MobileTimelineScreen(isActive: selection == .photos)
+                MobileTimelineScreen(isActive: selection == .photos, scrollToLatestSignal: photosScrollSignal)
             }
             Tab(MobileTab.collections.title, systemImage: MobileTab.collections.systemImage, value: MobileTab.collections) {
                 MobileCollectionsScreen()
@@ -137,12 +153,16 @@ private struct MobilePhoneTabShell: View {
 private struct MobilePadSidebarShell: View {
     @Binding var selection: MobileTab
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
+    /// Bumped when the already-selected Photos row is re-selected, so the timeline scrolls to newest.
+    @State private var photosScrollSignal = 0
 
     private var optionalSelection: Binding<MobileTab?> {
         Binding {
             selection
         } set: { tab in
-            if let tab { selection = tab }
+            guard let tab else { return }
+            if tab == .photos, selection == .photos { photosScrollSignal &+= 1 }
+            selection = tab
         }
     }
 
@@ -163,7 +183,7 @@ private struct MobilePadSidebarShell: View {
             // NavigationSplitView already renders the ONE native sidebar toggle in the detail's top bar; a
             // second manual `sidebar.left` button here produced the duplicate toggle in landscape. Rely on the
             // system control only (predictable, and it animates the column the standard way).
-            MobileRouteScreen(tab: selection, isPhotosActive: selection == .photos)
+            MobileRouteScreen(tab: selection, isPhotosActive: selection == .photos, photosScrollSignal: photosScrollSignal)
         }
         .tint(ProtonColor.primary)
         .onChange(of: selection) { _, tab in
@@ -175,11 +195,12 @@ private struct MobilePadSidebarShell: View {
 private struct MobileRouteScreen: View {
     let tab: MobileTab
     let isPhotosActive: Bool
+    var photosScrollSignal: Int = 0
 
     var body: some View {
         switch tab {
         case .photos:
-            MobileTimelineScreen(isActive: isPhotosActive)
+            MobileTimelineScreen(isActive: isPhotosActive, scrollToLatestSignal: photosScrollSignal)
         case .collections:
             MobileCollectionsScreen()
         case .map:

@@ -107,6 +107,38 @@ public enum OriginalFileNaming {
         return isVideo ? "mov" : "jpg"
     }
 
+    /// The exported/saved file's full basename, metadata-first. The real decrypted Proton
+    /// `metadataFilename` is authoritative — it IS the original's own name and already carries the correct
+    /// extension (`IMG_0001.HEIC`), so it is returned verbatim (only sanitised for path safety), never
+    /// re-stamped. This is what keeps a HEIC named `IMG_0001.HEIC` instead of a re-invented
+    /// `ProductBrand-…jpg`. Only when no usable original name exists (metadata lookup failed completely, or
+    /// the name is empty/unsafe) do we fall back to `fallbackBase` + the resolved `ext`. When the real name
+    /// exists but lacks a recognised media extension, its base is kept and the sniffed `ext` appended.
+    /// Pure/value-only, so the iOS and macOS export + Photos-save paths share one decision (unit-tested).
+    public static func exportFilename(metadataFilename: String?, fallbackBase: String, ext: String) -> String {
+        if let sanitized = sanitizedOriginalName(metadataFilename) {
+            // The original's own extension is the most authoritative signal — keep the whole name verbatim.
+            if recognizedExtension(fromFilename: sanitized) != nil { return sanitized }
+            // A real base name with a missing/unknown extension: keep the base, append the sniffed extension.
+            return "\(sanitized).\(ext)"
+        }
+        return "\(fallbackBase).\(ext)"
+    }
+
+    /// A filesystem-safe rendering of a real original filename, or `nil` when there is nothing usable.
+    /// Reduces the name to its last path component and strips NUL/trailing whitespace so a hostile or
+    /// edge-case Proton link name (`../evil`, `a/b/IMG.HEIC`) can never escape the export directory or
+    /// create nested folders; `nil` for empty/whitespace-only / reserved (`.`/`..`) names so the caller
+    /// uses its generated fallback.
+    public static func sanitizedOriginalName(_ filename: String?) -> String? {
+        guard let filename else { return nil }
+        let base = (filename as NSString).lastPathComponent
+            .replacingOccurrences(of: "\0", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty, base != ".", base != ".." else { return nil }
+        return base
+    }
+
     /// The recognised media extension carried by a real filename, lowercased (no dot), or `nil` when
     /// the name is empty / has no extension / the extension isn't a known media type.
     public static func recognizedExtension(fromFilename filename: String?) -> String? {
