@@ -434,19 +434,27 @@ final class MetalGridScrollHost: NSView {
         case .undecided:
             let start = pinchBaseLevel
             guard abs(Double(pos) - Double(start)) >= pinchDriver.tuning.directionResolveQ else { return }  // pre-move: keep showing the start detent
-            let dir = pos < CGFloat(start) ? -1 : 1
-            let next = start + dir
-            if next >= pinchChainBand.lo, next <= pinchChainBand.hi {
+            switch GridPinchRoutePolicy.candidate(
+                startLevel: start,
+                direction: pos < CGFloat(start) ? -1 : 1,
+                chainBand: pinchChainBand,
+                engine: coordinator.engine
+            ) {
+            case .lattice:
                 pinchMode = .lattice                          // first eligible step is in-band ⇒ continuous chain
                 pinchDriver.begin(startLevel: start, chainLo: pinchChainBand.lo, chainHi: pinchChainBand.hi)
                 _ = applyLatticeSegment(pinchDriver.update(continuousLevel: Double(pos), dt: dt))
-            } else if next >= 0, next < coordinator.levelCount, coordinator.engine.isOverviewBoundary(start, next),
-                      coordinator.beginOverviewDissolve(sourceLevel: start, targetLevel: next, viewportSize: metalView.bounds.size) {
-                pinchMode = .overviewDissolve                 // overview boundary ⇒ two-layer offscreen dissolve
-                pinchOverviewSource = start
-                pinchOverviewTarget = next
-                driveOverviewDissolve(continuousLevel: pos)
-            } else {
+            case let .overviewDissolve(target):
+                if coordinator.beginOverviewDissolve(sourceLevel: start, targetLevel: target, viewportSize: metalView.bounds.size) {
+                    pinchMode = .overviewDissolve             // overview boundary ⇒ two-layer offscreen dissolve
+                    pinchOverviewSource = start
+                    pinchOverviewTarget = target
+                    driveOverviewDissolve(continuousLevel: pos)
+                } else {
+                    pinchMode = .reflow
+                    coordinator.updateLiveZoom(continuousLevel: pos)
+                }
+            case .reflow:
                 pinchMode = .reflow                           // genuinely out-of-band ⇒ transaction reflow
                 coordinator.updateLiveZoom(continuousLevel: pos)
             }
@@ -516,10 +524,11 @@ final class MetalGridScrollHost: NSView {
     private func beginShortPinchStep(cancelled: Bool) -> Bool {
         guard !cancelled, abs(pinchCumulativeMagnification) > 1e-6 else { return false }
         let direction = pinchCumulativeMagnification > 0 ? -1 : 1   // positive magnification = pinch-in = lower level
-        let next = pinchBaseLevel + direction
-        guard next >= 0, next < coordinator.levelCount else { return false }
 
-        if next >= pinchChainBand.lo, next <= pinchChainBand.hi {
+        switch GridPinchRoutePolicy.candidate(
+            startLevel: pinchBaseLevel, direction: direction, chainBand: pinchChainBand, engine: coordinator.engine
+        ) {
+        case .lattice:
             pinchMode = .lattice
             pinchDriver.begin(startLevel: pinchBaseLevel, chainLo: pinchChainBand.lo, chainHi: pinchChainBand.hi)
             let out = pinchDriver.releaseTowardAdjacent(direction: direction)
@@ -529,13 +538,12 @@ final class MetalGridScrollHost: NSView {
             lastMagnifyEventTime = CACurrentMediaTime()
             requestFrame()
             return true
-        }
-
-        if coordinator.engine.isOverviewBoundary(pinchBaseLevel, next),
-           coordinator.beginOverviewDissolve(sourceLevel: pinchBaseLevel, targetLevel: next, viewportSize: metalView.bounds.size) {
+        case let .overviewDissolve(target):
+            guard coordinator.beginOverviewDissolve(sourceLevel: pinchBaseLevel, targetLevel: target, viewportSize: metalView.bounds.size)
+            else { return false }
             pinchMode = .overviewDissolve
             pinchOverviewSource = pinchBaseLevel
-            pinchOverviewTarget = next
+            pinchOverviewTarget = target
             pinchOverviewQ = 0
             coordinator.setOverviewDissolveProgress(0)
             pinchOverviewSettleFrom = 0
@@ -545,9 +553,9 @@ final class MetalGridScrollHost: NSView {
             lastMagnifyEventTime = CACurrentMediaTime()
             requestFrame()
             return true
+        case .reflow:
+            return false
         }
-
-        return false
     }
 
     /// If a previous lattice pinch is still running its post-release settle (the settle spans multiple display

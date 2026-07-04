@@ -63,7 +63,7 @@ extension UIKitTimelineGridHostView {
         pinchMode = .undecided
         pinchSettling = false
         pinchBuiltSegment = nil
-        pinchChainBand = eligiblePinchChainBand(engine: ctx.engine, startLevel: ctx.level)
+        pinchChainBand = GridPinchRoutePolicy.chainBand(around: ctx.level, engine: ctx.engine)
         pinchDriver = PinchLiveZoomDriver(tuning: .init(from: gridTransition.tuning))
         pinchPrevSampleTime = CACurrentMediaTime()
         pinchAdvancePrevTime = 0
@@ -93,8 +93,13 @@ extension UIKitTimelineGridHostView {
             guard let start = pinchStartLevel else { return }
             let delta = Double(rawLevel) - Double(start)
             guard abs(delta) >= pinchDriver.tuning.directionResolveQ else { return }
-            let next = start + (rawLevel < CGFloat(start) ? -1 : 1)
-            if next >= pinchChainBand.lo, next <= pinchChainBand.hi {
+            switch GridPinchRoutePolicy.candidate(
+                startLevel: start,
+                direction: rawLevel < CGFloat(start) ? -1 : 1,
+                chainBand: pinchChainBand,
+                engine: ctx.engine
+            ) {
+            case .lattice:
                 pinchMode = .lattice
                 pinchDriver.begin(startLevel: start, chainLo: pinchChainBand.lo, chainHi: pinchChainBand.hi)
                 let update = pinchDriver.update(continuousLevel: Double(rawLevel), dt: dt)
@@ -102,12 +107,17 @@ extension UIKitTimelineGridHostView {
                     pinchMode = .reflow
                     updateReflow(rawLevel: rawLevel, engine: ctx.engine)
                 }
-            } else if beginOverviewDissolveIfPossible(source: start, target: next, engine: ctx.engine) {
-                pinchMode = .overviewDissolve
-                pinchOverviewSource = start
-                pinchOverviewTarget = next
-                driveOverviewDissolve(rawLevel: rawLevel)
-            } else {
+            case let .overviewDissolve(target):
+                if beginOverviewDissolveIfPossible(source: start, target: target, engine: ctx.engine) {
+                    pinchMode = .overviewDissolve
+                    pinchOverviewSource = start
+                    pinchOverviewTarget = target
+                    driveOverviewDissolve(rawLevel: rawLevel)
+                } else {
+                    pinchMode = .reflow
+                    updateReflow(rawLevel: rawLevel, engine: ctx.engine)
+                }
+            case .reflow:
                 pinchMode = .reflow
                 updateReflow(rawLevel: rawLevel, engine: ctx.engine)
             }
@@ -237,14 +247,6 @@ extension UIKitTimelineGridHostView {
         return (phase, maxY)
     }
 
-    private func eligiblePinchChainBand(engine: SquareTileGridEngine, startLevel: Int) -> (lo: Int, hi: Int) {
-        var lo = startLevel
-        while lo > 0, engine.metrics(level: lo - 1).transitionKindToNext == .focusRowRelayout { lo -= 1 }
-        var hi = startLevel
-        while hi < engine.levelCount - 1, engine.metrics(level: hi).transitionKindToNext == .focusRowRelayout { hi += 1 }
-        return (lo, hi)
-    }
-
     private func selectedFlatIndices() -> Set<Int> {
         guard selectionMode, !selectedUIDs.isEmpty else { return [] }
         return Set(selectedUIDs.compactMap { itemIndexByUID[$0] })
@@ -289,9 +291,10 @@ extension UIKitTimelineGridHostView {
     private func beginShortPinchStep(cancelled: Bool, rawLevel: CGFloat, startLevel: Int, engine: SquareTileGridEngine) -> Bool {
         guard !cancelled, abs(rawLevel - CGFloat(startLevel)) > 1e-6 else { return false }
         let direction = rawLevel < CGFloat(startLevel) ? -1 : 1
-        let next = startLevel + direction
-        guard next >= 0, next < engine.levelCount else { return false }
-        if next >= pinchChainBand.lo, next <= pinchChainBand.hi {
+        switch GridPinchRoutePolicy.candidate(
+            startLevel: startLevel, direction: direction, chainBand: pinchChainBand, engine: engine
+        ) {
+        case .lattice:
             pinchMode = .lattice
             pinchDriver.begin(startLevel: startLevel, chainLo: pinchChainBand.lo, chainHi: pinchChainBand.hi)
             let update = pinchDriver.releaseTowardAdjacent(direction: direction)
@@ -300,11 +303,11 @@ extension UIKitTimelineGridHostView {
             pinchAdvancePrevTime = 0
             requestRender()
             return true
-        }
-        if beginOverviewDissolveIfPossible(source: startLevel, target: next, engine: engine) {
+        case let .overviewDissolve(target):
+            guard beginOverviewDissolveIfPossible(source: startLevel, target: target, engine: engine) else { return false }
             pinchMode = .overviewDissolve
             pinchOverviewSource = startLevel
-            pinchOverviewTarget = next
+            pinchOverviewTarget = target
             pinchOverviewQ = 0
             if let plan = overviewDissolve { overviewDissolve = plan.withProgress(0) }
             pinchOverviewSettleFrom = 0
@@ -313,8 +316,9 @@ extension UIKitTimelineGridHostView {
             pinchSettling = true
             requestRender()
             return true
+        case .reflow:
+            return false
         }
-        return false
     }
 
     private func commitLiveZoom(to targetLevel: Int, engine: SquareTileGridEngine) {

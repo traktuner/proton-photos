@@ -1388,14 +1388,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     // MARK: - Live pinch single-lattice transition
 
-    /// The contiguous adjacent-step band around the current `level` that is lattice-eligible (every step
-    /// `lo→lo+1` is `.focusRowRelayout`). For the normal levels this is `[0, 3]`; an overview start gives a
-    /// degenerate band (`lo == hi`) ⇒ the host uses the `GridZoomTransaction` reflow (`transactionReflow`). The host chains within this band.
+    /// The lattice-eligible band around the coordinator's current level (shared `GridPinchRoutePolicy`;
+    /// for the normal production levels this is `[0, 3]`, an overview start degenerates to `lo == hi`).
     func eligiblePinchChainBand() -> (lo: Int, hi: Int) {
-        var lo = level, hi = level
-        while lo > 0, engine.metrics(level: lo - 1).transitionKindToNext == .focusRowRelayout { lo -= 1 }
-        while hi < engine.levelCount - 1, engine.metrics(level: hi).transitionKindToNext == .focusRowRelayout { hi += 1 }
-        return (lo, hi)
+        GridPinchRoutePolicy.chainBand(around: level, engine: engine)
     }
 
     /// The presentation frame parameters for one detent in the current gesture: the gesture-START detent keeps

@@ -238,8 +238,10 @@ public final class UIKitTimelineGridHostView: UIView {
         self.selectionMode = selectionMode
         self.selectedUIDs = selectedUIDs
         // SwiftUI re-runs configure on EVERY update pass of the hosting screen (selection taps, sheet/cover
-        // presentation, load-state flips), almost always with the same immutable snapshot array. `==` hits
-        // its O(1) storage-identity fast path then, so an unchanged pass never pays the O(n) UID re-map.
+        // presentation, load-state flips), almost always re-passing the same snapshot array — Array's `==`
+        // then short-circuits on storage identity, skipping the per-pass UID re-map. Full CONTENT equality
+        // (not UID equality) is the skip test on purpose: items can be re-published with stable UIDs but
+        // enriched metadata (tags, burst members), and those passes must fall through to refresh `items`.
         let uidsChanged: Bool
         if items == self.items {
             uidsChanged = false

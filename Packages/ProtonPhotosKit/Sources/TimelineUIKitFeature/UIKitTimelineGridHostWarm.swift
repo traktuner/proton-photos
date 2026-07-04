@@ -97,8 +97,7 @@ extension UIKitTimelineGridHostView {
     /// if cells are still missing the next frame re-invokes this, so the fill continues to convergence.
     func scheduleWarmIfNeeded(_ uids: [PhotoUID], pixelSize: Int) {
         guard let thumbnailFeed else { return }
-        var seen = Set<PhotoUID>()
-        let unique = uids.filter { seen.insert($0).inserted }
+        let unique = uniqueUIDs(uids)
         guard !unique.isEmpty else { lastWarmIDs = []; warmNeedsRepass = false; return }
         if warmInFlight {
             // A pass is running; if demand moved, remember to re-issue once it finishes.
