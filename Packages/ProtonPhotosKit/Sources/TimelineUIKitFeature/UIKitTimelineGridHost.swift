@@ -882,6 +882,7 @@ public final class UIKitTimelineGridHostView: UIView {
             allowUpgrade: allowUpgrade,
             hasImage: { feed?.memoryCGImage(for: $0) != nil },
             canRetry: { !(feed?.isKnownUnfetchable($0) ?? false) },
+            needsSharperSource: { feed?.decodedNeedsSharperSource($0, forPixels: uploadPixels) ?? false },
             provideImage: { feed?.memoryCGImage(for: $0) }
         )
         let groups = MetalGridFrameComposer.buildGroups(

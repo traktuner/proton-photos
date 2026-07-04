@@ -26,6 +26,10 @@ public final class WrapperImageCache<Image: AnyObject>: @unchecked Sendable {
         cache.setObject(image, forKey: key, cost: max(0, cost))
     }
 
+    public func remove(forKey key: NSString) {
+        cache.removeObject(forKey: key)
+    }
+
     public func removeAll() {
         cache.removeAllObjects()
     }

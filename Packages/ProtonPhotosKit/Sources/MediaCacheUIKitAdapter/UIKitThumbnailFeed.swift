@@ -40,6 +40,11 @@ public actor UIKitThumbnailFeed {
             crawlBackoffSeconds: 5,
             downloadTimeoutSeconds: 20
         )
+        let wrappers = WrapperImageCache<UIImage>(
+            countLimit: 256,
+            costLimitBytes: UIKitMediaCachePolicy.wrapperRAMBudgetBytes()
+        )
+        imageWrappers = wrappers
         self.core = ThumbnailFeedCore(
             cache: cache,
             loader: loader,
@@ -48,11 +53,10 @@ public actor UIKitThumbnailFeed {
             onDecoded: { uid, decoded in
                 // Same DB-backed dimension pipeline as the macOS feed - batched, off this path.
                 dimensions?.record(uid, width: decoded.pixelWidth, height: decoded.pixelHeight)
+                // A (re)decode may have replaced the CGImage with a sharper one; drop the stale UIImage
+                // wrapper so viewer/map consumers rebuild from the current decoded tier on next read.
+                wrappers.remove(forKey: Self.key(uid))
             }
-        )
-        imageWrappers = WrapperImageCache(
-            countLimit: 256,
-            costLimitBytes: UIKitMediaCachePolicy.wrapperRAMBudgetBytes()
         )
     }
 
@@ -85,6 +89,11 @@ public actor UIKitThumbnailFeed {
 
     public nonisolated func memoryCGImage(for uid: PhotoUID) -> CGImage? {
         core.memoryDecoded(for: uid)?.image
+    }
+
+    /// See `ThumbnailFeedCore.decodedNeedsSharperSource` — true only for a present-but-undersized RAM decode.
+    public nonisolated func decodedNeedsSharperSource(_ uid: PhotoUID, forPixels pixels: Int) -> Bool {
+        core.decodedNeedsSharperSource(uid, forPixels: pixels)
     }
 
     /// Subscribe to the shared feed's "images available" arrival wake (see `ThumbnailFeedCore.onImagesAvailable`).

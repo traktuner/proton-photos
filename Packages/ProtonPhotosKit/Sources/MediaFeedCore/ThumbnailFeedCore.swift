@@ -180,7 +180,7 @@ public actor ThumbnailFeedCore {
             diskPresence.set(uid, present: true)
             PhotoDiagnostics.shared.increment("thumb.diskCacheHit")
             guard let image = decode(data, for: uid) else { return nil }
-            storeDecoded(image, for: uid)
+            storeDecoded(image, for: uid, decodePixelCap: Int(configuration.targetPixels))
             return image
         }
         diskPresence.set(uid, present: false)
@@ -190,6 +190,20 @@ public actor ThumbnailFeedCore {
 
     public nonisolated func memoryDecoded(for uid: PhotoUID) -> DecodedThumbnail? {
         decoded.image(for: uid)
+    }
+
+    /// True when the RAM tier holds this UID but at a decode cap materially below `pixels` — i.e. a warm
+    /// at `pixels` would actually produce a sharper image. False when the entry is absent (that is the
+    /// ordinary missing-tile path) or already adequate, so a settled render loop that keys retry work on
+    /// this can never spin on a source-limited image.
+    public nonisolated func decodedNeedsSharperSource(_ uid: PhotoUID, forPixels pixels: Int) -> Bool {
+        decoded.needsSharperDecode(for: uid, requestedPixels: pixels)
+    }
+
+    /// The pixel cap a warm request actually decodes at: the feed's configured target is the floor (the
+    /// crawl/viewer baseline), a positive request can only raise it. `0` = "no size opinion".
+    private func effectiveDecodePixels(for request: ThumbnailRequest) -> CGFloat {
+        request.pixelSize > 0 ? max(CGFloat(request.pixelSize), configuration.targetPixels) : configuration.targetPixels
     }
 
     public nonisolated func isKnownUnfetchable(_ uid: PhotoUID) -> Bool {
@@ -266,29 +280,34 @@ public actor ThumbnailFeedCore {
         var queuedNetwork = 0
         var missing = 0
         let mainThreadDecodeCount = 0
-        var needDecode: [PhotoUID] = []
+        var needDecode: [(uid: PhotoUID, pixels: CGFloat, isUpgrade: Bool)] = []
         needDecode.reserveCapacity(targets.count)
         for request in targets {
-            if decoded.contains(request.uid) {
+            // Size-aware skip: "already decoded" only counts when the cached entry's decode cap is adequate
+            // for THIS request (shared `ThumbnailDecodeUpgradePolicy` hysteresis). A materially larger ask
+            // re-decodes the same UID sharper, in place — this is what lets a zoomed-in grid level sharpen
+            // tiles that were first decoded for a denser level.
+            let pixels = effectiveDecodePixels(for: request)
+            if decoded.hasAdequateEntry(for: request.uid, requestedPixels: Int(pixels)) {
                 PhotoDiagnostics.shared.increment("thumb.ramDecodedHit")
                 alreadyDecoded += 1
             } else {
-                needDecode.append(request.uid)
+                needDecode.append((request.uid, pixels, decoded.contains(request.uid)))
             }
         }
         if !needDecode.isEmpty {
             let cache = self.cache
-            let maxPixels = configuration.targetPixels
             let lanes = max(1, min(needDecode.count, configuration.maxConcurrentDecodes))
             let outcomes = await withTaskGroup(of: DecodedTile.self) { group -> [DecodedTile] in
                 var iterator = needDecode.makeIterator()
                 func addNext() {
-                    guard let uid = iterator.next() else { return }
+                    guard let (uid, maxPixels, isUpgrade) = iterator.next() else { return }
                     group.addTask {
                         guard let data = PhotoPerformanceSignposts.mediaFeed.interval("feed.decrypt", {
                             cache.diskData(for: uid)
                         }) else {
-                            return DecodedTile(uid: uid, decoded: nil, diskHadData: false, durationMs: 0)
+                            return DecodedTile(uid: uid, decoded: nil, diskHadData: false, durationMs: 0,
+                                               decodePixelCap: Int(maxPixels), isUpgrade: isUpgrade)
                         }
                         let start = Date()
                         let decoded = PhotoPerformanceSignposts.mediaFeed.interval("feed.decode") {
@@ -298,7 +317,9 @@ public actor ThumbnailFeedCore {
                             uid: uid,
                             decoded: decoded,
                             diskHadData: true,
-                            durationMs: Date().timeIntervalSince(start) * 1000
+                            durationMs: Date().timeIntervalSince(start) * 1000,
+                            decodePixelCap: Int(maxPixels),
+                            isUpgrade: isUpgrade
                         )
                     }
                 }
@@ -319,7 +340,8 @@ public actor ThumbnailFeedCore {
                     prefetchDecodeStarted += 1
                     PhotoDiagnostics.shared.recordDecodeStarted(queueDepth: 0)
                     if let image = tile.decoded {
-                        storeDecoded(image, for: tile.uid)
+                        storeDecoded(image, for: tile.uid, decodePixelCap: tile.decodePixelCap)
+                        if tile.isUpgrade { PhotoDiagnostics.shared.increment("thumb.decodedUpgrade") }
                         prefetchDecodeCompleted += 1
                         PhotoDiagnostics.shared.recordDecodeCompleted(durationMs: tile.durationMs, queueDepth: 0)
                         decodedFromDisk += 1
@@ -386,7 +408,7 @@ public actor ThumbnailFeedCore {
         cache.storeToDisk(data, for: uid)
         diskPresence.set(uid, present: true)
         guard let image = decode(data, for: uid) else { return nil }
-        storeDecoded(image, for: uid)
+        storeDecoded(image, for: uid, decodePixelCap: Int(configuration.targetPixels))
         return image
     }
 
@@ -843,8 +865,8 @@ public actor ThumbnailFeedCore {
         return nil
     }
 
-    private func storeDecoded(_ image: DecodedThumbnail, for uid: PhotoUID) {
-        decoded.set(image, for: uid)
+    private func storeDecoded(_ image: DecodedThumbnail, for uid: PhotoUID, decodePixelCap: Int) {
+        decoded.set(image, for: uid, decodePixelCap: decodePixelCap)
         onDecoded(uid, image)
     }
 
@@ -936,10 +958,13 @@ final class DecodedThumbnailCache: @unchecked Sendable {
         let uid: PhotoUID
         var image: DecodedThumbnail
         var cost: Int
+        /// The pixel cap this entry was decoded under (NOT the achieved image size — a source-limited
+        /// image records the cap it was given, so repeating the same ask never re-decodes).
+        var decodePixelCap: Int
         var prev: Node?
         var next: Node?
-        init(uid: PhotoUID, image: DecodedThumbnail, cost: Int) {
-            self.uid = uid; self.image = image; self.cost = cost
+        init(uid: PhotoUID, image: DecodedThumbnail, cost: Int, decodePixelCap: Int) {
+            self.uid = uid; self.image = image; self.cost = cost; self.decodePixelCap = decodePixelCap
         }
     }
 
@@ -968,19 +993,45 @@ final class DecodedThumbnailCache: @unchecked Sendable {
         return map[uid] != nil
     }
 
+    /// True when an entry exists AND its decode cap is adequate for `requestedPixels` (shared
+    /// `ThumbnailDecodeUpgradePolicy` hysteresis) — the size-aware "already decoded" test.
+    func hasAdequateEntry(for uid: PhotoUID, requestedPixels: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let node = map[uid] else { return false }
+        return !ThumbnailDecodeUpgradePolicy.needsSharperDecode(
+            cachedDecodePixels: node.decodePixelCap, requestedPixels: requestedPixels)
+    }
+
+    /// True ONLY when an entry exists but was decoded under a materially smaller cap than
+    /// `requestedPixels`. Absent entries return false (they are the ordinary missing-tile path).
+    func needsSharperDecode(for uid: PhotoUID, requestedPixels: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let node = map[uid] else { return false }
+        return ThumbnailDecodeUpgradePolicy.needsSharperDecode(
+            cachedDecodePixels: node.decodePixelCap, requestedPixels: requestedPixels)
+    }
+
     /// Insert or replace, adjusting the running cost, then evict LRU entries until within budget. The
     /// just-set entry is never evicted here unless it ALONE exceeds the budget (then it is kept and the
     /// cache stays transiently over budget until a later set/limit-change reclaims it).
-    func set(_ image: DecodedThumbnail, for uid: PhotoUID) {
+    /// Replacement keeps the LARGER decode: concurrent warms from two grids at different levels can race
+    /// the same UID, and the small decode landing last must not undo the sharp one already paid for.
+    func set(_ image: DecodedThumbnail, for uid: PhotoUID, decodePixelCap: Int) {
+        let cap = max(1, decodePixelCap)
         let cost = max(0, image.decodedCostBytes)
         lock.lock(); defer { lock.unlock() }
         if let node = map[uid] {
+            guard cap >= node.decodePixelCap else {
+                moveToFront(node)
+                return
+            }
             totalCost += cost - node.cost
             node.image = image
             node.cost = cost
+            node.decodePixelCap = cap
             moveToFront(node)
         } else {
-            let node = Node(uid: uid, image: image, cost: cost)
+            let node = Node(uid: uid, image: image, cost: cost, decodePixelCap: cap)
             map[uid] = node
             insertAtFront(node)
             totalCost += cost
@@ -1074,6 +1125,8 @@ private struct DecodedTile: @unchecked Sendable {
     let decoded: DecodedThumbnail?
     let diskHadData: Bool
     let durationMs: Double
+    let decodePixelCap: Int
+    let isUpgrade: Bool
 }
 
 private final class ByteBox: @unchecked Sendable {

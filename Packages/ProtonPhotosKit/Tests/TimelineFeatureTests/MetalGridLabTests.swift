@@ -137,7 +137,12 @@ private func uid(_ s: String) -> PhotoUID { PhotoUID(volumeID: "v", nodeID: s) }
             #expect(policy.budget.maxUploadBytesPerFrame < macBudget.maxUploadBytesPerFrame)
             #expect(policy.budget.maxUploadsPerFrame < macBudget.maxUploadsPerFrame)
             #expect(policy.budget.maxCachedTextures < macBudget.maxCachedTextures)
-            #expect(policy.maxTexturePixels < 320)
+            // Conservatism lives in the BYTE budgets above; the pixel ceiling serves the largest (sparsest)
+            // tiles, which iPhone 3× displays need MORE pixels for than a macOS point-scale grid. Bound it
+            // so at least 16 worst-case textures always fit the resident budget — never a jetsam-risk single
+            // allocation — instead of pinning it below the macOS cap.
+            #expect(policy.maxTexturePixels <= 512)
+            #expect(policy.maxTexturePixels * policy.maxTexturePixels * 4 * 16 <= policy.budget.maxResidentBytes)
         }
     }
 

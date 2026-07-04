@@ -67,6 +67,9 @@ package enum MetalGridFrameComposer {
     /// pin more cheap textures), and the upgrade runs AFTER fresh uploads spend their budget share (new
     /// placeholders always win). `signposts` lets the host wrap the upload/upgrade work in its own Instruments
     /// intervals without this module importing the host's diagnostics.
+    /// `needsSharperSource` reports a RAM image that EXISTS but was decoded materially below the current
+    /// effective pixels, so the warm pass can re-decode it sharper for the in-place texture upgrade. The
+    /// default (never) matches a feed whose decodes always land at the platform cap — macOS today.
     @MainActor
     package static func stream<ID: Hashable & Sendable>(
         cache: MetalGridTextureCache<ID>,
@@ -77,6 +80,7 @@ package enum MetalGridFrameComposer {
         allowUpgrade: Bool,
         hasImage: (ID) -> Bool,
         canRetry: (ID) -> Bool,
+        needsSharperSource: (ID) -> Bool = { _ in false },
         provideImage: (ID) -> CGImage?,
         signposts: MetalGridComposeSignposts = MetalGridComposeSignposts()
     ) -> StreamResult<ID> {
@@ -116,10 +120,11 @@ package enum MetalGridFrameComposer {
         var pendingVisibleQualityUpgrade = cache.pendingUpgradesThisFrame
         if allowUpgrade {
             for uid in upgradeCandidates where cache.residentTextureNeedsMeaningfulUpgrade(uid) {
-                // A low-res resident keeps drawing while its RAM decode is missing; request the source image so a
-                // settled sparse frame can replace it with a sharp texture. If the source is present but
-                // source-limited, or the pinned floor cannot fit the replacement, there is no retryable work.
-                guard !hasImage(uid), canRetry(uid) else { continue }
+                // A low-res resident keeps drawing while its RAM decode is missing OR materially below the
+                // effective cap; request the source so a settled sparse frame can replace it with a sharp
+                // texture. If the source is present at its adequate cap (source-limited included), or the
+                // pinned floor cannot fit the replacement, there is no retryable work.
+                guard !hasImage(uid) || needsSharperSource(uid), canRetry(uid) else { continue }
                 appendWarm(uid)
                 pendingVisibleQualityUpgrade = true
             }

@@ -365,7 +365,7 @@ struct ThumbnailFeedCoreTests {
     @Test func decodedCacheHitAndMissKeyedByPhotoUID() {
         let cache = DecodedThumbnailCache(costLimit: 1_000_000)
         let a = Self.uid("dc-a"); let b = Self.uid("dc-b")
-        cache.set(Self.decodedThumb(10, 10), for: a)   // keyed directly by PhotoUID, no NSString built
+        cache.set(Self.decodedThumb(10, 10), for: a, decodePixelCap: 320)   // keyed directly by PhotoUID, no NSString built
         #expect(cache.image(for: a) != nil)
         #expect(cache.image(for: b) == nil)
         #expect(cache.contains(a))
@@ -376,10 +376,10 @@ struct ThumbnailFeedCoreTests {
         // Budget holds exactly two 10×10×4=400-byte entries; the third eviction targets the LRU.
         let cache = DecodedThumbnailCache(costLimit: 800)
         let ids = (0 ..< 3).map { Self.uid("dc-lru-\($0)") }
-        cache.set(Self.decodedThumb(10, 10), for: ids[0])
-        cache.set(Self.decodedThumb(10, 10), for: ids[1])
+        cache.set(Self.decodedThumb(10, 10), for: ids[0], decodePixelCap: 320)
+        cache.set(Self.decodedThumb(10, 10), for: ids[1], decodePixelCap: 320)
         _ = cache.image(for: ids[0])                    // touch ids[0] → MRU, so ids[1] becomes the LRU
-        cache.set(Self.decodedThumb(10, 10), for: ids[2])   // over budget → evict LRU (ids[1])
+        cache.set(Self.decodedThumb(10, 10), for: ids[2], decodePixelCap: 320)   // over budget → evict LRU (ids[1])
 
         #expect(cache.image(for: ids[0]) != nil)        // recently used survives
         #expect(cache.image(for: ids[1]) == nil)        // least-recently used evicted
@@ -390,9 +390,9 @@ struct ThumbnailFeedCoreTests {
     @Test func decodedCacheReplaceUpdatesRunningCost() {
         let cache = DecodedThumbnailCache(costLimit: 10_000_000)
         let a = Self.uid("dc-rep")
-        cache.set(Self.decodedThumb(10, 10), for: a)    // 400
+        cache.set(Self.decodedThumb(10, 10), for: a, decodePixelCap: 320)    // 400
         #expect(cache.snapshotForTesting().cost == 400)
-        cache.set(Self.decodedThumb(20, 20), for: a)    // 1600, same UID → replace, not add
+        cache.set(Self.decodedThumb(20, 20), for: a, decodePixelCap: 320)    // 1600, same UID → replace, not add
         #expect(cache.snapshotForTesting().count == 1)
         #expect(cache.snapshotForTesting().cost == 1600)
     }
@@ -402,11 +402,11 @@ struct ThumbnailFeedCoreTests {
         // when a newer item arrives.
         let cache = DecodedThumbnailCache(costLimit: 100)
         let a = Self.uid("dc-big-a")
-        cache.set(Self.decodedThumb(10, 10), for: a)    // 400 > 100 → kept
+        cache.set(Self.decodedThumb(10, 10), for: a, decodePixelCap: 320)    // 400 > 100 → kept
         #expect(cache.image(for: a) != nil)
         #expect(cache.snapshotForTesting().count == 1)
         let b = Self.uid("dc-big-b")
-        cache.set(Self.decodedThumb(10, 10), for: b)    // keeping=b → evict LRU (a)
+        cache.set(Self.decodedThumb(10, 10), for: b, decodePixelCap: 320)    // keeping=b → evict LRU (a)
         #expect(cache.image(for: b) != nil)
         #expect(cache.image(for: a) == nil)
     }
@@ -414,7 +414,7 @@ struct ThumbnailFeedCoreTests {
     @Test func decodedCacheSetCostLimitEvictsDownToBudget() {
         let cache = DecodedThumbnailCache(costLimit: 10_000_000)
         let ids = (0 ..< 3).map { Self.uid("dc-shrink-\($0)") }
-        for id in ids { cache.set(Self.decodedThumb(10, 10), for: id) }   // 3×400 = 1200
+        for id in ids { cache.set(Self.decodedThumb(10, 10), for: id, decodePixelCap: 320) }   // 3×400 = 1200
         cache.setCostLimit(800)                          // shrink → evict oldest down to ≤800
         #expect(cache.snapshotForTesting().count == 2)
         #expect(cache.snapshotForTesting().cost <= 800)
@@ -424,11 +424,94 @@ struct ThumbnailFeedCoreTests {
 
     @Test func decodedCacheRemoveAllClears() {
         let cache = DecodedThumbnailCache(costLimit: 10_000_000)
-        cache.set(Self.decodedThumb(10, 10), for: Self.uid("dc-x"))
+        cache.set(Self.decodedThumb(10, 10), for: Self.uid("dc-x"), decodePixelCap: 320)
         cache.removeAll()
         #expect(cache.snapshotForTesting().count == 0)
         #expect(cache.snapshotForTesting().cost == 0)
         #expect(cache.image(for: Self.uid("dc-x")) == nil)
+    }
+
+    // MARK: - Size-aware decoded tier (soft→sharp upgrades)
+
+    @Test func warmReDecodesSharperWhenALargerPixelSizeIsRequested() async throws {
+        // Decoded once small for a dense level, the same UID must re-decode sharper for a larger level —
+        // "already decoded" is size-aware, keyed on the shared 1.25× upgrade hysteresis.
+        let uid = Self.uid("upgrade")
+        let cache = Self.cache("upgrade")
+        cache.storeToDisk(Self.pngData(width: 64, height: 64), for: uid)
+        let feed = ThumbnailFeedCore(cache: cache, loader: RecordingLoader(), configuration: Self.configuration())
+
+        let small = await feed.warmDecoded([ThumbnailRequest(uid: uid)], priority: .visibleNow, limit: 1)
+        #expect(small.decodedFromDisk == 1)
+        #expect(feed.memoryDecoded(for: uid)?.pixelWidth == 16)   // configuration targetPixels = 16
+
+        let sharpened = await feed.warmDecoded([ThumbnailRequest(uid: uid, pixelSize: 64)], priority: .visibleNow, limit: 1)
+        #expect(sharpened.alreadyDecoded == 0)
+        #expect(sharpened.decodedFromDisk == 1)                   // re-decoded, not skipped
+        #expect(feed.memoryDecoded(for: uid)?.pixelWidth == 64)   // cached image actually got sharper
+    }
+
+    @Test func warmSkipsSlightlyLargerAsksWithoutChurn() async throws {
+        // An ask below the 1.25× hysteresis (18 vs cap 16) must not re-decode — repeated settled frames at
+        // a marginally different effective size stay free.
+        let uid = Self.uid("no-churn")
+        let cache = Self.cache("no-churn")
+        cache.storeToDisk(Self.pngData(width: 64, height: 64), for: uid)
+        let feed = ThumbnailFeedCore(cache: cache, loader: RecordingLoader(), configuration: Self.configuration())
+
+        _ = await feed.warmDecoded([ThumbnailRequest(uid: uid)], priority: .visibleNow, limit: 1)
+        for _ in 0 ..< 3 {
+            let again = await feed.warmDecoded([ThumbnailRequest(uid: uid, pixelSize: 18)], priority: .visibleNow, limit: 1)
+            #expect(again.alreadyDecoded == 1)
+            #expect(again.decodedFromDisk == 0)
+        }
+        #expect(feed.memoryDecoded(for: uid)?.pixelWidth == 16)
+    }
+
+    @Test func sourceLimitedImageNeverReDecodesInALoop() async throws {
+        // The recorded decode CAP (not the achieved size) gates adequacy: a 64 px source asked for at 320
+        // yields a 64 px image, and repeating the 320 ask must be a no-op, not a per-frame re-decode.
+        let uid = Self.uid("src-limited")
+        let cache = Self.cache("src-limited")
+        cache.storeToDisk(Self.pngData(width: 64, height: 64), for: uid)
+        let feed = ThumbnailFeedCore(cache: cache, loader: RecordingLoader(), configuration: Self.configuration())
+
+        let first = await feed.warmDecoded([ThumbnailRequest(uid: uid, pixelSize: 320)], priority: .visibleNow, limit: 1)
+        #expect(first.decodedFromDisk == 1)
+        #expect(feed.memoryDecoded(for: uid)?.pixelWidth == 64)   // source-limited below the 320 ask
+
+        for _ in 0 ..< 3 {
+            let again = await feed.warmDecoded([ThumbnailRequest(uid: uid, pixelSize: 320)], priority: .visibleNow, limit: 1)
+            #expect(again.alreadyDecoded == 1)
+            #expect(again.decodedFromDisk == 0)
+        }
+        // And the render loop's retry signal agrees: nothing sharper is available for this ask.
+        #expect(!feed.decodedNeedsSharperSource(uid, forPixels: 320))
+    }
+
+    @Test func decodedNeedsSharperSourceReportsOnlyPresentUndersizedEntries() async throws {
+        let uid = Self.uid("sharper-signal")
+        let cache = Self.cache("sharper-signal")
+        cache.storeToDisk(Self.pngData(width: 64, height: 64), for: uid)
+        let feed = ThumbnailFeedCore(cache: cache, loader: RecordingLoader(), configuration: Self.configuration())
+
+        #expect(!feed.decodedNeedsSharperSource(uid, forPixels: 64))   // absent → false (missing-tile path)
+        _ = await feed.warmDecoded([ThumbnailRequest(uid: uid)], priority: .visibleNow, limit: 1)   // cap 16
+        #expect(feed.decodedNeedsSharperSource(uid, forPixels: 64))    // present but materially undersized
+        #expect(!feed.decodedNeedsSharperSource(uid, forPixels: 18))   // within hysteresis → adequate
+    }
+
+    @Test func decodedCacheUpgradeReplacesCostAndKeepsLargerOnRace() {
+        let cache = DecodedThumbnailCache(costLimit: 10_000_000)
+        let a = Self.uid("dc-upgrade")
+        cache.set(Self.decodedThumb(10, 10), for: a, decodePixelCap: 16)    // 400 bytes
+        cache.set(Self.decodedThumb(20, 20), for: a, decodePixelCap: 320)   // upgrade replaces cost in place
+        #expect(cache.snapshotForTesting().count == 1)
+        #expect(cache.snapshotForTesting().cost == 1600)
+        // A smaller concurrent decode landing last must not undo the sharp entry (cross-grid warm race).
+        cache.set(Self.decodedThumb(10, 10), for: a, decodePixelCap: 16)
+        #expect(cache.snapshotForTesting().cost == 1600)
+        #expect(cache.image(for: a)?.pixelWidth == 20)
     }
 
     @Test func decodedRamTierRespondsToMemoryPressureThroughFeed() async throws {

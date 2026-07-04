@@ -61,10 +61,6 @@ extension UIKitTimelineGridHostView {
         let key = "\(range.lowerBound)-\(range.upperBound)-\(down)-\(plan.levelID)"
         guard key != lastAheadKey else { return }
         lastAheadKey = key
-        let missing = range
-            .map { itemUIDs[$0] }
-            .filter { thumbnailFeed.memoryCGImage(for: $0) == nil && !thumbnailFeed.isKnownUnfetchable($0) }
-        guard !missing.isEmpty else { return }
         let pixelSize = GridTextureUploadSizing.uploadPixels(
             slotSidePoints: plan.slotSide,
             backingScale: metalView.metalLayer.contentsScale,
@@ -72,6 +68,16 @@ extension UIKitTimelineGridHostView {
             floor: 64,
             cap: textureCache?.maxTexturePixels ?? 320
         )
+        // Ahead tiles count as needing work when absent OR decoded materially below this level's pixels,
+        // so scrolling after a zoom-in lands on rows that are already re-decoded sharp, not just present.
+        let missing = range
+            .map { itemUIDs[$0] }
+            .filter { uid in
+                (thumbnailFeed.memoryCGImage(for: uid) == nil
+                    || thumbnailFeed.decodedNeedsSharperSource(uid, forPixels: pixelSize))
+                    && !thumbnailFeed.isKnownUnfetchable(uid)
+            }
+        guard !missing.isEmpty else { return }
         let requests = missing.map { ThumbnailRequest(uid: $0, pixelSize: pixelSize, cropMode: displayMode.rawValue) }
         aheadWarmInFlight = true
         aheadWarmTask = Task { [weak self, thumbnailFeed] in
