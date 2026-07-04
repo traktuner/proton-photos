@@ -8,7 +8,7 @@ DerivedData/
 # Generated Xcode project (regenerated from project.yml via xcodegen)
 ProtonPhotos.xcodeproj/
 
-# Vendored SDK clone (re-clone via: git clone --branch 0.17.1 https://github.com/ProtonDriveApps/sdk-swift Vendor/sdk-swift)
+# Vendored SDK clone (re-clone via: git clone --branch 0.19.0 https://github.com/ProtonDriveApps/sdk-swift Vendor/sdk-swift)
 Vendor/
 
 # macOS

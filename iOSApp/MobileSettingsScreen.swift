@@ -66,7 +66,7 @@ struct MobileSettingsScreen: View {
                 if let used = account.usedSpaceBytes, let max = account.maxSpaceBytes, max > 0 {
                     VStack(alignment: .leading, spacing: 6) {
                         LabeledContent(String(localized: "settings.storage")) {
-                            Text("\(byteString(used)) / \(byteString(max))")
+                            Text(String(localized: "settings.storage_usage \(byteString(used)) \(byteString(max))"))
                                 .monospacedDigit()
                                 .foregroundStyle(ProtonColor.textWeak)
                         }

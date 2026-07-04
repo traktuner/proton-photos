@@ -1,6 +1,6 @@
 # SDK capability matrix
 
-What the Proton Drive Swift SDK (`Vendor/sdk-swift`, 0.17.1) exposes, what the app actually uses, and
+What the Proton Drive Swift SDK (`Vendor/sdk-swift`, 0.19.0) exposes, what the app actually uses, and
 where each capability is wrapped. The runtime equivalent is logged once at sign-in as the
 `[SDKCapabilities]` block (see `App/Drive/SDK/SDKCapabilities.swift`).
 
@@ -14,13 +14,21 @@ direct-HTTP layer behind a clean feature interface; where neither can do it, sur
 |---|---|---|---|---|
 | `enumerateTimeline` | yes | `DriveSDKBridge.loadTimeline()` | implemented | SQLite-cached; unchanged by this pass |
 | `downloadThumbnails` | yes | `DriveSDKBridge.loadThumbnails/singleThumbnail` | implemented | grid + viewer thumbnails |
-| `download` | yes | `DriveSDKBridge.downloadOriginal` | implemented | full-res export |
+| `download` | available | - | not used for viewer originals | public API writes decrypted bytes to a destination file; the viewer keeps original image loads RAM-only |
 | `downloadOperation` | indirect | (via `download`) | available | not separately surfaced; `download` covers current needs |
 | `cancelPhotoDownload` | no | - | available | not wired (downloads are short-lived) |
 | `uploadPhoto` | **yes (new)** | `DriveSDKBridge: PhotoUploading.upload` | implemented | library upload; convenience path (operation + start) |
 | `startUpload` | indirect | (inside `uploadPhoto`) | implemented | called by the convenience `uploadPhoto` |
 | `uploadOperation` | indirect | (inside `uploadPhoto`) | available | not held separately, so no in-flight byte-pause (see below) |
 | `cancelUpload` | **yes (new)** | `DriveSDKBridge: PhotoUploading.cancel` | implemented | token-based cancel of an in-flight upload |
+
+## `ProtonDriveClient`
+
+| Method | Used by app | Wrapper location | Status | Notes |
+|---|---|---|---|---|
+| `trash(nodes:)` | **yes** | `DriveSDKBridge.trash` | implemented | replaces the direct `trash_multiple` HTTP write path |
+| `downloadFile` / `downloadToStreamOperation` | no | - | available | generic Drive revision download; useful for future file/export surfaces, not AVFoundation byte-range video playback |
+| Device APIs | no | - | available | not part of the Photos MVP |
 
 The upload storage stream (`HttpClientProtocol.requestUploadToStorage`) was previously a stub returning
 "not implemented". It is now implemented in `App/Drive/SDKHttpClient.swift` (bound input/output stream
@@ -44,7 +52,7 @@ To get true in-flight pause/byte-resume later, switch `DriveSDKBridge.upload` to
 
 ## Albums
 
-The Swift SDK exposes **no** album API (confirmed: `grep -ri album Vendor/sdk-swift/Sources` → nothing).
+The Swift SDK exposes **no public album API** (confirmed against `ProtonPhotosClient` and `ProtonDriveClient` in 0.19.0).
 
 | Operation | Path | Status | Notes |
 |---|---|---|---|
@@ -52,12 +60,12 @@ The Swift SDK exposes **no** album API (confirmed: `grep -ri album Vendor/sdk-sw
 | List album photos | direct HTTP | implemented | `DriveSession.fetchAlbumPhotos` |
 | Create album | - | **unsupported** | needs album-node encryption (node key + encrypted name + hash key) - not implemented |
 | Add photo to album | - | **unsupported** | needs re-encrypting the photo's content key to the album key - not implemented |
-| Set album cover | - | **unsupported** | no SDK API and no encrypted-write HTTP path |
+| Set album cover | direct HTTP | implemented | cleartext cover LinkID write; no album key material needed |
 
 `DriveCrypto` is **decrypt-only** today (address→share→node→content-key→block decryption), so the
-encryption primitives album writes require don't exist yet. Album writes therefore return
+encryption primitives create/add album writes require don't exist yet. Those writes therefore return
 `AlbumError.unsupported(operation:gap:)` with the exact missing capability, and the upload destination
-sheet disables those options with the same explanation. Listing/selection works.
+sheet disables those options with the same explanation. Listing/selection and set-cover work.
 
 ### Exact gap to enable album upload end-to-end
 

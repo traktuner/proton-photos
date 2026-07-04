@@ -5,13 +5,14 @@ import ProtonAuth
 import ProtonDriveSDK
 import UploadCore
 
-/// Bridges the feature modules to the Proton Drive SDK. Owns the `ProtonPhotosClient`, wires in
+/// Bridges the feature modules to the Proton Drive SDK. Owns the SDK clients, wires in
 /// our HTTP + account clients, resolves the photos root, and adapts SDK types to `PhotosCore`.
 ///
 /// Everything SDK-specific is isolated here so feature modules stay SDK-agnostic and new SDK
 /// capabilities (albums, sharing, upload) can be added without touching the UI layer.
 actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader, FullMediaProvider, VideoStreamProvider, PhotoMetadataProvider, BurstGroupProvider, PhotoLibraryProvider, FavoritesProvider, TrashProvider, LibraryStatsProvider {
     private let photosClient: ProtonPhotosClient
+    private let driveClient: ProtonDriveClient
     private let driveSession: DriveSession
     private let rateLimit = RateLimitGate()
     private var photosRoot: SDKNodeUid?
@@ -97,15 +98,25 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             entityCachePath: caches.appendingPathComponent("entities.sqlite").path
         )
 
+        let httpClient = SDKHttpClient(driveSession: driveSession, rateLimit: rateLimit)
         self.photosClient = try await ProtonPhotosClient(
             configuration: config,
-            httpClient: SDKHttpClient(driveSession: driveSession, rateLimit: rateLimit),
+            httpClient: httpClient,
             accountClient: accountClient,
             logCallback: { _ in },
             featureFlagProviderCallback: { _, completion in completion(false) },
             recordMetricEventCallback: { _ in }
         )
         DebugLog.log("bridge: ProtonPhotosClient created ✓")
+        self.driveClient = try await ProtonDriveClient(
+            configuration: config,
+            httpClient: httpClient,
+            accountClient: accountClient,
+            logCallback: { _ in },
+            recordMetricEventCallback: { _ in },
+            featureFlagProviderCallback: { _, completion in completion(false) }
+        )
+        DebugLog.log("bridge: ProtonDriveClient created ✓")
     }
 
     // MARK: - PhotosRepository
@@ -362,8 +373,13 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     // MARK: - TrashProvider
 
     func trash(_ uids: [PhotoUID]) async throws {
-        let root = try await resolvePhotosRoot()
-        try await driveSession.trash(volumeID: root.volumeID, linkIDs: uids.map(\.nodeID))
+        guard !uids.isEmpty else { return }
+        let nodes = uids.map { SDKNodeUid(volumeID: $0.volumeID, nodeID: $0.nodeID) }
+        let results = try await driveClient.trash(nodes: nodes, cancellationToken: UUID())
+        if let failed = results.first(where: { $0.error != nil }), let error = failed.error {
+            throw error
+        }
+        guard results.count == uids.count else { throw DriveBridgeError.incompleteTrashResult }
     }
 
     func restore(_ uids: [PhotoUID]) async throws {
@@ -603,9 +619,11 @@ extension DriveSDKBridge: PhotoUploading {
 
 enum DriveBridgeError: LocalizedError {
     case noPhotosShare
+    case incompleteTrashResult
     var errorDescription: String? {
         switch self {
         case .noPhotosShare: String(localized: "error.no_photos_library")
+        case .incompleteTrashResult: "The SDK trash operation did not return a result for every item."
         }
     }
 }

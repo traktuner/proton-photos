@@ -114,7 +114,7 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
             }
             if http.statusCode == 429 { rateLimit.penalize(seconds: Self.retryAfter(http)) }
             return .success(HttpClientStream(
-                stream: downloadStreamCreator(bytes),
+                source: .stream(downloadStreamCreator(bytes)),
                 headers: Self.headerPairs(http),
                 statusCode: http.statusCode
             ))

@@ -18,7 +18,7 @@ The app is built around Proton Drive's end-to-end encrypted data model. Authenti
 - Metal-based timeline/grid rendering.
 - Swift Package Manager modules under `Packages/ProtonPhotosKit`.
 - Xcode project generation through `xcodegen` from `project.yml`.
-- Proton Drive SDK 0.17.1 vendored locally at `Vendor/sdk-swift`.
+- Proton Drive SDK 0.19.0 vendored locally at `Vendor/sdk-swift`.
 - ProtonCore pinned to 37.3.0 in `project.yml`; this must match the SDK requirement.
 
 ## Security Model
@@ -46,12 +46,12 @@ export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 
 ## Bootstrap
 
-Clone the repository, then clone the local SDK dependency:
+Clone the repository, then prepare the local SDK dependency:
 
 ```bash
 git clone <repo-url> proton-photos
 cd proton-photos
-git clone --branch 0.17.1 https://github.com/ProtonDriveApps/sdk-swift Vendor/sdk-swift
+./scripts/update-proton-sdk.sh 0.19.0
 ```
 
 Verify the SDK and ProtonCore pin:

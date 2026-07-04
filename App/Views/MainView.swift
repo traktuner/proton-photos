@@ -91,7 +91,7 @@ struct MainView: View {
         self.uploadCoordinator = facade.uploadCoordinator
         // Learned thumbnail dimensions persist into the library metadata DB (photos.w/h) through the
         // backend bridge - batched by the coalescer, so decode callbacks never touch the DB directly.
-        let dimensions = (backend as? PhotoDimensionRecording).map { PhotoDimensionCoalescer(store: $0) }
+        let dimensions = PhotoDimensionCoalescer(store: backend)
         // Use the SHARED, account-configured cache (AppModel.prepareBackend calls
         // OfflineLibraryManager.shared.configure(session:) before this view is built) so the encrypted
         // disk cache uses the durable per-account session-derived key and survives relaunch. A fresh
