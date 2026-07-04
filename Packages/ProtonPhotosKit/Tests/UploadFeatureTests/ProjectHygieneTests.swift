@@ -199,6 +199,13 @@ final class ProjectHygieneTests: XCTestCase {
             mobileApp.contains(".tabViewStyle(.sidebarAdaptable)"),
             "iPadOS sidebar must not depend on TabView's adaptive promotion"
         )
+        XCTAssertFalse(
+            mobileApp.contains("Image(systemName: \"sidebar.left\")"),
+            """
+            iPad detail must not add a manual sidebar toggle on top of NavigationSplitView's built-in
+            control — that produced the duplicate landscape toggle. Rely on the single native control.
+            """
+        )
     }
 
     func testPlatformAppsUseSharedProtonDriveBackend() {

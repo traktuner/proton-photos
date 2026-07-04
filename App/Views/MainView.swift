@@ -1352,11 +1352,10 @@ struct MainView: View {
     /// `nonisolated` + the actor's `nonisolated diskData` ⇒ the AES-GCM decrypt happens off the main thread.
     nonisolated private static func fetchOriginal(item: PhotoItem, backend: any PhotosBackend, cache: ThumbnailCache,
                                                   onProgress: @escaping @Sendable (Double) -> Void) async throws -> Data {
-        if let cached = cache.diskData(for: item.uid) {
-            onProgress(1)
-            return cached
-        }
-        return try await backend.originalData(for: item.uid, onProgress: onProgress)
+        // Shared cache-first retrieval (one implementation across iOS + macOS). `.readOnly`: export reuses
+        // whatever the viewer cached and bumps LRU on a hit, but never itself grows the offline cache.
+        try await EncryptedOriginalProvider(media: backend, cache: cache, policy: .readOnly)
+            .originalData(for: item.uid, onProgress: onProgress)
     }
 
     private func chooseZipDestination(suggestedName: String? = nil) -> URL? {

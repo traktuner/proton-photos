@@ -83,6 +83,16 @@ final class MobileLibraryModel {
     /// app's only on-disk media cache (previews live in a RAM cache; video bytes are backend-managed).
     private var thumbnailCache: ThumbnailCache?
 
+    /// The encrypted on-disk ORIGINALS cache. Seeded when the fullscreen viewer decrypts an original, then
+    /// reused (cache-first, before the network) by later fullscreen opens and by share/export — giving iOS the
+    /// same E2EE-safe originals reuse macOS already has (`OfflineLibraryManager.originalsCache`). Plaintext
+    /// originals are NEVER written outside this AES-GCM store. Exposed so the share/export path can read it.
+    private(set) var originalsCache: ThumbnailCache?
+
+    /// LRU byte ceiling for `originalsCache`, enforced after each viewer store so a long session of large
+    /// HEIC/video originals can't grow the on-disk cache without bound.
+    let originalsCacheCapBytes: Int64 = 512 * 1024 * 1024
+
     private var configuredUID: String?
     private var store: SessionKeychainStore?
     private var session: ProtonSession?
@@ -236,6 +246,8 @@ final class MobileLibraryModel {
         snapshot = TimelineSnapshot()
         thumbnailFeed = nil
         thumbnailCache = nil
+        originalsCache?.clearAndForgetKey()   // sign-out purges decrypted-originals blobs + the account key
+        originalsCache = nil
         loadState = .initial
         locationCrawlStarted = false
         locationIndex.replaceAll([])
@@ -272,6 +284,19 @@ final class MobileLibraryModel {
             )
         )
         thumbnailCache = cache
+
+        // Parallel encrypted store for decrypted ORIGINALS (own namespace/derivative so it never collides
+        // with thumbnails/previews), keyed to the same account. Seeded by the viewer, reused by share/export.
+        let originals = ThumbnailCache(namespace: "mobile-originals", derivative: "original")
+        originals.configure(
+            accountUID: session.uid,
+            key: LocalCacheKeyDerivation.thumbnailPreviewCacheKey(
+                accountUID: session.uid,
+                keyPassword: session.keyPassword
+            )
+        )
+        originals.enforceByteCap(originalsCacheCapBytes)   // trim any prior-session overflow up front
+        originalsCache = originals
 
         // Drive the shared memory governor from UIKit pressure/thermal/lifecycle events and register the
         // session's cache owners (identity-keyed: a new session's cache/feed replaces the previous

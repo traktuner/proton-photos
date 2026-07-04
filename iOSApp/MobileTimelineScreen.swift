@@ -183,7 +183,9 @@ struct MobileTimelineScreen: View {
         guard !chosen.isEmpty else { return }
         isExporting = true
         Task {
-            let result = await MobileMediaExporter.exportOriginals(chosen, backend: backend)
+            let result = await MobileMediaExporter.exportOriginals(
+                chosen, backend: backend, cache: model.originalsCache, cacheCapBytes: model.originalsCacheCapBytes
+            )
             isExporting = false
             if result.urls.isEmpty {
                 // Nothing could be prepared — surface the failure, never a silent no-op.

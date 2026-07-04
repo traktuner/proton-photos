@@ -37,6 +37,12 @@ public final class UIKitViewerImageStore {
 
     private let thumbnailProvider: (PhotoUID) -> UIImage?
     private let media: (any FullMediaProvider)?
+    /// Optional cache-first + persisting override for the ORIGINAL-bytes fallback path. Injected by the host
+    /// app (which owns the encrypted originals cache) as a closure, so this adapter stays decoupled from the
+    /// cache layer (`MediaByteCache` deliberately sits outside this target — see `CoreArchitectureGateTests`).
+    /// When present, seeding/reuse of the E2EE originals cache happens inside the closure; when nil the store
+    /// falls back to `media.originalData` exactly as before.
+    private let originalDataOverride: (@Sendable (PhotoUID) async throws -> Data)?
     private let cache = WrapperImageCache<CachedDisplayImage>(countLimit: 8, costLimitBytes: 48 * 1024 * 1024)
     /// The page currently on screen — the one entry a `.minimal` purge keeps. `displayImage` is called for
     /// the CURRENT page only (`ViewerImageLoadPolicy` gates neighbours), so recording it here is exact.
@@ -44,10 +50,12 @@ public final class UIKitViewerImageStore {
 
     public init(
         thumbnailProvider: @escaping (PhotoUID) -> UIImage?,
-        media: (any FullMediaProvider)?
+        media: (any FullMediaProvider)?,
+        originalDataOverride: (@Sendable (PhotoUID) async throws -> Data)? = nil
     ) {
         self.thumbnailProvider = thumbnailProvider
         self.media = media
+        self.originalDataOverride = originalDataOverride
     }
 
     /// The instant grid thumbnail (already decoded in the feed's RAM tier), or nil.
@@ -112,7 +120,12 @@ public final class UIKitViewerImageStore {
                 Self.logger.notice("[ViewerPerf] original fallback fetch start uid=\(Self.short(uid), privacy: .public)")
             }
             do {
-                data = try await media.originalData(for: uid)
+                // Cache-first + persisting when the host injected an override; otherwise the plain provider.
+                if let originalDataOverride {
+                    data = try await originalDataOverride(uid)
+                } else {
+                    data = try await media.originalData(for: uid)
+                }
                 source = "originalFallback"
             } catch {
                 if Self.verbose {

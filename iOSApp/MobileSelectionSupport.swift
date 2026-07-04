@@ -1,7 +1,7 @@
+import MediaByteCache
 import PhotosCore
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
 
 /// Identifiable payload for the share sheet: the on-disk file URLs exported from the selection.
 struct MobileSharePayload: Identifiable {
@@ -29,11 +29,24 @@ enum MobileMediaExporter {
         let failed: Int
     }
 
-    static func exportOriginals(_ items: [PhotoItem], backend: any FullMediaProvider) async -> ExportResult {
+    static func exportOriginals(
+        _ items: [PhotoItem],
+        backend: any FullMediaProvider,
+        cache: ThumbnailCache?,
+        cacheCapBytes: Int64
+    ) async -> ExportResult {
         guard !items.isEmpty else { return ExportResult(urls: [], failed: 0) }
         let directory = exportDirectory
         try? FileManager.default.removeItem(at: directory)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        // Cache-first byte retrieval: a just-viewed / previously-shared original is reused from the encrypted
+        // originals cache instead of being re-downloaded. On a miss we SEED the cache (`.persisting`): the iOS
+        // viewer displays a bounded preview rather than the full original, so on iOS it is the share/export path
+        // that most often warms the originals cache — and every subsequent share/open then avoids the network.
+        // Bytes only ever live in the AES-GCM cache, never as app-owned plaintext.
+        let policy: OriginalsCachePolicy = cache != nil ? .persisting(capBytes: cacheCapBytes) : .readOnly
+        let provider = EncryptedOriginalProvider(media: backend, cache: cache, policy: policy)
 
         let maxConcurrent = 4
         var exported: [URL] = []
@@ -45,7 +58,7 @@ enum MobileMediaExporter {
                 guard index < items.count else { return }
                 let item = items[index]
                 index += 1
-                group.addTask { await export(item, backend: backend, into: directory) }
+                group.addTask { await export(item, provider: provider, into: directory) }
             }
             for _ in 0 ..< min(maxConcurrent, items.count) { addNext() }
             for await url in group {
@@ -56,10 +69,16 @@ enum MobileMediaExporter {
         return ExportResult(urls: exported, failed: failed)
     }
 
-    private static func export(_ item: PhotoItem, backend: any FullMediaProvider, into directory: URL) async -> URL? {
+    private static func export(_ item: PhotoItem, provider: EncryptedOriginalProvider, into directory: URL) async -> URL? {
         do {
-            let data = try await backend.originalData(for: item.uid)
-            let url = directory.appendingPathComponent(filename(for: item))
+            let data = try await provider.originalData(for: item.uid)
+            // Derive the extension from the ACTUAL bytes, not the timeline `mediaType` (which the SDK
+            // stamps as `image/jpeg` on every image — the reason a HEIC used to be saved as `.jpg`).
+            let ext = OriginalFileNaming.resolvedExtension(
+                filename: nil, mimeType: item.mediaType, header: data,
+                fallbackMediaType: item.mediaType, isVideo: item.isVideo
+            )
+            let url = directory.appendingPathComponent(filename(for: item, ext: ext))
             try data.write(to: url, options: .atomic)
             return url
         } catch {
@@ -67,10 +86,8 @@ enum MobileMediaExporter {
         }
     }
 
-    /// A recipient-friendly filename: the capture date plus the correct extension for the media type.
-    private static func filename(for item: PhotoItem) -> String {
-        let ext = UTType(mimeType: item.mediaType)?.preferredFilenameExtension
-            ?? (item.isVideo ? "mov" : "jpg")
+    /// A recipient-friendly filename: the capture date plus the resolved original extension.
+    private static func filename(for item: PhotoItem, ext: String) -> String {
         let stamp = Self.stampFormatter.string(from: item.captureTime)
         // Keep the node id suffix so two photos from the same second never collide on disk.
         let suffix = String(item.uid.nodeID.suffix(6))

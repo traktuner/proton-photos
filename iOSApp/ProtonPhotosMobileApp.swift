@@ -160,19 +160,10 @@ private struct MobilePadSidebarShell: View {
                 max: SidebarMetrics.maxWidth
             )
         } detail: {
+            // NavigationSplitView already renders the ONE native sidebar toggle in the detail's top bar; a
+            // second manual `sidebar.left` button here produced the duplicate toggle in landscape. Rely on the
+            // system control only (predictable, and it animates the column the standard way).
             MobileRouteScreen(tab: selection, isPhotosActive: selection == .photos)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
-                            }
-                        } label: {
-                            Image(systemName: "sidebar.left")
-                        }
-                        .accessibilityLabel("Show or Hide Sidebar")
-                    }
-                }
         }
         .tint(ProtonColor.primary)
         .onChange(of: selection) { _, tab in
