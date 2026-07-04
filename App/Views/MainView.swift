@@ -72,6 +72,10 @@ struct MainView: View {
     @State private var pendingTrashItems: [PhotoItem] = []
     @State private var closeViewerAfterTrash = false
     @State private var confirmTrash = false
+    /// Set when a trash/restore API call fails AFTER the optimistic grid removal - the items are
+    /// reloaded and the failure surfaced, never silently swallowed (the photo would look deleted while
+    /// the server still has it outside the trash).
+    @State private var trashActionFailureMessage: String?
     // Favorites (read from server so iOS favorites show up; toggle writes back).
     @State private var favorites: Set<PhotoUID> = []
     @State private var uploadRefreshTask: Task<Void, Never>?
@@ -230,6 +234,7 @@ struct MainView: View {
                 LibraryMapScreen(index: OfflineLibraryManager.shared.locationIndex,
                                  thumbnail: { feed.memoryImage(for: $0) },
                                  onSelectPhoto: { openPhotoByUID($0) })
+                    .overlay { mapEmptyStateOverlay }
                     .padding(.leading, leadingObstructionInset)
                     .animation(.easeInOut(duration: 0.3), value: leadingObstructionInset)
                     .ignoresSafeArea()
@@ -322,6 +327,14 @@ struct MainView: View {
             }
         } message: {
             Text("export.confirm_many_message \(pendingExportItems.count)")
+        }
+        .alert("alert.trash_action_failed_title", isPresented: Binding(
+            get: { trashActionFailureMessage != nil },
+            set: { if !$0 { trashActionFailureMessage = nil } }
+        )) {
+            Button("action.ok", role: .cancel) { trashActionFailureMessage = nil }
+        } message: {
+            Text(trashActionFailureMessage ?? "")
         }
     }
 
@@ -758,6 +771,42 @@ struct MainView: View {
         DebugLog.log(line)
     }
 
+    /// Honest Map empty state over the bare world map, mirroring the iOS states: "scanning" while the
+    /// GPS crawl runs, "no geotagged photos" only once it completed empty, a real-failure state when
+    /// every probe failed, and the generic hint before the crawl starts. Shares `PhotoLocationIndex`
+    /// scan progress with iOS - the states can't drift.
+    @ViewBuilder private var mapEmptyStateOverlay: some View {
+        let index = OfflineLibraryManager.shared.locationIndex
+        if index.coordinates.isEmpty {
+            switch index.scanProgress.phase {
+            case .scanning:
+                ContentUnavailableView {
+                    Label("map.scanning_title", systemImage: "location.magnifyingglass")
+                } description: {
+                    Text("map.scanning_message \(index.scanProgress.scanned) \(index.scanProgress.total)")
+                }
+            case .failed:
+                ContentUnavailableView {
+                    Label("map.scan_failed_title", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text("map.scan_failed_message")
+                }
+            case .completed:
+                ContentUnavailableView {
+                    Label("map.empty_title", systemImage: "mappin.slash")
+                } description: {
+                    Text("map.no_places_found_message")
+                }
+            case .idle:
+                ContentUnavailableView {
+                    Label("map.empty_title", systemImage: "mappin.slash")
+                } description: {
+                    Text("map.empty_message")
+                }
+            }
+        }
+    }
+
     // MARK: - Favorites / trash
 
     private func toggleFavorite(_ uid: PhotoUID) {
@@ -805,13 +854,32 @@ struct MainView: View {
         let uids = items.map(\.uid)
         timelineModel.remove(Set(uids))          // optimistic removal from the grid
         favorites.subtract(uids)
-        Task { try? await backend.trash(uids) }
+        Task {
+            do {
+                try await backend.trash(uids)
+            } catch {
+                // Honest failure: the server still has the photos outside the trash. Reload the current
+                // route so they reappear, and tell the user - a swallowed error here looks like a
+                // successful delete that never shows up in Recently Deleted.
+                DebugLog.log("trash: FAILED n=\(uids.count) - \(error)")
+                await timelineModel.retry()
+                trashActionFailureMessage = String(localized: "alert.trash_failed_message")
+            }
+        }
     }
 
     private func restorePhotos(_ items: [PhotoItem]) {
         let uids = items.map(\.uid)
         timelineModel.remove(Set(uids))          // optimistic removal from the trash view
-        Task { try? await backend.restore(uids) }
+        Task {
+            do {
+                try await backend.restore(uids)
+            } catch {
+                DebugLog.log("restore: FAILED n=\(uids.count) - \(error)")
+                await timelineModel.retry()
+                trashActionFailureMessage = String(localized: "alert.restore_failed_message")
+            }
+        }
     }
 
     private var selectedItems: [PhotoItem] { timelineModel.allItems.filter { selectedUIDs.contains($0.uid) } }
@@ -1321,12 +1389,13 @@ struct MainView: View {
     }
 
     nonisolated private static func defaultExtension(_ item: PhotoItem, metadata: PhotoMetadata?) -> String {
-        let mime = metadata?.mimeType ?? item.mediaType
-        if mime.contains("png") { return "png" }
-        if mime.contains("heic") || mime.contains("heif") { return "heic" }
-        if mime.contains("quicktime") { return "mov" }
-        if mime.hasPrefix("video/") { return "mp4" }
-        return "jpg"
+        // Shared resolver: real Proton filename → trustworthy MIME → timeline mediaType fallback.
+        // (No `header:` here — the suggested name is chosen before the download begins; macOS's
+        // primary name source remains `metadata.filename`, so this is behaviour-preserving.)
+        OriginalFileNaming.resolvedExtension(
+            filename: metadata?.filename, mimeType: metadata?.mimeType, header: nil,
+            fallbackMediaType: item.mediaType, isVideo: item.isVideo
+        )
     }
 
     nonisolated private static func uniqueName(_ name: String, used: inout Set<String>) -> String {

@@ -162,7 +162,11 @@ actor PhotoVideoStreamSource {
             filename = try? crypto.decryptName(name, parent: parentKey)
         }
         var xattr: ExtendedAttributes?
-        if let xa = link.xAttr, let data = try? crypto.decryptXAttr(xa, node: fileKey) {
+        // Link-level XAttr first, then the embedded active-revision XAttr - photos uploaded by Proton's
+        // clients frequently carry it only on the revision, and without this fallback the info panel and
+        // the Map GPS crawl saw `nil` (no dimensions, no Location) for those photos.
+        if let xa = link.xAttr ?? link.fileProperties?.activeRevision?.xAttr,
+           let data = try? crypto.decryptXAttr(xa, node: fileKey) {
             xattr = try? JSONDecoder().decode(ExtendedAttributes.self, from: data)
         }
         return (filename, link.mimeType, link.size, xattr)
@@ -254,7 +258,10 @@ struct LinkBody: Decodable {
         let activeRevision: ActiveRevision?
         struct ActiveRevision: Decodable {
             let id: String
-            enum CodingKeys: String, CodingKey { case id = "ID" }
+            /// The revision-level XAttr. For photos uploaded by Proton's own clients the XAttr often
+            /// lives ONLY here, not on the link (`prepareAnyFile` needed the same fallback for videos).
+            let xAttr: String?
+            enum CodingKeys: String, CodingKey { case id = "ID", xAttr = "XAttr" }
         }
         enum CodingKeys: String, CodingKey {
             case contentKeyPacket = "ContentKeyPacket", activeRevision = "ActiveRevision"

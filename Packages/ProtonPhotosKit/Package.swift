@@ -90,6 +90,11 @@ let package = Package(
             ],
             swiftSettings: sdkBackendSwiftSettings
         ),
+        .testTarget(
+            name: "ProtonDriveBackendTests",
+            dependencies: ["ProtonDriveBackend", "ProtonAuth", "PhotosCore"],
+            swiftSettings: sdkBackendSwiftSettings
+        ),
         .target(name: "MediaByteCache", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "MediaByteCacheTests", dependencies: ["MediaByteCache", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MediaDecodingCore", swiftSettings: disableDynamicActorIsolation),

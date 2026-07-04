@@ -162,7 +162,9 @@ final class OfflineLibraryManager {
         VideoByteRangeCache.shared.clearAll()
         locationStore.clear()
         locationIndex.replaceAll([])
+        locationIndex.updateScanProgress(PhotoLocationScanProgress())
         locationCrawlStarted = false
+        Task { await locationCrawl.cancel() }
         prepareMonitor?.cancel()
         cachePreparePercent = 0
         prepareActive = false
@@ -170,9 +172,9 @@ final class OfflineLibraryManager {
     }
 
     /// Kicks off the background GPS crawl that builds the Map view's location index - once per session.
-    /// Lower priority than the thumbnail crawl: a single throttled worker, resumable (only photos not yet
-    /// indexed are fetched), persisting the encrypted snapshot periodically. Safe to call repeatedly; only
-    /// the first non-empty call starts it.
+    /// Lower priority than VISIBLE thumbnail work: a single throttled worker, resumable (only photos not
+    /// yet indexed are fetched), persisting the encrypted snapshot periodically. Safe to call repeatedly;
+    /// only the first non-empty call starts it.
     func startLocationCrawl(items: [PhotoItem], metadata: any PhotoMetadataProvider) {
         guard !locationCrawlStarted, !items.isEmpty else { return }
         locationCrawlStarted = true
@@ -182,23 +184,21 @@ final class OfflineLibraryManager {
         let store = locationStore
         let feed = self.feed
         Task {
-            // Give the thumbnail crawl a head start, then crawl GPS only while the grid isn't actively
+            // Give the thumbnail crawl a head start, then crawl GPS whenever the grid isn't actively
             // demanding on-screen thumbnails - so the Map crawl shares the rate-limit budget as P2 and
             // never stalls scrolling (thumbnails are P1).
             try? await Task.sleep(for: .seconds(8))
             await locationCrawl.start(
                 uids: uids,
                 captureDates: dates,
-                location: { uid in
-                    guard let m = try? await metadata.metadata(for: uid), m.hasLocation,
-                          let lat = m.latitude, let lon = m.longitude else { return nil }
-                    return (lat, lon)
-                },
+                location: LocationCrawl.metadataProbe(metadata),
                 index: index,
                 store: store,
-                // P2: pause the GPS crawl entirely while the thumbnail crawl (P1) still has ANY work -
-                // visible OR background fill - so they never flood the backend together and stall thumbnails.
-                shouldYield: { await feed?.hasPendingThumbnailWork() ?? true }
+                // P2: back off while the grid has LIVE visible demand (scrolling / queued visible-priority
+                // thumbnails). Deliberately NOT `hasPendingThumbnailWork()` - that includes the whole-library
+                // sequential fill and parked the Map behind a 20k-thumbnail crawl for hours.
+                shouldYield: { await feed?.hasVisibleThumbnailPressure() ?? false },
+                log: { DebugLog.log($0) }
             )
         }
     }

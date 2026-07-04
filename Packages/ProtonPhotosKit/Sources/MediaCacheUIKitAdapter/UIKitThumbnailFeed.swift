@@ -123,6 +123,12 @@ public actor UIKitThumbnailFeed {
         await core.hasPendingThumbnailWork()
     }
 
+    /// Visible-only pressure (priority queue / live viewport demand) - excludes the whole-library
+    /// sequential fill. The Map's GPS crawl yields on this, never on full crawl completion.
+    public func hasVisibleThumbnailPressure() async -> Bool {
+        await core.hasVisibleThumbnailPressure()
+    }
+
     public func warmDecoded(
         _ requests: [ThumbnailRequest],
         priority requestedPriority: ThumbnailPriority,

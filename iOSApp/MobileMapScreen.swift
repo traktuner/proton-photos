@@ -19,10 +19,36 @@ struct MobileMapScreen: View {
 
             Group {
                 if model.locationIndex.coordinates.isEmpty {
-                    ContentUnavailableView {
-                        Label("map.empty_title", systemImage: "mappin.slash")
-                    } description: {
-                        Text("map.empty_message")
+                    // Honest empty states: "scanning" while the GPS crawl runs, "no geotagged photos"
+                    // only once it COMPLETED with zero finds, and a real-failure state when every probe
+                    // failed. Only `.idle` (crawl not started, e.g. library still loading) keeps the
+                    // generic message.
+                    switch model.locationIndex.scanProgress.phase {
+                    case .scanning:
+                        let progress = model.locationIndex.scanProgress
+                        ContentUnavailableView {
+                            Label("map.scanning_title", systemImage: "location.magnifyingglass")
+                        } description: {
+                            Text("map.scanning_message \(progress.scanned) \(progress.total)")
+                        }
+                    case .failed:
+                        ContentUnavailableView {
+                            Label("map.scan_failed_title", systemImage: "exclamationmark.triangle")
+                        } description: {
+                            Text("map.scan_failed_message")
+                        }
+                    case .completed:
+                        ContentUnavailableView {
+                            Label("map.empty_title", systemImage: "mappin.slash")
+                        } description: {
+                            Text("map.no_places_found_message")
+                        }
+                    case .idle:
+                        ContentUnavailableView {
+                            Label("map.empty_title", systemImage: "mappin.slash")
+                        } description: {
+                            Text("map.empty_message")
+                        }
                     }
                 } else {
                     MobileLibraryMap(

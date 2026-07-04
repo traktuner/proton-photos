@@ -268,6 +268,15 @@ public actor ThumbnailFeedCore {
         return !priority.isEmpty || sequentialIndex < sequential.count
     }
 
+    /// True only while the grid needs the backend RIGHT NOW: queued visible-priority work or a live
+    /// viewport demand. Unlike `hasPendingThumbnailWork()` this deliberately EXCLUDES the whole-library
+    /// sequential fill: lower-priority background work (the Map's GPS crawl) yields on THIS, so it backs
+    /// off while the user scrolls but is never parked until a 20k-photo thumbnail crawl finishes.
+    public func hasVisibleThumbnailPressure() -> Bool {
+        guard prefetchEnabled else { return false }
+        return !priority.isEmpty || hasRecentVisibleDemand()
+    }
+
     public func warmDecoded(
         _ requests: [ThumbnailRequest],
         priority requestedPriority: ThumbnailPriority,

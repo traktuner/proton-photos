@@ -169,6 +169,32 @@ struct ThumbnailFeedCoreTests {
         #expect(wakes.value() == 0)
     }
 
+    @Test func visiblePressureExcludesSequentialBacklogButTracksLiveDemand() async throws {
+        // The Map's GPS crawl yields on `hasVisibleThumbnailPressure`. A pending whole-library sequential
+        // fill must NOT count as pressure - keying the GPS crawl to `hasPendingThumbnailWork` parked it
+        // until every one of 20k+ thumbnails was cached (the "map empty until the crawl finished" bug).
+        let clock = MutableClock(Date(timeIntervalSince1970: 1_000))
+        let uids = (0 ..< 8).map { Self.uid("pressure-\($0)") }
+        let loader = RecordingLoader(delayMilliseconds: 250)
+        let feed = ThumbnailFeedCore(
+            cache: Self.cache("pressure"), loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 1),
+            clock: { clock.read() }
+        )
+
+        await feed.startPrefetch(uids)   // seeds the whole-library sequential backlog
+        #expect(await feed.hasPendingThumbnailWork(), "sequential backlog must count as pending work")
+        #expect(await feed.hasVisibleThumbnailPressure() == false,
+                "a background fill alone must NOT register as visible pressure")
+
+        feed.noteVisibleDemand()         // a live viewport appears
+        #expect(await feed.hasVisibleThumbnailPressure(), "live demand must register as visible pressure")
+
+        clock.advance(10)                // demand window (2 s) expires
+        #expect(await feed.hasVisibleThumbnailPressure() == false,
+                "expired demand must release the pressure so the GPS crawl resumes")
+    }
+
     @Test func corruptDiskBlobDoesNotStarveVisibleFetch() async throws {
         let cache = Self.cache("corrupt")
         let uid = Self.uid("corrupt")

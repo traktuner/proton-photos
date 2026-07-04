@@ -203,19 +203,19 @@ final class MobileLibraryModel {
         let crawl = locationCrawl
         let feed = thumbnailFeed
         Task {
-            // Give the thumbnail crawl a head start, then yield to it so the map crawl never stalls scrolling.
+            // Give the thumbnail crawl a head start, then yield only to LIVE visible demand so the map
+            // crawl never stalls scrolling - but is also never parked behind the whole-library sequential
+            // fill (`hasPendingThumbnailWork` includes it, which kept the Map empty until all 20k+
+            // thumbnails were cached).
             try? await Task.sleep(for: .seconds(3))
             await crawl.start(
                 uids: uids,
                 captureDates: dates,
-                location: { uid in
-                    guard let metadata = try? await backend.metadata(for: uid), metadata.hasLocation,
-                          let latitude = metadata.latitude, let longitude = metadata.longitude else { return nil }
-                    return (latitude, longitude)
-                },
+                location: LocationCrawl.metadataProbe(backend),
                 index: index,
                 store: store,
-                shouldYield: { await feed?.hasPendingThumbnailWork() ?? false }
+                shouldYield: { await feed?.hasVisibleThumbnailPressure() ?? false },
+                log: { DebugLog.log($0) }
             )
         }
     }
@@ -239,6 +239,8 @@ final class MobileLibraryModel {
         loadState = .initial
         locationCrawlStarted = false
         locationIndex.replaceAll([])
+        locationIndex.updateScanProgress(PhotoLocationScanProgress())
+        Task { [locationCrawl] in await locationCrawl.cancel() }
     }
 
     private func start(session: ProtonSession, store: SessionKeychainStore) {

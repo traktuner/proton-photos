@@ -329,7 +329,9 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             return Self.group(entries, volumeID: root.volumeID)
         case .trash:
             let root = try await resolvePhotosRoot()
-            let links = try await driveSession.listTrash(volumeID: root.volumeID).filter { $0.type != 1 }   // drop folders; keep files/unknown
+            let links = try await driveSession.listTrash(volumeID: root.volumeID)
+                .filter { $0.type != 1 && $0.type != 3 }         // drop folders + albums; keep files/unknown
+                .filter { $0.mainPhotoLinkID == nil }            // hide Live-Photo paired videos, like the timeline
             let photos = links
                 .compactMap { l -> PhotoItem? in
                     guard let id = l.linkID else { return nil }
@@ -364,6 +366,15 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     func trash(_ uids: [PhotoUID]) async throws {
         let root = try await resolvePhotosRoot()
         try await driveSession.trash(volumeID: root.volumeID, linkIDs: uids.map(\.nodeID))
+        // Debug-gated end-to-end verification: the moved links must actually surface in the volume trash
+        // listing (this is the seam that silently broke before - trash "succeeded" but Recently Deleted
+        // stayed empty). Costs one extra listing round-trip, only when the debug log is on.
+        if DebugLog.isEnabled {
+            let trashed = Set((try? await driveSession.listTrash(volumeID: root.volumeID))?.compactMap(\.linkID) ?? [])
+            let missing = uids.map(\.nodeID).filter { !trashed.contains($0) }
+            DebugLog.log("trash-verify: \(uids.count - missing.count)/\(uids.count) moved links visible in trash listing"
+                         + (missing.isEmpty ? "" : " MISSING=\(missing.map { $0.prefix(8) + "…" }.joined(separator: ","))"))
+        }
     }
 
     func restore(_ uids: [PhotoUID]) async throws {

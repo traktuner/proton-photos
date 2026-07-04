@@ -13,6 +13,10 @@ public enum DebugLog {
         return logs.appendingPathComponent("protonphotos.log")
     }()
 
+    /// Whether the log is active (Debug build + `PROTONPHOTOS_DEBUG_LOG=1`). Callers can gate extra
+    /// diagnostic work (e.g. the post-trash listing verification) on this so Release pays nothing.
+    public static var isEnabled: Bool { enabled }
+
     public static func log(_ message: String) {
         guard enabled else { return }
         let line = "\(Date().formatted(date: .omitted, time: .standard)) \(message)\n"

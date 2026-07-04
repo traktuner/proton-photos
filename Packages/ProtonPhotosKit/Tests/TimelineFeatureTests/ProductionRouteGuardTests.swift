@@ -94,6 +94,52 @@ struct ProductionRouteGuardTests {
         #expect(capabilities.contains("var trashViaSDK = false"))
     }
 
+    @Test func trashMutationsDecodeMultistatusAndListingResolvesViaFetchMetadata() throws {
+        let session = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DriveSession.swift"), encoding: .utf8)
+        // trash/restore answer HTTP 200 with PER-ITEM codes; ignoring the body silently drops failures.
+        #expect(session.contains("BatchLinkResponses"),
+                "trash_multiple/restore_multiple must decode the per-item multistatus body")
+        #expect(session.contains("throw DriveBatchActionError"),
+                "a failed item must surface as a thrown error, never as silent success")
+        // The volume trash listing returns ONLY {ShareID, LinkIDs} groups - link bodies come from
+        // fetch_metadata. Decoding `Links` straight out of the trash listing is the bug that rendered
+        // Recently Deleted permanently empty.
+        #expect(session.contains("VolumeTrashResponse"))
+        #expect(session.contains("links/fetch_metadata"),
+                "trash listing must resolve ids via the per-share fetch_metadata batch")
+
+        // Platform shells must not swallow trash/restore failures - the grid would pretend the photo
+        // was deleted while the server still has it outside the trash.
+        let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
+        #expect(!mainView.contains("try? await backend.trash"), "macOS must surface trash failures")
+        #expect(!mainView.contains("try? await backend.restore"), "macOS must surface restore failures")
+    }
+
+    @Test func locationCrawlYieldsOnVisiblePressureAndSharesTheCorePath() throws {
+        // Both shells feed the Map from the SAME MediaLocationCore crawl: the shared probe, and a yield
+        // predicate keyed to LIVE visible demand. Keying it to `hasPendingThumbnailWork` parks the GPS
+        // crawl until the whole library's thumbnails finish (the "map empty for hours" bug).
+        for shell in ["App/Offline/OfflineLibraryManager.swift", "iOSApp/MobileLibraryModel.swift"] {
+            let text = try String(contentsOf: Self.repoRoot.appendingPathComponent(shell), encoding: .utf8)
+            #expect(text.contains("LocationCrawl.metadataProbe"),
+                    "\(shell) must use the shared MediaLocationCore probe, not platform-local GPS parsing")
+            #expect(text.contains("hasVisibleThumbnailPressure()"),
+                    "\(shell) must yield the GPS crawl on visible pressure only")
+            #expect(!text.contains("?.hasPendingThumbnailWork()"),
+                    "\(shell) must never park the GPS crawl behind the full thumbnail crawl")
+        }
+
+        // Both map surfaces observe the scan progress so "scanning" and "no geotagged photos" are
+        // distinguishable - never a blanket "no places yet" while the crawl still runs.
+        for screen in ["App/Views/MainView.swift", "iOSApp/MobileMapScreen.swift"] {
+            let text = try String(contentsOf: Self.repoRoot.appendingPathComponent(screen), encoding: .utf8)
+            #expect(text.contains("scanProgress"), "\(screen) must observe the crawl's scan progress")
+            #expect(text.contains("map.scanning_title"), "\(screen) must show a distinct scanning state")
+            #expect(text.contains("map.no_places_found_message"),
+                    "\(screen) must reserve 'no geotagged photos' for a COMPLETED scan")
+        }
+    }
+
     @Test func viewerOriginalsCacheIsReadBeforeNetworkAndPurgedBySettings() throws {
         let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
         #expect(mainView.contains("originalsCache: offline.originalsCache"))

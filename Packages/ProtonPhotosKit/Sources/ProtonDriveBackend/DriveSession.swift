@@ -18,7 +18,8 @@ final class DriveSession: @unchecked Sendable {
         session: ProtonSession,
         store: SessionKeychainStore,
         config: ProtonAPIConfig = ProtonAPIConfig(),
-        accountCacheDirectory: URL
+        accountCacheDirectory: URL,
+        urlProtocolClasses: [AnyClass]? = nil
     ) {
         self.session = session
         self.store = store
@@ -26,6 +27,8 @@ final class DriveSession: @unchecked Sendable {
         self.accountCacheDirectory = accountCacheDirectory
         let cfg = URLSessionConfiguration.ephemeral
         cfg.httpAdditionalHeaders = ["Accept": "application/vnd.protonmail.v1+json"]
+        // Test seam: lets unit tests intercept requests with a URLProtocol stub (never set in production).
+        if let urlProtocolClasses { cfg.protocolClasses = urlProtocolClasses }
         self.urlSession = URLSession(configuration: cfg)
     }
 
@@ -228,28 +231,98 @@ extension DriveSession {
         try await send("/drive/photos/volumes/\(volumeID)/albums/\(albumLinkID)", method: "PUT", body: ["CoverLinkID": coverLinkID])
     }
 
+    /// The web client's `BATCH_REQUEST_SIZE` for link mutations - larger batches get per-item errors.
+    private static let batchRequestSize = 50
+    /// The web client's chunk size for `links/fetch_metadata`.
+    private static let metadataBatchSize = 150
+
     /// Moves photos to trash (batch). Volume-keyed, on the `v2` path.
+    ///
+    /// IMPORTANT: this endpoint is a MULTISTATUS batch - it returns HTTP 200 with per-item result codes
+    /// in `Responses[].Response`. A failed move MUST be detected from the body; ignoring it turns every
+    /// failure into a silent "success" (photo gone from the grid, never in Recently Deleted).
     func trash(volumeID: String, linkIDs: [String]) async throws {
-        try await send("/drive/v2/volumes/\(volumeID)/trash_multiple", method: "POST", body: ["LinkIDs": linkIDs])
+        try await batchLinkAction("trash", volumeID: volumeID, linkIDs: linkIDs,
+                                  path: "/drive/v2/volumes/\(volumeID)/trash_multiple", method: "POST")
     }
 
-    /// Restores photos from trash (batch).
+    /// Restores photos from trash (batch). Same multistatus contract as `trash`.
     func restore(volumeID: String, linkIDs: [String]) async throws {
-        try await send("/drive/v2/volumes/\(volumeID)/trash/restore_multiple", method: "PUT", body: ["LinkIDs": linkIDs])
+        try await batchLinkAction("restore", volumeID: volumeID, linkIDs: linkIDs,
+                                  path: "/drive/v2/volumes/\(volumeID)/trash/restore_multiple", method: "PUT")
     }
 
-    /// Lists trashed links (offset pagination). Callers filter to photo files.
+    /// Runs one batched link mutation in web-client-sized chunks and decodes the per-item multistatus
+    /// body, throwing `DriveBatchActionError` if any link failed so callers never mistake a failed or
+    /// partial move for success.
+    private func batchLinkAction(_ action: String, volumeID: String, linkIDs: [String], path: String, method: String) async throws {
+        guard !linkIDs.isEmpty else { return }
+        var succeeded = 0
+        var failed = 0
+        var firstError: String?
+        for chunk in Self.chunked(linkIDs, size: Self.batchRequestSize) {
+            let data = try await send(path, method: method, body: ["LinkIDs": chunk])
+            guard let decoded = try? JSONDecoder().decode(BatchLinkResponses.self, from: data),
+                  let responses = decoded.responses else {
+                // Unknown body shape: the HTTP layer already enforced 2xx, so count the chunk as moved,
+                // but log it - a silent contract change must stay visible in the debug log.
+                DebugLog.log("\(action): WARNING - unrecognized multistatus body (\(data.count) bytes), assuming success")
+                succeeded += chunk.count
+                continue
+            }
+            for item in responses {
+                if let error = item.response?.error, !error.isEmpty {
+                    failed += 1
+                    if firstError == nil { firstError = error }
+                } else if let code = item.response?.code, code != 1000 {
+                    failed += 1
+                    if firstError == nil { firstError = "code \(code)" }
+                } else {
+                    succeeded += 1
+                }
+            }
+        }
+        DebugLog.log("\(action): vol=\(volumeID.prefix(8))… n=\(linkIDs.count) ok=\(succeeded) failed=\(failed)"
+                     + (firstError.map { " firstError=\($0)" } ?? ""))
+        if failed > 0 {
+            throw DriveBatchActionError(action: action, failed: failed, total: linkIDs.count, firstMessage: firstError)
+        }
+    }
+
+    /// Lists trashed links. Two-step, matching the Proton web client:
+    ///  1. `GET /drive/volumes/{id}/trash` returns ONLY id groups `{Trash:[{ShareID, LinkIDs}]}` - it has
+    ///     no link bodies. (Decoding `Links` out of this response is why Recently Deleted rendered empty:
+    ///     the tolerant DTO decoded `nil` and the UI showed an empty grid with no error.)
+    ///  2. `POST /drive/shares/{shareID}/links/fetch_metadata` resolves the ids to link metadata.
     func listTrash(volumeID: String, pageSize: Int = 150) async throws -> [TrashLink] {
-        var all: [TrashLink] = []
+        var idsByShare: [String: [String]] = [:]
         var page = 0
+        var totalIDs = 0
         while true {
-            let r = try await getJSON("/drive/volumes/\(volumeID)/trash?Page=\(page)&PageSize=\(pageSize)", as: TrashResponse.self)
-            let links = r.links ?? []
-            all.append(contentsOf: links)
-            if links.count < pageSize { break }
+            let r = try await getJSON("/drive/volumes/\(volumeID)/trash?Page=\(page)&PageSize=\(pageSize)", as: VolumeTrashResponse.self)
+            var pageLinkCount = 0
+            for group in r.trash ?? [] {
+                idsByShare[group.shareID, default: []].append(contentsOf: group.linkIDs)
+                pageLinkCount += group.linkIDs.count
+            }
+            totalIDs += pageLinkCount
+            if pageLinkCount < pageSize { break }   // web client: hasNextPage = totalLinks >= PageSize
             page += 1
         }
+        var all: [TrashLink] = []
+        for (shareID, ids) in idsByShare {
+            for chunk in Self.chunked(ids, size: Self.metadataBatchSize) {
+                let data = try await send("/drive/shares/\(shareID)/links/fetch_metadata", method: "POST", body: ["LinkIDs": chunk])
+                let decoded = try JSONDecoder().decode(LinkMetaBatchResponse.self, from: data)
+                all.append(contentsOf: decoded.links ?? [])
+            }
+        }
+        DebugLog.log("listTrash: vol=\(volumeID.prefix(8))… trashedIDs=\(totalIDs) resolved=\(all.count)")
         return all
+    }
+
+    private static func chunked(_ items: [String], size: Int) -> [[String]] {
+        stride(from: 0, to: items.count, by: size).map { Array(items[$0 ..< min($0 + size, items.count)]) }
     }
 
     /// Lists the user's owned photo albums (AnchorID cursor pagination). Names are NOT included here
@@ -282,28 +355,84 @@ extension DriveSession {
     }
 }
 
+/// One trashed link as resolved via `links/fetch_metadata`. Tolerant: the listing sometimes omits fields
+/// per item; a single missing required field used to fail the WHOLE decode (the "Recently Deleted couldn't
+/// load" error). Optional + filtered in the bridge instead.
 struct TrashLink: Decodable {
-    // Tolerant: the trash listing sometimes omits fields per item; a single missing required field used to fail
-    // the WHOLE decode (the "Recently Deleted couldn't load" error). Optional + filtered in the bridge instead.
     let linkID: String?
+    /// LinkType: 1 = folder, 2 = file, 3 = album.
     let type: Int?
     let createTime: Double?
     let mimeType: String?
-    let photoProperties: PhotoProps?
-    struct PhotoProps: Decodable {
-        let captureTime: Double?
-        enum CodingKeys: String, CodingKey { case captureTime = "CaptureTime" }
+    let fileProperties: FileProps?
+    struct FileProps: Decodable {
+        let activeRevision: Revision?
+        struct Revision: Decodable {
+            let photo: Photo?
+            struct Photo: Decodable {
+                let captureTime: Double?
+                let mainPhotoLinkID: String?
+                enum CodingKeys: String, CodingKey {
+                    case captureTime = "CaptureTime", mainPhotoLinkID = "MainPhotoLinkID"
+                }
+            }
+            enum CodingKeys: String, CodingKey { case photo = "Photo" }
+        }
+        enum CodingKeys: String, CodingKey { case activeRevision = "ActiveRevision" }
     }
     enum CodingKeys: String, CodingKey {
         case linkID = "LinkID", type = "Type", createTime = "CreateTime",
-             mimeType = "MIMEType", photoProperties = "PhotoProperties"
+             mimeType = "MIMEType", fileProperties = "FileProperties"
     }
-    var captureTime: Double { photoProperties?.captureTime ?? createTime ?? 0 }
+    var captureTime: Double { fileProperties?.activeRevision?.photo?.captureTime ?? createTime ?? 0 }
+    /// Non-nil when this link is a Live Photo's paired video - hidden from the trash grid, exactly like
+    /// the timeline listing hides RelatedPhotos behind their main photo.
+    var mainPhotoLinkID: String? { fileProperties?.activeRevision?.photo?.mainPhotoLinkID }
 }
 
-private struct TrashResponse: Decodable {
+/// `GET /drive/volumes/{id}/trash` - id groups only, no link bodies.
+private struct VolumeTrashResponse: Decodable {
+    let trash: [Group]?
+    struct Group: Decodable {
+        let shareID: String
+        let linkIDs: [String]
+        enum CodingKeys: String, CodingKey { case shareID = "ShareID", linkIDs = "LinkIDs" }
+    }
+    enum CodingKeys: String, CodingKey { case trash = "Trash" }
+}
+
+/// `POST /drive/shares/{shareID}/links/fetch_metadata` response.
+private struct LinkMetaBatchResponse: Decodable {
     let links: [TrashLink]?
     enum CodingKeys: String, CodingKey { case links = "Links" }
+}
+
+/// Per-item multistatus body of `trash_multiple` / `restore_multiple` (HTTP 200 even when items fail).
+private struct BatchLinkResponses: Decodable {
+    let responses: [Item]?
+    struct Item: Decodable {
+        let linkID: String?
+        let response: Status?
+        struct Status: Decodable {
+            let code: Int?
+            let error: String?
+            enum CodingKeys: String, CodingKey { case code = "Code", error = "Error" }
+        }
+        enum CodingKeys: String, CodingKey { case linkID = "LinkID", response = "Response" }
+    }
+    enum CodingKeys: String, CodingKey { case responses = "Responses" }
+}
+
+/// A batched link mutation partially or fully failed (per-item multistatus codes).
+struct DriveBatchActionError: LocalizedError {
+    let action: String
+    let failed: Int
+    let total: Int
+    let firstMessage: String?
+    var errorDescription: String? {
+        let base = "\(action) failed for \(failed) of \(total) items"
+        return firstMessage.map { "\(base) (\($0))" } ?? base
+    }
 }
 
 struct AlbumListEntry: Decodable {
