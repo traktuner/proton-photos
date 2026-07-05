@@ -579,20 +579,23 @@ private struct AlbumSyncSection: View {
 }
 
 /// Compact status row over the shared Core `BackupStatus` model (used for the manual upload
-/// queue's pre-upload check). All state/wording decisions live in Core; this is layout only.
+/// queue's pre-upload check). Idle is explanatory text only; a standalone "Ready" row is not
+/// useful for this section.
 private struct BackupStatusSummaryRow: View {
     let status: BackupStatus
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Label(status.localizedTitle, systemImage: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
-                    .font(.system(size: 12, weight: .medium))
-                Spacer()
-                if let total = status.totalConsidered, total > 0 {
-                    Text(String(localized: "settings.upload_check_progress \(status.checked) \(total)"))
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(.secondary)
+            if showsStatusHeader {
+                HStack(alignment: .firstTextBaseline) {
+                    Label(status.localizedTitle, systemImage: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    if total > 0 {
+                        Text(String(localized: "settings.upload_check_progress \(status.checked) \(total)"))
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -620,6 +623,14 @@ private struct BackupStatusSummaryRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var total: Int {
+        status.totalConsidered ?? 0
+    }
+
+    private var showsStatusHeader: Bool {
+        status.isActive || total > 0 || status.needsAttentionCount > 0
     }
 }
 

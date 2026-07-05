@@ -157,37 +157,42 @@ struct MobileSettingsScreen: View {
         let status = BackupStatus(
             manualUploadCheck: libraryModel.facade?.uploadCoordinator.preparationStatus ?? UploadPreparationStatus()
         )
-        HStack(spacing: 10) {
-            Image(systemName: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
-                .foregroundStyle(status.isActive ? ProtonColor.primary : ProtonColor.textWeak)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(status.localizedTitle)
-                        .foregroundStyle(ProtonColor.textNorm)
-                    Spacer()
-                    if let total = status.totalConsidered, total > 0 {
-                        Text(String(localized: "settings.upload_check_progress \(status.checked) \(total)"))
-                            .font(.footnote)
-                            .foregroundStyle(ProtonColor.textWeak)
-                            .monospacedDigit()
+        let total = status.totalConsidered ?? 0
+        if status.isActive || total > 0 || status.needsAttentionCount > 0 {
+            HStack(spacing: 10) {
+                Image(systemName: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
+                    .foregroundStyle(status.isActive ? ProtonColor.primary : ProtonColor.textWeak)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(status.localizedTitle)
+                            .foregroundStyle(ProtonColor.textNorm)
+                        Spacer()
+                        if total > 0 {
+                            Text(String(localized: "settings.upload_check_progress \(status.checked) \(total)"))
+                                .font(.footnote)
+                                .foregroundStyle(ProtonColor.textWeak)
+                                .monospacedDigit()
+                        }
                     }
-                }
-                if let total = status.totalConsidered, total > 0 {
-                    if let fraction = status.fractionCompleted {
-                        ProgressView(value: fraction)
-                            .tint(ProtonColor.primary)
-                    } else {
-                        ProgressView()
-                            .tint(ProtonColor.primary)
+                    if total > 0 {
+                        if let fraction = status.fractionCompleted {
+                            ProgressView(value: fraction)
+                                .tint(ProtonColor.primary)
+                        } else {
+                            ProgressView()
+                                .tint(ProtonColor.primary)
+                        }
+                        backupStatusDetail(status)
+                    } else if status.needsAttentionCount > 0 {
+                        backupStatusDetail(status)
                     }
-                    backupStatusDetail(status)
-                } else {
-                    Text(String(localized: "settings.upload_check_idle_help"))
-                        .font(.footnote)
-                        .foregroundStyle(ProtonColor.textWeak)
                 }
             }
+        } else {
+            Text(String(localized: "settings.upload_check_idle_help"))
+                .font(.footnote)
+                .foregroundStyle(ProtonColor.textWeak)
         }
     }
 
