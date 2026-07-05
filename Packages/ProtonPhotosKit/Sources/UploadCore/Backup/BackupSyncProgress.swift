@@ -9,6 +9,8 @@ public struct BackupSyncProgress: Sendable, Equatable {
     public var total = 0
     /// Discovered/queued rows that no worker has picked up yet.
     public var waiting = 0
+    /// Subset of `waiting` already past its duplicate check and waiting for bytes only.
+    public var uploadQueued = 0
     /// In the pre-upload phase (resolve + hash + duplicate check) - "wird geprüft".
     public var checking = 0
     /// Pushing bytes right now - "wird gesichert".
@@ -30,6 +32,9 @@ public struct BackupSyncProgress: Sendable, Equatable {
     public var currentItemName: String?
     /// True while a runner pass is draining the queue.
     public var isRunning = false
+    /// True while the throttle policy holds the running pass at zero concurrency
+    /// (e.g. critical thermal pressure) - "paused", not "working".
+    public var isPausedByPolicy = false
 
     public init() {}
 
@@ -60,6 +65,7 @@ public struct BackupSyncProgress: Sendable, Equatable {
         self.init()
         total = summary.total
         waiting = summary.waiting
+        uploadQueued = summary.queuedForUpload
         checking = summary.checkingActive
         uploading = summary.uploadingActive
         uploaded = summary.uploaded

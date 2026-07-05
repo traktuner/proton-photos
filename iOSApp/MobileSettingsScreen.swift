@@ -25,6 +25,7 @@ struct MobileSettingsScreen: View {
             List {
                 accountSection
                 librarySection
+                backupSection
                 cacheSection
                 signOutSection
                 brandFooter
@@ -97,7 +98,14 @@ struct MobileSettingsScreen: View {
                     detail: previewLoadingDetail
                 )
             }
-            uploadPreparationRow
+        }
+    }
+
+    /// Backup state lives in its own section, mirroring the macOS Backup tab. The row is driven by
+    /// the shared Core `BackupStatus` model - same phases and wording on every platform.
+    @ViewBuilder private var backupSection: some View {
+        Section(String(localized: "settings.section_backup")) {
+            backupStatusRow
         }
     }
 
@@ -125,28 +133,35 @@ struct MobileSettingsScreen: View {
         }
     }
 
-    @ViewBuilder private var uploadPreparationRow: some View {
-        let status = libraryModel.facade?.uploadCoordinator.preparationStatus ?? UploadPreparationStatus()
+    @ViewBuilder private var backupStatusRow: some View {
+        let status = BackupStatus(
+            manualUploadCheck: libraryModel.facade?.uploadCoordinator.preparationStatus ?? UploadPreparationStatus()
+        )
         HStack(spacing: 10) {
-            Image(systemName: status.isRunning ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
-                .foregroundStyle(status.isRunning ? ProtonColor.primary : ProtonColor.textWeak)
+            Image(systemName: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
+                .foregroundStyle(status.isActive ? ProtonColor.primary : ProtonColor.textWeak)
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(uploadPreparationTitle(status))
+                    Text(status.localizedTitle)
                         .foregroundStyle(ProtonColor.textNorm)
                     Spacer()
-                    if status.hasItems {
-                        Text(String(localized: "settings.upload_check_progress \(status.resolved) \(status.total)"))
+                    if let total = status.totalConsidered, total > 0 {
+                        Text(String(localized: "settings.upload_check_progress \(status.checked) \(total)"))
                             .font(.footnote)
                             .foregroundStyle(ProtonColor.textWeak)
                             .monospacedDigit()
                     }
                 }
-                if status.hasItems {
-                    ProgressView(value: status.progressFraction)
-                        .tint(ProtonColor.primary)
-                    uploadPreparationDetail(status)
+                if let total = status.totalConsidered, total > 0 {
+                    if let fraction = status.fractionCompleted {
+                        ProgressView(value: fraction)
+                            .tint(ProtonColor.primary)
+                    } else {
+                        ProgressView()
+                            .tint(ProtonColor.primary)
+                    }
+                    backupStatusDetail(status)
                 } else {
                     Text(String(localized: "settings.upload_check_idle_help"))
                         .font(.footnote)
@@ -156,23 +171,13 @@ struct MobileSettingsScreen: View {
         }
     }
 
-    private func uploadPreparationTitle(_ status: UploadPreparationStatus) -> String {
-        if !status.hasItems { return String(localized: "settings.upload_check_idle") }
-        return status.isRunning
-            ? String(localized: "settings.upload_check_active")
-            : String(localized: "settings.upload_check_done")
-    }
-
-    @ViewBuilder private func uploadPreparationDetail(_ status: UploadPreparationStatus) -> some View {
+    @ViewBuilder private func backupStatusDetail(_ status: BackupStatus) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            if status.checking > 0 {
-                Text(String(localized: "settings.upload_check_running \(status.checking)"))
+            if status.alreadyBackedUp > 0 {
+                Text(String(localized: "settings.upload_check_duplicates \(status.alreadyBackedUp)"))
             }
-            if status.skippedDuplicates > 0 {
-                Text(String(localized: "settings.upload_check_duplicates \(status.skippedDuplicates)"))
-            }
-            if status.needsAttention > 0 {
-                Text(String(localized: "settings.upload_check_attention \(status.needsAttention)"))
+            if status.needsAttentionCount > 0 {
+                Text(String(localized: "settings.upload_check_attention \(status.needsAttentionCount)"))
             }
         }
         .font(.footnote)

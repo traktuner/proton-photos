@@ -1,6 +1,104 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "backup.detail_already_backed_up %lld": {
+      "extractionState": "manual",
+      "comment": "Completed-state detail: how many items were already safe and skipped without uploading.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Already backed up: %lld" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Bereits gesichert: %lld" } }
+      }
+    },
+    "backup.detail_attention %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld files need attention" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld Dateien benötigen Aufmerksamkeit" } }
+      }
+    },
+    "backup.detail_backed_up %lld %lld": {
+      "extractionState": "manual",
+      "comment": "Uploading-state detail. First %lld: proven backed-up count, second: total considered.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld of %lld backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld von %lld gesichert" } }
+      }
+    },
+    "backup.detail_checked %lld %lld": {
+      "extractionState": "manual",
+      "comment": "Checking-state detail. Deliberately 'checked', never 'uploaded' or 'hashed'.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld of %lld checked" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld von %lld geprüft" } }
+      }
+    },
+    "backup.detail_waiting %lld": {
+      "extractionState": "manual",
+      "comment": "Waiting-state detail: outstanding items that continue on the next run.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld files will continue on the next run" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld Dateien werden beim nächsten Durchlauf fortgesetzt" } }
+      }
+    },
+    "backup.phase_attention": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Some files need attention" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Einige Dateien benötigen Aufmerksamkeit" } }
+      }
+    },
+    "backup.phase_checking": {
+      "extractionState": "manual",
+      "comment": "Headline while proving items are already backed up (identity + duplicate check). NEVER worded as uploading or hashing.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Checking backup status" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Backup-Status wird geprüft" } }
+      }
+    },
+    "backup.phase_completed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "All files backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Alle Dateien gesichert" } }
+      }
+    },
+    "backup.phase_idle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ready" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Bereit" } }
+      }
+    },
+    "backup.phase_paused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Paused" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Pausiert" } }
+      }
+    },
+    "backup.phase_scanning": {
+      "extractionState": "manual",
+      "comment": "Headline while enumerating folders/assets. Totals are unknown - UI shows an indeterminate spinner.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Looking for files…" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Dateien werden gesucht…" } }
+      }
+    },
+    "backup.phase_uploading": {
+      "extractionState": "manual",
+      "comment": "Headline ONLY while bytes are actually uploading.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backing up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Wird gesichert" } }
+      }
+    },
+    "backup.phase_waiting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Waiting to continue" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Wartet auf Fortsetzung" } }
+      }
+    },
     "backup.error_source_missing": {
       "extractionState": "manual",
       "comment": "Backup queue row error: the local source file disappeared before it could be backed up.",

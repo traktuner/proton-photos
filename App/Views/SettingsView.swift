@@ -15,10 +15,10 @@ struct SettingsView: View {
         TabView {
             AccountSettingsTab(signOut: signOut)
                 .tabItem { Label("settings.account_tab", systemImage: "person.crop.circle") }
-            LibrarySettingsTab(uploadCoordinator: uploadCoordinator)
+            LibrarySettingsTab()
                 .tabItem { Label("settings.library_tab", systemImage: "photo.on.rectangle.angled") }
             if let backup {
-                BackupSettingsTab(backup: backup)
+                BackupSettingsTab(backup: backup, uploadCoordinator: uploadCoordinator)
                     .tabItem { Label("settings.backup_tab", systemImage: "arrow.triangle.2.circlepath.icloud") }
             }
             CacheStatusTab()
@@ -32,6 +32,7 @@ struct SettingsView: View {
 
 private struct BackupSettingsTab: View {
     @State var backup: FolderBackupController
+    let uploadCoordinator: UploadCoordinator?
 
     var body: some View {
         Form {
@@ -74,77 +75,88 @@ private struct BackupSettingsTab: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    HStack {
-                        Text(statusText)
-                            .font(.system(size: 12))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer()
-                        if backup.isSyncing {
-                            Button("settings.backup_stop") { backup.stopSync() }
-                        } else {
-                            Button("settings.backup_sync_now") { backup.syncNow() }
-                                .disabled(backup.folders.isEmpty)
-                        }
-                    }
-                    if backup.progress.total > 0 {
-                        ProgressView(value: backup.progress.fraction)
-                        Text("settings.backup_backed_up \(backup.progress.backedUp) \(backup.progress.total)")
-                            .font(.system(size: 11).monospacedDigit())
-                            .foregroundStyle(.secondary)
-                        detailRows
-                    }
-                    if let message = backup.lastMessage {
-                        Text(message)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.red)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    folderSyncStatus
                 }
             } header: {
                 Text("settings.backup_status_section")
+            }
+
+            // The manual upload queue's pre-upload check lives here too: it is backup work
+            // ("is this already safe?"), not a generic library concern.
+            Section {
+                BackupStatusSummaryRow(
+                    status: BackupStatus(manualUploadCheck: uploadCoordinator?.preparationStatus ?? UploadPreparationStatus())
+                )
+            } header: {
+                Text("settings.backup_uploads_section")
             }
         }
         .formStyle(.grouped)
     }
 
-    /// Honest status wording: "checking" while proving items safe, "backing up" only while bytes
-    /// move, and never a success claim that the durable counts don't back.
-    private var statusText: LocalizedStringKey {
-        let progress = backup.progress
-        if backup.isSyncing {
-            if progress.uploading > 0 { return "settings.backup_status_uploading" }
-            if let name = progress.currentItemName { return "settings.backup_status_checking \(name)" }
-            return "settings.backup_status_checking_generic"
-        }
-        if progress.hasOutstandingWork { return "settings.backup_status_pending \(progress.waiting + progress.blocked)" }
-        if progress.total > 0, progress.backedUp + progress.skippedRemoteDeletions + progress.sourceMissing == progress.total,
-           progress.failed == 0 {
-            return "settings.backup_status_done"
-        }
-        return "settings.backup_status_idle"
-    }
-
+    /// Status header, honest progress, and count rows - all wording comes from the shared
+    /// Core `BackupStatus` model, so macOS and iOS can never drift apart.
     @ViewBuilder
-    private var detailRows: some View {
-        let progress = backup.progress
-        VStack(alignment: .leading, spacing: 3) {
-            if progress.skippedRemoteDeletions > 0 {
-                Text("settings.backup_row_skipped_deleted \(progress.skippedRemoteDeletions)")
+    private var folderSyncStatus: some View {
+        let status = backup.status
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(status.localizedTitle)
+                    .font(.system(size: 12, weight: .medium))
+                if let detail = status.localizedDetail {
+                    Text(detail)
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
-            if progress.sourceMissing > 0 {
-                Text("settings.backup_row_source_missing \(progress.sourceMissing)")
-            }
-            if progress.blocked > 0 {
-                Text("settings.backup_row_blocked \(progress.blocked)")
-            }
-            if progress.failed > 0 {
-                Text("settings.backup_row_failed \(progress.failed)")
-                    .foregroundStyle(.orange)
+            Spacer()
+            if backup.isSyncing {
+                Button("settings.backup_stop") { backup.stopSync() }
+            } else {
+                Button("settings.backup_sync_now") { backup.syncNow() }
+                    .disabled(backup.folders.isEmpty)
             }
         }
-        .font(.system(size: 11).monospacedDigit())
-        .foregroundStyle(.secondary)
+        if status.isActive || status.phase == .paused {
+            if let fraction = status.fractionCompleted {
+                ProgressView(value: fraction)
+            } else {
+                ProgressView()  // indeterminate: totals unknown (scanning) - no fake progress
+            }
+            if let name = status.currentItemName {
+                Text(name)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        if let total = status.totalConsidered, total > 0 {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("settings.backup_backed_up \(status.backedUp) \(total)")
+                if status.skippedRemoteDeletions > 0 {
+                    Text("settings.backup_row_skipped_deleted \(status.skippedRemoteDeletions)")
+                }
+                if status.sourceMissing > 0 {
+                    Text("settings.backup_row_source_missing \(status.sourceMissing)")
+                }
+                if status.waitingRetry > 0 {
+                    Text("settings.backup_row_blocked \(status.waitingRetry)")
+                }
+                if status.failed > 0 {
+                    Text("settings.backup_row_failed \(status.failed)")
+                        .foregroundStyle(.orange)
+                }
+            }
+            .font(.system(size: 11).monospacedDigit())
+            .foregroundStyle(.secondary)
+        }
+        if let message = backup.lastMessage {
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func pickFolder() {
@@ -206,8 +218,6 @@ private struct AccountSettingsTab: View {
 // MARK: - Library / Cache
 
 private struct LibrarySettingsTab: View {
-    let uploadCoordinator: UploadCoordinator?
-
     @State private var offline = OfflineLibraryManager.shared
     @AppStorage(AppSettingsKey.offlineOriginalsCapUnlimited) private var capUnlimited = AppSettingsDefault.offlineOriginalsCapUnlimited
     @AppStorage(AppSettingsKey.offlineOriginalsCapGB) private var capGB = AppSettingsDefault.offlineOriginalsCapGB
@@ -229,12 +239,6 @@ private struct LibrarySettingsTab: View {
                     .fixedSize(horizontal: false, vertical: true)
             } header: {
                 Text("settings.library_offline_section")
-            }
-
-            Section {
-                UploadPreparationSettingsRow(status: uploadCoordinator?.preparationStatus ?? UploadPreparationStatus())
-            } header: {
-                Text("settings.upload_check_section")
             }
 
             Section {
@@ -334,33 +338,36 @@ private struct LibrarySettingsTab: View {
     }
 }
 
-private struct UploadPreparationSettingsRow: View {
-    let status: UploadPreparationStatus
+/// Compact status row over the shared Core `BackupStatus` model (used for the manual upload
+/// queue's pre-upload check). All state/wording decisions live in Core; this is layout only.
+private struct BackupStatusSummaryRow: View {
+    let status: BackupStatus
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Label(title, systemImage: status.isRunning ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
+                Label(status.localizedTitle, systemImage: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
                     .font(.system(size: 12, weight: .medium))
                 Spacer()
-                if status.hasItems {
-                    Text(String(localized: "settings.upload_check_progress \(status.resolved) \(status.total)"))
+                if let total = status.totalConsidered, total > 0 {
+                    Text(String(localized: "settings.upload_check_progress \(status.checked) \(total)"))
                         .font(.system(size: 11).monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
             }
 
-            if status.hasItems {
-                ProgressView(value: status.progressFraction)
+            if let total = status.totalConsidered, total > 0 {
+                if let fraction = status.fractionCompleted {
+                    ProgressView(value: fraction)
+                } else {
+                    ProgressView()
+                }
                 VStack(alignment: .leading, spacing: 2) {
-                    if status.checking > 0 {
-                        Text("settings.upload_check_running \(status.checking)")
+                    if status.alreadyBackedUp > 0 {
+                        Text("settings.upload_check_duplicates \(status.alreadyBackedUp)")
                     }
-                    if status.skippedDuplicates > 0 {
-                        Text("settings.upload_check_duplicates \(status.skippedDuplicates)")
-                    }
-                    if status.needsAttention > 0 {
-                        Text("settings.upload_check_attention \(status.needsAttention)")
+                    if status.needsAttentionCount > 0 {
+                        Text("settings.upload_check_attention \(status.needsAttentionCount)")
                     }
                 }
                 .font(.system(size: 11))
@@ -373,11 +380,6 @@ private struct UploadPreparationSettingsRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-    }
-
-    private var title: LocalizedStringKey {
-        if !status.hasItems { return "settings.upload_check_idle" }
-        return status.isRunning ? "settings.upload_check_active" : "settings.upload_check_done"
     }
 }
 

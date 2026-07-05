@@ -79,6 +79,9 @@ public struct UploadBackupSyncQueueEntry: Sendable, Equatable {
 public struct UploadBackupSyncQueueSummary: Sendable, Equatable {
     public var total = 0
     public var waiting = 0
+    /// Subset of `waiting` whose duplicate check already produced an `.upload` decision - these
+    /// rows wait for bytes, not for checking. Lets UI say "queued for upload" honestly.
+    public var queuedForUpload = 0
     public var active = 0
     /// Active rows in the pre-upload phase (checking/hashing/duplicateChecking).
     public var checkingActive = 0
@@ -114,8 +117,11 @@ public struct UploadBackupSyncQueueSummary: Sendable, Equatable {
         let count = max(0, count)
         total += count
         switch state {
-        case .discovered, .queuedForUpload:
+        case .discovered:
             waiting += count
+        case .queuedForUpload:
+            waiting += count
+            queuedForUpload += count
         case .checking, .hashing, .duplicateChecking:
             active += count
             checkingActive += count

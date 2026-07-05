@@ -23,7 +23,9 @@ struct BackupFolder: Identifiable, Equatable {
 final class FolderBackupController {
 
     private(set) var folders: [BackupFolder] = []
-    private(set) var progress = BackupSyncProgress()
+    /// The ONE user-facing state surface (shared Core model - same phases/wording on every
+    /// platform). UI reads only this; raw runner progress stays internal.
+    private(set) var status = BackupStatus()
     private(set) var isSyncing = false
     private(set) var lastMessage: String?
 
@@ -36,6 +38,8 @@ final class FolderBackupController {
     private let queueStore: UploadBackupSyncQueueManifestStore?
     private let stateStore: UploadBackupStateManifestStore?
     private var syncTask: Task<Void, Never>?
+    private var isScanning = false
+    private var lastStatusUpdate = Date.distantPast
 
     private static let foldersDefaultsKey = "backup.folderBookmarks.v1"
 
@@ -85,10 +89,24 @@ final class FolderBackupController {
         if let runner {
             Task {
                 await runner.setOnProgress { snapshot in
-                    Task { @MainActor [weak self] in self?.progress = snapshot }
+                    Task { @MainActor [weak self] in self?.applyRunnerProgress(snapshot) }
                 }
             }
         }
+    }
+
+    /// Coalesces per-transition runner emissions to a calm UI cadence: phase changes and settle
+    /// points render immediately, count ticks are throttled. Dropping intermediate ticks is safe -
+    /// the run's final emission always changes the phase and is therefore always applied.
+    private func applyRunnerProgress(_ snapshot: BackupSyncProgress) {
+        let candidate = BackupStatus(progress: snapshot, isScanning: isScanning)
+        guard candidate != status else { return }
+        let now = Date()
+        if candidate.phase == status.phase, snapshot.isRunning, now.timeIntervalSince(lastStatusUpdate) < 0.15 {
+            return
+        }
+        lastStatusUpdate = now
+        status = candidate
     }
 
     // MARK: - Folder registry (bookmarks are the App-side boundary)
@@ -141,7 +159,9 @@ final class FolderBackupController {
     func syncNow() {
         guard !isSyncing, let engine, let runner else { return }
         isSyncing = true
+        isScanning = true
         lastMessage = nil
+        status = BackupStatus(progress: currentQueueProgress(), isScanning: true)
         let snapshotFolders = folders
         syncTask = Task { [weak self] in
             var accessedURLs: [URL] = []
@@ -169,6 +189,7 @@ final class FolderBackupController {
                 }
             }
 
+            await self?.finishScanPhase()
             _ = await runner.runUntilDrained()
             await self?.finishSync()
         }
@@ -189,15 +210,24 @@ final class FolderBackupController {
         lastMessage = message
     }
 
+    private func finishScanPhase() {
+        isScanning = false
+    }
+
     private func finishSync() {
         isSyncing = false
+        isScanning = false
         refreshFromQueue()
     }
 
     /// Seeds the UI snapshot from the durable queue - shows outstanding work from a previous
     /// launch before any sync pass runs (relaunch-resume visibility).
     private func refreshFromQueue() {
-        guard let queueStore else { return }
-        progress = BackupSyncProgress(summary: queueStore.summary())
+        status = BackupStatus(progress: currentQueueProgress(), isScanning: false)
+    }
+
+    private func currentQueueProgress() -> BackupSyncProgress {
+        guard let queueStore else { return BackupSyncProgress() }
+        return BackupSyncProgress(summary: queueStore.summary())
     }
 }

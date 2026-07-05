@@ -152,8 +152,16 @@ public actor BackupSyncRunner {
 
             let limit = configuration.throttle.maxConcurrentItems(for: throttleInputs())
             if limit == 0 {
+                if !progress.isPausedByPolicy {
+                    progress.isPausedByPolicy = true
+                    emitProgress()
+                }
                 try? await clock.sleep(for: configuration.pausedPollInterval)
                 continue
+            }
+            if progress.isPausedByPolicy {
+                progress.isPausedByPolicy = false
+                emitProgress()
             }
 
             let wave = nextEligibleWave(limit: limit)
@@ -486,8 +494,11 @@ public actor BackupSyncRunner {
 
     private func addToProgress(_ state: UploadBackupSyncQueueState, sign: Int) {
         switch state {
-        case .discovered, .queuedForUpload:
+        case .discovered:
             progress.waiting += sign
+        case .queuedForUpload:
+            progress.waiting += sign
+            progress.uploadQueued += sign
         case .checking, .hashing, .duplicateChecking:
             progress.checking += sign
         case .uploading, .finalizing:

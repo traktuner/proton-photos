@@ -1,6 +1,14 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.backup_uploads_section": {
+      "extractionState": "manual",
+      "comment": "Backup tab section for the manual upload queue's pre-upload check.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Uploads" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Uploads" } }
+      }
+    },
     "settings.backup_tab": {
       "extractionState": "manual",
       "localizations": {
@@ -72,50 +80,6 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Stop" } },
         "de": { "stringUnit": { "state": "translated", "value": "Stoppen" } }
-      }
-    },
-    "settings.backup_status_idle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Ready" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Bereit" } }
-      }
-    },
-    "settings.backup_status_checking %@": {
-      "extractionState": "manual",
-      "comment": "%@ is the file currently being checked. Deliberately says 'checking', never 'hashing'.",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Checking: %@" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Wird geprüft: %@" } }
-      }
-    },
-    "settings.backup_status_checking_generic": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Checking files before upload…" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Dateien werden geprüft…" } }
-      }
-    },
-    "settings.backup_status_uploading": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Backing up…" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Wird gesichert…" } }
-      }
-    },
-    "settings.backup_status_pending %lld": {
-      "extractionState": "manual",
-      "comment": "%lld outstanding items after a stopped/interrupted pass.",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "%lld items waiting - backup continues on the next run" } },
-        "de": { "stringUnit": { "state": "translated", "value": "%lld Elemente ausstehend - Sicherung wird beim nächsten Durchlauf fortgesetzt" } }
-      }
-    },
-    "settings.backup_status_done": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "All files backed up" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Alle Dateien gesichert" } }
       }
     },
     "settings.backup_backed_up %lld %lld": {
@@ -1700,42 +1664,6 @@
         }
       }
     },
-    "settings.upload_check_section": {
-      "extractionState": "manual",
-      "comment": "Settings section header for the pre-upload duplicate check.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Upload Check"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Upload-Prüfung"
-          }
-        }
-      }
-    },
-    "settings.upload_check_idle": {
-      "extractionState": "manual",
-      "comment": "No upload duplicate check is currently active.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No upload check running"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Keine Upload-Prüfung aktiv"
-          }
-        }
-      }
-    },
     "settings.upload_check_idle_help": {
       "extractionState": "manual",
       "comment": "Explains that files are checked before upload and duplicates are skipped.",
@@ -1754,42 +1682,6 @@
         }
       }
     },
-    "settings.upload_check_active": {
-      "extractionState": "manual",
-      "comment": "Active pre-upload duplicate check status title.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Checking photos before upload"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Fotos werden vor dem Hochladen geprüft"
-          }
-        }
-      }
-    },
-    "settings.upload_check_done": {
-      "extractionState": "manual",
-      "comment": "Finished pre-upload duplicate check status title.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Upload check complete"
-          }
-        },
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Upload-Prüfung abgeschlossen"
-          }
-        }
-      }
-    },
     "settings.upload_check_progress %lld %lld": {
       "extractionState": "manual",
       "comment": "Pre-upload duplicate-check progress. First number is resolved files; second is total files.",
@@ -1804,48 +1696,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld von %lld geprüft"
-          }
-        }
-      }
-    },
-    "settings.upload_check_running %lld": {
-      "extractionState": "manual",
-      "comment": "Number of files currently being checked before upload.",
-      "localizations": {
-        "en": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld file is being checked"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld files are being checked"
-                }
-              }
-            }
-          }
-        },
-        "de": {
-          "variations": {
-            "plural": {
-              "one": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld Datei wird geprüft"
-                }
-              },
-              "other": {
-                "stringUnit": {
-                  "state": "translated",
-                  "value": "%lld Dateien werden geprüft"
-                }
-              }
-            }
           }
         }
       }
