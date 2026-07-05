@@ -2,38 +2,37 @@ import Foundation
 import PhotosCore
 import AlbumsFeature
 
-/// `AlbumBackend` over the app's existing direct-HTTP album reads.
+/// `AlbumBackend` over the app's direct-HTTP album operations.
 ///
-/// Listing + SET-COVER work via direct REST (the set-cover write is just a cleartext `CoverLinkID` PUT, no
-/// crypto). Create + add-photo are still **not** implemented: those HTTP writes require album-node encryption
-/// (generating an album node key, encrypting the name + hash key, and re-encrypting each photo's content key to
-/// the album key) that this app's `DriveCrypto` (decrypt-only) can't yet do - they report `.unsupported` with the
-/// exact gap rather than faking success.
+/// Listing + set-cover were always REST-backed; create + add-photos are now implemented through
+/// `ProtonAlbumWriteService` (album-node write crypto + the photos album endpoints). The service
+/// providers stay injected closures so a future official SDK album-write adapter can replace this
+/// backend without touching `AlbumCore` or any UI.
 struct HTTPAlbumBackend: AlbumBackend {
     /// Supplied by the bridge: the already-decrypted album list the sidebar uses.
     let listProvider: @Sendable () async throws -> [AlbumSummary]
     /// Supplied by the bridge: PUT the album's cover to an already-uploaded photo (cleartext LinkID, no crypto).
     let setCoverProvider: @Sendable (AlbumID, PhotoUID) async throws -> Void
+    /// Album write service: create-album crypto + REST.
+    let createProvider: @Sendable (String) async throws -> AlbumID
+    /// Album write service: add existing photos (re-encrypted link metadata, no media re-upload).
+    /// Must throw when ANY photo fails to attach - callers must never mistake a partial add for success.
+    let addProvider: @Sendable ([PhotoUID], AlbumID) async throws -> Void
 
-    /// List + set-cover via direct REST; create/add still need album-node write crypto (not yet implemented).
-    var capabilities: AlbumCapabilities { .httpReadAndCover }
+    var capabilities: AlbumCapabilities {
+        AlbumCapabilities(canList: true, canCreate: true, canAddPhotos: true, canSetCover: true)
+    }
 
     func listAlbums() async throws -> [AlbumSummary] {
         try await listProvider()
     }
 
     func createAlbum(name: String) async throws -> AlbumID {
-        throw AlbumError.unsupported(
-            operation: "Create album",
-            gap: "the Proton Swift SDK exposes no album API and album-node encryption (key + name + hash-key) isn’t implemented"
-        )
+        try await createProvider(name)
     }
 
     func addPhotos(_ photoUIDs: [PhotoUID], to albumID: AlbumID) async throws {
-        throw AlbumError.unsupported(
-            operation: "Add to album",
-            gap: "adding a photo re-encrypts its content key to the album key, which isn’t implemented"
-        )
+        try await addProvider(photoUIDs, albumID)
     }
 
     func setAlbumCover(albumID: AlbumID, photoUID: PhotoUID) async throws {

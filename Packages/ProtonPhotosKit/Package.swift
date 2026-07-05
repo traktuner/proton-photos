@@ -53,6 +53,7 @@ let package = Package(
         // pure (no SDK/HTTP) and drive injected backend protocols the app implements.
         .library(name: "AlbumCore", targets: ["AlbumCore"]),
         .library(name: "AlbumsFeature", targets: ["AlbumsFeature"]),
+        .library(name: "AlbumSyncCore", targets: ["AlbumSyncCore"]),
         .library(name: "UploadCore", targets: ["UploadCore"]),
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
         .library(name: "PhotoLibraryBackupAdapter", targets: ["PhotoLibraryBackupAdapter"]),
@@ -83,6 +84,7 @@ let package = Package(
                 "ProtonAuth",
                 "AlbumCore",
                 "AlbumsFeature",
+                "AlbumSyncCore",
                 "UploadCore",
                 .product(name: "ProtonDriveSDK", package: "ProtonDriveSDK"),
                 .product(name: "ProtonCoreDataModel", package: "protoncore_ios"),
@@ -93,7 +95,10 @@ let package = Package(
         ),
         .testTarget(
             name: "ProtonDriveBackendTests",
-            dependencies: ["ProtonDriveBackend", "ProtonAuth", "PhotosCore"],
+            dependencies: [
+                "ProtonDriveBackend", "ProtonAuth", "PhotosCore", "AlbumSyncCore",
+                .product(name: "ProtonCoreCryptoGoInterface", package: "protoncore_ios"),
+            ],
             swiftSettings: sdkBackendSwiftSettings
         ),
         .target(name: "MediaByteCache", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
@@ -144,12 +149,17 @@ let package = Package(
             swiftSettings: disableDynamicActorIsolation
         ),
         // Albums: universal management protocols + repository over an injected backend. The app's
-        // current backend routes reads via direct HTTP and reports album writes as unsupported until
-        // Proton's SDK exposes the album-write API.
+        // current backend routes reads via direct HTTP; album writes go through the backend's
+        // album-write service (direct HTTP + clean-room node crypto) until the SDK exposes them.
         .target(name: "AlbumCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         // Backward-compatible feature product for app targets already importing AlbumsFeature.
         .target(name: "AlbumsFeature", dependencies: ["AlbumCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "AlbumsFeatureTests", dependencies: ["AlbumCore", "AlbumsFeature", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        // AlbumSyncCore: universal local-album → Proton-album sync engine (planner, runner, mapping
+        // store). Pure Swift: no PhotoKit/UIKit/AppKit/SwiftUI/SDK imports - platform adapters
+        // provide the local album source; the backend provides remote album operations.
+        .target(name: "AlbumSyncCore", dependencies: ["AlbumCore", "UploadCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "AlbumSyncCoreTests", dependencies: ["AlbumSyncCore", "AlbumCore", "UploadCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         // UploadCore: pure queue + state machine + folder enumeration over an injected upload backend.
         .target(name: "UploadCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         // UploadFeature: SwiftUI adapter over UploadCore. No DesignSystem dependency; the native
@@ -158,7 +168,7 @@ let package = Package(
         // PhotoLibraryBackupAdapter: the ONE PhotoKit boundary (contract platform-adapter layer),
         // shared verbatim by iOS/iPadOS/macOS. May import Photos; never UIKit/AppKit/SwiftUI or
         // the SDK. Emits platform-neutral UploadCore values; makes no dedupe/upload decisions.
-        .target(name: "PhotoLibraryBackupAdapter", dependencies: ["UploadCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "PhotoLibraryBackupAdapter", dependencies: ["UploadCore", "PhotosCore", "AlbumSyncCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "UploadFeatureTests", dependencies: ["UploadCore", "PhotosCore", "PhotoLibraryBackupAdapter"], swiftSettings: disableDynamicActorIsolation),
         // Map: UIKit/AppKit MapKit views + clustering over PhotoLocationIndex (MediaLocationCore).
         .target(name: "MapUIKitAdapter", dependencies: ["PhotosCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),

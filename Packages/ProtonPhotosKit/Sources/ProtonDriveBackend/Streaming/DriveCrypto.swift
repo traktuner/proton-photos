@@ -20,25 +20,39 @@ enum DriveCryptoError: Error { case keyRing, badMessage, base64 }
 final class DriveCrypto: @unchecked Sendable {
     /// Address private keys, pre-resolved to (armored, passphrase) so a ring can be built any time.
     private let addressKeys: [UnlockableKey]
+    /// The same address keys with their address identity kept, for WRITE operations that must name
+    /// a signature email (album create / add-to-album). One entry per active key, address order
+    /// preserved (Proton lists the primary address first).
+    let signers: [DriveCryptoSigner]
     /// Serializes block decryption - AVFoundation can issue concurrent range requests, and a single
     /// gopenpgp session key isn't guaranteed safe to decrypt with from multiple threads at once.
     private let blockLock = NSLock()
 
     init(account: AccountData, keyPassword: String) {
         var keys: [UnlockableKey] = []
+        var signers: [DriveCryptoSigner] = []
         for address in account.addresses {
             for key in address.keys where key.active == 1 {
                 if let pass = try? key.passphrase(userKeys: account.userKeys, mailboxPassphrase: keyPassword) {
-                    keys.append(UnlockableKey(armored: key.privateKey, passphrase: pass.value))
+                    let unlockable = UnlockableKey(armored: key.privateKey, passphrase: pass.value)
+                    keys.append(unlockable)
+                    signers.append(DriveCryptoSigner(addressID: address.addressID, email: address.email, key: unlockable))
                 }
             }
         }
         self.addressKeys = keys
+        self.signers = signers
+    }
+
+    /// Test seam: build directly from resolved keys (production always goes through `AccountData`).
+    init(addressKeys: [UnlockableKey], signers: [DriveCryptoSigner]) {
+        self.addressKeys = addressKeys
+        self.signers = signers
     }
 
     // MARK: - Ring building
 
-    private func unlockedKey(_ k: UnlockableKey) throws -> CryptoKey {
+    func unlockedKey(_ k: UnlockableKey) throws -> CryptoKey {
         var error: NSError?
         guard let key = CryptoGo.CryptoNewKeyFromArmored(k.armored, &error), error == nil else {
             throw DriveCryptoError.keyRing
@@ -46,7 +60,7 @@ final class DriveCrypto: @unchecked Sendable {
         return try key.unlock(k.passphrase.data(using: .utf8))
     }
 
-    private func ring(_ keys: [UnlockableKey]) throws -> CryptoKeyRing {
+    func ring(_ keys: [UnlockableKey]) throws -> CryptoKeyRing {
         var error: NSError?
         guard let ring = CryptoGo.CryptoNewKeyRing(nil, &error), error == nil else {
             throw DriveCryptoError.keyRing
@@ -58,7 +72,7 @@ final class DriveCrypto: @unchecked Sendable {
     /// Decrypts an armored PGP message (a share/node passphrase, or XAttr) with the given keys.
     /// `verifyKey: nil` - the reference clients treat signature verification as best-effort and
     /// non-fatal, and for streaming we don't have the material to verify, so we skip it.
-    private func decryptArmored(_ armored: String, with keys: [UnlockableKey]) throws -> CryptoPlainMessage {
+    func decryptArmored(_ armored: String, with keys: [UnlockableKey]) throws -> CryptoPlainMessage {
         let ring = try ring(keys)
         defer { ring.clearPrivateParams() }
         var error: NSError?

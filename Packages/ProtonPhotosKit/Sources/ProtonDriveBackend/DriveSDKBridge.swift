@@ -608,6 +608,14 @@ extension DriveSDKBridge: PhotoUploading {
         return UploadDedupePipeline(store: store, checker: service)
     }
 
+    /// The album WRITE service (create + add-photos crypto/REST). Built once at facade
+    /// composition; shares the bridge's session, crypto, and photos-share discovery.
+    nonisolated func makeAlbumWriteService() -> ProtonAlbumWriteService {
+        ProtonAlbumWriteService(session: driveSession, crypto: crypto) { [self] in
+            try await photosShareContext()
+        }
+    }
+
     func upload(
         _ request: PhotoUploadRequest,
         onProgress: @Sendable @escaping (UploadProgress) -> Void

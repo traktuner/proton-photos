@@ -135,6 +135,166 @@
         }
       }
     },
+    "albumsync.phase_idle": {
+      "extractionState": "manual",
+      "comment": "Album sync status: nothing running yet for this album.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not synced yet" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Noch nicht synchronisiert" } }
+      }
+    },
+    "albumsync.phase_scanning": {
+      "extractionState": "manual",
+      "comment": "Album sync status: reading the local album contents (no upload yet).",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Preparing album" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Album wird vorbereitet" } }
+      }
+    },
+    "albumsync.phase_backing_up": {
+      "extractionState": "manual",
+      "comment": "Album sync status: photos missing from the Proton library are being backed up (checking/hashing included - wording must stay honest, most work is often verification).",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backing up missing photos" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Fehlende Fotos werden gesichert" } }
+      }
+    },
+    "albumsync.phase_checking": {
+      "extractionState": "manual",
+      "comment": "Album sync status: comparing against the photos already in the Proton album - nothing is uploading.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Checking existing photos" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Bestehende Fotos werden geprüft" } }
+      }
+    },
+    "albumsync.phase_attaching": {
+      "extractionState": "manual",
+      "comment": "Album sync status: already-uploaded photos are being added to the Proton album (membership only, no media re-upload).",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Adding photos to album" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Fotos werden zum Album hinzugefügt" } }
+      }
+    },
+    "albumsync.phase_completed": {
+      "extractionState": "manual",
+      "comment": "Album sync status: the run finished with every attachable photo in the album.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Album synced" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Album synchronisiert" } }
+      }
+    },
+    "albumsync.phase_needs_attention": {
+      "extractionState": "manual",
+      "comment": "Album sync status: the run finished but some photos could not be backed up or added.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Needs attention" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Benötigt Aufmerksamkeit" } }
+      }
+    },
+    "albumsync.detail_backed_up %lld %lld": {
+      "extractionState": "manual",
+      "comment": "Album sync backup progress: %1$lld of %2$lld album photos are safe in the Proton library.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%1$lld of %2$lld backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%1$lld von %2$lld gesichert" } }
+      }
+    },
+    "albumsync.detail_attached %lld %lld": {
+      "extractionState": "manual",
+      "comment": "Album sync attach progress: %1$lld of %2$lld photos are in the Proton album.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%1$lld of %2$lld added to album" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%1$lld von %2$lld zum Album hinzugefügt" } }
+      }
+    },
+    "albumsync.detail_completed %lld": {
+      "extractionState": "manual",
+      "comment": "Album sync completed detail: how many of this album's photos are in the Proton album.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld photos in the album" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld Fotos im Album" } }
+      }
+    },
+    "albumsync.detail_needs_attention %lld": {
+      "extractionState": "manual",
+      "comment": "Album sync attention detail: photos that could not be backed up or added to the album.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld photos need attention" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld Fotos benötigen Aufmerksamkeit" } }
+      }
+    },
+    "albumsync.error_name_conflict": {
+      "extractionState": "manual",
+      "comment": "Album sync error: a Proton album with the same name already exists and the user has not decided yet whether to use it.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A Proton album with this name already exists. Choose whether to use it or cancel."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein Proton-Album mit diesem Namen existiert bereits. Wähle, ob es verwendet werden soll, oder brich ab."
+          }
+        }
+      }
+    },
+    "albumsync.error_store_unavailable": {
+      "extractionState": "manual",
+      "comment": "Album sync error: the local album-mapping database could not be opened; syncing without it could create duplicate albums.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album sync is unavailable because its local database could not be opened."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album-Synchronisierung ist nicht verfügbar, weil die lokale Datenbank nicht geöffnet werden konnte."
+          }
+        }
+      }
+    },
+    "albumsync.error_already_running": {
+      "extractionState": "manual",
+      "comment": "Album sync error: only one album syncs at a time in v1.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another album is already syncing. Try again when it finishes."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein anderes Album wird bereits synchronisiert. Versuche es danach erneut."
+          }
+        }
+      }
+    },
+    "albumsync.error_stopped": {
+      "extractionState": "manual",
+      "comment": "Album sync status after the user stops a run: everything done so far is durable; re-running converges.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync stopped. Progress is saved and the next run continues where it left off."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchronisierung gestoppt. Der Fortschritt bleibt erhalten, der nächste Lauf setzt fort."
+          }
+        }
+      }
+    },
     "brand.product_name": {
       "extractionState": "manual",
       "comment": "Visible product name. Keep as a single key so rebranding is one catalog edit plus bundle metadata.",

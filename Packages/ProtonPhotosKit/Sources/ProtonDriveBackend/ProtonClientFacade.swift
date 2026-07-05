@@ -1,6 +1,7 @@
 import Foundation
 import PhotosCore
 import AlbumsFeature
+import AlbumSyncCore
 import UploadCore
 
 /// High-level, app-facing composition of the Proton clients. Built once the SDK bridge is ready and
@@ -31,6 +32,9 @@ public final class ProtonClientFacade {
     public let accountDataDirectory: URL
     /// SQLite tuning for account-scoped stores opened by feature composition.
     public let accountDatabasePolicy: LibraryDatabasePolicy
+    /// Remote album operations for the universal album sync engine (create / children / attach) -
+    /// backed by the album write service; swappable for a future SDK adapter.
+    public let albumSyncRemoteOps: any AlbumSyncRemoteAlbumOps
 
     private init(
         backend: any PhotosBackend,
@@ -40,7 +44,8 @@ public final class ProtonClientFacade {
         photoUploader: any PhotoUploading,
         uploadIdentityResolver: (any UploadIdentityResolving)?,
         accountDataDirectory: URL,
-        accountDatabasePolicy: LibraryDatabasePolicy
+        accountDatabasePolicy: LibraryDatabasePolicy,
+        albumSyncRemoteOps: any AlbumSyncRemoteAlbumOps
     ) {
         self.backend = backend
         self.albums = albums
@@ -50,13 +55,25 @@ public final class ProtonClientFacade {
         self.uploadIdentityResolver = uploadIdentityResolver
         self.accountDataDirectory = accountDataDirectory
         self.accountDatabasePolicy = accountDatabasePolicy
+        self.albumSyncRemoteOps = albumSyncRemoteOps
     }
 
     static func make(bridge: DriveSDKBridge) -> ProtonClientFacade {
-        // Albums: list + set-cover via the bridge's direct REST; create/add still report unsupported.
+        // Albums: list + set-cover via the bridge's direct REST; create/add via the album write
+        // service (album-node crypto + photos album endpoints).
+        let albumWrite = bridge.makeAlbumWriteService()
         let albumBackend = HTTPAlbumBackend(
             listProvider: { try await bridge.albums().map(AlbumSummary.init) },
-            setCoverProvider: { albumID, photoUID in try await bridge.setAlbumCover(albumID: albumID, photoUID: photoUID) }
+            setCoverProvider: { albumID, photoUID in try await bridge.setAlbumCover(albumID: albumID, photoUID: photoUID) },
+            createProvider: { name in try await albumWrite.createAlbum(name: name) },
+            addProvider: { photoUIDs, albumID in
+                let result = try await albumWrite.attach(
+                    photoUIDs.map { AlbumAttachRequestItem(uid: $0) }, albumID: albumID
+                )
+                if result.failedCount > 0 {
+                    throw AlbumError.backend(result.firstFailureMessage ?? "add to album failed")
+                }
+            }
         )
         let albumsRepo = AlbumsRepository(backend: albumBackend)
 
@@ -90,7 +107,11 @@ public final class ProtonClientFacade {
             photoUploader: bridge,
             uploadIdentityResolver: identityResolver,
             accountDataDirectory: bridge.uploadManifestURL.deletingLastPathComponent(),
-            accountDatabasePolicy: bridge.uploadManifestPolicy
+            accountDatabasePolicy: bridge.uploadManifestPolicy,
+            albumSyncRemoteOps: ProtonAlbumSyncRemoteOps(
+                service: albumWrite,
+                listProvider: { try await bridge.albums().map(AlbumSummary.init) }
+            )
         )
     }
 }
