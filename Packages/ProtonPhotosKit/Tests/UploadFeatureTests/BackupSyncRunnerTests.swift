@@ -51,9 +51,14 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
     private var modifiedOverrides: [String: Date] = [:]
     /// Secondary filenames per source id - resolved entries become Live-Photo-style compounds.
     private var secondaryNames: [String: [String]] = [:]
+    private var metadataByIdentifier: [String: [PhotoUploadAdditionalMetadata]] = [:]
 
     func setSecondaries(_ names: [String], for identifier: String) {
         lock.withLock { secondaryNames[identifier] = names }
+    }
+
+    func setAdditionalMetadata(_ metadata: [PhotoUploadAdditionalMetadata], for identifier: String) {
+        lock.withLock { metadataByIdentifier[identifier] = metadata }
     }
 
     init(defaultModified: Date) {
@@ -95,6 +100,7 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
         case .standard:
             let modified = lock.withLock { modifiedOverrides[id] } ?? defaultModified
             let secondaries = lock.withLock { secondaryNames[id] } ?? []
+            let additionalMetadata = lock.withLock { metadataByIdentifier[id] } ?? []
             let snapshot = UploadBackupAssetSnapshot(
                 source: entry.source,
                 revision: UploadBackupRevision(date: modified),
@@ -116,6 +122,7 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
                 ),
                 descriptor: descriptor,
                 mediaType: "image/jpeg",
+                additionalMetadata: additionalMetadata,
                 captureDate: modified,
                 secondaries: secondaries.map { name in
                     BackupSecondaryResource(
@@ -130,7 +137,8 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
                             fileSize: 2,
                             modificationDate: modified
                         ),
-                        mediaType: "video/quicktime"
+                        mediaType: "video/quicktime",
+                        additionalMetadata: additionalMetadata
                     )
                 }
             )
@@ -662,6 +670,18 @@ final class BackupSyncRunnerTests: XCTestCase {
         )
         XCTAssertEqual(record?.isComplete, true)
         XCTAssertEqual(record?.resourceCount, 2)
+    }
+
+    func testPhotoMetadataFlowsToPrimaryAndSecondaryUploads() async throws {
+        let entry = seedEntry("metadata.heic")
+        let metadata = PhotoUploadAdditionalMetadata(name: "Media", utf8JsonValue: Data(#"{"Width":4032}"#.utf8))
+        resolver.setSecondaries(["metadata.mov"], for: entry.source.identifier)
+        resolver.setAdditionalMetadata([metadata], for: entry.source.identifier)
+
+        let runner = makeRunner()
+        _ = await runner.runUntilDrained()
+
+        XCTAssertEqual(uploader.requests.map(\.additionalMetadata), [[metadata], [metadata]])
     }
 
     func testPairedVideoFailureRetriesWithoutReuploadingPrimary() async throws {

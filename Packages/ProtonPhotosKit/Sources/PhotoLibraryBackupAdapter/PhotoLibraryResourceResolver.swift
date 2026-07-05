@@ -34,6 +34,7 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
         // modification date must NOT be the temp file's mtime (that would defeat manifest hash
         // reuse across re-exports), so it uses the asset's stable creation date.
         let captureDate = asset.creationDate ?? asset.modificationDate ?? Date()
+        let additionalMetadata = try PhotoLibraryUploadMetadataBuilder.metadata(for: asset)
         let primaryURL = try await export(primaryResource, uploadFilename: plan.primary.uploadFilename)
         let primaryDescriptor = descriptor(
             source: candidate.snapshot.source,
@@ -62,7 +63,8 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
                 ),
                 mediaType: item.mimeType
                     ?? SupportedMedia.mimeType(for: url)
-                    ?? "application/octet-stream"
+                    ?? "application/octet-stream",
+                additionalMetadata: additionalMetadata
             ))
         }
 
@@ -72,6 +74,7 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
             mediaType: plan.primary.mimeType
                 ?? SupportedMedia.mimeType(for: primaryURL)
                 ?? "application/octet-stream",
+            additionalMetadata: additionalMetadata,
             captureDate: captureDate,
             secondaries: secondaries
         )

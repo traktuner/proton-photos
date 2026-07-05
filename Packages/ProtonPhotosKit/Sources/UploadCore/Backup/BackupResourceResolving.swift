@@ -6,10 +6,16 @@ public struct BackupSecondaryResource: Sendable {
     /// `descriptor.source.resource` must be a secondary role (e.g. `.livePairedVideo`).
     public let descriptor: UploadResourceDescriptor
     public let mediaType: String
+    public let additionalMetadata: [PhotoUploadAdditionalMetadata]
 
-    public init(descriptor: UploadResourceDescriptor, mediaType: String) {
+    public init(
+        descriptor: UploadResourceDescriptor,
+        mediaType: String,
+        additionalMetadata: [PhotoUploadAdditionalMetadata] = []
+    ) {
         self.descriptor = descriptor
         self.mediaType = mediaType
+        self.additionalMetadata = additionalMetadata
     }
 }
 
@@ -24,6 +30,7 @@ public struct BackupResolvedResource: Sendable {
     /// Pipeline + upload input describing the compound's PRIMARY resource.
     public let descriptor: UploadResourceDescriptor
     public let mediaType: String
+    public let additionalMetadata: [PhotoUploadAdditionalMetadata]
     /// Best local capture-time evidence (file creation date for folder sync, PHAsset creation
     /// date for photo-library assets) - drives the remote timeline placement.
     public let captureDate: Date
@@ -35,12 +42,14 @@ public struct BackupResolvedResource: Sendable {
         candidate: UploadBackupAssetCandidate,
         descriptor: UploadResourceDescriptor,
         mediaType: String,
+        additionalMetadata: [PhotoUploadAdditionalMetadata] = [],
         captureDate: Date,
         secondaries: [BackupSecondaryResource] = []
     ) {
         self.candidate = candidate
         self.descriptor = descriptor
         self.mediaType = mediaType
+        self.additionalMetadata = additionalMetadata
         self.captureDate = captureDate
         self.secondaries = secondaries
     }

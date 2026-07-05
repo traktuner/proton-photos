@@ -330,6 +330,145 @@ public enum UploadQueuePresentation {
 
 // MARK: - Upload request (per file, library-only)
 
+/// One Proton photo extended-attribute fragment. `name` is the XAttr section name
+/// (for example `Media` or `iOS.photos`); `utf8JsonValue` is the UTF-8 JSON payload
+/// expected by the Proton SDK.
+public struct PhotoUploadAdditionalMetadata: Sendable, Equatable {
+    public let name: String
+    public let utf8JsonValue: Data
+
+    public init(name: String, utf8JsonValue: Data) {
+        self.name = name
+        self.utf8JsonValue = utf8JsonValue
+    }
+}
+
+/// Proton photo XAttr sections. The field names match Proton Drive's encrypted photo metadata
+/// schema; adapters supply the values, Core owns the JSON shape.
+public enum PhotoUploadMetadataEncoder {
+    public struct Location: Codable, Sendable, Equatable {
+        public let latitude: Double
+        public let longitude: Double
+
+        enum CodingKeys: String, CodingKey {
+            case latitude = "Latitude"
+            case longitude = "Longitude"
+        }
+
+        public init(latitude: Double, longitude: Double) {
+            self.latitude = latitude
+            self.longitude = longitude
+        }
+    }
+
+    public struct SubjectCoordinates: Codable, Sendable, Equatable {
+        public let top: Int
+        public let left: Int
+        public let bottom: Int
+        public let right: Int
+
+        enum CodingKeys: String, CodingKey {
+            case top = "Top"
+            case left = "Left"
+            case bottom = "Bottom"
+            case right = "Right"
+        }
+
+        public init(top: Int, left: Int, bottom: Int, right: Int) {
+            self.top = top
+            self.left = left
+            self.bottom = bottom
+            self.right = right
+        }
+    }
+
+    public struct Camera: Codable, Sendable, Equatable {
+        public let captureTime: String?
+        public let device: String?
+        public let orientation: Int?
+        public let subjectCoordinates: SubjectCoordinates?
+
+        enum CodingKeys: String, CodingKey {
+            case captureTime = "CaptureTime"
+            case device = "Device"
+            case orientation = "Orientation"
+            case subjectCoordinates = "SubjectCoordinates"
+        }
+
+        public init(
+            captureTime: String?,
+            device: String? = nil,
+            orientation: Int? = nil,
+            subjectCoordinates: SubjectCoordinates? = nil
+        ) {
+            self.captureTime = captureTime
+            self.device = device
+            self.orientation = orientation
+            self.subjectCoordinates = subjectCoordinates
+        }
+    }
+
+    public struct Media: Codable, Sendable, Equatable {
+        public let width: Int?
+        public let height: Int?
+        public let duration: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case width = "Width"
+            case height = "Height"
+            case duration = "Duration"
+        }
+
+        public init(width: Int?, height: Int?, duration: Double?) {
+            self.width = width
+            self.height = height
+            self.duration = duration
+        }
+    }
+
+    public struct IOSPhotos: Codable, Sendable, Equatable {
+        public let iCloudID: String?
+        public let modificationTime: String?
+
+        enum CodingKeys: String, CodingKey {
+            case iCloudID = "ICloudID"
+            case modificationTime = "ModificationTime"
+        }
+
+        public init(iCloudID: String?, modificationTime: String?) {
+            self.iCloudID = iCloudID
+            self.modificationTime = modificationTime
+        }
+    }
+
+    public static func metadata(
+        location: Location?,
+        camera: Camera,
+        media: Media,
+        iOSPhotos: IOSPhotos?
+    ) throws -> [PhotoUploadAdditionalMetadata] {
+        let encoder = JSONEncoder()
+        var output: [PhotoUploadAdditionalMetadata] = []
+        if let location {
+            output.append(try encode(location, name: "Location", encoder: encoder))
+        }
+        output.append(try encode(camera, name: "Camera", encoder: encoder))
+        output.append(try encode(media, name: "Media", encoder: encoder))
+        if let iOSPhotos {
+            output.append(try encode(iOSPhotos, name: "iOS.photos", encoder: encoder))
+        }
+        return output
+    }
+
+    private static func encode<T: Encodable>(
+        _ value: T,
+        name: String,
+        encoder: JSONEncoder
+    ) throws -> PhotoUploadAdditionalMetadata {
+        PhotoUploadAdditionalMetadata(name: name, utf8JsonValue: try encoder.encode(value))
+    }
+}
+
 /// The library-upload payload for one file. The album/cover orchestration lives in `UploadManager`;
 /// this is purely what the SDK needs to push bytes into the photo library.
 public struct PhotoUploadRequest: Sendable {
@@ -342,6 +481,9 @@ public struct PhotoUploadRequest: Sendable {
     public let captureTime: Date
     public let modificationDate: Date
     public let tags: [Int]
+    /// Proton-compatible encrypted metadata sections. File bytes still contain their original
+    /// embedded EXIF; these sections populate Proton's searchable/decrypted photo XAttrs.
+    public let additionalMetadata: [PhotoUploadAdditionalMetadata]
     /// 20-byte SHA-1 of the file, from the dedupe pipeline's hashing phase. The backend forwards
     /// it to the SDK for server-side integrity verification of the streamed bytes.
     public let expectedSHA1: Data?
@@ -361,6 +503,7 @@ public struct PhotoUploadRequest: Sendable {
         captureTime: Date,
         modificationDate: Date,
         tags: [Int],
+        additionalMetadata: [PhotoUploadAdditionalMetadata] = [],
         expectedSHA1: Data? = nil,
         mainPhotoUID: PhotoUID? = nil
     ) {
@@ -373,6 +516,7 @@ public struct PhotoUploadRequest: Sendable {
         self.captureTime = captureTime
         self.modificationDate = modificationDate
         self.tags = tags
+        self.additionalMetadata = additionalMetadata
         self.expectedSHA1 = expectedSHA1
         self.mainPhotoUID = mainPhotoUID
     }
@@ -390,6 +534,7 @@ public struct PhotoUploadRequest: Sendable {
             captureTime: captureTime,
             modificationDate: modificationDate,
             tags: tags,
+            additionalMetadata: additionalMetadata,
             expectedSHA1: identity.sha1Digest,
             mainPhotoUID: mainPhotoUID
         )

@@ -346,7 +346,7 @@ public actor BackupSyncRunner {
         preflight preflightResult: UploadPreflightResult
     ) async {
         let key = Self.key(entry)
-        var persistedState = transition(entry, from: state, to: .uploading)
+        let persistedState = transition(entry, from: state, to: .uploading)
         let token = UUID()
         inFlightTokens[key] = token
         defer { inFlightTokens[key] = nil }
@@ -360,7 +360,8 @@ public actor BackupSyncRunner {
             fileSize: resolved.descriptor.fileSize,
             captureTime: resolved.captureDate,
             modificationDate: resolved.descriptor.modificationDate,
-            tags: []
+            tags: [],
+            additionalMetadata: resolved.additionalMetadata
         ).applying(identity: preflightResult.identity)
 
         let uid: PhotoUID
@@ -466,6 +467,7 @@ public actor BackupSyncRunner {
                         captureTime: resolvedCaptureDate(for: secondary),
                         modificationDate: secondary.descriptor.modificationDate,
                         tags: [],
+                        additionalMetadata: secondary.additionalMetadata,
                         mainPhotoUID: primaryUID
                     ).applying(identity: result.identity)
                     let uid: PhotoUID

@@ -644,7 +644,9 @@ extension DriveSDKBridge: PhotoUploading {
                 mediaType: request.mediaType,
                 thumbnails: thumbnails,
                 tags: [],                       // let the server classify; avoids tag-mapping upload failures
-                additionalMetadata: [],
+                additionalMetadata: request.additionalMetadata.map {
+                    AdditionalMetadata(name: $0.name, utf8JsonValue: $0.utf8JsonValue)
+                },
                 // From the dedupe pipeline's hashing phase - the SDK verifies the streamed bytes
                 // against this digest server-side.
                 expectedSHA1: request.expectedSHA1,
