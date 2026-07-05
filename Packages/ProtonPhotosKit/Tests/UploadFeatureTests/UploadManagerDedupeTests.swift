@@ -77,18 +77,18 @@ final class UploadManagerDedupeTests: XCTestCase {
 
         let dup = try XCTUnwrap(items.first { $0.displayName == "dup.jpg" })
         let fresh = try XCTUnwrap(items.first { $0.displayName == "new.jpg" })
-        XCTAssertEqual(dup.state, .skippedDuplicate)
+        XCTAssertEqual(dup.state, .skipped(.activeDuplicate))
         XCTAssertEqual(fresh.state, .completed)
         XCTAssertEqual(uploader.startedOrder, ["corrected-new.jpg"], "duplicate bytes must never upload")
         XCTAssertEqual(completions.events.map(\.displayName), ["new.jpg"],
                        "skipped duplicates must not emit a completion event (no new node exists)")
 
-        let stats = await { () -> UploadQueueStats in
+        let stats = { () -> UploadQueueStats in
             var s = UploadQueueStats()
             for item in items {
                 switch item.state {
                 case .completed: s.completed += 1
-                case .skippedDuplicate: s.skippedDuplicates += 1
+                case let .skipped(reason) where reason.countsAsBackedUp: s.skippedDuplicates += 1
                 default: break
                 }
             }
@@ -128,6 +128,48 @@ final class UploadManagerDedupeTests: XCTestCase {
             return XCTFail("expected failed, got \(items[0].state)")
         }
         XCTAssertTrue(uploader.startedOrder.isEmpty, "a failed duplicate check must not upload blindly")
+    }
+
+    func testDraftDuplicateFailsRetryablyInsteadOfClaimingBackedUp() async throws {
+        let urls = try makeTempFiles(["draft.jpg"], in: tempDir)
+        let uploader = MockUploader()
+        let resolver = FakeIdentityResolver()
+        resolver.decisionsByFilename["draft.jpg"] = .skip(.draftExists, remoteLinkID: "draft-link")
+        let manager = UploadManager(uploader: uploader, identityResolver: resolver)
+
+        await manager.enqueueFiles(urls, destination: .library)
+        let items = await waitForAllTerminal(manager)
+
+        guard case let .failed(message) = items[0].state else {
+            return XCTFail("expected failed draft state, got \(items[0].state)")
+        }
+        XCTAssertFalse(message.isEmpty)
+        XCTAssertTrue(uploader.startedOrder.isEmpty, "a draft blocker must never upload blindly")
+        XCTAssertEqual(UploadQueuePresentation.rowActions(for: items[0], capabilities: .unavailable), [.retry])
+    }
+
+    func testRemoteDeletionSkipDoesNotCountAsBackedUpDuplicate() async throws {
+        let urls = try makeTempFiles(["deleted.jpg"], in: tempDir)
+        let uploader = MockUploader()
+        let resolver = FakeIdentityResolver()
+        resolver.decisionsByFilename["deleted.jpg"] = .skip(.deletedRemotely, remoteLinkID: "old-link")
+        let manager = UploadManager(uploader: uploader, identityResolver: resolver)
+
+        await manager.enqueueFiles(urls, destination: .library)
+        let items = await waitForAllTerminal(manager)
+
+        XCTAssertEqual(items[0].state, .skipped(.deletedRemotely))
+        XCTAssertTrue(uploader.startedOrder.isEmpty, "remote deletion policy must not restore bytes")
+        var stats = UploadQueueStats()
+        if case let .skipped(reason) = items[0].state {
+            if reason.countsAsBackedUp {
+                stats.skippedDuplicates += 1
+            } else {
+                stats.skippedRemoteDeletions += 1
+            }
+        }
+        XCTAssertEqual(stats.skippedDuplicates, 0)
+        XCTAssertEqual(stats.skippedRemoteDeletions, 1)
     }
 
     func testCancelDuringHashingCancelsWithoutUpload() async throws {
@@ -205,7 +247,7 @@ final class UploadManagerDedupeTests: XCTestCase {
         await manager.enqueueFiles(urls, destination: .library)
         let items = await waitForAllTerminal(manager)
 
-        XCTAssertEqual(items[0].state, .skippedDuplicate)
+        XCTAssertEqual(items[0].state, .skipped(.primaryAlreadyPresent))
         XCTAssertTrue(uploader.startedOrder.isEmpty)
     }
 }

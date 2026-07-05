@@ -263,7 +263,7 @@ final class UploadManagerTests: XCTestCase {
             UploadItem(id: UUID(), ordinal: 2, fileURL: url, displayName: "uploading.jpg",
                        mediaType: "image/jpeg", byteCount: 1, state: .uploading(progress: 0.2)),
             UploadItem(id: UUID(), ordinal: 3, fileURL: url, displayName: "duplicate.jpg",
-                       mediaType: "image/jpeg", byteCount: 1, state: .skippedDuplicate),
+                       mediaType: "image/jpeg", byteCount: 1, state: .skipped(.activeDuplicate)),
             UploadItem(id: UUID(), ordinal: 4, fileURL: url, displayName: "failed.jpg",
                        mediaType: "image/jpeg", byteCount: 1, state: .failed(message: "boom")),
         ]

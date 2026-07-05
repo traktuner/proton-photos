@@ -105,6 +105,36 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
         }
     }
 
+    @discardableResult
+    public func requeueStaleActive(before cutoff: Date, updatedAt: Date) -> Int {
+        lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                """
+                UPDATE backup_sync_queue SET
+                  state = CASE state
+                    WHEN 'checking' THEN 'discovered'
+                    WHEN 'hashing' THEN 'checking'
+                    WHEN 'duplicateChecking' THEN 'hashing'
+                    WHEN 'uploading' THEN 'queuedForUpload'
+                    WHEN 'finalizing' THEN 'queuedForUpload'
+                    ELSE state
+                  END,
+                  updated_at = ?
+                WHERE updated_at < ?
+                  AND state IN ('checking', 'hashing', 'duplicateChecking', 'uploading', 'finalizing');
+                """,
+                -1, &stmt, nil
+            ) == SQLITE_OK else { return 0 }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, updatedAt.timeIntervalSince1970)
+            sqlite3_bind_double(stmt, 2, cutoff.timeIntervalSince1970)
+            guard sqlite3_step(stmt) == SQLITE_DONE else { return 0 }
+            return Int(sqlite3_changes(db))
+        }
+    }
+
     public func updateState(
         source: UploadSourceIdentity,
         revision: UploadBackupRevision,

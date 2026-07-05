@@ -239,17 +239,25 @@ public actor UploadManager: UploadManaging {
                 transition(id, to: .hashing)
                 let result = try await identityResolver.resolve(descriptor)
                 if currentState(id) == .cancelled { finish(id); return }
-                if result.decision.skipsPrimaryUpload {
-                    // Already in the library (active/trashed/draft/manifest-known). For manual
-                    // single-file uploads a "missing secondaries" outcome also means the primary
-                    // itself is present, so nothing uploads. No album attach for skipped items -
-                    // there is no fresh PhotoUID and album add is unsupported anyway.
-                    transition(id, to: .skippedDuplicate)
+                switch result.decision {
+                case .upload:
+                    preflight = result
+                    effectiveRequest = request.applying(identity: result.identity)
+                case .uploadMissingSecondaries:
+                    // Manual uploads are single-resource compounds. If the policy reports missing
+                    // secondaries, the primary is already represented remotely and there is no
+                    // primary upload work for this queue item.
+                    transition(id, to: .skipped(.primaryAlreadyPresent))
+                    finish(id)
+                    return
+                case let .skip(reason, _):
+                    guard let skipReason = UploadSkipReason(duplicateReason: reason) else {
+                        throw UploadError.backend(reason.blockingMessage)
+                    }
+                    transition(id, to: .skipped(skipReason))
                     finish(id)
                     return
                 }
-                preflight = result
-                effectiveRequest = request.applying(identity: result.identity)
             }
 
             let uid = try await uploader.upload(effectiveRequest) { [weak self] progress in
@@ -456,7 +464,12 @@ public actor UploadManager: UploadManaging {
             case .queued: s.queued += 1
             case .preparing, .hashing, .uploading, .finalizing: s.active += 1
             case .completed: s.completed += 1
-            case .skippedDuplicate: s.skippedDuplicates += 1
+            case let .skipped(reason):
+                if reason.countsAsBackedUp {
+                    s.skippedDuplicates += 1
+                } else {
+                    s.skippedRemoteDeletions += 1
+                }
             case .failed: s.failed += 1
             case .cancelled: s.cancelled += 1
             case .paused: s.paused += 1
@@ -472,5 +485,35 @@ public actor UploadManager: UploadManaging {
 
     private func message(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+}
+
+private extension UploadSkipReason {
+    init?(duplicateReason: UploadDuplicateDecision.SkipReason) {
+        switch duplicateReason {
+        case .activeDuplicate:
+            self = .activeDuplicate
+        case .knownFromManifest:
+            self = .knownFromManifest
+        case .trashedDuplicate:
+            self = .trashedDuplicate
+        case .deletedRemotely:
+            self = .deletedRemotely
+        case .draftExists, .inconsistentRemoteState:
+            return nil
+        }
+    }
+}
+
+private extension UploadDuplicateDecision.SkipReason {
+    var blockingMessage: String {
+        switch self {
+        case .draftExists:
+            return L10n.string("upload.error_remote_draft")
+        case .inconsistentRemoteState:
+            return L10n.string("upload.error_remote_inconsistent")
+        case .activeDuplicate, .knownFromManifest, .trashedDuplicate, .deletedRemotely:
+            return L10n.string("upload.error_duplicate_check_blocked")
+        }
     }
 }

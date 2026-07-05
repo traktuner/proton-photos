@@ -55,6 +55,40 @@ public struct UploadDestination: Sendable, Equatable {
 
 // MARK: - Item state machine
 
+/// Why an upload queue item finished without uploading new bytes.
+public enum UploadSkipReason: Sendable, Equatable {
+    /// The active Proton library already contains the same photo.
+    case activeDuplicate
+    /// The local manifest already proved this exact resource is backed up.
+    case knownFromManifest
+    /// The primary photo is already present; no manual upload work remains.
+    case primaryAlreadyPresent
+    /// Proton reports the same photo in trash. Respect the user's deletion instead of restoring it.
+    case trashedDuplicate
+    /// Proton reports the same photo as deleted remotely. Respect the deletion instead of restoring it.
+    case deletedRemotely
+
+    public var countsAsBackedUp: Bool {
+        switch self {
+        case .activeDuplicate, .knownFromManifest, .primaryAlreadyPresent:
+            return true
+        case .trashedDuplicate, .deletedRemotely:
+            return false
+        }
+    }
+
+    public var label: String {
+        switch self {
+        case .activeDuplicate, .knownFromManifest, .primaryAlreadyPresent:
+            return L10n.string("upload.state_skipped_duplicate")
+        case .trashedDuplicate:
+            return L10n.string("upload.state_skipped_trashed")
+        case .deletedRemotely:
+            return L10n.string("upload.state_skipped_deleted")
+        }
+    }
+}
+
 /// The lifecycle of a single queued upload. Transitions are enforced by `UploadManager`.
 public enum UploadItemState: Sendable, Equatable {
     case queued
@@ -63,16 +97,15 @@ public enum UploadItemState: Sendable, Equatable {
     case uploading(progress: Double)
     case finalizing         // upload done, applying album membership
     case completed
-    /// The photo already exists in the Proton library (or its trash) - nothing was uploaded.
-    /// Terminal and successful from the user's perspective: their photo IS backed up.
-    case skippedDuplicate
+    /// Nothing was uploaded because the dedupe preflight resolved the item without new bytes.
+    case skipped(UploadSkipReason)
     case failed(message: String)
     case cancelled
     case paused
 
     public var isTerminal: Bool {
         switch self {
-        case .completed, .skippedDuplicate, .failed, .cancelled: return true
+        case .completed, .skipped, .failed, .cancelled: return true
         default: return false
         }
     }
@@ -93,7 +126,7 @@ public enum UploadItemState: Sendable, Equatable {
         case let .uploading(p): return L10n.string("upload.state_uploading \(Int(p * 100))")
         case .finalizing: return L10n.string("upload.state_finalizing")
         case .completed: return L10n.string("upload.state_completed")
-        case .skippedDuplicate: return L10n.string("upload.state_skipped_duplicate")
+        case let .skipped(reason): return reason.label
         case let .failed(message): return L10n.string("upload.state_failed \(message)")
         case .cancelled: return L10n.string("upload.state_cancelled")
         case .paused: return L10n.string("upload.state_paused")
@@ -180,6 +213,8 @@ public struct UploadQueueStats: Sendable, Equatable {
     public var completed = 0
     /// Items resolved as already-in-library duplicates - done without uploading bytes.
     public var skippedDuplicates = 0
+    /// Items skipped because Proton says the matching remote item was deleted or trashed.
+    public var skippedRemoteDeletions = 0
     public var failed = 0
     public var cancelled = 0
     public var paused = 0
@@ -187,11 +222,13 @@ public struct UploadQueueStats: Sendable, Equatable {
 
     public init() {}
 
-    public var total: Int { queued + active + completed + skippedDuplicates + failed + cancelled + paused }
+    public var total: Int {
+        queued + active + completed + skippedDuplicates + skippedRemoteDeletions + failed + cancelled + paused
+    }
 
     public var totalProgress: Double {
         guard total > 0 else { return 0 }
-        return Double(completed + skippedDuplicates) / Double(total)
+        return Double(completed + skippedDuplicates + skippedRemoteDeletions) / Double(total)
     }
 
     public var summaryText: String {
@@ -209,6 +246,7 @@ public struct UploadPreparationStatus: Sendable, Equatable {
     public var checking = 0
     public var checked = 0
     public var skippedDuplicates = 0
+    public var skippedRemoteDeletions = 0
     public var failed = 0
     public var cancelled = 0
     public var paused = 0
@@ -225,9 +263,13 @@ public struct UploadPreparationStatus: Sendable, Equatable {
                 checking += 1
             case .uploading, .finalizing, .completed:
                 checked += 1
-            case .skippedDuplicate:
+            case let .skipped(reason):
                 checked += 1
-                skippedDuplicates += 1
+                if reason.countsAsBackedUp {
+                    skippedDuplicates += 1
+                } else {
+                    skippedRemoteDeletions += 1
+                }
             case .failed:
                 failed += 1
             case .cancelled:
@@ -276,13 +318,13 @@ public enum UploadQueuePresentation {
             return capabilities.supportsPauseResume ? [.pause, .cancel] : [.cancel]
         case .paused:
             return [.resume]
-        case .completed, .skippedDuplicate, .finalizing:
+        case .completed, .skipped, .finalizing:
             return []
         }
     }
 
     public static func canClearFinished(_ stats: UploadQueueStats) -> Bool {
-        stats.completed + stats.skippedDuplicates + stats.failed + stats.cancelled > 0
+        stats.completed + stats.skippedDuplicates + stats.skippedRemoteDeletions + stats.failed + stats.cancelled > 0
     }
 }
 

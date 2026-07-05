@@ -101,9 +101,9 @@ public struct UploadQueuePanel: View {
         switch item.state {
         case .completed:
             Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-        case .skippedDuplicate:
-            // Done without uploading: the photo already exists in the library.
-            Image(systemName: "checkmark.circle").foregroundStyle(.green)
+        case let .skipped(reason):
+            Image(systemName: reason.countsAsBackedUp ? "checkmark.circle" : "slash.circle")
+                .foregroundStyle(reason.countsAsBackedUp ? .green : .secondary)
         case .failed:
             Image(systemName: item.partialSuccess ? "exclamationmark.triangle.fill" : "xmark.circle.fill")
                 .foregroundStyle(item.partialSuccess ? .yellow : .red)

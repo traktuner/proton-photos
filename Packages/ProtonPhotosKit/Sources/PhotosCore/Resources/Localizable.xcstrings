@@ -1223,6 +1223,42 @@
         }
       }
     },
+    "upload.state_skipped_trashed": {
+      "extractionState": "manual",
+      "comment": "Upload queue item state: Proton reports the matching remote photo in trash, so the app respects the deletion.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skipped (in Proton trash)"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersprungen (im Proton-Papierkorb)"
+          }
+        }
+      }
+    },
+    "upload.state_skipped_deleted": {
+      "extractionState": "manual",
+      "comment": "Upload queue item state: Proton reports the matching remote photo was deleted, so the app respects the deletion.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skipped (deleted remotely)"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersprungen (remote gelöscht)"
+          }
+        }
+      }
+    },
     "upload.state_uploading %lld": {
       "extractionState": "manual",
       "comment": "Upload progress. %lld is a percentage.",
@@ -1345,6 +1381,60 @@
           "stringUnit": {
             "state": "translated",
             "value": "%lld abgeschlossen · %lld aktiv · %lld fehlgeschlagen"
+          }
+        }
+      }
+    },
+    "upload.error_remote_draft": {
+      "extractionState": "manual",
+      "comment": "Upload duplicate check found a server draft and the item must be retried later.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A previous upload draft is still being finalized. Try again later."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein früherer Upload-Entwurf wird noch verarbeitet. Versuche es später erneut."
+          }
+        }
+      }
+    },
+    "upload.error_remote_inconsistent": {
+      "extractionState": "manual",
+      "comment": "Upload duplicate check returned an incomplete remote duplicate response.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proton reported an incomplete duplicate state. Try again later."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proton hat einen unvollständigen Duplikatstatus gemeldet. Versuche es später erneut."
+          }
+        }
+      }
+    },
+    "upload.error_duplicate_check_blocked": {
+      "extractionState": "manual",
+      "comment": "Fallback upload duplicate-check blocker message.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The duplicate check blocked this upload."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Duplikatprüfung hat diesen Upload blockiert."
           }
         }
       }

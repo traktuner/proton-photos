@@ -145,6 +145,61 @@ final class UploadBackupSyncQueueTests: XCTestCase {
         XCTAssertEqual(updated.lastError, "network")
     }
 
+    func testSQLiteQueueRequeuesStaleActiveStatesAfterCrash() throws {
+        let url = tempDir.appendingPathComponent(UploadBackupSyncQueueManifestStore.databaseFileName)
+        let store = try XCTUnwrap(UploadBackupSyncQueueManifestStore(url: url))
+        let old = Date(timeIntervalSince1970: 10)
+        let fresh = Date(timeIntervalSince1970: 90)
+        let recoveredAt = Date(timeIntervalSince1970: 100)
+        let cutoff = Date(timeIntervalSince1970: 50)
+
+        let staleStates: [(String, UploadBackupSyncQueueState, UploadBackupSyncQueueState)] = [
+            ("checking", .checking, .discovered),
+            ("hashing", .hashing, .checking),
+            ("duplicate", .duplicateChecking, .hashing),
+            ("uploading", .uploading, .queuedForUpload),
+            ("finalizing", .finalizing, .queuedForUpload),
+        ]
+        for (id, state, _) in staleStates {
+            store.upsert(UploadBackupSyncQueueEntry(
+                source: source(id),
+                revision: revision(10),
+                originalFilename: "\(id).heic",
+                state: state,
+                updatedAt: old
+            ))
+        }
+        store.upsert(UploadBackupSyncQueueEntry(
+            source: source("fresh-uploading"),
+            revision: revision(20),
+            originalFilename: "fresh.heic",
+            state: .uploading,
+            updatedAt: fresh
+        ))
+        store.upsert(UploadBackupSyncQueueEntry(
+            source: source("done"),
+            revision: revision(30),
+            originalFilename: "done.heic",
+            state: .completed,
+            updatedAt: old
+        ))
+
+        XCTAssertEqual(store.requeueStaleActive(before: cutoff, updatedAt: recoveredAt), staleStates.count)
+
+        for (id, _, expected) in staleStates {
+            let entry = try XCTUnwrap(store.entry(for: source(id), revision: revision(10)))
+            XCTAssertEqual(entry.state, expected)
+            XCTAssertEqual(entry.updatedAt, recoveredAt)
+        }
+        XCTAssertEqual(store.entry(for: source("fresh-uploading"), revision: revision(20))?.state, .uploading)
+        XCTAssertEqual(store.entry(for: source("done"), revision: revision(30))?.state, .completed)
+        XCTAssertEqual(
+            Set(store.nextRunnable(limit: 10).map(\.source.identifier)),
+            Set(staleStates.map { $0.0 }),
+            "recovered rows must become runnable again; stale uploading/finalizing may not disappear"
+        )
+    }
+
     func testSQLiteQueueResetsFutureSchema() throws {
         let url = tempDir.appendingPathComponent(UploadBackupSyncQueueManifestStore.databaseFileName)
         do {

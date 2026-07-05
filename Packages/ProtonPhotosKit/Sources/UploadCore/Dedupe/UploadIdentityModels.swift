@@ -179,12 +179,6 @@ public enum UploadDuplicateDecision: Sendable, Equatable {
     /// The primary photo exists remotely and stays untouched, but these secondary resources are
     /// missing and should be uploaded with `mainPhotoUid = primaryLinkID`.
     case uploadMissingSecondaries(primaryLinkID: String, missing: [UploadSourceIdentity])
-
-    /// True for every case that must NOT upload the primary resource.
-    public var skipsPrimaryUpload: Bool {
-        if case .upload = self { return false }
-        return true
-    }
 }
 
 // MARK: - Persistent manifest record

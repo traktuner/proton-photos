@@ -10,6 +10,8 @@ public enum UploadBackupSyncQueueState: String, Sendable, Codable, CaseIterable 
     case finalizing
     case alreadyBackedUp
     case completed
+    case sourceMissing
+    case blockedByDraft
     case failed
     case paused
 
@@ -18,7 +20,7 @@ public enum UploadBackupSyncQueueState: String, Sendable, Codable, CaseIterable 
     }
 
     public var isTerminalFailure: Bool {
-        self == .failed
+        self == .failed || self == .sourceMissing
     }
 
     public var isActive: Bool {
@@ -77,6 +79,8 @@ public struct UploadBackupSyncQueueSummary: Sendable, Equatable {
     public var active = 0
     public var alreadyBackedUp = 0
     public var uploaded = 0
+    public var sourceMissing = 0
+    public var blocked = 0
     public var failed = 0
     public var paused = 0
 
@@ -107,6 +111,10 @@ public struct UploadBackupSyncQueueSummary: Sendable, Equatable {
             alreadyBackedUp += count
         case .completed:
             uploaded += count
+        case .sourceMissing:
+            sourceMissing += count
+        case .blockedByDraft:
+            blocked += count
         case .failed:
             failed += count
         case .paused:
@@ -119,6 +127,8 @@ public protocol UploadBackupSyncQueueStore: Sendable {
     func upsert(_ entry: UploadBackupSyncQueueEntry)
     func entry(for source: UploadSourceIdentity, revision: UploadBackupRevision) -> UploadBackupSyncQueueEntry?
     func nextRunnable(limit: Int) -> [UploadBackupSyncQueueEntry]
+    @discardableResult
+    func requeueStaleActive(before cutoff: Date, updatedAt: Date) -> Int
     func updateState(
         source: UploadSourceIdentity,
         revision: UploadBackupRevision,
