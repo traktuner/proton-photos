@@ -11,8 +11,10 @@ public struct UploadSourceIdentity: Sendable, Hashable, Codable {
     public enum Kind: String, Sendable, Codable {
         /// A file on disk; `identifier` is the absolute file-system path.
         case fileURL
-        /// A PhotoKit asset resource; `identifier` is the `PHAsset.localIdentifier`. Defined now
-        /// so the future iOS auto-backup source shares the manifest without a schema change.
+        /// A photo-library asset resource. Platform adapters should prefer the provider's stable
+        /// cloud identifier when available and fall back to a local identifier only when they must.
+        /// Defined now so future iOS/iPadOS/macOS photo-library backup sources share the manifest
+        /// without a schema change.
         case photoLibraryAsset
     }
 
