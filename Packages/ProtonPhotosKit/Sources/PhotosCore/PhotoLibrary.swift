@@ -73,6 +73,7 @@ public protocol FavoritesProvider: Sendable {
 public protocol TrashProvider: Sendable {
     func trash(_ uids: [PhotoUID]) async throws
     func restore(_ uids: [PhotoUID]) async throws
+    func emptyTrash() async throws
 }
 
 /// A Proton photo album (user-created collection).

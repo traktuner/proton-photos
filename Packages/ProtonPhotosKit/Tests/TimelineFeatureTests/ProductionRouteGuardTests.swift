@@ -115,6 +115,29 @@ struct ProductionRouteGuardTests {
         #expect(!mainView.contains("try? await backend.restore"), "macOS must surface restore failures")
     }
 
+    @Test func emptyTrashUsesPhotosSdkAndIsSurfacedByBothShells() throws {
+        let provider = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotosCore/PhotoLibrary.swift"), encoding: .utf8)
+        #expect(provider.contains("func emptyTrash() async throws"))
+
+        let bridge = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/ProtonDriveBackend/DriveSDKBridge.swift"), encoding: .utf8)
+        let body = try Self.body(of: bridge, from: "func emptyTrash() async throws {", to: "    /// Builds timeline sections")
+        #expect(body.contains("photosClient.emptyTrash()"))
+        #expect(!body.contains("driveClient.emptyTrash"))
+
+        let photosClient = try String(contentsOf: Self.repoRoot.appendingPathComponent("Vendor/sdk-swift/Sources/Client/ProtonPhotosClient/ProtonPhotosClient.swift"), encoding: .utf8)
+        #expect(photosClient.contains("Proton_Drive_Sdk_DrivePhotosClientEmptyTrashRequest"))
+
+        let packaging = try String(contentsOf: Self.repoRoot.appendingPathComponent("Vendor/sdk-swift/Sources/Plumbing/Message+Packaging.swift"), encoding: .utf8)
+        #expect(packaging.contains(".drivePhotosClientEmptyTrash(request)"))
+
+        let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
+        #expect(mainView.contains("confirmEmptyTrash"))
+        #expect(mainView.contains("backend.emptyTrash()"))
+
+        let mobileCollections = try String(contentsOf: Self.repoRoot.appendingPathComponent("iOSApp/MobileAlbumsScreen.swift"), encoding: .utf8)
+        #expect(mobileCollections.contains("model.emptyTrash()"))
+    }
+
     @Test func locationCrawlYieldsOnVisiblePressureAndSharesTheCorePath() throws {
         // Both shells feed the Map from the SAME MediaLocationCore crawl: the shared probe, and a yield
         // predicate keyed to LIVE visible demand. Keying it to `hasPendingThumbnailWork` parks the GPS

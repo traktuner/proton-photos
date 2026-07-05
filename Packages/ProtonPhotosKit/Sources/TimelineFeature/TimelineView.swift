@@ -24,11 +24,13 @@ public struct TimelineView: View {
     private let favoriteUIDs: Set<PhotoUID>
     private let gridProfile: GridLevelProfile
     private let gridProfileResolver: TimelineGridProfileResolver?
+    private let gridFillOrder: GridFillOrder
 
     public init(
         model: TimelineViewModel,
         level: Binding<Int>? = nil,
         gridProfile: GridLevelProfile = TimelineGridProfiles.productionDefaultProfile,
+        gridFillOrder: GridFillOrder = .newestBottomTrailing,
         proxy: GridProxy<PhotoUID>? = nil,
         routeScrollGeneration: Int = 0,
         routeInitialScrollAnchor: GridScrollAnchor<PhotoUID>? = nil,
@@ -43,6 +45,7 @@ public struct TimelineView: View {
         _model = State(initialValue: model)
         _level = level ?? .constant(gridProfile.defaultLevel)
         self.gridProfile = gridProfile
+        self.gridFillOrder = gridFillOrder
         let productionConfig = TimelineGridProfileConfiguration.production
         self.gridProfileResolver = gridProfile == productionConfig.defaultProfile ? productionConfig.resolver : nil
         self.proxy = proxy
@@ -99,6 +102,7 @@ public struct TimelineView: View {
                             routeInitialScrollAnchor: routeInitialScrollAnchor,
                             gridProfile: gridProfile,
                             gridProfileResolver: gridProfileResolver,
+                            gridFillOrder: gridFillOrder,
                             onOpen: onOpen,
                             proxy: proxy,
                             selectionMode: selectionMode,

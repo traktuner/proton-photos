@@ -9,12 +9,14 @@ import TimelineCore
 /// layout/content-size path only after layout geometry is valid - never as an immediate scroll from SwiftUI.
 ///   - `.preserve`: keep the current scroll position (the default for incremental data updates).
 ///   - `.newest`: place the viewport at the newest (bottom) end exactly once (a route's first visit / launch).
+///   - `.oldest`: place bounded/read-order routes at the top-leading end exactly once.
 ///   - `.restore(anchor)`: re-pin a remembered photo anchor (returning to a previously-visited route so it
 ///     reopens exactly where the user left it).
 /// In every case, after the one-shot placement the user scrolls freely (no sticky pinning, no pullback).
 enum GridInitialViewport: Equatable {
     case preserve
     case newest
+    case oldest
     case restore(GridScrollAnchor<PhotoUID>)
 }
 
@@ -63,6 +65,7 @@ final class MetalGridScrollHost: NSView {
     private var pendingLevelEcho: Int?
     private var gridProfileResolver: TimelineGridProfileResolver?
     private var pendingResolvedGridProfile: GridLevelProfile?
+    private var fillOrder: GridFillOrder
 
     /// The leading obstruction inset (points) for the native floating sidebar. ONE value drives three things:
     /// (1) event hit-testing is declined for `x < eventLeadingInset` (those events reach the sidebar); (2) input
@@ -173,13 +176,15 @@ final class MetalGridScrollHost: NSView {
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
           gridProfile: GridLevelProfile,
+          fillOrder: GridFillOrder = .newestBottomTrailing,
           gridProfileResolver: TimelineGridProfileResolver? = nil) {
         guard let coordinator = MetalGridCoordinator(device: device, dataSource: dataSource, budget: budget,
-                                                     gridProfile: gridProfile,
+                                                     gridProfile: gridProfile, fillOrder: fillOrder,
                                                      memoryGovernor: .shared) else { return nil }
         self.coordinator = coordinator
         self.metalView = MetalGridView(frame: .zero, device: device)
         self.gridProfileResolver = gridProfileResolver
+        self.fillOrder = fillOrder
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
         wantsLayer = true
         layer?.backgroundColor = MetalGridPalette.background.cgColor   // uniform Apple-like dark surface
@@ -862,6 +867,14 @@ final class MetalGridScrollHost: NSView {
         _ = applyResolvedGridProfileIfNeeded(oldFrame: lastViewportScreenFrame, newFrame: viewportScreenFrame())
     }
 
+    func updateFillOrder(_ newFillOrder: GridFillOrder) {
+        guard fillOrder != newFillOrder else { return }
+        fillOrder = newFillOrder
+        coordinator.setFillOrder(newFillOrder)
+        applyContentSize(coordinator.contentSize())
+        requestFrame()
+    }
+
     private var canApplyResolvedGridProfile: Bool {
         window != nil
             && !inLiveResize
@@ -1194,6 +1207,8 @@ final class MetalGridScrollHost: NSView {
         switch policy {
         case .newest:
             targetY = maxY
+        case .oldest:
+            targetY = 0
         case .restore(let anchor):
             if let rect = coordinator.cellContentRect(forUID: anchor.itemID) {
                 targetY = min(max(0, rect.minY - anchor.topOffset), maxY)

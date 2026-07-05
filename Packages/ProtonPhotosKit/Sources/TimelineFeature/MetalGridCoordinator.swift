@@ -21,6 +21,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private var dataSource: MetalGridDataSource
     private let budget: MetalGridBudget
     private(set) var gridProfile: GridLevelProfile
+    private var fillOrder: GridFillOrder = .newestBottomTrailing
 
     /// Fired ONCE, the first time every visible cell is GPU-resident (the first fully-drawn frame). The shell
     /// holds the launch veil until this so it never lifts onto blank thumbnails. See `streamTextures`.
@@ -256,7 +257,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     }
 
     init?(device: MTLDevice, dataSource: MetalGridDataSource, budget: MetalGridBudget = .default,
-          gridProfile: GridLevelProfile, memoryGovernor: MemoryPressureGovernor? = nil) {
+          gridProfile: GridLevelProfile, fillOrder: GridFillOrder = .newestBottomTrailing,
+          memoryGovernor: MemoryPressureGovernor? = nil) {
         let texturePolicy = AppKitMetalGridTexturePolicies.policy(budget: budget)
         guard let renderer = MetalGridRenderer(device: device, clearColor: MetalGridPalette.clearColor),
               let cache = AppKitMetalGridTextureCacheFactory.makeCache(
@@ -268,8 +270,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         self.dataSource = dataSource
         self.budget = budget
         self.gridProfile = gridProfile
+        self.fillOrder = fillOrder
         self.level = gridProfile.defaultLevel
-        self.engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: gridProfile)
+        self.engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: gridProfile,
+                                           fillOrder: fillOrder)
         super.init()
         rebuildIndex()
         // Register the GPU texture cache with the injected memory governor (nil in tests — they never
@@ -288,6 +292,14 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         requestRedraw()
     }
 
+    func setFillOrder(_ newFillOrder: GridFillOrder) {
+        guard fillOrder != newFillOrder else { return }
+        fillOrder = newFillOrder
+        rebuildIndex()
+        onContentSizeChange?(contentSize())
+        requestRedraw()
+    }
+
     var totalItems: Int { dataSource.flatUIDs.count }
     var orderedUIDs: [PhotoUID] { dataSource.flatUIDs }
     var gridProfileID: String { gridProfile.id }
@@ -301,7 +313,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                           targetCommittedPhase: Int? = nil,
                           levelMapping: GridProfileRebaseLevelMapping = .closestVisualMatch) -> GridProfileRebaseResult? {
         guard newProfile.id != gridProfile.id else { return nil }
-        var targetEngine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: newProfile)
+        var targetEngine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: newProfile,
+                                                fillOrder: fillOrder)
         targetEngine.topInset = topBarInset
         let result = engine.rebasedScrollOffsetForProfileChange(GridProfileRebaseInput(
             targetEngine: targetEngine,
@@ -346,7 +359,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         for (i, uid) in dataSource.flatUIDs.enumerated() { map[uid] = i }
         indexByUID = map
         // Rebuild the canonical engine from the new section structure (single source of truth).
-        engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: gridProfile)
+        engine = SquareTileGridEngine(sectionCounts: dataSource.sectionCounts, profile: gridProfile,
+                                      fillOrder: fillOrder)
         engine.topInset = topBarInset             // a fresh engine resets topInset → re-apply the toolbar margin
         committedPhase = nil                      // a stale phase could point past the new data → canonical
     }

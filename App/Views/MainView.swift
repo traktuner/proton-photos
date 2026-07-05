@@ -72,6 +72,8 @@ struct MainView: View {
     @State private var pendingTrashItems: [PhotoItem] = []
     @State private var closeViewerAfterTrash = false
     @State private var confirmTrash = false
+    @State private var confirmEmptyTrash = false
+    @State private var isEmptyingTrash = false
     /// Set when a trash/restore API call fails AFTER the optimistic grid removal - the items are
     /// reloaded and the failure surfaced, never silently swallowed (the photo would look deleted while
     /// the server still has it outside the trash).
@@ -123,7 +125,7 @@ struct MainView: View {
                     // user-resizable - an AppKit quirk we accept; min==ideal==max did not change it.)
                     .navigationSplitViewColumnWidth(sidebarWidth)
             } detail: {
-                TimelineView(model: timelineModel, level: $level, proxy: gridProxy,
+                TimelineView(model: timelineModel, level: $level, gridFillOrder: gridFillOrder, proxy: gridProxy,
                              routeScrollGeneration: routeScrollGeneration,
                              routeInitialScrollAnchor: routeInitialScrollAnchor,
                              searchText: committedSearchText,
@@ -312,6 +314,14 @@ struct MainView: View {
             }
         } message: {
             Text(trashConfirmationMessage)
+        }
+        .confirmationDialog("trash.empty_title", isPresented: $confirmEmptyTrash) {
+            Button("trash.empty_confirm", role: .destructive) {
+                emptyTrash()
+            }
+            Button("action.cancel", role: .cancel) {}
+        } message: {
+            Text("trash.empty_message")
         }
         .confirmationDialog("export.confirm_many_title", isPresented: $confirmLargeExport) {
             Button("export.confirm_many_button") {
@@ -648,6 +658,10 @@ struct MainView: View {
         }
     }
 
+    private var gridFillOrder: GridFillOrder {
+        selection == .all && committedSearchText.isEmpty ? .newestBottomTrailing : .topLeading
+    }
+
     private func loadAlbums() async {
         albums = (try? await backend.albums()) ?? []
         uploadCoordinator.albums = albums          // feed the upload destination picker
@@ -882,6 +896,25 @@ struct MainView: View {
         }
     }
 
+    private func emptyTrash() {
+        let uids = Set(timelineModel.allItems.map(\.uid))
+        guard selection == .trash, !uids.isEmpty, !isEmptyingTrash else { return }
+        isEmptyingTrash = true
+        Task {
+            defer { isEmptyingTrash = false }
+            do {
+                try await backend.emptyTrash()
+                timelineModel.remove(uids)
+                selectedUIDs = []
+                selectionMode = false
+            } catch {
+                DebugLog.log("empty-trash: FAILED n=\(uids.count) - \(error)")
+                await timelineModel.retry()
+                trashActionFailureMessage = String(localized: "trash.empty_failed_message")
+            }
+        }
+    }
+
     private var selectedItems: [PhotoItem] { timelineModel.allItems.filter { selectedUIDs.contains($0.uid) } }
 
     private func scheduleSearchCommit(_ value: String) {
@@ -899,6 +932,8 @@ struct MainView: View {
         searchDebounceTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(280))
             guard !Task.isCancelled else { return }
+            routeInitialScrollAnchor = nil
+            routeScrollGeneration += 1
             committedSearchText = value
             searchDebounceTask = nil
         }
@@ -1075,6 +1110,17 @@ struct MainView: View {
                             .help("toolbar.set_album_cover")
                             .accessibilityLabel("toolbar.set_album_cover")
                     }
+                }
+            } else {
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { confirmEmptyTrash = true } label: {
+                        Label("trash.empty_button", systemImage: "trash.slash")
+                            .labelStyle(.iconOnly)
+                    }
+                    .disabled(timelineModel.allItems.isEmpty || isEmptyingTrash)
+                    .help("trash.empty_button")
+                    .accessibilityLabel("trash.empty_button")
                 }
             }
             // Pill 3 - zoom + aspect view controls.

@@ -398,6 +398,11 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         try await driveSession.restore(volumeID: root.volumeID, linkIDs: uids.map(\.nodeID))
     }
 
+    func emptyTrash() async throws {
+        _ = try await resolvePhotosRoot()
+        try await photosClient.emptyTrash()
+    }
+
     /// Builds timeline sections from direct-listing entries (tag filters + album contents).
     private static func group(_ entries: [PhotosListEntry], volumeID: String) -> [TimelineSection] {
         let burstMemberIDs = burstMemberLookup(from: entries)

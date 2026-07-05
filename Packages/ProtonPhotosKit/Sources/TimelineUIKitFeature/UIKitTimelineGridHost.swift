@@ -22,6 +22,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
     private let items: [PhotoItem]
     private let thumbnailFeed: UIKitThumbnailFeed
     private let level: Int?
+    private let fillOrder: GridFillOrder
     private let displayMode: TileContentDisplayMode
     private let selectionMode: Bool
     private let selectedUIDs: Set<PhotoUID>
@@ -43,6 +44,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         items: [PhotoItem],
         thumbnailFeed: UIKitThumbnailFeed,
         level: Int? = nil,
+        fillOrder: GridFillOrder = .newestBottomTrailing,
         displayMode: TileContentDisplayMode = .squareFillCrop,
         selectionMode: Bool = false,
         selectedUIDs: Set<PhotoUID> = [],
@@ -56,6 +58,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         self.items = items
         self.thumbnailFeed = thumbnailFeed
         self.level = level
+        self.fillOrder = fillOrder
         self.displayMode = displayMode
         self.selectionMode = selectionMode
         self.selectedUIDs = selectedUIDs
@@ -88,7 +91,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         view.onOpenPhoto = onOpenPhoto
         view.onToggleSelection = onToggleSelection
         view.onDragSelectionChanged = onDragSelectionChanged
-        view.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, displayMode: displayMode,
+        view.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, fillOrder: fillOrder, displayMode: displayMode,
                        selectionMode: selectionMode, selectedUIDs: selectedUIDs)
         view.setActive(isActive)
         return view
@@ -100,7 +103,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         uiView.onOpenPhoto = onOpenPhoto
         uiView.onToggleSelection = onToggleSelection
         uiView.onDragSelectionChanged = onDragSelectionChanged
-        uiView.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, displayMode: displayMode,
+        uiView.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, fillOrder: fillOrder, displayMode: displayMode,
                          selectionMode: selectionMode, selectedUIDs: selectedUIDs)
         uiView.setActive(isActive)
         // Retap of the active Fotos tab bumped the signal → scroll to the newest photos. Diffed against the
@@ -171,6 +174,7 @@ public final class UIKitTimelineGridHostView: UIView {
     let pinchOverviewSettleDuration: CFTimeInterval = 0.16
     var overviewDissolve: OverviewLayerDissolvePlan?
     var displayMode: TileContentDisplayMode = .squareFillCrop
+    private var fillOrder: GridFillOrder = .newestBottomTrailing
     /// Selection state, mirrored from SwiftUI each `configure`. In selection mode a tap toggles a cell instead of
     /// opening it, and the grid draws the shared selection decorations (blue outline + checkmark badge).
     var selectionMode = false
@@ -243,6 +247,7 @@ public final class UIKitTimelineGridHostView: UIView {
     private var cachedEngine: SquareTileGridEngine?
     private var cachedEngineItemCount = -1
     private var cachedEngineProfileID: String?
+    private var cachedEngineFillOrder: GridFillOrder = .newestBottomTrailing
     private var needsInitialNewestViewport = true
     var userHasScrolledTimeline = false
     var isApplyingProgrammaticScroll = false
@@ -297,6 +302,7 @@ public final class UIKitTimelineGridHostView: UIView {
         items: [PhotoItem],
         thumbnailFeed: UIKitThumbnailFeed,
         level: Int? = nil,
+        fillOrder: GridFillOrder = .newestBottomTrailing,
         displayMode: TileContentDisplayMode = .squareFillCrop,
         selectionMode: Bool = false,
         selectedUIDs: Set<PhotoUID> = []
@@ -319,6 +325,13 @@ public final class UIKitTimelineGridHostView: UIView {
         }
         let shouldOpenAtNewest = uidsChanged && !itemUIDs.isEmpty && !userHasScrolledTimeline
         self.thumbnailFeed = thumbnailFeed
+        if fillOrder != self.fillOrder {
+            self.fillOrder = fillOrder
+            committedPhase = nil
+            cachedEngine = nil
+            needsInitialNewestViewport = true
+            userHasScrolledTimeline = false
+        }
         // Subscribe to the feed's arrival wake ONCE per feed instance (a new session/route builds a new feed):
         // a background download landing on disk then re-warms + redraws this host, so a visible tile fills
         // without the user having to scroll a nudge further. Mirrors the macOS `installImageAvailabilityCallback`.
@@ -532,7 +545,7 @@ public final class UIKitTimelineGridHostView: UIView {
               !itemUIDs.isEmpty
         else { return }
 
-        let bottomY = maxContentOffsetY
+        let bottomY = fillOrder == .newestBottomTrailing ? maxContentOffsetY : 0
         isApplyingProgrammaticScroll = true
         scrollView.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)
         isApplyingProgrammaticScroll = false
@@ -600,13 +613,15 @@ public final class UIKitTimelineGridHostView: UIView {
     /// The canonical geometry engine for the current item count + profile, rebuilt only when either changes.
     /// A finger-scroll changes neither, so the engine (and its section arrays) is constructed once, not per frame.
     func currentEngine(profile: GridLevelProfile) -> SquareTileGridEngine {
-        if let cachedEngine, cachedEngineItemCount == items.count, cachedEngineProfileID == profile.id {
+        if let cachedEngine, cachedEngineItemCount == items.count, cachedEngineProfileID == profile.id,
+           cachedEngineFillOrder == fillOrder {
             return cachedEngine
         }
-        let engine = SquareTileGridEngine(sectionCounts: [items.count], profile: profile)
+        let engine = SquareTileGridEngine(sectionCounts: [items.count], profile: profile, fillOrder: fillOrder)
         cachedEngine = engine
         cachedEngineItemCount = items.count
         cachedEngineProfileID = profile.id
+        cachedEngineFillOrder = fillOrder
         return engine
     }
 

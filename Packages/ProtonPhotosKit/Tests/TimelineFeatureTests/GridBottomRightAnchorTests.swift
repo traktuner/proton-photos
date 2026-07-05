@@ -56,4 +56,26 @@ import GridCore
             }
         }
     }
+
+    @Test func topLeadingFillKeepsSparseRoutesInReadingOrder() {
+        let count = 8
+        let e = SquareTileGridEngine(sectionCounts: [count], profile: .testRegularTimeline, fillOrder: .topLeading)
+        for level in 0 ..< e.levelCount {
+            let cols = e.resolvedMetrics(level: level, width: width).columns
+            guard let first = e.locate(flatIndex: 0, level: level, width: width),
+                  let last = e.locate(flatIndex: count - 1, level: level, width: width)
+            else {
+                Issue.record("missing sparse-route placement at level \(level)")
+                continue
+            }
+            #expect(first.row == 0)
+            #expect(first.column == 0, "bounded routes start at top-leading")
+            #expect(last.row == (count - 1) / cols)
+            #expect(last.column == (count - 1) % cols, "bounded routes leave trailing empty cells, not leading empty cells")
+            for flat in 0 ..< count {
+                let loc = e.locate(flatIndex: flat, level: level, width: width)!
+                #expect(e.flatIndex(section: loc.section, row: loc.row, column: loc.column, level: level, width: width) == flat)
+            }
+        }
+    }
 }

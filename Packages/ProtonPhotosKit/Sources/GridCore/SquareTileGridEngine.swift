@@ -194,6 +194,15 @@ public struct GridSectionHeader: Equatable, Sendable {
     }
 }
 
+public enum GridFillOrder: Equatable, Sendable {
+    /// Timeline order for the main library: oldest is allowed to occupy the leading partial row, newest lands in
+    /// the bottom-trailing corner when the viewport opens at the latest end.
+    case newestBottomTrailing
+    /// Reading order for bounded routes such as Trash, albums, and smart filters: first item starts top-leading,
+    /// sparse final rows remain trailing-empty instead of floating to the right/top.
+    case topLeading
+}
+
 /// The complete renderable plan for ONE frame. The renderer converts `visibleSlots`/`visibleHeaders` to
 /// quads; it invents nothing. `slotSide`/`gap`/`pitch`/`columns` describe the RESOLVED grid (the grid that
 /// actually fills the width at this frame's metrics).
@@ -231,6 +240,7 @@ public struct GridZoomAnchor: Equatable, Sendable {
 public struct SquareTileGridEngine: Equatable, Sendable {
     /// Section order is the array order; element = that section's item count (section 0 first/top).
     public let sectionCounts: [Int]
+    public let fillOrder: GridFillOrder
     /// The SINGLE source of truth for grid density - one square ladder, one place to retune.
     public let levels: [GridLevelMetrics]
     private let configuredDefaultLevel: Int
@@ -247,10 +257,12 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// adapters set it to the toolbar/safe-area height plumbed from their host view.
     public var topInset: CGFloat = 0
 
-    public init(sectionCounts: [Int], levels: [GridLevelMetrics], defaultLevel: Int) {
+    public init(sectionCounts: [Int], levels: [GridLevelMetrics], defaultLevel: Int,
+                fillOrder: GridFillOrder = .newestBottomTrailing) {
         precondition(!levels.isEmpty, "SquareTileGridEngine requires at least one grid level")
         precondition(defaultLevel >= 0 && defaultLevel < levels.count, "SquareTileGridEngine defaultLevel is out of range")
         self.sectionCounts = sectionCounts
+        self.fillOrder = fillOrder
         self.levels = levels
         self.configuredDefaultLevel = defaultLevel
         var starts: [Int] = []
@@ -261,8 +273,10 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         self.totalItems = running
     }
 
-    public init(sectionCounts: [Int], profile: GridLevelProfile) {
-        self.init(sectionCounts: sectionCounts, levels: profile.levels, defaultLevel: profile.defaultLevel)
+    public init(sectionCounts: [Int], profile: GridLevelProfile,
+                fillOrder: GridFillOrder = .newestBottomTrailing) {
+        self.init(sectionCounts: sectionCounts, levels: profile.levels, defaultLevel: profile.defaultLevel,
+                  fillOrder: fillOrder)
     }
 
     public var levelCount: Int { levels.count }
@@ -486,8 +500,10 @@ public struct SquareTileGridEngine: Equatable, Sendable {
     /// empty slots before item 0, i.e. `column(globalIndex) = (columnPhase + globalIndex) % columns`. It lets
     /// a zoom commit land the anchor item in the cursor's column so the photo under the cursor does NOT fly
     /// across the grid on release (`SquareTileGridEngine.columnPhase(forItem:targetColumn:…)` derives it).
-    /// `nil` = the default BOTTOM-RIGHT anchoring: newest item in the corner, the only partial row is the
-    /// OLDEST at the top-left, no black on the right of the last row. With a cursor-aligned phase the partial
+    /// `nil` = the engine's configured fill order. The main timeline uses BOTTOM-RIGHT anchoring: newest item
+    /// in the corner, the only partial row is the OLDEST at the top-left, no black on the right of the last row.
+    /// Bounded routes use `.topLeading`: first item starts in the top-left and sparse final rows stay left.
+    /// With a cursor-aligned phase the partial
     /// row instead splits between the oldest (top-left) and newest (bottom-right) ends - see the report.
     func resolved(targetSide: CGFloat, gap: CGFloat, headerHeight: CGFloat, interSectionSpacing: CGFloat,
                   width: CGFloat, columnPhase: Int? = nil, fixedColumns: Int? = nil, maxColumns: Int? = nil) -> ResolvedGrid {
@@ -529,7 +545,12 @@ public struct SquareTileGridEngine: Equatable, Sendable {
                 rows = (count + emptyTopLeft + columns - 1) / columns
             } else {
                 rows = count > 0 ? (count + columns - 1) / columns : 0
-                emptyTopLeft = rows * columns - count                        // bottom-right anchoring (default)
+                switch fillOrder {
+                case .newestBottomTrailing:
+                    emptyTopLeft = rows * columns - count                    // bottom-right anchoring (main timeline)
+                case .topLeading:
+                    emptyTopLeft = 0
+                }
             }
             rowsArr[s] = rows
             emptyArr[s] = emptyTopLeft
@@ -662,7 +683,7 @@ public struct SquareTileGridEngine: Equatable, Sendable {
         let count = sectionCounts[section]
         let rows = grid.sectionRows[section]
         guard row < rows else { return nil }
-        let emptyTopLeft = rows * grid.columns - count
+        let emptyTopLeft = grid.sectionEmptyTopLeft[section]
         let slot = row * grid.columns + column
         let item = slot - emptyTopLeft
         guard item >= 0, item < count else { return nil }

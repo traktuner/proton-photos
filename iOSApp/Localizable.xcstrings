@@ -1054,6 +1054,108 @@
         }
       }
     },
+    "trash.empty_button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Papierkorb leeren"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empty Recently Deleted"
+          }
+        }
+      }
+    },
+    "trash.empty_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Papierkorb endgültig leeren?"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empty Recently Deleted?"
+          }
+        }
+      }
+    },
+    "trash.empty_message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Fotos und Videos in „Zuletzt gelöscht“ werden endgültig gelöscht. Das kann nicht rückgängig gemacht werden."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All photos and videos in Recently Deleted will be permanently deleted. This can’t be undone."
+          }
+        }
+      }
+    },
+    "trash.empty_confirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Endgültig löschen"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Permanently"
+          }
+        }
+      }
+    },
+    "trash.empty_failed_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Papierkorb konnte nicht geleert werden"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t Empty Recently Deleted"
+          }
+        }
+      }
+    },
+    "trash.empty_failed_message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„Zuletzt gelöscht“ konnte nicht geleert werden. Die Objekte sind weiterhin dort."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recently Deleted couldn’t be emptied. The items are still there."
+          }
+        }
+      }
+    },
     "settings.account_email" : {
       "extractionState" : "manual",
       "localizations" : {

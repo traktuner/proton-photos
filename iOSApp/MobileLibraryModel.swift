@@ -130,6 +130,11 @@ final class MobileLibraryModel {
         snapshot = snapshot.removingItems(withUIDs: uids)   // order-preserving, re-indexed
     }
 
+    func emptyTrash() async throws {
+        guard let backend else { return }
+        try await backend.emptyTrash()
+    }
+
     /// Position of `uid` in the ordered timeline, or nil — O(1) via the snapshot index (viewer paging, map/
     /// grid open), replacing the previous O(n) `firstIndex`.
     func index(of uid: PhotoUID) -> Int? { snapshot.index(of: uid) }

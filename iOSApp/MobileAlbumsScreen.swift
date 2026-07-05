@@ -146,6 +146,8 @@ private struct MobileFilterGridScreen: View {
     @State private var snapshot = TimelineSnapshot()
     @State private var phase: Phase = .loading
     @State private var viewer: MobileViewerPresentation?
+    @State private var confirmEmptyTrash = false
+    @State private var actionError: String?
 
     private enum Phase: Equatable { case loading, loaded, failed(String) }
 
@@ -166,13 +168,42 @@ private struct MobileFilterGridScreen: View {
                 if snapshot.isEmpty {
                     ContentUnavailableView(String(localized: "collections.filter_empty"), systemImage: "photo.on.rectangle")
                 } else if let feed = model.thumbnailFeed {
-                    UIKitTimelineGrid(items: snapshot.items, thumbnailFeed: feed, onOpenPhoto: open)
+                    UIKitTimelineGrid(items: snapshot.items, thumbnailFeed: feed, fillOrder: .topLeading, onOpenPhoto: open)
                         .ignoresSafeArea(edges: .bottom)
                 }
             }
         }
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if filter == .trash {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(role: .destructive) {
+                        confirmEmptyTrash = true
+                    } label: {
+                        Image(systemName: "trash.slash")
+                    }
+                    .disabled(snapshot.isEmpty || phase != .loaded)
+                    .accessibilityLabel(String(localized: "trash.empty_button"))
+                }
+            }
+        }
+        .confirmationDialog(String(localized: "trash.empty_title"), isPresented: $confirmEmptyTrash) {
+            Button(String(localized: "trash.empty_confirm"), role: .destructive) {
+                Task { await emptyTrash() }
+            }
+            Button(String(localized: "action.cancel"), role: .cancel) {}
+        } message: {
+            Text(String(localized: "trash.empty_message"))
+        }
+        .alert(String(localized: "trash.empty_failed_title"), isPresented: Binding(
+            get: { actionError != nil },
+            set: { if !$0 { actionError = nil } }
+        )) {
+            Button(String(localized: "action.ok"), role: .cancel) { actionError = nil }
+        } message: {
+            Text(actionError ?? "")
+        }
         .task(id: filter) { await load() }
         .fullScreenCover(item: $viewer) { presentation in
             MobilePhotoViewer(items: presentation.items, startIndex: presentation.index, libraryModel: model)
@@ -200,5 +231,16 @@ private struct MobileFilterGridScreen: View {
     private func open(_ item: PhotoItem) {
         guard let index = snapshot.index(of: item.uid) else { return }   // O(1)
         viewer = MobileViewerPresentation(index: index, items: snapshot.items)
+    }
+
+    @MainActor private func emptyTrash() async {
+        guard filter == .trash, !snapshot.isEmpty else { return }
+        do {
+            try await model.emptyTrash()
+            snapshot = TimelineSnapshot()
+            phase = .loaded
+        } catch {
+            actionError = String(localized: "trash.empty_failed_message")
+        }
     }
 }
