@@ -3,7 +3,13 @@ import Foundation
 import PhotosCore
 import ProtonAuth
 import ProtonCoreCryptoGoInterface
+import ProtonCoreCryptoPatchedGoImplementation
 @testable import ProtonDriveBackend
+
+/// The gopenpgp implementation is process-global and injected once (the apps do the same at startup).
+private let cryptoImplementationReady: Void = {
+    injectDefaultCryptoImplementation()
+}()
 
 /// A self-consistent Proton key chain generated fresh per suite run: address key → share key →
 /// photos-root key (+ root hash key) → one photo link. Lets the tests DECRYPT and VERIFY every
@@ -26,6 +32,7 @@ private struct AlbumCryptoFixture {
     let photoNameMessage: String
 
     init() throws {
+        _ = cryptoImplementationReady
         let boot = DriveCrypto(addressKeys: [], signers: [])
 
         func makeKey() throws -> UnlockableKey {

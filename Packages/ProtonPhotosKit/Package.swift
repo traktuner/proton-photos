@@ -98,6 +98,9 @@ let package = Package(
             dependencies: [
                 "ProtonDriveBackend", "ProtonAuth", "PhotosCore", "AlbumSyncCore",
                 .product(name: "ProtonCoreCryptoGoInterface", package: "protoncore_ios"),
+                // The gopenpgp implementation the app injects at startup - the crypto round-trip
+                // tests need a live implementation behind the CryptoGo interface.
+                .product(name: "ProtonCoreCryptoPatchedGoImplementation", package: "protoncore_ios"),
             ],
             swiftSettings: sdkBackendSwiftSettings
         ),
