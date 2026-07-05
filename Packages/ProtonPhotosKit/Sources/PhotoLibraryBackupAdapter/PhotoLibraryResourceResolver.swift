@@ -43,22 +43,26 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
         )
 
         var secondaries: [BackupSecondaryResource] = []
-        if let paired = plan.pairedVideo,
-           let pairedResource = PhotoKitAssetMapper.resource(for: paired.role, of: asset) {
-            let pairedURL = try await export(pairedResource, uploadFilename: paired.uploadFilename)
-            let pairedSource = UploadSourceIdentity(
+        for item in plan.secondaries {
+            guard let resource = PhotoKitAssetMapper.resource(for: item.role, ordinal: item.ordinal, of: asset) else {
+                throw UploadError.backend("missing PhotoKit resource \(item.role.rawValue)#\(item.ordinal)")
+            }
+            let url = try await export(resource, uploadFilename: item.uploadFilename)
+            let source = UploadSourceIdentity(
                 kind: .photoLibraryAsset,
                 identifier: entry.source.identifier,
-                resource: .livePairedVideo
+                resource: item.sourceResource
             )
             secondaries.append(BackupSecondaryResource(
                 descriptor: descriptor(
-                    source: pairedSource,
-                    fileURL: pairedURL,
-                    filename: paired.uploadFilename,
+                    source: source,
+                    fileURL: url,
+                    filename: item.uploadFilename,
                     stableDate: captureDate
                 ),
-                mediaType: paired.mimeType ?? "video/quicktime"
+                mediaType: item.mimeType
+                    ?? SupportedMedia.mimeType(for: url)
+                    ?? "application/octet-stream"
             ))
         }
 

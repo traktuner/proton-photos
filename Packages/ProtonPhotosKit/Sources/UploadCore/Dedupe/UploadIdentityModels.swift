@@ -18,12 +18,24 @@ public struct UploadSourceIdentity: Sendable, Hashable, Codable {
         case photoLibraryAsset
     }
 
-    /// The role of this resource within its compound (a Live Photo is one compound with a primary
-    /// photo + a paired video resource; a plain photo/video is a compound of one primary).
-    public enum Resource: String, Sendable, Codable {
-        case primary
-        /// A Live Photo's paired video (uploaded with `mainPhotoUid` pointing at the primary).
-        case livePairedVideo
+    /// The role of this resource within its compound. Kept as an open raw-value wrapper because
+    /// PhotoKit can expose more than the original Live-Photo pair: RAW alternates, edited renders,
+    /// adjustment data, proxy resources, and future resource types must be representable without a
+    /// schema migration or a platform-specific fork.
+    public struct Resource: RawRepresentable, Sendable, Hashable, Codable {
+        public let rawValue: String
+
+        public init(rawValue: String) {
+            self.rawValue = rawValue.isEmpty ? Self.primary.rawValue : rawValue
+        }
+
+        public static let primary = Resource(rawValue: "primary")
+        /// Backward-compatible identity for the classic Live Photo paired video.
+        public static let livePairedVideo = Resource(rawValue: "livePairedVideo")
+
+        public static func photoKit(role: String, ordinal: Int) -> Resource {
+            Resource(rawValue: "photoKit.\(role).\(max(0, ordinal))")
+        }
     }
 
     public let kind: Kind

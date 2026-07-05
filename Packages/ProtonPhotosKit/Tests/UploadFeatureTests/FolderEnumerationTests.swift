@@ -45,6 +45,7 @@ final class SupportedMediaTests: XCTestCase {
     func testImageAndVideoDetection() {
         XCTAssertEqual(SupportedMedia.mimeType(for: URL(fileURLWithPath: "/x/a.JPG")), "image/jpeg")
         XCTAssertEqual(SupportedMedia.mimeType(for: URL(fileURLWithPath: "/x/a.heic")), "image/heic")
+        XCTAssertEqual(SupportedMedia.mimeType(for: URL(fileURLWithPath: "/x/a.DNG")), "image/x-adobe-dng")
         XCTAssertEqual(SupportedMedia.kind(for: URL(fileURLWithPath: "/x/a.mov")), .video)
         XCTAssertEqual(SupportedMedia.mimeType(for: URL(fileURLWithPath: "/x/a.mp4")), "video/mp4")
     }

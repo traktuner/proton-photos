@@ -37,16 +37,36 @@ final class PhotoBackupPlannerTests: XCTestCase {
         XCTAssertNil(plan.pairedVideo)
     }
 
-    func testEditedPhotoExportsCurrentBytesUnderOriginalName() throws {
+    func testEditedPhotoExportsCurrentBytesAndPreservesOriginalResources() throws {
         let asset = info(resources: [
             .init(role: .originalPhoto, originalFilename: "IMG_1234.HEIC", mimeType: "image/heic"),
             .init(role: .fullSizePhoto, originalFilename: "FullSizeRender.jpg", mimeType: "image/jpeg"),
-            .init(role: .adjustmentEvidence, originalFilename: "Adjustments.plist", mimeType: nil),
+            .init(role: .adjustmentData, originalFilename: "Adjustments.plist", mimeType: "application/octet-stream"),
         ])
         let plan = try XCTUnwrap(PhotoBackupAssetPlanner.exportPlan(for: asset))
         XCTAssertEqual(plan.primary.role, .fullSizePhoto, "the CURRENT user-visible bytes are backed up")
-        XCTAssertEqual(plan.primary.uploadFilename, "IMG_1234.HEIC",
-                       "the remote library keeps the user-recognizable original name")
+        XCTAssertEqual(plan.primary.uploadFilename, "IMG_1234.jpg",
+                       "the edited render keeps the original basename but gets an honest extension")
+        XCTAssertEqual(
+            plan.secondaries.map { "\($0.role.rawValue):\($0.uploadFilename)" },
+            ["originalPhoto:IMG_1234.HEIC", "adjustmentData:Adjustments.plist"],
+            "the untouched original and edit metadata must remain attached to the compound"
+        )
+        XCTAssertEqual(PhotoBackupAssetPlanner.candidate(for: asset)?.snapshot.resourceCount, 3)
+    }
+
+    func testRawAlternateIsBackedUpAsPartOfTheCompound() throws {
+        let asset = info(resources: [
+            .init(role: .originalPhoto, originalFilename: "IMG_7777.HEIC", mimeType: "image/heic"),
+            .init(role: .alternatePhoto, originalFilename: "IMG_7777.DNG", mimeType: "image/x-adobe-dng"),
+        ])
+
+        let plan = try XCTUnwrap(PhotoBackupAssetPlanner.exportPlan(for: asset))
+
+        XCTAssertEqual(plan.primary.uploadFilename, "IMG_7777.HEIC")
+        XCTAssertEqual(plan.secondaries.map(\.uploadFilename), ["IMG_7777.DNG"])
+        XCTAssertEqual(plan.secondaries.map(\.sourceResource.rawValue), ["photoKit.alternatePhoto.0"])
+        XCTAssertEqual(PhotoBackupAssetPlanner.candidate(for: asset)?.snapshot.resourceCount, 2)
     }
 
     func testVideoPrefersCurrentRenderAndKeepsMOV() throws {
@@ -153,7 +173,7 @@ final class PhotoBackupPlannerTests: XCTestCase {
 
     func testAssetWithoutExportableResourceIsSkipped() {
         let broken = info(resources: [
-            .init(role: .adjustmentEvidence, originalFilename: "Adjustments.plist", mimeType: nil)
+            .init(role: .adjustmentData, originalFilename: "Adjustments.plist", mimeType: nil)
         ])
         XCTAssertNil(PhotoBackupAssetPlanner.candidate(for: broken))
     }

@@ -346,10 +346,10 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
         guard let kindRaw = columnText(stmt, kindColumn),
               let kind = UploadSourceIdentity.Kind(rawValue: kindRaw),
               let id = columnText(stmt, idColumn),
-              let resourceRaw = columnText(stmt, resourceColumn),
-              let resource = UploadSourceIdentity.Resource(rawValue: resourceRaw) else {
+              let resourceRaw = columnText(stmt, resourceColumn) else {
             return nil
         }
+        let resource = UploadSourceIdentity.Resource(rawValue: resourceRaw)
         return UploadSourceIdentity(kind: kind, identifier: id, resource: resource)
     }
 

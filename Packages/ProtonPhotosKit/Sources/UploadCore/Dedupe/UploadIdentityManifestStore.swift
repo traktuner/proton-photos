@@ -180,10 +180,10 @@ public final class UploadIdentityManifestStore: UploadIdentityStore, @unchecked 
                   let kindRaw = columnText(stmt, 0),
                   let kind = UploadSourceIdentity.Kind(rawValue: kindRaw),
                   let identifier = columnText(stmt, 1),
-                  let resourceRaw = columnText(stmt, 2),
-                  let resource = UploadSourceIdentity.Resource(rawValue: resourceRaw) else {
+                  let resourceRaw = columnText(stmt, 2) else {
                 return nil
             }
+            let resource = UploadSourceIdentity.Resource(rawValue: resourceRaw)
             return UploadIdentityRecord(
                 source: UploadSourceIdentity(kind: kind, identifier: identifier, resource: resource),
                 filename: columnText(stmt, 3) ?? "",

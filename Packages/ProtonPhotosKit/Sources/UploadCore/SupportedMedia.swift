@@ -17,6 +17,7 @@ public enum SupportedMedia {
         "png":  (.image, "image/png"),
         "heic": (.image, "image/heic"),
         "heif": (.image, "image/heif"),
+        "dng":  (.image, "image/x-adobe-dng"),
         "tif":  (.image, "image/tiff"),
         "tiff": (.image, "image/tiff"),
         "webp": (.image, "image/webp"),
