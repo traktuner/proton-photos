@@ -72,8 +72,11 @@ let package = Package(
         // the single source of truth for package strings.
         .target(name: "PhotosCore", resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "PhotosCoreTests", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
-        .target(name: "DesignSystemCore", swiftSettings: disableDynamicActorIsolation),
-        .target(name: "DesignSystemAppKitAdapter", dependencies: ["DesignSystemCore"], resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
+        // DesignSystemCore owns the shared branding assets (Resources/Branding.xcassets) - the
+        // loading mark is one SwiftUI view used verbatim by macOS (launch veil) and iOS (library
+        // loading screen).
+        .target(name: "DesignSystemCore", resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "DesignSystemAppKitAdapter", dependencies: ["DesignSystemCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "DesignSystem", dependencies: ["DesignSystemCore", "DesignSystemAppKitAdapter"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "ProtonAuth", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "ProtonAuthTests", dependencies: ["ProtonAuth"], swiftSettings: disableDynamicActorIsolation),

@@ -466,7 +466,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             }
         }
 
-        for file in ["ProtonComponents.swift", "ProtonColors.swift"] {
+        for file in ["ProtonComponents.swift", "ProtonColors.swift", "LoadingMark.swift"] {
             if !FileManager.default.fileExists(atPath: coreRoot.appendingPathComponent(file).path) {
                 violations.append("DesignSystemCore/\(file): missing shared SwiftUI file")
             }
@@ -474,15 +474,18 @@ final class CoreArchitectureGateTests: XCTestCase {
         if !FileManager.default.fileExists(atPath: appKitRoot.appendingPathComponent("LoadingVeil.swift").path) {
             violations.append("DesignSystemAppKitAdapter/LoadingVeil.swift: missing AppKit launch-veil adapter")
         }
-        if !FileManager.default.fileExists(atPath: appKitRoot.appendingPathComponent("Resources").path) {
-            violations.append("DesignSystemAppKitAdapter/Resources: branding assets must live with the adapter that uses them")
+        // The branding assets live with the SHARED loading mark (DesignSystemCore) - the mark is one
+        // SwiftUI implementation used verbatim by the macOS launch veil and the iOS loading screen.
+        if !FileManager.default.fileExists(atPath: coreRoot.appendingPathComponent("Resources").path) {
+            violations.append("DesignSystemCore/Resources: branding assets must live with the shared loading mark")
         }
 
         let coreFiles = try swiftFiles(in: coreRoot)
         for file in coreFiles {
             let source = try String(contentsOf: file, encoding: .utf8)
             let code = stripCommentsAndStringLiterals(from: source)
-            for token in ["NSViewRepresentable", "NSVisualEffectView", "NSView", "FrostedGlassBackground", "LoadingMark"] where contains(token, in: code) {
+            // The mark itself is shared; only the genuinely-AppKit veil surface must stay out of core.
+            for token in ["NSViewRepresentable", "NSVisualEffectView", "NSView", "FrostedGlassBackground"] where contains(token, in: code) {
                 violations.append("DesignSystemCore/\(file.lastPathComponent): AppKit launch-veil symbol leaked into shared UI core (\(token))")
             }
         }

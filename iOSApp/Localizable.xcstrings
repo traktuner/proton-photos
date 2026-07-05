@@ -900,40 +900,6 @@
         }
       }
     },
-    "loading.preparing_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ihre Fotos werden vorbereitet …"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Preparing your photos…"
-          }
-        }
-      }
-    },
-    "loading.updating_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ihre Mediathek wird aktualisiert …"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Updating your library…"
-          }
-        }
-      }
-    },
     "login.footer" : {
       "extractionState" : "manual",
       "localizations" : {
