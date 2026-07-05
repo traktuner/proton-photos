@@ -18,17 +18,38 @@ public final class ProtonClientFacade {
     public let uploads: UploadManager
     /// Main-actor observable the upload UI binds to.
     public let uploadCoordinator: UploadCoordinator
+    /// The raw upload transport (the SDK bridge) for the backup sync runner - shares the exact
+    /// upload semantics with the manual queue.
+    public let photoUploader: any PhotoUploading
+    /// The ONE dedupe pipeline instance for this account, shared by manual uploads and backup
+    /// sync so both see the same manifest and the same cached remote view. Nil only when the
+    /// manifest database could not open - manual uploads then run without dedupe, but backup
+    /// sync must NOT start (it would risk double uploads).
+    public let uploadIdentityResolver: (any UploadIdentityResolving)?
+    /// Per-account data directory (holds `library-v1.sqlite` + upload manifests). Backup sync
+    /// stores live here too, so the sign-out purge covers them wholesale.
+    public let accountDataDirectory: URL
+    /// SQLite tuning for account-scoped stores opened by feature composition.
+    public let accountDatabasePolicy: LibraryDatabasePolicy
 
     private init(
         backend: any PhotosBackend,
         albums: AlbumsRepository,
         uploads: UploadManager,
-        uploadCoordinator: UploadCoordinator
+        uploadCoordinator: UploadCoordinator,
+        photoUploader: any PhotoUploading,
+        uploadIdentityResolver: (any UploadIdentityResolving)?,
+        accountDataDirectory: URL,
+        accountDatabasePolicy: LibraryDatabasePolicy
     ) {
         self.backend = backend
         self.albums = albums
         self.uploads = uploads
         self.uploadCoordinator = uploadCoordinator
+        self.photoUploader = photoUploader
+        self.uploadIdentityResolver = uploadIdentityResolver
+        self.accountDataDirectory = accountDataDirectory
+        self.accountDatabasePolicy = accountDatabasePolicy
     }
 
     static func make(bridge: DriveSDKBridge) -> ProtonClientFacade {
@@ -43,10 +64,13 @@ public final class ProtonClientFacade {
         // the universal dedupe pipeline (hash → duplicate check → skip/upload), so every upload
         // path shares ONE duplicate semantic.
         let attaching = AlbumAttachingAdapter(albums: albumsRepo)
+        // ONE pipeline instance for the whole account: manual uploads and backup sync must share
+        // the manifest and the cached remote duplicate view, or their skip decisions could drift.
+        let identityResolver = bridge.makeUploadIdentityResolver()
         let manager = UploadManager(
             uploader: bridge,
             albums: attaching,
-            identityResolver: bridge.makeUploadIdentityResolver(),
+            identityResolver: identityResolver,
             maxConcurrent: 3
         )
 
@@ -58,7 +82,15 @@ public final class ProtonClientFacade {
             canSetAlbumCover: albumsRepo.capabilities.canSetCover
         )
 
-        return ProtonClientFacade(backend: bridge, albums: albumsRepo,
-                                  uploads: manager, uploadCoordinator: coordinator)
+        return ProtonClientFacade(
+            backend: bridge,
+            albums: albumsRepo,
+            uploads: manager,
+            uploadCoordinator: coordinator,
+            photoUploader: bridge,
+            uploadIdentityResolver: identityResolver,
+            accountDataDirectory: bridge.uploadManifestURL.deletingLastPathComponent(),
+            accountDatabasePolicy: bridge.uploadManifestPolicy
+        )
     }
 }

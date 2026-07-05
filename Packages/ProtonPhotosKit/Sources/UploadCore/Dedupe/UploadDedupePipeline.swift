@@ -25,6 +25,9 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
     private var duplicateCache: [String: [RemotePhotoDuplicate]] = [:]
     /// In-flight lookups, one entry per name hash, so concurrent items never double-query.
     private var inFlight: [String: Task<[String: [RemotePhotoDuplicate]], any Error>] = [:]
+    /// Bumped by `invalidateCachedRemoteState` so lookups that were already in flight when the
+    /// view was invalidated cannot repopulate the cache with pre-invalidation data.
+    private var cacheGeneration = 0
 
     public init(
         store: any UploadIdentityStore,
@@ -135,11 +138,23 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
         return UploadPreflightResult(identity: identity, decision: decision)
     }
 
+    /// Drops the cached remote view (and detaches in-flight lookups) so the next `resolve`
+    /// re-queries the server. Called after failed/cancelled upload attempts and before
+    /// draft-blocked re-checks - the moments where the server may know more than the cache.
+    public func invalidateCachedRemoteState() async {
+        cacheGeneration += 1
+        duplicateCache.removeAll()
+        // Don't cancel running lookups (their callers still get server truth as of their start),
+        // but stop new callers from joining them and stop their results from repopulating the
+        // invalidated cache (guarded by `cacheGeneration` in `lookup`).
+        inFlight.removeAll()
+    }
+
     /// Batch-prefetch for a fresh enqueue: computes name hashes (no content hashing) and queries
     /// the duplicates endpoint in Proton-sized chunks, so per-item `resolve` calls become cache
     /// hits. Clears the previous batch's remote view first - every enqueue sees fresh state.
     public func prime(_ descriptors: [UploadResourceDescriptor]) async {
-        duplicateCache.removeAll()
+        await invalidateCachedRemoteState()
         guard let epoch = try? await checker.hashKeyEpoch() else { return }
 
         var pending: [String] = []
@@ -210,6 +225,7 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
 
     private func lookup(batch nameHashes: [String]) async throws -> [String: [RemotePhotoDuplicate]] {
         let checker = self.checker
+        let generation = cacheGeneration
         let task = Task { () -> [String: [RemotePhotoDuplicate]] in
             let items = try await checker.findDuplicates(nameHashes: nameHashes)
             // Every requested hash gets an entry - [] distinguishes "server says free" from
@@ -223,7 +239,10 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
             for hash in nameHashes where inFlight[hash] == task { inFlight[hash] = nil }
         }
         let grouped = try await task.value
-        for (hash, items) in grouped { duplicateCache[hash] = items }
+        // A view invalidated while this lookup ran must stay invalidated - the result predates it.
+        if generation == cacheGeneration {
+            for (hash, items) in grouped { duplicateCache[hash] = items }
+        }
         return grouped
     }
 }

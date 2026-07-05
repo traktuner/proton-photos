@@ -315,7 +315,9 @@ final class ProjectHygieneTests: XCTestCase {
         for required in [
             "com.apple.security.app-sandbox",
             "com.apple.security.network.client",
-            "com.apple.security.files.user-selected.read-write"
+            "com.apple.security.files.user-selected.read-write",
+            // Folder backup persists the user's chosen folders as security-scoped bookmarks.
+            "com.apple.security.files.bookmarks.app-scope"
         ] {
             XCTAssertEqual(plist[required] as? Bool, true, "missing required entitlement \(required)")
         }

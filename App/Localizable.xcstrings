@@ -1,6 +1,161 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.backup_tab": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backup" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Backup" } }
+      }
+    },
+    "settings.backup_folders_section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Folders" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Ordner" } }
+      }
+    },
+    "settings.backup_no_folders": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No folders selected yet. Added folders are backed up to Proton Photos, encrypted." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Noch keine Ordner ausgewählt. Hinzugefügte Ordner werden verschlüsselt in Proton Photos gesichert." } }
+      }
+    },
+    "settings.backup_add_folder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Add Folder…" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Ordner hinzufügen…" } }
+      }
+    },
+    "settings.backup_add_folder_prompt": {
+      "extractionState": "manual",
+      "comment": "Confirm button of the folder picker panel.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Back Up Folder" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Ordner sichern" } }
+      }
+    },
+    "settings.backup_folder_stale": {
+      "extractionState": "manual",
+      "comment": "Shown under a folder whose sandbox bookmark no longer resolves.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Access must be renewed - please add this folder again" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Zugriff muss erneuert werden - bitte Ordner erneut hinzufügen" } }
+      }
+    },
+    "settings.backup_status_section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backup status" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Backup-Status" } }
+      }
+    },
+    "settings.backup_unavailable": {
+      "extractionState": "manual",
+      "comment": "Shown when the duplicate-protection store could not be opened; backup is disabled rather than risking double uploads.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backup is unavailable because duplicate protection could not be initialized." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Backup ist nicht verfügbar, weil der Duplikatschutz nicht initialisiert werden konnte." } }
+      }
+    },
+    "settings.backup_sync_now": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Back up now" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Jetzt sichern" } }
+      }
+    },
+    "settings.backup_stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Stop" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Stoppen" } }
+      }
+    },
+    "settings.backup_status_idle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ready" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Bereit" } }
+      }
+    },
+    "settings.backup_status_checking %@": {
+      "extractionState": "manual",
+      "comment": "%@ is the file currently being checked. Deliberately says 'checking', never 'hashing'.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Checking: %@" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Wird geprüft: %@" } }
+      }
+    },
+    "settings.backup_status_checking_generic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Checking files before upload…" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Dateien werden geprüft…" } }
+      }
+    },
+    "settings.backup_status_uploading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backing up…" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Wird gesichert…" } }
+      }
+    },
+    "settings.backup_status_pending %lld": {
+      "extractionState": "manual",
+      "comment": "%lld outstanding items after a stopped/interrupted pass.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld items waiting - backup continues on the next run" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld Elemente ausstehend - Sicherung wird beim nächsten Durchlauf fortgesetzt" } }
+      }
+    },
+    "settings.backup_status_done": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "All files backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Alle Dateien gesichert" } }
+      }
+    },
+    "settings.backup_backed_up %lld %lld": {
+      "extractionState": "manual",
+      "comment": "First %lld: proven backed-up count. Second %lld: total. The ONLY number presented as backed up.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld of %lld backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld von %lld gesichert" } }
+      }
+    },
+    "settings.backup_row_skipped_deleted %lld": {
+      "extractionState": "manual",
+      "comment": "Items whose identical remote copy is trashed/deleted - deliberately NOT re-uploaded.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Skipped (deleted in Proton Photos): %lld" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Übersprungen (in Proton Photos gelöscht): %lld" } }
+      }
+    },
+    "settings.backup_row_source_missing %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No longer on this Mac: %lld" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Nicht mehr auf diesem Mac: %lld" } }
+      }
+    },
+    "settings.backup_row_blocked %lld": {
+      "extractionState": "manual",
+      "comment": "Items parked behind a remote upload draft; re-checked automatically.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Will be re-checked later: %lld" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Werden später erneut geprüft: %lld" } }
+      }
+    },
+    "settings.backup_row_failed %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Need attention: %lld" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Benötigen Aufmerksamkeit: %lld" } }
+      }
+    },
     "action.cancel": {
       "extractionState": "manual",
       "localizations": {

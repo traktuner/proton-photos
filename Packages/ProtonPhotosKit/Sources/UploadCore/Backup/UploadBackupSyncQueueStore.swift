@@ -105,6 +105,40 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
         }
     }
 
+    public func entries(
+        in state: UploadBackupSyncQueueState,
+        updatedBefore: Date,
+        limit: Int
+    ) -> [UploadBackupSyncQueueEntry] {
+        let clampedLimit = max(1, limit)
+        return lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                """
+                SELECT source_kind, source_id, resource, revision_us, original_filename, byte_count,
+                       state, attempts, last_error, updated_at
+                FROM backup_sync_queue
+                WHERE state = ? AND updated_at < ?
+                ORDER BY updated_at ASC
+                LIMIT ?;
+                """,
+                -1, &stmt, nil
+            ) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, 1, state.rawValue)
+            sqlite3_bind_double(stmt, 2, updatedBefore.timeIntervalSince1970)
+            sqlite3_bind_int(stmt, 3, Int32(clampedLimit))
+            var entries: [UploadBackupSyncQueueEntry] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let source = sourceFromColumns(stmt, kindColumn: 0, idColumn: 1, resourceColumn: 2) else { continue }
+                let revision = UploadBackupRevision(rawValue: sqlite3_column_int64(stmt, 3))
+                entries.append(row(stmt, source: source, revision: revision, offset: 4))
+            }
+            return entries
+        }
+    }
+
     @discardableResult
     public func requeueStaleActive(before cutoff: Date, updatedAt: Date) -> Int {
         lock.withLock {

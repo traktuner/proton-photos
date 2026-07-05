@@ -8,6 +8,7 @@ import UploadCore
 /// Native macOS Settings window (Proton Photos -> Einstellungen...).
 struct SettingsView: View {
     let uploadCoordinator: UploadCoordinator?
+    let backup: FolderBackupController?
     let signOut: () -> Void
 
     var body: some View {
@@ -16,10 +17,145 @@ struct SettingsView: View {
                 .tabItem { Label("settings.account_tab", systemImage: "person.crop.circle") }
             LibrarySettingsTab(uploadCoordinator: uploadCoordinator)
                 .tabItem { Label("settings.library_tab", systemImage: "photo.on.rectangle.angled") }
+            if let backup {
+                BackupSettingsTab(backup: backup)
+                    .tabItem { Label("settings.backup_tab", systemImage: "arrow.triangle.2.circlepath.icloud") }
+            }
             CacheStatusTab()
                 .tabItem { Label("settings.diagnostics_tab", systemImage: "internaldrive") }
         }
         .frame(width: 520, height: 520)
+    }
+}
+
+// MARK: - Folder backup
+
+private struct BackupSettingsTab: View {
+    @State var backup: FolderBackupController
+
+    var body: some View {
+        Form {
+            Section {
+                if backup.folders.isEmpty {
+                    Text("settings.backup_no_folders")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(backup.folders) { folder in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(folder.displayPath)
+                                .font(.system(size: 12))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            if folder.needsRenewal {
+                                Text("settings.backup_folder_stale")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                        Spacer()
+                        Button(role: .destructive) { backup.removeFolder(folder.id) } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(backup.isSyncing)
+                    }
+                }
+                Button("settings.backup_add_folder") { pickFolder() }
+                    .disabled(backup.isSyncing)
+            } header: {
+                Text("settings.backup_folders_section")
+            }
+
+            Section {
+                if !backup.isAvailable {
+                    Text("settings.backup_unavailable")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    HStack {
+                        Text(statusText)
+                            .font(.system(size: 12))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        if backup.isSyncing {
+                            Button("settings.backup_stop") { backup.stopSync() }
+                        } else {
+                            Button("settings.backup_sync_now") { backup.syncNow() }
+                                .disabled(backup.folders.isEmpty)
+                        }
+                    }
+                    if backup.progress.total > 0 {
+                        ProgressView(value: backup.progress.fraction)
+                        Text("settings.backup_backed_up \(backup.progress.backedUp) \(backup.progress.total)")
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        detailRows
+                    }
+                    if let message = backup.lastMessage {
+                        Text(message)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            } header: {
+                Text("settings.backup_status_section")
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    /// Honest status wording: "checking" while proving items safe, "backing up" only while bytes
+    /// move, and never a success claim that the durable counts don't back.
+    private var statusText: LocalizedStringKey {
+        let progress = backup.progress
+        if backup.isSyncing {
+            if progress.uploading > 0 { return "settings.backup_status_uploading" }
+            if let name = progress.currentItemName { return "settings.backup_status_checking \(name)" }
+            return "settings.backup_status_checking_generic"
+        }
+        if progress.hasOutstandingWork { return "settings.backup_status_pending \(progress.waiting + progress.blocked)" }
+        if progress.total > 0, progress.backedUp + progress.skippedRemoteDeletions + progress.sourceMissing == progress.total,
+           progress.failed == 0 {
+            return "settings.backup_status_done"
+        }
+        return "settings.backup_status_idle"
+    }
+
+    @ViewBuilder
+    private var detailRows: some View {
+        let progress = backup.progress
+        VStack(alignment: .leading, spacing: 3) {
+            if progress.skippedRemoteDeletions > 0 {
+                Text("settings.backup_row_skipped_deleted \(progress.skippedRemoteDeletions)")
+            }
+            if progress.sourceMissing > 0 {
+                Text("settings.backup_row_source_missing \(progress.sourceMissing)")
+            }
+            if progress.blocked > 0 {
+                Text("settings.backup_row_blocked \(progress.blocked)")
+            }
+            if progress.failed > 0 {
+                Text("settings.backup_row_failed \(progress.failed)")
+                    .foregroundStyle(.orange)
+            }
+        }
+        .font(.system(size: 11).monospacedDigit())
+        .foregroundStyle(.secondary)
+    }
+
+    private func pickFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = NSLocalizedString("settings.backup_add_folder_prompt", comment: "folder picker confirm button")
+        if panel.runModal() == .OK, let url = panel.url {
+            backup.addFolder(url)
+        }
     }
 }
 

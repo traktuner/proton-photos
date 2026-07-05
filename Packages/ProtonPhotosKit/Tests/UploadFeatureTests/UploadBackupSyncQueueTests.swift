@@ -145,6 +145,31 @@ final class UploadBackupSyncQueueTests: XCTestCase {
         XCTAssertEqual(updated.lastError, "network")
     }
 
+    func testSQLiteQueueListsEntriesInOneStateOldestFirst() throws {
+        let url = tempDir.appendingPathComponent(UploadBackupSyncQueueManifestStore.databaseFileName)
+        let store = try XCTUnwrap(UploadBackupSyncQueueManifestStore(url: url))
+        for (id, state, at) in [
+            ("blocked-new", UploadBackupSyncQueueState.blockedByDraft, 30.0),
+            ("blocked-old", .blockedByDraft, 10.0),
+            ("waiting", .discovered, 5.0),
+            ("blocked-future", .blockedByDraft, 100.0),
+        ] {
+            store.upsert(UploadBackupSyncQueueEntry(
+                source: source(id),
+                revision: revision(1),
+                originalFilename: "\(id).heic",
+                state: state,
+                updatedAt: Date(timeIntervalSince1970: at)
+            ))
+        }
+
+        let due = store.entries(in: .blockedByDraft, updatedBefore: Date(timeIntervalSince1970: 50), limit: 10)
+        XCTAssertEqual(due.map(\.source.identifier), ["blocked-old", "blocked-new"],
+                       "state filter + oldest-first ordering + strict updatedBefore cutoff")
+        XCTAssertEqual(store.entries(in: .blockedByDraft, updatedBefore: Date(timeIntervalSince1970: 50), limit: 1).count, 1)
+        XCTAssertTrue(store.entries(in: .sourceMissing, updatedBefore: .distantFuture, limit: 10).isEmpty)
+    }
+
     func testSQLiteQueueRequeuesStaleActiveStatesAfterCrash() throws {
         let url = tempDir.appendingPathComponent(UploadBackupSyncQueueManifestStore.databaseFileName)
         let store = try XCTUnwrap(UploadBackupSyncQueueManifestStore(url: url))

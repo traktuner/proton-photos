@@ -427,6 +427,9 @@ public actor UploadManager: UploadManaging {
         }
         // Unsupported files can't be retried into success.
         if case .failed = job.item.state, !SupportedMedia.isSupported(job.item.fileURL) { return }
+        // The failed attempt may have committed server-side (lost response). Re-resolve against
+        // fresh remote state so the retry skips as a duplicate instead of uploading twice.
+        await identityResolver?.invalidateCachedRemoteState()
         jobs[id]?.item.state = .queued
         jobs[id]?.item.uploadedUID = nil
         pump()

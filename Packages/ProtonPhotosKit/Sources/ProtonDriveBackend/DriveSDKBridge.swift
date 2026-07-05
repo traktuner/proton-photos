@@ -24,9 +24,11 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     private let crypto: DriveCrypto
     private var streamSource: PhotoVideoStreamSource?
     /// Where the per-account upload-identity manifest lives (next to `library-v1.sqlite`, so the
-    /// sign-out purge covers it) and the platform SQLite tuning it opens with.
-    private let uploadManifestURL: URL
-    private let uploadManifestPolicy: LibraryDatabasePolicy
+    /// sign-out purge covers it) and the platform SQLite tuning it opens with. Module-internal:
+    /// the facade derives the account data directory + store policy for the backup sync stores
+    /// (same directory, same purge coverage).
+    let uploadManifestURL: URL
+    let uploadManifestPolicy: LibraryDatabasePolicy
 
     /// Full sign-out / master-reset: erase the SDK metadata SQLite stores for `uid` (security
     /// follow-up #2 - non-secret node metadata that must not survive sign-out) AND the app-owned

@@ -307,10 +307,16 @@ public protocol UploadIdentityResolving: Sendable {
     /// Records that `descriptor` was uploaded as `remoteLinkID` so later runs can skip it without
     /// a remote round-trip.
     func recordUploaded(_ descriptor: UploadResourceDescriptor, identity: UploadIdentity, remoteVolumeID: String, remoteLinkID: String) async
+    /// Drops any batch-cached remote duplicate state so the next `resolve` re-queries the server.
+    /// MUST be called after a failed/cancelled upload attempt and before re-checking a
+    /// draft-blocked item: the server may have committed work the cache predates (e.g. an upload
+    /// whose success response was lost), and acting on the stale view would double-upload.
+    func invalidateCachedRemoteState() async
 }
 
 public extension UploadIdentityResolving {
     func prime(_ descriptors: [UploadResourceDescriptor]) async {}
+    func invalidateCachedRemoteState() async {}
 }
 
 /// The outcome of the pre-upload phase for one resource.

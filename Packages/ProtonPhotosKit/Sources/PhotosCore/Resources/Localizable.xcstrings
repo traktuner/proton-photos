@@ -1,6 +1,42 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "backup.error_source_missing": {
+      "extractionState": "manual",
+      "comment": "Backup queue row error: the local source file disappeared before it could be backed up.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The file no longer exists on this device"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Datei ist auf diesem Gerät nicht mehr vorhanden"
+          }
+        }
+      }
+    },
+    "backup.state_skipped_remote_deletion": {
+      "extractionState": "manual",
+      "comment": "Backup queue row note: the identical photo is in the Proton trash or was deleted remotely, so it is deliberately not re-uploaded and not counted as backed up.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skipped: deleted in Proton Photos"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übersprungen: in Proton Photos gelöscht"
+          }
+        }
+      }
+    },
     "brand.product_name": {
       "extractionState": "manual",
       "comment": "Visible product name. Keep as a single key so rebranding is one catalog edit plus bundle metadata.",
