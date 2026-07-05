@@ -202,6 +202,12 @@ private struct MobilePhoneTabShell: View {
             }
         }
         .tint(ProtonColor.primary)
+        // Keep the native Liquid-Glass tab bar always showing its glass background, in every scroll
+        // state. The photo grid scrolls edge-to-edge UNDER the bar (`.ignoresSafeArea(.bottom)`);
+        // without this, the bar drops to its transparent scroll-edge state over bright thumbnails
+        // and the tab labels (e.g. "Fotos") lose contrast. This steers the system bar structurally -
+        // it stays system-owned Liquid Glass, not a custom material.
+        .toolbarBackground(.visible, for: .tabBar)
         .onChange(of: selection) { _, tab in
             MobileTabActivityLog.note(tab: tab)
         }

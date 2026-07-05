@@ -7,9 +7,10 @@ import TimelineCore
 /// loading phase: the SAME breathing loading mark as the macOS launch veil (`DesignSystemCore`),
 /// centered, no text - calm and quiet instead of a status readout.
 ///
-/// Before the inventory resolves there is nothing behind it, so it is opaque; once the grid is
-/// mounting underneath (`loadingContent`) it becomes a translucent glass scrim, so the photos
-/// visibly build behind the mark until the first full screen is ready.
+/// Backgrounds are only ever black or fully transparent - never a gray material veil:
+///  • before the inventory resolves there is nothing behind it, so it sits on the black background;
+///  • once the grid is mounting underneath (`loadingContent`), the background is CLEAR so the
+///    thumbnails pop straight against the black grid with just the mark floating over them.
 struct MobileLibraryLoadingView: View {
     let state: LibraryLoadState
 
@@ -24,8 +25,10 @@ struct MobileLibraryLoadingView: View {
 
     @ViewBuilder private var scrim: some View {
         if case .loadingContent = state {
-            // The grid is already building underneath — let it show through.
-            Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
+            // The grid (black + the popping thumbnails) is already building underneath — show it
+            // through directly. No material scrim: a translucent gray veil over black is exactly the
+            // gray flash we must not have.
+            Color.clear
         } else {
             ProtonColor.backgroundNorm.ignoresSafeArea()
         }
