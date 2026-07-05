@@ -29,6 +29,21 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
     /// view was invalidated cannot repopulate the cache with pre-invalidation data.
     private var cacheGeneration = 0
 
+    /// Same-run content coalescing: one claim per (key epoch | content hash) while an `.upload`
+    /// decision is outstanding. Identical bytes discovered concurrently (copied folders in one
+    /// scan, duplicate files in one enqueue) wait here until the first upload settles, then
+    /// re-check the manifest instead of uploading the same content in parallel.
+    private struct PendingContentUpload {
+        var owner: UploadSourceIdentity
+        var waiters: [CheckedContinuation<Void, Never>]
+    }
+
+    private var pendingContentUploads: [String: PendingContentUpload] = [:]
+
+    private static func contentKey(epoch: String, contentHash: String) -> String {
+        "\(epoch)|\(contentHash)"
+    }
+
     public init(
         store: any UploadIdentityStore,
         hasher: any UploadHashing = UploadFileHasher(),
@@ -110,8 +125,53 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
         )
         store.upsert(record)
 
-        let remoteItems = try await duplicates(forNameHash: nameHash)
-        try Task.checkCancellation()
+        // Account-wide content dedupe + same-run coalescing. Loop invariant on exit: either we
+        // returned a known-content skip, or WE hold the pending-upload claim for this content.
+        let contentKey = Self.contentKey(epoch: epoch, contentHash: contentHash)
+        while true {
+            // Bytes already proven on the server under ANY source path/filename (copied folder,
+            // renamed file): adopt that remote link for this source - no remote query, no upload.
+            if let known = store.trustedRecord(contentHash: contentHash, hashKeyEpoch: epoch),
+               known.sha1Hex == sha1Hex,
+               let knownLink = known.remoteLinkID {
+                record.remoteVolumeID = known.remoteVolumeID
+                record.remoteLinkID = knownLink
+                record.outcome = UploadIdentityManifestStore.Outcome.duplicateActive.rawValue
+                record.updatedAt = now()
+                store.upsert(record)
+                return UploadPreflightResult(identity: identity, decision: .skip(.knownFromManifest, remoteLinkID: knownLink))
+            }
+            guard let pending = pendingContentUploads[contentKey] else {
+                // Claim the content BEFORE the remote check - identical items resolving
+                // concurrently must serialize here, not race to independent `.upload` decisions.
+                pendingContentUploads[contentKey] = PendingContentUpload(owner: descriptor.source, waiters: [])
+                break
+            }
+            if pending.owner == descriptor.source {
+                // Re-resolve of the claim owner itself (retry after a failure whose report we
+                // never saw). Never wait on our own claim; re-take it.
+                break
+            }
+            // Identical bytes are uploading right now - wait until that attempt settles
+            // (recordUploaded or uploadDidFail), then re-check the manifest.
+            await withCheckedContinuation { continuation in
+                if pendingContentUploads[contentKey] != nil {
+                    pendingContentUploads[contentKey]!.waiters.append(continuation)
+                } else {
+                    continuation.resume()   // claim vanished in the same turn - just re-loop
+                }
+            }
+            try Task.checkCancellation()
+        }
+
+        let remoteItems: [RemotePhotoDuplicate]
+        do {
+            remoteItems = try await duplicates(forNameHash: nameHash)
+            try Task.checkCancellation()
+        } catch {
+            releasePendingContentClaim(contentKey, owner: descriptor.source)
+            throw error
+        }
 
         let decision = UploadDuplicateDecisionPolicy.decide(
             primary: .init(source: descriptor.source, nameHash: nameHash, contentHash: contentHash),
@@ -135,7 +195,23 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
         default:
             break
         }
+
+        if case .upload = decision {
+            // The claim stays held: the caller now owns this content's upload and MUST settle it
+            // via `recordUploaded` (success) or `uploadDidFail` (anything else). Identical items
+            // wait on the claim until then.
+        } else {
+            releasePendingContentClaim(contentKey, owner: descriptor.source)
+        }
         return UploadPreflightResult(identity: identity, decision: decision)
+    }
+
+    /// Releases the same-content claim (if `owner` still holds it) and wakes every waiter so it
+    /// re-checks the manifest / re-resolves against fresh state.
+    private func releasePendingContentClaim(_ key: String, owner: UploadSourceIdentity) {
+        guard let pending = pendingContentUploads[key], pending.owner == owner else { return }
+        pendingContentUploads[key] = nil
+        for waiter in pending.waiters { waiter.resume() }
     }
 
     /// Drops the cached remote view (and detaches in-flight lookups) so the next `resolve`
@@ -195,22 +271,52 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
         remoteVolumeID: String,
         remoteLinkID: String
     ) async {
-        guard let epoch = try? await checker.hashKeyEpoch() else { return }
-        store.upsert(UploadIdentityRecord(
-            source: descriptor.source,
-            filename: descriptor.filename,
-            correctedName: identity.correctedName,
-            fileSize: descriptor.fileSize,
-            modificationDate: descriptor.modificationDate,
-            sha1Hex: identity.sha1Hex,
+        if let epoch = try? await checker.hashKeyEpoch() {
+            store.upsert(UploadIdentityRecord(
+                source: descriptor.source,
+                filename: descriptor.filename,
+                correctedName: identity.correctedName,
+                fileSize: descriptor.fileSize,
+                modificationDate: descriptor.modificationDate,
+                sha1Hex: identity.sha1Hex,
+                nameHash: identity.nameHash,
+                contentHash: identity.contentHash,
+                hashKeyEpoch: epoch,
+                remoteVolumeID: remoteVolumeID,
+                remoteLinkID: remoteLinkID,
+                outcome: UploadIdentityManifestStore.Outcome.uploaded.rawValue,
+                updatedAt: now()
+            ))
+        }
+        // Narrow cache update: the server now has this name+content ACTIVE. A cached "free" view
+        // for this name hash must not survive the upload it predates - that is exactly how a
+        // second copied folder used to re-upload identical photos in the same session.
+        duplicateCache[identity.nameHash, default: []].append(RemotePhotoDuplicate(
             nameHash: identity.nameHash,
             contentHash: identity.contentHash,
-            hashKeyEpoch: epoch,
-            remoteVolumeID: remoteVolumeID,
-            remoteLinkID: remoteLinkID,
-            outcome: UploadIdentityManifestStore.Outcome.uploaded.rawValue,
-            updatedAt: now()
+            linkState: .active,
+            linkID: remoteLinkID
         ))
+        // Settle the same-content claim AFTER the manifest row exists, so released waiters find
+        // it. Owner-scoped scan (not key computation) so a failed epoch fetch can never leak the
+        // claim and hang waiters.
+        releasePendingContentClaims(ownedBy: descriptor.source)
+    }
+
+    /// Reports that an upload attempt for a `.upload` decision ended WITHOUT success (error,
+    /// cancel, or stop). Drops the cached remote view (the server may have committed the attempt
+    /// even though the call failed) and releases the same-content claim so identical waiting
+    /// items re-resolve against fresh state.
+    public func uploadDidFail(_ descriptor: UploadResourceDescriptor) async {
+        await invalidateCachedRemoteState()
+        releasePendingContentClaims(ownedBy: descriptor.source)
+    }
+
+    private func releasePendingContentClaims(ownedBy owner: UploadSourceIdentity) {
+        for (key, pending) in pendingContentUploads where pending.owner == owner {
+            pendingContentUploads[key] = nil
+            for waiter in pending.waiters { waiter.resume() }
+        }
     }
 
     // MARK: - Duplicate lookup (cached / coalesced / batched)

@@ -63,6 +63,51 @@ final class UploadManagerDedupeTests: XCTestCase {
         try? FileManager.default.removeItem(at: tempDir)
     }
 
+    // MARK: - Account-wide content dedupe through the REAL pipeline (copied-folder regression)
+
+    func testIdenticalContentFromDifferentPathsUploadsOnce() async throws {
+        let dirA = tempDir.appendingPathComponent("sync1", isDirectory: true)
+        let dirB = tempDir.appendingPathComponent("sync2", isDirectory: true)
+        let fileA = try makeTempFiles(["IMG_1.jpg"], in: dirA)[0]
+        let fileB = try makeTempFiles(["IMG_renamed.jpg"], in: dirB)[0]
+        try Data("identical-bytes".utf8).write(to: fileA)
+        try Data("identical-bytes".utf8).write(to: fileB)
+
+        let uploader = MockUploader()
+        let pipeline = UploadDedupePipeline(store: FakeIdentityStore(), checker: FakeChecker())
+        let manager = UploadManager(uploader: uploader, identityResolver: pipeline)
+
+        await manager.enqueueFiles([fileA, fileB], destination: .library)
+        let items = await waitForAllTerminal(manager)
+
+        XCTAssertEqual(uploader.requests.count, 1,
+                       "identical bytes from different paths/filenames must upload exactly once")
+        let states = items.map(\.state)
+        XCTAssertTrue(states.contains(.completed))
+        XCTAssertTrue(states.contains(.skipped(.knownFromManifest)),
+                      "the copy must be reported as an already-backed-up duplicate, got \(states)")
+    }
+
+    func testDifferentContentWithSameFilenameUploadsBoth() async throws {
+        let dirA = tempDir.appendingPathComponent("sync1", isDirectory: true)
+        let dirB = tempDir.appendingPathComponent("sync2", isDirectory: true)
+        let fileA = try makeTempFiles(["IMG_1.jpg"], in: dirA)[0]
+        let fileB = try makeTempFiles(["IMG_1.jpg"], in: dirB)[0]
+        try Data("bytes-version-a".utf8).write(to: fileA)
+        try Data("bytes-version-b".utf8).write(to: fileB)
+
+        let uploader = MockUploader()
+        let pipeline = UploadDedupePipeline(store: FakeIdentityStore(), checker: FakeChecker())
+        let manager = UploadManager(uploader: uploader, identityResolver: pipeline)
+
+        await manager.enqueueFiles([fileA, fileB], destination: .library)
+        let items = await waitForAllTerminal(manager)
+
+        XCTAssertEqual(uploader.requests.count, 2,
+                       "same filename with different bytes is NOT a duplicate and must upload both")
+        XCTAssertTrue(items.allSatisfy { $0.state == .completed })
+    }
+
     func testDuplicateItemSkipsWithoutUploadingBytes() async throws {
         let urls = try makeTempFiles(["dup.jpg", "new.jpg"], in: tempDir)
         let uploader = MockUploader()

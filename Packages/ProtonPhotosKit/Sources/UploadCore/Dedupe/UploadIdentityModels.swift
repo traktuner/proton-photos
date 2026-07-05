@@ -260,6 +260,12 @@ public struct UploadIdentityRecord: Sendable, Equatable {
 /// production and by an in-memory fake in tests.
 public protocol UploadIdentityStore: Sendable {
     func record(for source: UploadSourceIdentity) -> UploadIdentityRecord?
+    /// Any row proving THIS CONTENT is already represented remotely for this account: same
+    /// content-hash HMAC under the same key epoch, with a trustworthy outcome (`uploaded` or
+    /// `duplicateActive`) and a remote link. Source-path and filename independent - this is what
+    /// lets a copied folder (or a renamed file) skip re-uploading bytes the account already owns.
+    /// Trashed/deleted outcomes are deliberately NOT trustworthy here.
+    func trustedRecord(contentHash: String, hashKeyEpoch: String) -> UploadIdentityRecord?
     func upsert(_ record: UploadIdentityRecord)
 }
 
@@ -312,11 +318,18 @@ public protocol UploadIdentityResolving: Sendable {
     /// draft-blocked item: the server may have committed work the cache predates (e.g. an upload
     /// whose success response was lost), and acting on the stale view would double-upload.
     func invalidateCachedRemoteState() async
+    /// MUST be called when an upload attempt for a `.upload` decision ends without
+    /// `recordUploaded` (error, cancel, stop). Settles the same-content coalescing claim so
+    /// identical items waiting on this upload re-resolve instead of hanging, and drops the
+    /// cached remote view. Exactly one of `recordUploaded`/`uploadDidFail` must follow every
+    /// `.upload` decision.
+    func uploadDidFail(_ descriptor: UploadResourceDescriptor) async
 }
 
 public extension UploadIdentityResolving {
     func prime(_ descriptors: [UploadResourceDescriptor]) async {}
     func invalidateCachedRemoteState() async {}
+    func uploadDidFail(_ descriptor: UploadResourceDescriptor) async {}
 }
 
 /// The outcome of the pre-upload phase for one resource.

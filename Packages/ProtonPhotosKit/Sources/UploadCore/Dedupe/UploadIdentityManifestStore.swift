@@ -92,6 +92,8 @@ public final class UploadIdentityManifestStore: UploadIdentityStore, @unchecked 
           updated_at    REAL NOT NULL,
           PRIMARY KEY (source_kind, source_id, resource)
         );
+        CREATE INDEX IF NOT EXISTS upload_identity_content_idx
+          ON upload_identity(content_hash, key_epoch);
         """
         guard sqlite3_exec(handle, schema, nil, nil, nil) == SQLITE_OK,
               verifyAndStampVersion(handle) else {
@@ -151,6 +153,51 @@ public final class UploadIdentityManifestStore: UploadIdentityStore, @unchecked 
                 remoteLinkID: columnText(stmt, 9),
                 outcome: columnText(stmt, 10),
                 updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 11))
+            )
+        }
+    }
+
+    public func trustedRecord(contentHash: String, hashKeyEpoch: String) -> UploadIdentityRecord? {
+        lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                """
+                SELECT source_kind, source_id, resource, filename, corrected, size, mtime,
+                       sha1_hex, name_hash, remote_vol, remote_link, outcome, updated_at
+                FROM upload_identity
+                WHERE content_hash=? AND key_epoch=?
+                  AND remote_link IS NOT NULL
+                  AND outcome IN ('uploaded', 'duplicateActive')
+                LIMIT 1;
+                """,
+                -1, &stmt, nil
+            ) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, 1, contentHash)
+            bindText(stmt, 2, hashKeyEpoch)
+            guard sqlite3_step(stmt) == SQLITE_ROW,
+                  let kindRaw = columnText(stmt, 0),
+                  let kind = UploadSourceIdentity.Kind(rawValue: kindRaw),
+                  let identifier = columnText(stmt, 1),
+                  let resourceRaw = columnText(stmt, 2),
+                  let resource = UploadSourceIdentity.Resource(rawValue: resourceRaw) else {
+                return nil
+            }
+            return UploadIdentityRecord(
+                source: UploadSourceIdentity(kind: kind, identifier: identifier, resource: resource),
+                filename: columnText(stmt, 3) ?? "",
+                correctedName: columnText(stmt, 4) ?? "",
+                fileSize: sqlite3_column_int64(stmt, 5),
+                modificationDate: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6)),
+                sha1Hex: columnText(stmt, 7) ?? "",
+                nameHash: columnText(stmt, 8) ?? "",
+                contentHash: contentHash,
+                hashKeyEpoch: hashKeyEpoch,
+                remoteVolumeID: columnText(stmt, 9),
+                remoteLinkID: columnText(stmt, 10),
+                outcome: columnText(stmt, 11),
+                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 12))
             )
         }
     }

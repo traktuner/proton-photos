@@ -98,6 +98,63 @@ final class FolderBackupIntegrationTests: XCTestCase {
         XCTAssertEqual(secondRun.hasOutstandingWork, false)
     }
 
+    /// The owner-reported P0: `sync1` and a byte-identical copied folder `sync2` (same filenames)
+    /// must produce ONE physical upload per photo, and a later third copy must upload nothing.
+    func testCopiedFoldersUploadEachContentOnlyOnce() async throws {
+        let sync1 = tempDir.appendingPathComponent("sync1", isDirectory: true)
+        let sync2 = tempDir.appendingPathComponent("sync2", isDirectory: true)
+        try FileManager.default.createDirectory(at: sync1, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sync2, withIntermediateDirectories: true)
+        for name in ["IMG_0001.jpg", "IMG_0002.heic", "clip.mov"] {
+            let bytes = Data("photo-bytes-\(name)".utf8)
+            try bytes.write(to: sync1.appendingPathComponent(name))
+            try bytes.write(to: sync2.appendingPathComponent(name))
+        }
+
+        _ = try await engine.scan(FolderBackupCatalog(folder: sync1))
+        _ = try await engine.scan(FolderBackupCatalog(folder: sync2))
+        let progress = await makeRunner().runUntilDrained()
+
+        XCTAssertEqual(uploader.requests.count, 3,
+                       "a byte-identical copied folder must not re-upload a single photo")
+        XCTAssertEqual(progress.uploaded, 3)
+        XCTAssertEqual(progress.alreadyBackedUp, 3)
+        XCTAssertEqual(progress.backedUp, 6, "BOTH folders' sources must be proven backed up")
+        XCTAssertEqual(progress.failed + progress.sourceMissing + progress.blocked, 0)
+
+        // A third copy attached later: zero new uploads, everything already backed up.
+        let sync3 = tempDir.appendingPathComponent("sync3", isDirectory: true)
+        try FileManager.default.createDirectory(at: sync3, withIntermediateDirectories: true)
+        for name in ["IMG_0001.jpg", "IMG_0002.heic", "clip.mov"] {
+            try Data("photo-bytes-\(name)".utf8).write(to: sync3.appendingPathComponent(name))
+        }
+        _ = try await engine.scan(FolderBackupCatalog(folder: sync3))
+        let third = await makeRunner().runUntilDrained()
+
+        XCTAssertEqual(uploader.requests.count, 3, "a later copied folder must upload nothing new")
+        XCTAssertEqual(third.backedUp, 9)
+    }
+
+    func testCopiedContentWithDifferentFilenamesUploadsOnce() async throws {
+        let sync1 = tempDir.appendingPathComponent("sync1", isDirectory: true)
+        let sync2 = tempDir.appendingPathComponent("sync2", isDirectory: true)
+        try FileManager.default.createDirectory(at: sync1, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sync2, withIntermediateDirectories: true)
+        let bytes = Data("the-same-photo-bytes".utf8)
+        try bytes.write(to: sync1.appendingPathComponent("IMG_0001.jpg"))
+        try bytes.write(to: sync2.appendingPathComponent("export (1).jpg"))
+
+        _ = try await engine.scan(FolderBackupCatalog(folder: sync1))
+        _ = try await engine.scan(FolderBackupCatalog(folder: sync2))
+        let progress = await makeRunner().runUntilDrained()
+
+        XCTAssertEqual(uploader.requests.count, 1,
+                       "identical bytes must dedupe even when the filename differs")
+        XCTAssertEqual(progress.uploaded, 1)
+        XCTAssertEqual(progress.alreadyBackedUp, 1)
+        XCTAssertEqual(progress.backedUp, 2)
+    }
+
     func testFileDeletedBetweenScanAndRunBecomesSourceMissing() async throws {
         let doomed = folder.appendingPathComponent("gone.jpg")
         try Data("bytes".utf8).write(to: doomed)

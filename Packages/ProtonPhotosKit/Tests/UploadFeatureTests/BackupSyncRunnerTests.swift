@@ -207,6 +207,11 @@ final class SpyIdentityResolver: UploadIdentityResolving, @unchecked Sendable {
         log.append("manifest.invalidateCachedRemoteState")
         await inner.invalidateCachedRemoteState()
     }
+
+    func uploadDidFail(_ descriptor: UploadResourceDescriptor) async {
+        log.append("manifest.uploadDidFail")
+        await inner.uploadDidFail(descriptor)
+    }
 }
 
 /// Uploader that "crashes" after the remote side already accepted the bytes: the first call
@@ -590,6 +595,27 @@ final class BackupSyncRunnerTests: XCTestCase {
         func set(_ inputs: BackupThrottleInputs) {
             lock.withLock { _inputs = inputs }
         }
+    }
+
+    // MARK: 9b. Identical content discovered concurrently uploads exactly once
+
+    func testConcurrentIdenticalContentUploadsExactlyOnce() async throws {
+        let first = seedEntry("copy-a.jpg")
+        let second = seedEntry("copy-b.jpg")
+        hasher.contentSeeds["/backup/copy-a.jpg"] = "identical-bytes"
+        hasher.contentSeeds["/backup/copy-b.jpg"] = "identical-bytes"
+        let slowUploader = MockUploader(workDuration: .milliseconds(40), deliverProgress: false)
+
+        let runner = makeRunner(uploader: slowUploader, throttle: BackupThrottlePolicy(baseConcurrency: 2))
+        let progress = await runner.runUntilDrained()
+
+        XCTAssertEqual(slowUploader.requests.count, 1,
+                       "identical bytes in the same wave must coalesce to one upload")
+        XCTAssertEqual(progress.uploaded, 1)
+        XCTAssertEqual(progress.alreadyBackedUp, 1)
+        XCTAssertEqual(progress.backedUp, 2, "both sources must end up proven backed up")
+        let states = [state(of: first), state(of: second)]
+        XCTAssertTrue(states.contains(.completed) && states.contains(.alreadyBackedUp), "got \(states)")
     }
 
     // MARK: 10. Concurrency stays bounded

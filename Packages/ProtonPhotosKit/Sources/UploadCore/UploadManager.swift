@@ -219,25 +219,26 @@ public actor UploadManager: UploadManaging {
     // MARK: - Per-item run
 
     private func run(_ id: UploadQueueItemID) async {
+        guard let job = jobs[id] else { return }
+        let request = await makeRequest(for: job)
+        // The descriptor mirrors the request snapshot (same name/size/mtime), so manifest rows
+        // written here validate against the exact attributes that were uploaded. Hoisted out of
+        // the do-block: the catch paths report a failed `.upload` attempt back to the pipeline.
+        let descriptor = UploadResourceDescriptor(
+            source: .file(request.fileURL),
+            fileURL: request.fileURL,
+            filename: request.name,
+            fileSize: request.fileSize,
+            modificationDate: request.modificationDate
+        )
+        var preflight: UploadPreflightResult?
         do {
-            guard let job = jobs[id] else { return }
-            let request = await makeRequest(for: job)
             if currentState(id) == .cancelled || currentState(id) == .paused {
                 finish(id)
                 return
             }
 
             var effectiveRequest = request
-            var preflight: UploadPreflightResult?
-            // The descriptor mirrors the request snapshot (same name/size/mtime), so manifest rows
-            // written here validate against the exact attributes that were uploaded.
-            let descriptor = UploadResourceDescriptor(
-                source: .file(request.fileURL),
-                fileURL: request.fileURL,
-                filename: request.name,
-                fileSize: request.fileSize,
-                modificationDate: request.modificationDate
-            )
 
             // Universal dedupe: hash + duplicate check BEFORE any bytes are uploaded. `.hashing`
             // covers both (the duplicate lookup rides the same phase). Cancellation lands here
@@ -245,7 +246,15 @@ public actor UploadManager: UploadManaging {
             if let identityResolver {
                 transition(id, to: .hashing)
                 let result = try await identityResolver.resolve(descriptor)
-                if currentState(id) == .cancelled { finish(id); return }
+                if currentState(id) == .cancelled {
+                    // A `.upload` decision holds the pipeline's same-content claim - settle it
+                    // before honoring the cancel, or identical waiting items would hang.
+                    if case .upload = result.decision {
+                        await identityResolver.uploadDidFail(descriptor)
+                    }
+                    finish(id)
+                    return
+                }
                 switch result.decision {
                 case .upload:
                     preflight = result
@@ -270,15 +279,16 @@ public actor UploadManager: UploadManaging {
             let uid = try await uploader.upload(effectiveRequest) { [weak self] progress in
                 Task { await self?.applyProgress(id, progress) }
             }
-            // Library upload finished. If cancelled meanwhile, honour the cancel.
-            if currentState(id) == .cancelled { finish(id); return }
+            // Record BEFORE honouring a racing cancel: the upload DID succeed, so the manifest
+            // must know (future runs skip without a remote query) - and recording is what settles
+            // the pipeline's same-content claim for identical items waiting on this upload.
             if let identityResolver, let preflight {
-                // Remember the upload so future runs skip this exact file without a remote query.
                 await identityResolver.recordUploaded(
                     descriptor, identity: preflight.identity,
                     remoteVolumeID: uid.volumeID, remoteLinkID: uid.nodeID
                 )
             }
+            if currentState(id) == .cancelled { finish(id); return }
             setUploadedUID(id, uid)
             emitCompletedUpload(id)
 
@@ -295,8 +305,13 @@ public actor UploadManager: UploadManaging {
             }
             transition(id, to: .completed)
         } catch is CancellationError {
+            // A throw with `preflight` set means the uploader itself failed after a `.upload`
+            // decision - settle the pipeline's same-content claim so identical waiting items
+            // re-resolve (and the possibly server-committed attempt is re-queried, not trusted).
+            if preflight != nil { await identityResolver?.uploadDidFail(descriptor) }
             transition(id, to: .cancelled)
         } catch {
+            if preflight != nil { await identityResolver?.uploadDidFail(descriptor) }
             if currentState(id) == .cancelled || currentState(id) == .paused {
                 // already handled by cancel()/pause()
             } else {

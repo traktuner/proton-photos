@@ -118,6 +118,54 @@ final class UploadIdentityManifestTests: XCTestCase {
         )
     }
 
+    func testTrustedContentLookupFiltersOutcomesAndSurvivesReopen() throws {
+        var store = try makeStore()
+
+        var uploaded = makeRecord(identifier: "/sync1/a.heic")
+        uploaded.remoteVolumeID = "vol-1"
+        uploaded.remoteLinkID = "link-1"
+        uploaded.outcome = UploadIdentityManifestStore.Outcome.uploaded.rawValue
+        store.upsert(uploaded)
+
+        var trashed = makeRecord(identifier: "/sync1/trashed.heic")
+        trashed.contentHash = "contenthash-trashed"
+        trashed.remoteLinkID = "link-t"
+        trashed.outcome = UploadIdentityManifestStore.Outcome.duplicateTrashed.rawValue
+        store.upsert(trashed)
+
+        var linkless = makeRecord(identifier: "/sync1/linkless.heic")
+        linkless.contentHash = "contenthash-linkless"
+        linkless.outcome = UploadIdentityManifestStore.Outcome.uploaded.rawValue
+        store.upsert(linkless)
+
+        XCTAssertEqual(store.trustedRecord(contentHash: "contenthash-1", hashKeyEpoch: "epoch-1")?.remoteLinkID, "link-1")
+        XCTAssertNil(store.trustedRecord(contentHash: "contenthash-1", hashKeyEpoch: "epoch-2"),
+                     "a different hash-key epoch must never match")
+        XCTAssertNil(store.trustedRecord(contentHash: "contenthash-trashed", hashKeyEpoch: "epoch-1"),
+                     "trashed outcomes are not proof of backup")
+        XCTAssertNil(store.trustedRecord(contentHash: "contenthash-linkless", hashKeyEpoch: "epoch-1"),
+                     "rows without a remote link are not trustworthy")
+
+        // Reopen: the row and the additive index survive.
+        store.close()
+        store = try makeStore()
+        XCTAssertEqual(store.trustedRecord(contentHash: "contenthash-1", hashKeyEpoch: "epoch-1")?.remoteLinkID, "link-1")
+
+        var handle: OpaquePointer?
+        let path = tempDir.appendingPathComponent(UploadIdentityManifestStore.databaseFileName).path
+        XCTAssertEqual(sqlite3_open(path, &handle), SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        var stmt: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(handle, "PRAGMA index_list('upload_identity');", -1, &stmt, nil), SQLITE_OK)
+        defer { sqlite3_finalize(stmt) }
+        var indexNames: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let name = sqlite3_column_text(stmt, 1) { indexNames.append(String(cString: name)) }
+        }
+        XCTAssertTrue(indexNames.contains("upload_identity_content_idx"),
+                      "the content lookup must be index-backed, found: \(indexNames)")
+    }
+
     func testUpsertAndFetchRoundTrip() throws {
         let store = try makeStore()
         let record = makeRecord()

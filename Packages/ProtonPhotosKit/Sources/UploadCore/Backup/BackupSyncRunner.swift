@@ -351,11 +351,10 @@ public actor BackupSyncRunner {
         do {
             uid = try await uploader.upload(request) { _ in }
         } catch {
-            // The server may have committed this upload even though the call failed (lost
-            // response, cancel racing completion). Any cached duplicate view now lies about
-            // this name - drop it so the retry re-queries and resolves to a duplicate instead
-            // of pushing the bytes again.
-            await identityResolver.invalidateCachedRemoteState()
+            // Settle the pipeline's same-content claim (identical items may be waiting on this
+            // upload) and drop the cached remote view - the server may have committed the
+            // attempt even though the call failed, so the retry must re-query.
+            await identityResolver.uploadDidFail(resolved.descriptor)
             if error is CancellationError || stopRequested {
                 revert(entry, from: persistedState)
             } else {
