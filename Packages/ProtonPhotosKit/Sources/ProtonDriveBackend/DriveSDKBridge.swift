@@ -617,15 +617,22 @@ extension DriveSDKBridge: PhotoUploading {
         let thumbnails = await UploadMediaProcessor.thumbnails(for: request.fileURL, isVideo: isVideo)
         onProgress(UploadProgress(phase: .uploading, fraction: 0))
         do {
+            // Secondary resources (a Live Photo's paired video) reference their primary. Core may
+            // only know the primary's LINK id (from a duplicate-check row, which carries no
+            // volume); every photo lives in the single photos volume, so an empty volumeID
+            // resolves to the photos root's volume here at the transport boundary.
+            var mainPhotoUid: SDKNodeUid?
+            if let main = request.mainPhotoUID {
+                let volumeID = main.volumeID.isEmpty ? try await resolvePhotosRoot().volumeID : main.volumeID
+                mainPhotoUid = SDKNodeUid(volumeID: volumeID, nodeID: main.nodeID)
+            }
             let ids = try await photosClient.uploadPhoto(
                 name: request.name,
                 fileURL: request.fileURL,
                 fileSize: request.fileSize,
                 modificationDate: request.modificationDate,
                 captureTime: request.captureTime,
-                // Secondary resources (a Live Photo's paired video) reference their primary; nil
-                // for primaries - which is every manual upload today.
-                mainPhotoUid: request.mainPhotoUID.map { SDKNodeUid(volumeID: $0.volumeID, nodeID: $0.nodeID) },
+                mainPhotoUid: mainPhotoUid,
                 mediaType: request.mediaType,
                 thumbnails: thumbnails,
                 tags: [],                       // let the server classify; avoids tag-mapping upload failures

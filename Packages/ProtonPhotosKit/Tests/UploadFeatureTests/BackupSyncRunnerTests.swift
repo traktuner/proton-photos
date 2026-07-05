@@ -49,6 +49,12 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
     /// overrides it per source.
     let defaultModified: Date
     private var modifiedOverrides: [String: Date] = [:]
+    /// Secondary filenames per source id - resolved entries become Live-Photo-style compounds.
+    private var secondaryNames: [String: [String]] = [:]
+
+    func setSecondaries(_ names: [String], for identifier: String) {
+        lock.withLock { secondaryNames[identifier] = names }
+    }
 
     init(defaultModified: Date) {
         self.defaultModified = defaultModified
@@ -88,11 +94,12 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
             fallthrough
         case .standard:
             let modified = lock.withLock { modifiedOverrides[id] } ?? defaultModified
+            let secondaries = lock.withLock { secondaryNames[id] } ?? []
             let snapshot = UploadBackupAssetSnapshot(
                 source: entry.source,
                 revision: UploadBackupRevision(date: modified),
                 editRevision: .unavailable,
-                resourceCount: 1
+                resourceCount: 1 + secondaries.count
             )
             let descriptor = UploadResourceDescriptor(
                 source: entry.source,
@@ -109,7 +116,23 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
                 ),
                 descriptor: descriptor,
                 mediaType: "image/jpeg",
-                captureDate: modified
+                captureDate: modified,
+                secondaries: secondaries.map { name in
+                    BackupSecondaryResource(
+                        descriptor: UploadResourceDescriptor(
+                            source: UploadSourceIdentity(
+                                kind: entry.source.kind,
+                                identifier: entry.source.identifier,
+                                resource: .livePairedVideo
+                            ),
+                            fileURL: URL(fileURLWithPath: "\(entry.source.identifier)#\(name)"),
+                            filename: name,
+                            fileSize: 2,
+                            modificationDate: modified
+                        ),
+                        mediaType: "video/quicktime"
+                    )
+                }
             )
         }
     }
@@ -616,6 +639,75 @@ final class BackupSyncRunnerTests: XCTestCase {
         XCTAssertEqual(progress.backedUp, 2, "both sources must end up proven backed up")
         let states = [state(of: first), state(of: second)]
         XCTAssertTrue(states.contains(.completed) && states.contains(.alreadyBackedUp), "got \(states)")
+    }
+
+    // MARK: 9c. Live Photo compounds (primary + paired video)
+
+    func testLivePhotoCompoundUploadsPairedVideoWithPrimaryReference() async throws {
+        let entry = seedEntry("live.heic")
+        resolver.setSecondaries(["live.mov"], for: entry.source.identifier)
+
+        let runner = makeRunner()
+        let progress = await runner.runUntilDrained()
+
+        XCTAssertEqual(uploader.requests.map(\.name), ["live.heic", "live.mov"],
+                       "the paired video uploads after its primary")
+        let pairedRequest = try XCTUnwrap(uploader.requests.last)
+        XCTAssertEqual(pairedRequest.mainPhotoUID, testUID("live.heic"),
+                       "the paired video must reference its freshly-uploaded primary")
+        XCTAssertEqual(state(of: entry), .completed)
+        XCTAssertEqual(progress.uploaded, 1, "a compound is ONE user-facing item")
+        let record = stateStore.record(
+            for: entry.source, revision: UploadBackupRevision(date: resolver.defaultModified)
+        )
+        XCTAssertEqual(record?.isComplete, true)
+        XCTAssertEqual(record?.resourceCount, 2)
+    }
+
+    func testPairedVideoFailureRetriesWithoutReuploadingPrimary() async throws {
+        let entry = seedEntry("live.heic")
+        resolver.setSecondaries(["live.mov"], for: entry.source.identifier)
+        let flaky = MockUploader(
+            workDuration: .milliseconds(1),
+            deliverProgress: false,
+            transientFailures: ["live.mov": 1]
+        )
+
+        let runner = makeRunner(uploader: flaky)
+        let progress = await runner.runUntilDrained()
+
+        // The retry pass resolves the primary via the manifest, so the compound settles as
+        // alreadyBackedUp - either success state is honest; what matters is the byte counts.
+        XCTAssertEqual(state(of: entry)?.isTerminalSuccess, true)
+        XCTAssertEqual(flaky.requests.filter { $0.name == "live.heic" }.count, 1,
+                       "the primary must never re-upload when only its paired video failed")
+        XCTAssertEqual(flaky.requests.filter { $0.name == "live.mov" }.count, 2,
+                       "the paired video retries after its transient failure")
+        // The retried paired video references the primary via its manifest link (no volume known
+        // from a skip row - the transport resolves the photos volume for it).
+        let retriedPaired = try XCTUnwrap(flaky.requests.last)
+        XCTAssertEqual(retriedPaired.mainPhotoUID?.nodeID, testUID("live.heic").nodeID)
+        XCTAssertEqual(progress.backedUp, 1)
+    }
+
+    // MARK: 9d. Composite resolver routes by source kind
+
+    func testCompositeResolverRoutesAndRejectsUnknownKinds() async throws {
+        let composite = CompositeBackupResourceResolver([.fileURL: resolver])
+        let fileEntry = seedEntry("routed.jpg")
+        let resolved = try await composite.resolve(fileEntry)
+        XCTAssertEqual(resolved?.descriptor.filename, "routed.jpg")
+
+        let photoEntry = UploadBackupSyncQueueEntry(
+            source: UploadSourceIdentity(kind: .photoLibraryAsset, identifier: "asset-1"),
+            revision: UploadBackupRevision(rawValue: 1),
+            originalFilename: "IMG.HEIC",
+            updatedAt: clock.now
+        )
+        do {
+            _ = try await composite.resolve(photoEntry)
+            XCTFail("unregistered source kinds must fail loudly, not guess")
+        } catch {}
     }
 
     // MARK: 10. Concurrency stays bounded

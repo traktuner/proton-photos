@@ -346,7 +346,9 @@ public struct PhotoUploadRequest: Sendable {
     /// it to the SDK for server-side integrity verification of the streamed bytes.
     public let expectedSHA1: Data?
     /// The compound's primary photo when THIS request uploads a secondary resource (a Live
-    /// Photo's paired video). Nil for primaries - which is every manual file upload today.
+    /// Photo's paired video). Nil for primaries. An EMPTY `volumeID` means "the photos volume":
+    /// core may only know the primary's link id (duplicate-check rows carry no volume), and the
+    /// transport layer resolves the account's single photos volume for it.
     public let mainPhotoUID: PhotoUID?
 
     public init(

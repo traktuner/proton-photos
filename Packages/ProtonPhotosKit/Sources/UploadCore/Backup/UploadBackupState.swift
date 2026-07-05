@@ -167,6 +167,19 @@ public actor UploadBackupPreflightIndex {
             pendingResourceCount: 0,
             updatedAt: now()
         ))
+        // When the adapter supplied a reliable edit revision, prove THAT complete too: a later
+        // metadata-only drift then classifies as already backed up via the edit-revision record
+        // (no export, no rehash), while a real content edit changes the edit revision and
+        // re-checks. This is the seam `classify`'s `.revision` branch was designed around.
+        if case let .revision(editRevision) = snapshot.editRevision, editRevision != snapshot.revision {
+            store.upsert(UploadBackupAssetRecord(
+                source: snapshot.source,
+                revision: editRevision,
+                resourceCount: snapshot.resourceCount,
+                pendingResourceCount: 0,
+                updatedAt: now()
+            ))
+        }
     }
 
     private static func decision(for record: UploadBackupAssetRecord) -> UploadBackupCheckDecision {

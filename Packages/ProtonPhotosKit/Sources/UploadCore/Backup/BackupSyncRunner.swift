@@ -294,16 +294,24 @@ public actor BackupSyncRunner {
 
         case let .uploadMissingSecondaries(primaryLinkID, _):
             // This entry IS the primary and the policy proved it active remotely; only paired
-            // secondaries (none for folder sync) would need bytes. The primary is backed up.
-            _ = primaryLinkID
-            await preflight.markBackedUp(resolved.candidate.snapshot)
-            finish(entry, from: persistedState, as: .alreadyBackedUp, message: nil, resolved: resolved)
+            // secondaries would need bytes.
+            await settleCompound(
+                entry, from: persistedState, resolved: resolved,
+                primaryUID: PhotoUID(volumeID: "", nodeID: primaryLinkID),
+                terminal: .alreadyBackedUp
+            )
 
-        case let .skip(reason, _):
+        case let .skip(reason, remoteLinkID):
             switch reason {
             case .activeDuplicate, .knownFromManifest:
-                await preflight.markBackedUp(resolved.candidate.snapshot)
-                finish(entry, from: persistedState, as: .alreadyBackedUp, message: nil, resolved: resolved)
+                // The primary is proven remote. Secondaries (a Live Photo's paired video) may
+                // still be missing - settle them before any "backed up" claim. The link-only
+                // reference resolves to the photos volume at the transport layer.
+                await settleCompound(
+                    entry, from: persistedState, resolved: resolved,
+                    primaryUID: remoteLinkID.map { PhotoUID(volumeID: "", nodeID: $0) },
+                    terminal: .alreadyBackedUp
+                )
 
             case .trashedDuplicate, .deletedRemotely:
                 // Respect the user's remote deletion: no upload, and explicitly NOT backed up.
@@ -380,9 +388,111 @@ public actor BackupSyncRunner {
             resolved.descriptor, identity: preflightResult.identity,
             remoteVolumeID: uid.volumeID, remoteLinkID: uid.nodeID
         )
+        await settleCompound(entry, from: persistedState, resolved: resolved, primaryUID: uid, terminal: .completed)
+    }
+
+    // MARK: - Compound settlement (secondaries after the primary)
+
+    private enum SecondaryOutcome {
+        case allSettled
+        case failed(remaining: Int, message: String)
+        case cancelled
+    }
+
+    /// Uploads/dedupes any secondary resources, then - and only then - marks the compound backed
+    /// up. Partial secondary failure records honest pending state and retries the whole entry;
+    /// the primary is never re-uploaded (its manifest row short-circuits the next pass).
+    private func settleCompound(
+        _ entry: UploadBackupSyncQueueEntry,
+        from state: UploadBackupSyncQueueState,
+        resolved: BackupResolvedResource,
+        primaryUID: PhotoUID?,
+        terminal: UploadBackupSyncQueueState
+    ) async {
+        var persistedState = state
+        if !resolved.secondaries.isEmpty {
+            if persistedState != .uploading {
+                persistedState = transition(entry, from: persistedState, to: .uploading)
+            }
+            guard let primaryUID else {
+                // No remote reference for the primary - cannot pair secondaries safely.
+                retryOrPark(entry, from: persistedState,
+                            error: UploadError.backend(L10n.string("upload.error_remote_inconsistent")))
+                return
+            }
+            switch await settleSecondaries(resolved.secondaries, primaryUID: primaryUID, entryKey: Self.key(entry)) {
+            case .allSettled:
+                break
+            case let .failed(remaining, message):
+                await preflight.markPending(resolved.candidate.snapshot, pendingResourceCount: remaining)
+                retryOrPark(entry, from: persistedState, error: UploadError.backend(message))
+                return
+            case .cancelled:
+                revert(entry, from: persistedState)
+                return
+            }
+        }
         await preflight.markBackedUp(resolved.candidate.snapshot)
-        persistedState = transition(entry, from: persistedState, to: .completed)
-        closeDriftedRevisionRow(entry, resolved: resolved, as: .completed)
+        finish(entry, from: persistedState, as: terminal, message: nil, resolved: resolved)
+    }
+
+    /// Each secondary goes through the SAME pipeline (manifest fast path skips ones already
+    /// uploaded by a previous attempt) and uploads with `mainPhotoUID` referencing the primary.
+    private func settleSecondaries(
+        _ secondaries: [BackupSecondaryResource],
+        primaryUID: PhotoUID,
+        entryKey: String
+    ) async -> SecondaryOutcome {
+        var remaining = secondaries.count
+        var lastMessage = ""
+        for secondary in secondaries {
+            if stopRequested { return .cancelled }
+            do {
+                let result = try await identityResolver.resolve(secondary.descriptor)
+                switch result.decision {
+                case .skip, .uploadMissingSecondaries:
+                    remaining -= 1
+                case .upload:
+                    let token = UUID()
+                    inFlightTokens["\(entryKey)#\(secondary.descriptor.source.resource.rawValue)"] = token
+                    defer { inFlightTokens["\(entryKey)#\(secondary.descriptor.source.resource.rawValue)"] = nil }
+                    let request = PhotoUploadRequest(
+                        queueItemID: UUID(),
+                        cancellationToken: token,
+                        fileURL: secondary.descriptor.fileURL,
+                        name: secondary.descriptor.filename,
+                        mediaType: secondary.mediaType,
+                        fileSize: secondary.descriptor.fileSize,
+                        captureTime: resolvedCaptureDate(for: secondary),
+                        modificationDate: secondary.descriptor.modificationDate,
+                        tags: [],
+                        mainPhotoUID: primaryUID
+                    ).applying(identity: result.identity)
+                    let uid: PhotoUID
+                    do {
+                        uid = try await uploader.upload(request) { _ in }
+                    } catch {
+                        await identityResolver.uploadDidFail(secondary.descriptor)
+                        throw error
+                    }
+                    await identityResolver.recordUploaded(
+                        secondary.descriptor, identity: result.identity,
+                        remoteVolumeID: uid.volumeID, remoteLinkID: uid.nodeID
+                    )
+                    remaining -= 1
+                }
+            } catch is CancellationError {
+                return .cancelled
+            } catch {
+                if stopRequested { return .cancelled }
+                lastMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+        }
+        return remaining == 0 ? .allSettled : .failed(remaining: remaining, message: lastMessage)
+    }
+
+    private func resolvedCaptureDate(for secondary: BackupSecondaryResource) -> Date {
+        secondary.descriptor.modificationDate
     }
 
     // MARK: - Transitions (persist first, then adjust the in-memory mirror)
