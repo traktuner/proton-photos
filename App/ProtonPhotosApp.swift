@@ -69,6 +69,7 @@ struct ProtonPhotosApp: App {
             SettingsView(
                 uploadCoordinator: model.facade?.uploadCoordinator,
                 backup: model.backupController,
+                photoBackup: model.photoBackupController,
                 signOut: { model.signOut() }
             )
         }

@@ -1,6 +1,84 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "settings.photos_backup_unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Foto-Backup ist nicht verfügbar, weil der Duplikatschutz nicht initialisiert werden konnte." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Photos backup is unavailable because duplicate protection could not be initialized." } }
+      }
+    },
+    "settings.photos_backup_explainer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Sichert die Fotos und Videos deiner Mediathek Ende-zu-Ende-verschlüsselt in Proton Photos. Originale bleiben unverändert. Beim Aktivieren wird Zugriff auf deine Fotos angefragt." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Backs up the photos and videos in your library to Proton Photos, end-to-end encrypted. Originals stay unchanged. Enabling asks for access to your photos." } }
+      }
+    },
+    "settings.photos_backup_enable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Foto-Backup aktivieren…" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable Photos backup…" } }
+      }
+    },
+    "settings.photos_backup_disable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Foto-Backup deaktivieren" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn off Photos backup" } }
+      }
+    },
+    "settings.photos_backup_denied" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Zugriff auf Fotos ist nicht erlaubt. Du kannst ihn in den Einstellungen erlauben." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Photos access is not allowed. You can grant it in Settings." } }
+      }
+    },
+    "settings.photos_backup_open_settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Einstellungen öffnen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Settings" } }
+      }
+    },
+    "settings.photos_backup_limited" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Nur die von dir ausgewählten Fotos werden gesichert." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only the photos you selected are backed up." } }
+      }
+    },
+    "settings.photos_backup_manage_selection" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Auswahl ändern…" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change selection…" } }
+      }
+    },
+    "settings.photos_backup_pause" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Pausieren" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pause" } }
+      }
+    },
+    "settings.photos_backup_sync_now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Jetzt sichern" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Back up now" } }
+      }
+    },
+    "settings.photos_backup_background_note" : {
+      "extractionState" : "manual",
+      "comment" : "Honest background wording: uploads continue while the app is open and in system-granted charging windows; iOS may pause them otherwise.",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Die Sicherung läuft, während die App geöffnet ist, und in vom System gewährten Zeitfenstern (meist beim Laden). iOS kann sie dazwischen pausieren – sie wird automatisch fortgesetzt." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Backup runs while the app is open and in system-granted windows (usually while charging). iOS may pause it in between - it resumes automatically." } }
+      }
+    },
     "settings.section_backup" : {
       "extractionState" : "manual",
       "localizations" : {

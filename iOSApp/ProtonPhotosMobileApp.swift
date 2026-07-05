@@ -1,6 +1,8 @@
+import BackgroundTasks
 import DesignSystemCore
 import Metal
 import os
+import PhotoLibraryBackupAdapter
 import PhotosCore
 import ProtonCoreCryptoPatchedGoImplementation
 import SwiftUI
@@ -9,10 +11,18 @@ import UIKit
 
 @main
 struct ProtonPhotosMobileApp: App {
+    /// BGTaskScheduler identifier - must match `BGTaskSchedulerPermittedIdentifiers` in Info.plist.
+    static let photoBackupTaskIdentifier = "me.protonphotos.ios.photo-backup.processing"
+
     @StateObject private var sessionModel = MobileSessionModel()
     /// `@State` (not `@StateObject`) because `MobileLibraryModel` is `@Observable`: SwiftUI then tracks its
     /// properties individually, so non-grid tabs don't re-render on a timeline snapshot change.
     @State private var libraryModel = MobileLibraryModel()
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        Self.registerPhotoBackupTask()
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -25,7 +35,55 @@ struct ProtonPhotosMobileApp: App {
                 .onChange(of: sessionModel.session) { _, session in
                     libraryModel.configure(session: session, store: sessionModel.sessionStore)
                 }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .background {
+                        Self.schedulePhotoBackupTask()
+                    }
+                }
         }
+    }
+
+    // MARK: - Background photo-backup catch-up (BGProcessingTask)
+
+    /// One shared reference for the BG task handler - the handler outlives any scene, so it must
+    /// not capture SwiftUI-owned state. Set by `MobileLibraryModel` when the account is ready.
+    @MainActor
+    static func currentPhotoBackup() -> PhotoLibraryBackupController? {
+        PhotoLibraryBackupSharedRef.shared.controller
+    }
+
+    private static func registerPhotoBackupTask() {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: photoBackupTaskIdentifier, using: nil) { task in
+            guard let processingTask = task as? BGProcessingTask else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            let work = Task { @MainActor in
+                guard let controller = currentPhotoBackup(), controller.isEnabled else {
+                    processingTask.setTaskCompleted(success: true)
+                    return
+                }
+                // Every queue transition is checkpointed - expiration simply stops the pass and
+                // the next window (or the next foreground session) resumes exactly.
+                await controller.backgroundCatchUp()
+                schedulePhotoBackupTask()    // keep future windows coming while work may remain
+                processingTask.setTaskCompleted(success: true)
+            }
+            processingTask.expirationHandler = {
+                Task { @MainActor in
+                    currentPhotoBackup()?.stopSync()
+                }
+                work.cancel()
+            }
+        }
+    }
+
+    static func schedulePhotoBackupTask() {
+        let request = BGProcessingTaskRequest(identifier: photoBackupTaskIdentifier)
+        request.requiresNetworkConnectivity = true
+        // Bulk hashing/upload belongs in charging windows; the system may still grant earlier.
+        request.requiresExternalPower = true
+        try? BGTaskScheduler.shared.submit(request)
     }
 }
 

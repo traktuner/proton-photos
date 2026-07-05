@@ -4,6 +4,7 @@ import MediaCacheCore
 import MediaCacheUIKitAdapter
 import MediaLocationCore
 import Observation
+import PhotoLibraryBackupAdapter
 import PhotosCore
 import ProtonAuth
 import ProtonDriveBackend
@@ -71,6 +72,8 @@ final class MobileLibraryModel {
     /// The shared backend, exposed so the Albums / Map / Viewer tabs can reuse it without re-building anything.
     private(set) var backend: (any PhotosBackend)?
     private(set) var facade: ProtonClientFacade?
+    /// Photos-library backup: the SHARED cross-platform controller (same code as macOS).
+    private(set) var photoBackup: PhotoLibraryBackupController?
 
     /// Whole-library GPS index for the Map tab (shared MediaLocationCore). Persisted encrypted at rest with the
     /// same per-account key as the media caches, so the Map is instant on relaunch.
@@ -248,6 +251,8 @@ final class MobileLibraryModel {
         session = nil
         backend = nil
         facade = nil
+        photoBackup?.stopSync()
+        photoBackup = nil
         snapshot = TimelineSnapshot()
         thumbnailFeed = nil
         thumbnailCache = nil
@@ -272,6 +277,8 @@ final class MobileLibraryModel {
         configuredUID = session.uid
         backend = nil
         facade = nil
+        photoBackup?.stopSync()
+        photoBackup = nil
         snapshot = TimelineSnapshot()
         thumbnailFeed = nil
         loadState = .preparingInventory
@@ -329,6 +336,15 @@ final class MobileLibraryModel {
                     targetPixels: 288
                 )
                 self.facade = client
+                self.photoBackup = PhotoLibraryBackupController(
+                    configuration: .init(
+                        accountDataDirectory: client.accountDataDirectory,
+                        databasePolicy: client.accountDatabasePolicy
+                    ),
+                    identityResolver: client.uploadIdentityResolver,
+                    uploader: client.photoUploader
+                )
+                PhotoLibraryBackupSharedRef.shared.controller = self.photoBackup
                 await client.uploadCoordinator.start()
                 self.backend = backend
                 self.thumbnailFeed = feed

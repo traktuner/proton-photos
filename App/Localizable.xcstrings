@@ -1,6 +1,49 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "settings.photos_backup_section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Photos Library" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Foto-Mediathek" } }
+      }
+    },
+    "settings.photos_backup_explainer": {
+      "extractionState": "manual",
+      "comment": "Shown BEFORE the system permission prompt - states plainly what enabling will do.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backs up the photos and videos in your Photos library to Proton Photos, end-to-end encrypted. Originals are kept unchanged; nothing is ever deleted from your library. Enabling asks for access to your Photos library." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Sichert die Fotos und Videos deiner Foto-Mediathek Ende-zu-Ende-verschlüsselt in Proton Photos. Originale bleiben unverändert; es wird nie etwas aus deiner Mediathek gelöscht. Beim Aktivieren wird Zugriff auf deine Foto-Mediathek angefragt." } }
+      }
+    },
+    "settings.photos_backup_enable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Enable Photos backup…" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Foto-Backup aktivieren…" } }
+      }
+    },
+    "settings.photos_backup_disable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Turn off Photos backup" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Foto-Backup deaktivieren" } }
+      }
+    },
+    "settings.photos_backup_denied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Photos access is not allowed - grant it in System Settings › Privacy & Security › Photos." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Zugriff auf Fotos ist nicht erlaubt – erlaube ihn in den Systemeinstellungen › Datenschutz & Sicherheit › Fotos." } }
+      }
+    },
+    "settings.photos_backup_limited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Only the photos you selected are backed up." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Nur die von dir ausgewählten Fotos werden gesichert." } }
+      }
+    },
     "settings.backup_uploads_section": {
       "extractionState": "manual",
       "comment": "Backup tab section for the manual upload queue's pre-upload check.",

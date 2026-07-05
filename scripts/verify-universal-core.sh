@@ -45,10 +45,12 @@ IOS_PLATFORM_ADAPTER_TARGETS=(
   MetalGridTextureUIKitAdapter
   TimelineUIKitAdapter
   TimelineUIKitFeature
+  PhotoLibraryBackupAdapter
 )
 
 MACOS_PLATFORM_ADAPTER_TARGETS=(
   MetalGridTextureAppKitAdapter
+  PhotoLibraryBackupAdapter
 )
 
 PLATFORMS=(

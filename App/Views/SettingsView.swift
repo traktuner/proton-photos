@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import PhotoLibraryBackupAdapter
 import PhotosCore
 import DesignSystem
 import ProtonDriveBackend
@@ -9,6 +10,7 @@ import UploadCore
 struct SettingsView: View {
     let uploadCoordinator: UploadCoordinator?
     let backup: FolderBackupController?
+    let photoBackup: PhotoLibraryBackupController?
     let signOut: () -> Void
 
     var body: some View {
@@ -18,7 +20,7 @@ struct SettingsView: View {
             LibrarySettingsTab()
                 .tabItem { Label("settings.library_tab", systemImage: "photo.on.rectangle.angled") }
             if let backup {
-                BackupSettingsTab(backup: backup, uploadCoordinator: uploadCoordinator)
+                BackupSettingsTab(backup: backup, photoBackup: photoBackup, uploadCoordinator: uploadCoordinator)
                     .tabItem { Label("settings.backup_tab", systemImage: "arrow.triangle.2.circlepath.icloud") }
             }
             CacheStatusTab()
@@ -32,10 +34,18 @@ struct SettingsView: View {
 
 private struct BackupSettingsTab: View {
     @State var backup: FolderBackupController
+    let photoBackup: PhotoLibraryBackupController?
     let uploadCoordinator: UploadCoordinator?
 
     var body: some View {
         Form {
+            if let photoBackup {
+                Section {
+                    PhotoLibraryBackupSection(controller: photoBackup)
+                } header: {
+                    Text("settings.photos_backup_section")
+                }
+            }
             Section {
                 if backup.folders.isEmpty {
                     Text("settings.backup_no_folders")
@@ -335,6 +345,94 @@ private struct LibrarySettingsTab: View {
         await OfflineLibraryManager.shared.deleteOfflineCache()
         await refreshSize()
         deleting = false
+    }
+}
+
+/// Photos-library backup controls over the SHARED cross-platform controller. Presentation only:
+/// consent copy before any permission request, honest permission states, shared status wording.
+private struct PhotoLibraryBackupSection: View {
+    @State var controller: PhotoLibraryBackupController
+
+    var body: some View {
+        if !controller.isAvailable {
+            Text("settings.backup_unavailable")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } else if !controller.isEnabled {
+            Text("settings.photos_backup_explainer")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                if controller.accessState == .denied || controller.accessState == .restricted {
+                    Text("settings.photos_backup_denied")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                }
+                Spacer()
+                Button("settings.photos_backup_enable") {
+                    Task { await controller.enableBackup() }
+                }
+            }
+        } else {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(controller.status.localizedTitle)
+                        .font(.system(size: 12, weight: .medium))
+                    if let detail = controller.status.localizedDetail {
+                        Text(detail)
+                            .font(.system(size: 11).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if controller.isSyncing {
+                    Button("settings.backup_stop") { controller.stopSync() }
+                } else {
+                    Button("settings.backup_sync_now") { controller.syncNow() }
+                }
+            }
+            if controller.status.isActive || controller.status.phase == .paused {
+                if let fraction = controller.status.fractionCompleted {
+                    ProgressView(value: fraction)
+                } else {
+                    ProgressView()
+                }
+                if let name = controller.status.currentItemName {
+                    Text(name)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            if let total = controller.status.totalConsidered, total > 0 {
+                Text("settings.backup_backed_up \(controller.status.backedUp) \(total)")
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                if controller.status.failed > 0 {
+                    Text("settings.backup_row_failed \(controller.status.failed)")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.orange)
+                }
+            }
+            if controller.accessState == .limited {
+                Text("settings.photos_backup_limited")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            if let message = controller.lastMessage {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("settings.photos_backup_disable") { controller.disableBackup() }
+                    .controlSize(.small)
+            }
+        }
     }
 }
 

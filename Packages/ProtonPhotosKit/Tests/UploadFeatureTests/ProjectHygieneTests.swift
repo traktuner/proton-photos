@@ -100,7 +100,8 @@ final class ProjectHygieneTests: XCTestCase {
             "product: PhotoViewerUIKitAdapter",
             "product: MapUIKitAdapter",
             "product: UploadCore",
-            "product: UploadFeature"
+            "product: UploadFeature",
+            "product: PhotoLibraryBackupAdapter"
         ] {
             XCTAssertTrue(mobileTarget.contains(required), "ProtonPhotosMobile target missing \(required)")
         }
@@ -250,6 +251,61 @@ final class ProjectHygieneTests: XCTestCase {
         )
     }
 
+    func testPhotoLibraryBackupAdapterStaysUIAndSDKFree() {
+        let adapterDir = repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoLibraryBackupAdapter")
+        let files = sourceFiles(in: adapterDir)
+        XCTAssertFalse(files.isEmpty, "the PhotoKit adapter target must exist")
+        for url in files {
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let importLines = Set(
+                text.split(whereSeparator: \.isNewline)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { $0.hasPrefix("import ") }
+            )
+            // Photos IS this target's purpose; UI frameworks, OS scheduling, and the SDK are not.
+            for forbidden in [
+                "import UIKit",
+                "import AppKit",
+                "import SwiftUI",
+                "import BackgroundTasks",
+                "import ProtonDriveSDK",
+                "import ProtonCore"
+            ] {
+                XCTAssertFalse(importLines.contains(forbidden),
+                               "\(url.lastPathComponent) must keep \(forbidden) out of the shared PhotoKit adapter")
+            }
+        }
+    }
+
+    func testPhotoBackupPermissionAndBackgroundDeclarations() throws {
+        // iOS: usage description + BG processing declarations must stay consistent with the
+        // registered task identifier.
+        let infoData = try Data(contentsOf: repoRoot.appendingPathComponent("iOSApp/Info.plist"))
+        let info = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: infoData, options: [], format: nil) as? [String: Any]
+        )
+        XCTAssertNotNil(info["NSPhotoLibraryUsageDescription"],
+                        "photo backup needs a usage description on iOS")
+        let identifiers = try XCTUnwrap(info["BGTaskSchedulerPermittedIdentifiers"] as? [String])
+        XCTAssertTrue(identifiers.contains("me.protonphotos.ios.photo-backup.processing"))
+        let modes = try XCTUnwrap(info["UIBackgroundModes"] as? [String])
+        XCTAssertTrue(modes.contains("processing"))
+        XCTAssertFalse(modes.contains("audio") || modes.contains("location") || modes.contains("voip"),
+                       "no keep-alive background-mode abuse")
+
+        let mobileApp = (try? String(
+            contentsOf: repoRoot.appendingPathComponent("iOSApp/ProtonPhotosMobileApp.swift"),
+            encoding: .utf8
+        )) ?? ""
+        XCTAssertTrue(mobileApp.contains("me.protonphotos.ios.photo-backup.processing"),
+                      "the registered BG task identifier must match Info.plist")
+
+        // macOS: usage description via project.yml.
+        let projectYML = try String(contentsOf: repoRoot.appendingPathComponent("project.yml"), encoding: .utf8)
+        XCTAssertTrue(projectYML.contains("INFOPLIST_KEY_NSPhotoLibraryUsageDescription"),
+                      "photo backup needs a usage description on macOS")
+    }
+
     func testUploadCoreStaysPlatformAndSDKAgnostic() {
         for url in sourceFiles(in: uploadCoreDir) {
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
@@ -317,7 +373,9 @@ final class ProjectHygieneTests: XCTestCase {
             "com.apple.security.network.client",
             "com.apple.security.files.user-selected.read-write",
             // Folder backup persists the user's chosen folders as security-scoped bookmarks.
-            "com.apple.security.files.bookmarks.app-scope"
+            "com.apple.security.files.bookmarks.app-scope",
+            // Photos-library backup reads originals through PhotoKit.
+            "com.apple.security.personal-information.photos-library"
         ] {
             XCTAssertEqual(plist[required] as? Bool, true, "missing required entitlement \(required)")
         }

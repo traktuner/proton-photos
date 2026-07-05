@@ -1,9 +1,13 @@
 import DesignSystemCore
 import Foundation
+import PhotoLibraryBackupAdapter
+import Photos
+import PhotosUI
 import PhotosCore
 import ProtonDriveBackend
 import SwiftUI
 import TimelineCore
+import UIKit
 import UploadCore
 
 /// Account, library status, cache and sign-out settings for the mobile app.
@@ -101,11 +105,20 @@ struct MobileSettingsScreen: View {
         }
     }
 
-    /// Backup state lives in its own section, mirroring the macOS Backup tab. The row is driven by
+    /// Backup state lives in its own section, mirroring the macOS Backup tab. Rows are driven by
     /// the shared Core `BackupStatus` model - same phases and wording on every platform.
     @ViewBuilder private var backupSection: some View {
-        Section(String(localized: "settings.section_backup")) {
+        Section {
+            if let photoBackup = libraryModel.photoBackup {
+                MobilePhotoBackupRows(controller: photoBackup)
+            }
             backupStatusRow
+        } header: {
+            Text(String(localized: "settings.section_backup"))
+        } footer: {
+            if libraryModel.photoBackup?.isEnabled == true {
+                Text(String(localized: "settings.photos_backup_background_note"))
+            }
         }
     }
 
@@ -259,5 +272,103 @@ struct MobileSettingsScreen: View {
             await refreshCacheSize()
             isClearingCache = false
         }
+    }
+}
+
+// MARK: - Photos library backup (shared cross-platform controller, native mobile presentation)
+
+/// Enable/permission/progress rows for Photos-library backup. All state, counts, and wording come
+/// from the shared `PhotoLibraryBackupController` + `BackupStatus`; this view is layout only.
+private struct MobilePhotoBackupRows: View {
+    @State var controller: PhotoLibraryBackupController
+
+    var body: some View {
+        if !controller.isAvailable {
+            Text(String(localized: "settings.photos_backup_unavailable"))
+                .font(.footnote)
+                .foregroundStyle(ProtonColor.textWeak)
+        } else if !controller.isEnabled {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(String(localized: "settings.photos_backup_explainer"))
+                    .font(.footnote)
+                    .foregroundStyle(ProtonColor.textWeak)
+                if controller.accessState == .denied || controller.accessState == .restricted {
+                    Text(String(localized: "settings.photos_backup_denied"))
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                    Button(String(localized: "settings.photos_backup_open_settings")) {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            UIApplication.shared.open(url)
+                        }
+                    }
+                } else {
+                    Button(String(localized: "settings.photos_backup_enable")) {
+                        Task { await controller.enableBackup() }
+                    }
+                    .foregroundStyle(ProtonColor.primary)
+                }
+            }
+        } else {
+            HStack(spacing: 10) {
+                Image(systemName: controller.status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
+                    .foregroundStyle(controller.status.isActive ? ProtonColor.primary : ProtonColor.textWeak)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(controller.status.localizedTitle)
+                        .foregroundStyle(ProtonColor.textNorm)
+                    if let detail = controller.status.localizedDetail {
+                        Text(detail)
+                            .font(.footnote)
+                            .foregroundStyle(ProtonColor.textWeak)
+                            .monospacedDigit()
+                    }
+                    if controller.status.isActive || controller.status.phase == .paused {
+                        if let fraction = controller.status.fractionCompleted {
+                            ProgressView(value: fraction).tint(ProtonColor.primary)
+                        } else {
+                            ProgressView().tint(ProtonColor.primary)
+                        }
+                    }
+                    if controller.status.failed > 0 {
+                        Text(String(localized: "settings.upload_check_attention \(controller.status.failed)"))
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+                }
+                Spacer()
+                if controller.isSyncing {
+                    Button(String(localized: "settings.photos_backup_pause")) { controller.stopSync() }
+                        .font(.footnote)
+                } else {
+                    Button(String(localized: "settings.photos_backup_sync_now")) { controller.syncNow() }
+                        .font(.footnote)
+                }
+            }
+            if controller.accessState == .limited {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(String(localized: "settings.photos_backup_limited"))
+                        .font(.footnote)
+                        .foregroundStyle(ProtonColor.textWeak)
+                    Button(String(localized: "settings.photos_backup_manage_selection")) {
+                        presentLimitedLibraryPicker()
+                    }
+                    .font(.footnote)
+                }
+            }
+            Button(String(localized: "settings.photos_backup_disable"), role: .destructive) {
+                controller.disableBackup()
+            }
+            .font(.footnote)
+        }
+    }
+
+    /// The system's limited-library selection UI (iOS/iPadOS only - the picker is UIKit-hosted,
+    /// which is exactly why this call lives in the app layer, not the shared adapter).
+    private func presentLimitedLibraryPicker() {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let root = scenes.first?.keyWindow?.rootViewController else { return }
+        var presenter = root
+        while let presented = presenter.presentedViewController { presenter = presented }
+        PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: presenter)
     }
 }

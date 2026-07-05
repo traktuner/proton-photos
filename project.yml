@@ -64,6 +64,8 @@ targets:
       - package: ProtonPhotosKit
         product: UploadFeature
       - package: ProtonPhotosKit
+        product: PhotoLibraryBackupAdapter
+      - package: ProtonPhotosKit
         product: MapFeature
       - package: ProtonCore
         product: ProtonCoreCryptoPatchedGoImplementation
@@ -76,6 +78,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.photography"
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: "Proton Photos backs up the photos and videos in your Photos library, end-to-end encrypted."
         CODE_SIGN_ENTITLEMENTS: App/ProtonPhotos.entitlements
         CODE_SIGN_STYLE: Automatic
         ENABLE_HARDENED_RUNTIME: YES
@@ -132,6 +135,8 @@ targets:
         product: UploadCore
       - package: ProtonPhotosKit
         product: UploadFeature
+      - package: ProtonPhotosKit
+        product: PhotoLibraryBackupAdapter
       - package: ProtonPhotosKit
         product: PhotoViewerCore
       - package: ProtonPhotosKit

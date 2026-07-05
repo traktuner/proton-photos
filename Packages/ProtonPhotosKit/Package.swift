@@ -55,6 +55,7 @@ let package = Package(
         .library(name: "AlbumsFeature", targets: ["AlbumsFeature"]),
         .library(name: "UploadCore", targets: ["UploadCore"]),
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
+        .library(name: "PhotoLibraryBackupAdapter", targets: ["PhotoLibraryBackupAdapter"]),
         // Library map: MapKit (native Apple Maps) view over the shared encrypted location index.
         // Platform UI layer - macOS now; an iOS/iPad UIKit variant reuses the same MediaLocationCore.
         .library(name: "MapUIKitAdapter", targets: ["MapUIKitAdapter"]),
@@ -154,7 +155,11 @@ let package = Package(
         // UploadFeature: SwiftUI adapter over UploadCore. No DesignSystem dependency; the native
         // presentation chrome stays owned by the host platform.
         .target(name: "UploadFeature", dependencies: ["UploadCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
-        .testTarget(name: "UploadFeatureTests", dependencies: ["UploadCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        // PhotoLibraryBackupAdapter: the ONE PhotoKit boundary (contract platform-adapter layer),
+        // shared verbatim by iOS/iPadOS/macOS. May import Photos; never UIKit/AppKit/SwiftUI or
+        // the SDK. Emits platform-neutral UploadCore values; makes no dedupe/upload decisions.
+        .target(name: "PhotoLibraryBackupAdapter", dependencies: ["UploadCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "UploadFeatureTests", dependencies: ["UploadCore", "PhotosCore", "PhotoLibraryBackupAdapter"], swiftSettings: disableDynamicActorIsolation),
         // Map: UIKit/AppKit MapKit views + clustering over PhotoLocationIndex (MediaLocationCore).
         .target(name: "MapUIKitAdapter", dependencies: ["PhotosCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MapFeature", dependencies: ["PhotosCore", "MediaLocationCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),

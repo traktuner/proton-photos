@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import PhotoLibraryBackupAdapter
 import PhotosCore
 import ProtonAuth
 import ProtonDriveBackend
@@ -31,6 +32,9 @@ final class AppModel {
     /// macOS folder-backup composition over the universal sync core. Lives exactly as long as the
     /// facade (per-account stores).
     private(set) var backupController: FolderBackupController?
+    /// Photos-library backup: the SHARED cross-platform controller from the PhotoKit adapter,
+    /// composed with this account's dedupe pipeline and uploader.
+    private(set) var photoBackupController: PhotoLibraryBackupController?
     /// True once the signed-in library has finished its first load (loaded / empty / failed). Drives the
     /// launch veil, which lifts only after the real grid is ready to be revealed. Reset on sign-out and on a
     /// fresh backend build so a new session shows the veil again.
@@ -98,6 +102,8 @@ final class AppModel {
         backend = .idle
         backupController?.stopSync()
         backupController = nil
+        photoBackupController?.stopSync()
+        photoBackupController = nil
         facade = nil
         libraryReady = false
         // FULL PURGE: sign-out must leave nothing tied to the account on disk. Erase the encrypted
@@ -136,6 +142,14 @@ final class AppModel {
                 )
                 facade = client
                 backupController = FolderBackupController(facade: client)
+                photoBackupController = PhotoLibraryBackupController(
+                    configuration: .init(
+                        accountDataDirectory: client.accountDataDirectory,
+                        databasePolicy: client.accountDatabasePolicy
+                    ),
+                    identityResolver: client.uploadIdentityResolver,
+                    uploader: client.photoUploader
+                )
                 await client.uploadCoordinator.start()
                 backend = .ready(client.backend)
                 // Start coordinating cache footprint with system memory pressure / thermal state now
