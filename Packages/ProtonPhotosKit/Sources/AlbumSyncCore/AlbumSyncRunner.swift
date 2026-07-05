@@ -225,16 +225,17 @@ public actor AlbumSyncRunner {
         if let mapping = mappingStore.mapping(localAlbumID: album.id) {
             return mapping.remoteAlbumID
         }
+        let name = album.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let remoteAlbumID: String
         switch resolution {
         case .automatic:
             let twins = try await nameTwins(of: album.title)
             guard twins.isEmpty else { throw AlbumSyncError.nameConflict(existing: twins) }
-            remoteAlbumID = try await remoteOps.createAlbum(name: album.title)
+            remoteAlbumID = try await remoteOps.createAlbum(name: name)
         case let .attachToExisting(existingID):
             remoteAlbumID = existingID
         case .createNew:
-            remoteAlbumID = try await remoteOps.createAlbum(name: album.title)
+            remoteAlbumID = try await remoteOps.createAlbum(name: name)
         }
         mappingStore.upsert(AlbumSyncMapping(
             localAlbumID: album.id,
