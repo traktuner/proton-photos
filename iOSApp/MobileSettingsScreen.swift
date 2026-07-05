@@ -163,6 +163,7 @@ struct MobileSettingsScreen: View {
                 Image(systemName: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
                     .foregroundStyle(status.isActive ? ProtonColor.primary : ProtonColor.textWeak)
                     .frame(width: 18)
+                    .spinsWhileActive(status.isActive)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(status.localizedTitle)
@@ -325,6 +326,7 @@ private struct MobilePhotoBackupRows: View {
                 Image(systemName: controller.status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
                     .foregroundStyle(controller.status.isActive ? ProtonColor.primary : ProtonColor.textWeak)
                     .frame(width: 18)
+                    .spinsWhileActive(controller.status.isActive)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(controller.status.localizedTitle)
                         .foregroundStyle(ProtonColor.textNorm)

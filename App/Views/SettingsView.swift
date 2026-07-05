@@ -715,8 +715,13 @@ private struct BackupStatusSummaryRow: View {
         VStack(alignment: .leading, spacing: 8) {
             if showsStatusHeader {
                 HStack(alignment: .firstTextBaseline) {
-                    Label(status.localizedTitle, systemImage: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
-                        .font(.system(size: 12, weight: .medium))
+                    Label {
+                        Text(status.localizedTitle)
+                    } icon: {
+                        Image(systemName: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
+                            .spinsWhileActive(status.isActive)
+                    }
+                    .font(.system(size: 12, weight: .medium))
                     Spacer()
                     if total > 0 {
                         Text(String(localized: "settings.upload_check_progress \(status.checked) \(total)"))
