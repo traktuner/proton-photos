@@ -58,7 +58,8 @@ public struct FileBackupResourceResolver: BackupResourceResolving {
 
         let fileSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
         let modified = (attributes[.modificationDate] as? Date) ?? Date()
-        let created = (attributes[.creationDate] as? Date) ?? modified
+        let fileFallback = UploadCaptureDateReader.fileSystemFallback(from: attributes, default: modified)
+        let captureDate = await UploadCaptureDateReader.captureDate(for: url, fallback: fileFallback)
         let filename = url.lastPathComponent
 
         let snapshot = UploadBackupAssetSnapshot(
@@ -78,7 +79,7 @@ public struct FileBackupResourceResolver: BackupResourceResolving {
             candidate: UploadBackupAssetCandidate(snapshot: snapshot, originalFilename: filename, byteCount: fileSize),
             descriptor: descriptor,
             mediaType: SupportedMedia.mimeType(for: url) ?? "application/octet-stream",
-            captureDate: created
+            captureDate: captureDate
         )
     }
 }

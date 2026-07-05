@@ -193,16 +193,16 @@ public actor UploadManager: UploadManaging {
         guard var job = jobs[id] else { return }
         activeIDs.insert(id)
         job.item.state = .preparing
-        let request = makeRequest(for: job)
-        job.task = Task { [weak self] in await self?.run(id, request: request) }
+        job.task = Task { [weak self] in await self?.run(id) }
         jobs[id] = job
     }
 
-    private func makeRequest(for job: Job) -> PhotoUploadRequest {
+    private func makeRequest(for job: Job) async -> PhotoUploadRequest {
         let url = job.item.fileURL
         let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
         let modified = (attrs?[.modificationDate] as? Date) ?? now()
-        let created = (attrs?[.creationDate] as? Date) ?? modified
+        let fileFallback = UploadCaptureDateReader.fileSystemFallback(from: attrs ?? [:], default: modified)
+        let captureDate = await UploadCaptureDateReader.captureDate(for: url, fallback: fileFallback)
         return PhotoUploadRequest(
             queueItemID: job.item.id,
             cancellationToken: job.cancellationToken,
@@ -210,7 +210,7 @@ public actor UploadManager: UploadManaging {
             name: job.item.displayName,
             mediaType: job.item.mediaType,
             fileSize: job.item.byteCount,
-            captureTime: created,
+            captureTime: captureDate,
             modificationDate: modified,
             tags: []
         )
@@ -218,8 +218,15 @@ public actor UploadManager: UploadManaging {
 
     // MARK: - Per-item run
 
-    private func run(_ id: UploadQueueItemID, request: PhotoUploadRequest) async {
+    private func run(_ id: UploadQueueItemID) async {
         do {
+            guard let job = jobs[id] else { return }
+            let request = await makeRequest(for: job)
+            if currentState(id) == .cancelled || currentState(id) == .paused {
+                finish(id)
+                return
+            }
+
             var effectiveRequest = request
             var preflight: UploadPreflightResult?
             // The descriptor mirrors the request snapshot (same name/size/mtime), so manifest rows
