@@ -12,8 +12,8 @@
       "extractionState": "manual",
       "comment": "Shown BEFORE the system permission prompt - states plainly what enabling will do.",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Backs up the photos and videos in your Photos library to Proton Photos, end-to-end encrypted. Originals are kept unchanged; nothing is ever deleted from your library. Photos that are already in Proton Photos — for example from another device or the Proton Drive app — are recognized during a check and are never uploaded again. Enabling asks for access to your Photos library." } },
-        "de": { "stringUnit": { "state": "translated", "value": "Sichert die Fotos und Videos deiner Foto-Mediathek Ende-zu-Ende-verschlüsselt in Proton Photos. Originale bleiben unverändert; es wird nie etwas aus deiner Mediathek gelöscht. Fotos, die bereits in Proton Photos sind – etwa von einem anderen Gerät oder aus der Proton Drive-App –, werden bei einer Prüfung erkannt und nie erneut hochgeladen. Beim Aktivieren wird Zugriff auf deine Foto-Mediathek angefragt." } }
+        "en": { "stringUnit": { "state": "translated", "value": "Backs up your photos and videos to Proton Photos, encrypted. Your originals stay untouched, and nothing is ever deleted from your library. Photos that are already in Proton Photos get recognized and are never uploaded again. Turning this on needs access to your photos." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Sichert deine Fotos und Videos verschlüsselt in Proton Photos. Deine Originale bleiben unverändert, und es wird nie etwas aus deiner Mediathek gelöscht. Fotos, die schon in Proton Photos liegen, werden erkannt und nicht noch mal hochgeladen. Zum Aktivieren braucht die App Zugriff auf deine Fotos." } }
       }
     },
     "settings.photos_backup_enable": {
@@ -33,8 +33,8 @@
     "settings.photos_backup_denied": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Photos access is not allowed - grant it in System Settings › Privacy & Security › Photos." } },
-        "de": { "stringUnit": { "state": "translated", "value": "Zugriff auf Fotos ist nicht erlaubt – erlaube ihn in den Systemeinstellungen › Datenschutz & Sicherheit › Fotos." } }
+        "en": { "stringUnit": { "state": "translated", "value": "Photos access isn’t allowed. You can grant it in System Settings under Privacy & Security › Photos." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Zugriff auf Fotos ist nicht erlaubt. Du kannst ihn in den Systemeinstellungen unter Datenschutz & Sicherheit › Fotos erlauben." } }
       }
     },
     "settings.photos_backup_limited": {
@@ -1869,13 +1869,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Before uploading, the app checks whether photos are already in your library. Existing photos are skipped instead of being uploaded again."
+            "value": "Before uploading, the app checks whether a photo is already backed up. If it is, it’s skipped."
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Vor dem Hochladen prüft die App, ob Fotos bereits in deiner Mediathek sind. Vorhandene Fotos werden übersprungen und nicht erneut hochgeladen."
+            "value": "Vor dem Hochladen prüft die App, ob ein Foto schon gesichert ist. Falls ja, wird es übersprungen."
           }
         }
       }

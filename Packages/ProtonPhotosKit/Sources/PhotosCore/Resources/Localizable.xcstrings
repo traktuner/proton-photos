@@ -1646,13 +1646,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Failed - %@"
+            "value": "Failed: %@"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Fehlgeschlagen – %@"
+            "value": "Fehlgeschlagen: %@"
           }
         }
       }

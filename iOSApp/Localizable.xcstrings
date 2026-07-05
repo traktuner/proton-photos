@@ -11,8 +11,8 @@
     "settings.photos_backup_explainer" : {
       "extractionState" : "manual",
       "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Sichert die Fotos und Videos deiner Mediathek Ende-zu-Ende-verschlüsselt in Proton Photos. Originale bleiben unverändert. Fotos, die bereits in Proton Photos sind – etwa von einem anderen Gerät oder aus der Proton Drive-App –, werden bei einer Prüfung erkannt und nie erneut hochgeladen. Beim Aktivieren wird Zugriff auf deine Fotos angefragt." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Backs up the photos and videos in your library to Proton Photos, end-to-end encrypted. Originals stay unchanged. Photos that are already in Proton Photos — for example from another device or the Proton Drive app — are recognized during a check and are never uploaded again. Enabling asks for access to your photos." } }
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Sichert deine Fotos und Videos verschlüsselt in Proton Photos. Deine Originale bleiben unverändert. Fotos, die schon in Proton Photos liegen, werden erkannt und nicht noch mal hochgeladen. Zum Aktivieren braucht die App Zugriff auf deine Fotos." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Backs up your photos and videos to Proton Photos, encrypted. Your originals stay untouched. Photos that are already in Proton Photos get recognized and are never uploaded again. Turning this on needs access to your photos." } }
       }
     },
     "settings.photos_backup_enable" : {
@@ -252,8 +252,8 @@
       "extractionState" : "manual",
       "comment" : "Honest background wording: uploads continue while the app is open and in system-granted charging windows; iOS may pause them otherwise.",
       "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Die Sicherung läuft, während die App geöffnet ist, und in vom System gewährten Zeitfenstern (meist beim Laden). iOS kann sie dazwischen pausieren – sie wird automatisch fortgesetzt." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Backup runs while the app is open and in system-granted windows (usually while charging). iOS may pause it in between - it resumes automatically." } }
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Die Sicherung läuft, während die App offen ist, und manchmal im Hintergrund (meist beim Laden). Wird sie unterbrochen, macht sie von selbst weiter." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Backup runs while the app is open, and sometimes in the background (usually while charging). If it stops, it picks up again on its own." } }
       }
     },
     "settings.section_backup" : {
@@ -1519,13 +1519,13 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Vor dem Hochladen prüft die App, ob Fotos bereits in deiner Mediathek sind. Vorhandene Fotos werden übersprungen und nicht erneut hochgeladen."
+            "value" : "Vor dem Hochladen prüft die App, ob ein Foto schon gesichert ist. Falls ja, wird es übersprungen."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Before uploading, the app checks whether photos are already in your library. Existing photos are skipped instead of being uploaded again."
+            "value" : "Before uploading, the app checks whether a photo is already backed up. If it is, it’s skipped."
           }
         }
       }
