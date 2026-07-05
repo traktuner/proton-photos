@@ -25,11 +25,11 @@ public struct UploadBackupRevision: Sendable, Hashable, Comparable, Codable {
 }
 
 /// Optional edit evidence supplied by a platform adapter. PhotoKit can expose adjustment metadata;
-/// file-system sources can usually use `.none`.
+/// mutable file-system sources must use `.unavailable` when they cannot prove content stability.
 public enum UploadBackupEditRevision: Sendable, Equatable, Codable {
-    /// The source has no separate edit/adjustment marker, so a cheap metadata revision drift can
-    /// be treated as the same content after a previous successful backup.
-    case none
+    /// The adapter proved that a metadata revision drift did not correspond to a content edit.
+    /// PhotoKit can use this for a known asset when adjustment evidence is present and empty.
+    case trustedNoContentEdits
     /// The source exposes a reliable content-edit revision.
     case revision(UploadBackupRevision)
     /// The adapter could not read reliable edit evidence. Core must not assume the asset is safe.
@@ -47,7 +47,7 @@ public struct UploadBackupAssetSnapshot: Sendable, Equatable {
     public init(
         source: UploadSourceIdentity,
         revision: UploadBackupRevision,
-        editRevision: UploadBackupEditRevision = .none,
+        editRevision: UploadBackupEditRevision = .unavailable,
         resourceCount: Int
     ) {
         precondition(resourceCount > 0, "Upload backup assets must expose at least one resource")
@@ -130,9 +130,7 @@ public actor UploadBackupPreflightIndex {
         }
 
         switch snapshot.editRevision {
-        case .none:
-            // A known source without edit evidence is treated as metadata drift and seeded at the
-            // current revision, so future scans are O(1) direct hits.
+        case .trustedNoContentEdits:
             markBackedUp(snapshot)
             return .alreadyBackedUp
 

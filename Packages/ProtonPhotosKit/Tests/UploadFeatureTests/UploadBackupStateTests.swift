@@ -48,7 +48,7 @@ final class UploadBackupStateTests: XCTestCase {
     private func snapshot(
         id: String = "cloud-asset-1",
         revision seconds: TimeInterval,
-        editRevision: UploadBackupEditRevision = .none,
+        editRevision: UploadBackupEditRevision = .unavailable,
         resources: Int = 1
     ) -> UploadBackupAssetSnapshot {
         UploadBackupAssetSnapshot(
@@ -90,12 +90,25 @@ final class UploadBackupStateTests: XCTestCase {
         XCTAssertEqual(result, .pendingUpload(remainingResources: 1))
     }
 
-    func testMetadataRevisionDriftWithoutEditEvidenceSeedsCurrentRevisionAsBackedUp() async {
+    func testMetadataRevisionDriftWithoutReliableEditEvidenceRequiresBackendCheck() async {
         let store = MemoryStore()
         let index = UploadBackupPreflightIndex(store: store)
         await index.markBackedUp(snapshot(revision: 10))
 
-        let changed = snapshot(revision: 20, editRevision: .none)
+        let changed = snapshot(revision: 20, editRevision: .unavailable)
+        let result = await index.classify(changed)
+
+        XCTAssertEqual(result, .needsBackendCheck(.unreliableEditRevision))
+        XCTAssertNil(store.record(for: changed.source, revision: changed.revision))
+        XCTAssertEqual(store.count(), 1)
+    }
+
+    func testTrustedNoContentEditsSeedsCurrentRevisionAsBackedUp() async {
+        let store = MemoryStore()
+        let index = UploadBackupPreflightIndex(store: store)
+        await index.markBackedUp(snapshot(revision: 10))
+
+        let changed = snapshot(revision: 20, editRevision: .trustedNoContentEdits)
         let result = await index.classify(changed)
 
         XCTAssertEqual(result, .alreadyBackedUp)

@@ -15,6 +15,9 @@ final class ProjectHygieneTests: XCTestCase {
 
     private var appDir: URL { repoRoot.appendingPathComponent("App") }
     private var mobileAppDir: URL { repoRoot.appendingPathComponent("iOSApp") }
+    private var uploadCoreDir: URL {
+        repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/UploadCore")
+    }
 
     private func appSourceFiles() -> [URL] {
         sourceFiles(in: appDir)
@@ -245,6 +248,28 @@ final class ProjectHygieneTests: XCTestCase {
             appSwiftFiles.contains { $0.contains("/App/Drive/") },
             "SDK/HTTP backend Swift files must live in ProtonDriveBackend, not App/Drive"
         )
+    }
+
+    func testUploadCoreStaysPlatformAndSDKAgnostic() {
+        for url in sourceFiles(in: uploadCoreDir) {
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let importLines = Set(
+                text.split(whereSeparator: \.isNewline)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { $0.hasPrefix("import ") }
+            )
+            for forbidden in [
+                "import AppKit",
+                "import UIKit",
+                "import Photos",
+                "import PhotosUI",
+                "import BackgroundTasks",
+                "import ProtonDriveSDK",
+                "import ProtonCore"
+            ] {
+                XCTAssertFalse(importLines.contains(forbidden), "\(url.lastPathComponent) must keep platform/API adapters out of UploadCore")
+            }
+        }
     }
 
     func testPlatformAppsUseSharedAuthLifecycleController() {
