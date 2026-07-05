@@ -61,6 +61,20 @@ public struct AlbumSyncMapping: Sendable, Equatable {
     }
 }
 
+/// A user-chosen "sync this local album" entry, persisted so the Settings list survives restarts
+/// and permission-less launches (the title is the last seen one until the library is read again).
+public struct AlbumSyncSelection: Sendable, Equatable {
+    public let localAlbumID: String
+    public var title: String
+    public var addedAt: Date
+
+    public init(localAlbumID: String, title: String, addedAt: Date) {
+        self.localAlbumID = localAlbumID
+        self.title = title
+        self.addedAt = addedAt
+    }
+}
+
 // MARK: - Remote albums / attach values
 
 /// A Proton album as needed by the sync flow (id + decrypted title).

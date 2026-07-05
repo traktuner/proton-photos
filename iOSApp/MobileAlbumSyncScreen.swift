@@ -4,10 +4,12 @@ import PhotosCore
 import SwiftUI
 
 /// Local-album → Proton-album sync over the SHARED cross-platform controller (same engine and
-/// wording as macOS Settings > Backup). Presentation only: album list, per-album sync state from
-/// the persisted mapping, honest phase wording, and the same-name conflict resolved by the user.
+/// wording as macOS Settings > Backup). The screen shows ONLY the albums the user selected in the
+/// picker sheet; removing a row stops syncing that album without touching Proton (the mapping
+/// stays, so re-selecting reuses the same remote album).
 struct MobileAlbumSyncScreen: View {
     @State var controller: AlbumSyncController
+    @State private var showPicker = false
 
     var body: some View {
         List {
@@ -16,7 +18,7 @@ struct MobileAlbumSyncScreen: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } else {
-                albumsSection
+                selectedSection
                 if controller.isSyncing {
                     progressSection
                 }
@@ -31,8 +33,19 @@ struct MobileAlbumSyncScreen: View {
         }
         .navigationTitle(String(localized: "settings.albumsync_title"))
         .navigationBarTitleDisplayMode(.inline)
-        // Opening this screen is the explicit user action that may trigger the photo-access prompt.
-        .task { await controller.refreshAlbums() }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showPicker = true
+                } label: {
+                    Label(String(localized: "settings.albumsync_add_albums"), systemImage: "plus")
+                }
+                .disabled(!controller.isAvailable)
+            }
+        }
+        .sheet(isPresented: $showPicker) {
+            MobileAlbumPickerSheet(controller: controller)
+        }
         .confirmationDialog(
             String(localized: "settings.albumsync_conflict_title"),
             isPresented: conflictPresented,
@@ -48,56 +61,101 @@ struct MobileAlbumSyncScreen: View {
                 controller.resolveConflict(useExisting: nil)
             }
         } message: {
-            if let conflict = controller.pendingConflict, conflict.existing.count > 1 {
-                Text(String(localized: "settings.albumsync_conflict_multiple"))
-            } else {
-                Text(String(localized: "settings.albumsync_conflict_message"))
+            if let conflict = controller.pendingConflict {
+                if conflict.existing.count > 1 {
+                    Text(String(localized: "settings.albumsync_conflict_multiple"))
+                } else {
+                    Text(String(localized: "settings.albumsync_conflict_message \(conflict.album.title)"))
+                }
             }
         }
     }
 
-    @ViewBuilder private var albumsSection: some View {
+    // MARK: - Selected albums
+
+    @ViewBuilder private var selectedSection: some View {
         Section {
-            if controller.accessState == .denied || controller.accessState == .restricted {
-                Text(String(localized: "settings.photos_backup_denied"))
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-            } else if controller.localAlbums.isEmpty {
-                Text(String(localized: "settings.albumsync_no_albums"))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            if controller.selectedAlbums.isEmpty {
+                Button {
+                    showPicker = true
+                } label: {
+                    Label(String(localized: "settings.albumsync_add_albums"), systemImage: "plus")
+                }
             }
-            ForEach(controller.localAlbums) { album in
-                albumRow(album)
+            ForEach(controller.selectedAlbums) { album in
+                selectedRow(album)
+            }
+            if !controller.selectedAlbums.isEmpty {
+                if controller.isSyncing {
+                    Button(String(localized: "settings.albumsync_stop"), role: .destructive) {
+                        controller.stopSync()
+                    }
+                } else {
+                    Button(String(localized: "settings.albumsync_sync_all")) {
+                        controller.syncSelected()
+                    }
+                }
             }
         } footer: {
             Text(String(localized: "settings.albumsync_explainer"))
         }
     }
 
-    private func albumRow(_ album: LocalAlbumSummary) -> some View {
+    @ViewBuilder
+    private func selectedRow(_ album: AlbumSyncController.SelectedAlbum) -> some View {
+        let isActive = controller.isSyncing && controller.progress.localAlbumID == album.id
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(album.title)
                     .lineLimit(1)
                 HStack(spacing: 6) {
-                    Text(String(localized: "settings.albumsync_photo_count \(album.assetCount)"))
-                    if let synced = controller.mapping(for: album)?.lastSyncedAt {
-                        Text(String(localized: "settings.albumsync_last_synced \(synced.formatted(.relative(presentation: .named)))"))
+                    if let count = album.assetCount {
+                        Text(String(localized: "settings.albumsync_photo_count \(count)"))
+                    }
+                    Text(isActive ? controller.progress.localizedTitle : album.localizedStateDescription)
+                        .foregroundStyle(stateColor(album, isActive: isActive))
+                    if album.needsAttentionCount > 0, !isActive {
+                        Text(String(localized: "settings.albumsync_row_attention \(album.needsAttentionCount)"))
+                            .foregroundStyle(.orange)
                     }
                 }
                 .font(.footnote.monospacedDigit())
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            if controller.isSyncing, controller.progress.localAlbumID == album.id {
-                Button(String(localized: "settings.albumsync_stop")) { controller.stopSync() }
-                    .buttonStyle(.borderless)
+            if isActive {
+                ProgressView()
+            } else if album.state == .needsDecision {
+                Button(String(localized: "settings.albumsync_decide")) {
+                    controller.presentConflict(albumID: album.id)
+                }
+                .buttonStyle(.borderless)
             } else {
-                Button(String(localized: "settings.albumsync_sync")) { controller.startSync(album: album) }
-                    .buttonStyle(.borderless)
-                    .disabled(controller.isSyncing)
+                Button {
+                    controller.removeFromSelection(album.id)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(Text(String(localized: "settings.albumsync_remove")))
             }
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button(role: .destructive) {
+                controller.removeFromSelection(album.id)
+            } label: {
+                Label(String(localized: "settings.albumsync_remove"), systemImage: "xmark.circle")
+            }
+            .disabled(isActive)
+        }
+    }
+
+    private func stateColor(_ album: AlbumSyncController.SelectedAlbum, isActive: Bool) -> Color {
+        if isActive { return .secondary }
+        switch album.state {
+        case .missingLocally, .needsDecision: return .orange
+        case .notSynced, .synced: return .secondary
         }
     }
 
@@ -131,5 +189,96 @@ struct MobileAlbumSyncScreen: View {
                 }
             }
         )
+    }
+}
+
+/// The album picker: every local album, searchable, multi-select with checkmarks. Confirming
+/// applies the FULL selection (checked = synced), so adding and removing are both one visit.
+/// Opening this sheet is the explicit user action that may trigger the photo-access prompt.
+private struct MobileAlbumPickerSheet: View {
+    @State var controller: AlbumSyncController
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var draft: Set<String> = []
+    @State private var searchText = ""
+    @State private var didLoad = false
+
+    private var filteredAlbums: [LocalAlbumSummary] {
+        let query = searchText.trimmingCharacters(in: .whitespaces)
+        guard !query.isEmpty else { return controller.availableAlbums }
+        return controller.availableAlbums.filter { $0.title.localizedCaseInsensitiveContains(query) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if controller.isLoadingAlbums && !didLoad {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if controller.accessState == .denied || controller.accessState == .restricted {
+                    ContentUnavailableView(
+                        String(localized: "settings.photos_backup_denied"),
+                        systemImage: "lock.rectangle.stack"
+                    )
+                } else if filteredAlbums.isEmpty {
+                    ContentUnavailableView(
+                        String(localized: "settings.albumsync_picker_empty"),
+                        systemImage: "rectangle.stack"
+                    )
+                } else {
+                    List(filteredAlbums) { album in
+                        Button {
+                            toggle(album.id)
+                        } label: {
+                            HStack {
+                                Image(systemName: draft.contains(album.id) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(draft.contains(album.id) ? Color.accentColor : Color.secondary)
+                                    .imageScale(.large)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(album.title)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    Text(String(localized: "settings.albumsync_photo_count \(album.assetCount)"))
+                                        .font(.footnote.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle(String(localized: "settings.albumsync_picker_title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: String(localized: "settings.albumsync_picker_search"))
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "action.cancel")) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(String(localized: "settings.albumsync_picker_apply")) {
+                        controller.applySelection(draft)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                }
+                ToolbarItem(placement: .status) {
+                    Text(String(localized: "settings.albumsync_picker_selected \(draft.count)"))
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task {
+            await controller.loadAvailableAlbums()
+            if !didLoad {
+                draft = controller.selectedAlbumIDs
+                didLoad = true
+            }
+        }
+    }
+
+    private func toggle(_ id: String) {
+        if draft.contains(id) { draft.remove(id) } else { draft.insert(id) }
     }
 }

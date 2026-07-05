@@ -318,6 +318,27 @@ private final class ProgressBox: @unchecked Sendable {
 }
 
 @Suite struct AlbumSyncMappingStoreTests {
+    @Test func selectionRoundTripKeepsMappingOnDeselect() throws {
+        let store = makeStore()
+        store.addSelection(AlbumSyncSelection(localAlbumID: "L1", title: "Urlaub", addedAt: Date(timeIntervalSinceReferenceDate: 10)))
+        store.addSelection(AlbumSyncSelection(localAlbumID: "L2", title: "Anna", addedAt: Date(timeIntervalSinceReferenceDate: 20)))
+        #expect(store.selections().map(\.localAlbumID) == ["L2", "L1"])   // title-ordered
+
+        // Re-adding updates the stored title (album renamed locally).
+        store.addSelection(AlbumSyncSelection(localAlbumID: "L1", title: "Urlaub 2026", addedAt: Date(timeIntervalSinceReferenceDate: 30)))
+        #expect(store.selections().first(where: { $0.localAlbumID == "L1" })?.title == "Urlaub 2026")
+
+        // Deselecting removes ONLY the selection - the album mapping survives, so re-selecting
+        // later reuses the same Proton album without a conflict round.
+        store.upsert(AlbumSyncMapping(
+            localAlbumID: "L1", remoteAlbumID: "R1", title: "Urlaub 2026",
+            createdAt: Date(timeIntervalSinceReferenceDate: 10)
+        ))
+        store.removeSelection(localAlbumID: "L1")
+        #expect(store.selections().map(\.localAlbumID) == ["L2"])
+        #expect(store.mapping(localAlbumID: "L1")?.remoteAlbumID == "R1")
+    }
+
     @Test func upsertReadRemoveRoundTrip() throws {
         let store = makeStore()
         let mapping = AlbumSyncMapping(

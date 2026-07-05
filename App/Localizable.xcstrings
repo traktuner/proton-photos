@@ -12,8 +12,8 @@
       "extractionState": "manual",
       "comment": "Shown BEFORE the system permission prompt - states plainly what enabling will do.",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Backs up the photos and videos in your Photos library to Proton Photos, end-to-end encrypted. Originals are kept unchanged; nothing is ever deleted from your library. Enabling asks for access to your Photos library." } },
-        "de": { "stringUnit": { "state": "translated", "value": "Sichert die Fotos und Videos deiner Foto-Mediathek Ende-zu-Ende-verschlüsselt in Proton Photos. Originale bleiben unverändert; es wird nie etwas aus deiner Mediathek gelöscht. Beim Aktivieren wird Zugriff auf deine Foto-Mediathek angefragt." } }
+        "en": { "stringUnit": { "state": "translated", "value": "Backs up the photos and videos in your Photos library to Proton Photos, end-to-end encrypted. Originals are kept unchanged; nothing is ever deleted from your library. Photos that are already in Proton Photos — for example from another device or the Proton Drive app — are recognized during a check and are never uploaded again. Enabling asks for access to your Photos library." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Sichert die Fotos und Videos deiner Foto-Mediathek Ende-zu-Ende-verschlüsselt in Proton Photos. Originale bleiben unverändert; es wird nie etwas aus deiner Mediathek gelöscht. Fotos, die bereits in Proton Photos sind – etwa von einem anderen Gerät oder aus der Proton Drive-App –, werden bei einer Prüfung erkannt und nie erneut hochgeladen. Beim Aktivieren wird Zugriff auf deine Foto-Mediathek angefragt." } }
       }
     },
     "settings.photos_backup_enable": {
@@ -118,6 +118,103 @@
         "de": { "stringUnit": { "state": "translated", "value": "Jetzt sichern" } }
       }
     },
+    "settings.albumsync_add_albums": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose albums…" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Alben auswählen…" } }
+      }
+    },
+    "settings.albumsync_sync_all": {
+      "extractionState": "manual",
+      "comment": "Syncs every selected album (sequentially).",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sync now" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Jetzt synchronisieren" } }
+      }
+    },
+    "settings.albumsync_remove": {
+      "extractionState": "manual",
+      "comment": "Tooltip/VoiceOver label of the per-row remove control. Removal only stops syncing - nothing is deleted on Proton.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Remove from sync" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Aus Sync entfernen" } }
+      }
+    },
+    "settings.albumsync_decide": {
+      "extractionState": "manual",
+      "comment": "Row button re-opening the same-name conflict dialog.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Decide…" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Entscheiden…" } }
+      }
+    },
+    "settings.albumsync_row_attention %lld": {
+      "extractionState": "manual",
+      "comment": "Per-row count of photos the last run could not back up or attach.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld need attention" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld benötigen Aufmerksamkeit" } }
+      }
+    },
+    "settings.albumsync_picker_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose albums to sync" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Alben für Sync auswählen" } }
+      }
+    },
+    "settings.albumsync_picker_search": {
+      "extractionState": "manual",
+      "comment": "Placeholder of the picker's search field.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Search albums" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Alben durchsuchen" } }
+      }
+    },
+    "settings.albumsync_picker_empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No albums match." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Keine passenden Alben." } }
+      }
+    },
+    "settings.albumsync_picker_selected %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld album selected" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld albums selected" } }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld Album ausgewählt" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld Alben ausgewählt" } }
+            }
+          }
+        }
+      }
+    },
+    "settings.albumsync_picker_apply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Apply" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Übernehmen" } }
+      }
+    },
+    "settings.albumsync_conflict_message %@": {
+      "extractionState": "manual",
+      "comment": "Body of the same-name dialog; %@ is the local album title. The user decides, the app never attaches by name match on its own.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Add the photos of “%@” to the existing Proton album, or cancel and rename one of the albums." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Füge die Fotos von „%@“ dem bestehenden Proton-Album hinzu, oder brich ab und benenne eines der Alben um." } }
+      }
+    },
     "settings.albumsync_section": {
       "extractionState": "manual",
       "localizations": {
@@ -131,27 +228,6 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Sync an Apple Photos album into a Proton Photos album. Photos already backed up are only linked, never uploaded again." } },
         "de": { "stringUnit": { "state": "translated", "value": "Synchronisiere ein Apple-Fotos-Album in ein Proton Photos-Album. Bereits gesicherte Fotos werden nur verknüpft, nie erneut hochgeladen." } }
-      }
-    },
-    "settings.albumsync_load_albums": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Show local albums" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Lokale Alben anzeigen" } }
-      }
-    },
-    "settings.albumsync_refresh": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Refresh albums" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Alben aktualisieren" } }
-      }
-    },
-    "settings.albumsync_sync": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Sync to Proton Album" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Mit Proton-Album synchronisieren" } }
       }
     },
     "settings.albumsync_photo_count %lld": {
@@ -175,27 +251,11 @@
         }
       }
     },
-    "settings.albumsync_last_synced %@": {
-      "extractionState": "manual",
-      "comment": "%@ is a relative time like 'yesterday' / 'gestern'.",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Synced %@" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Synchronisiert %@" } }
-      }
-    },
     "settings.albumsync_conflict_title": {
       "extractionState": "manual",
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "A Proton album with this name already exists" } },
         "de": { "stringUnit": { "state": "translated", "value": "Ein Proton-Album mit diesem Namen existiert bereits" } }
-      }
-    },
-    "settings.albumsync_conflict_message": {
-      "extractionState": "manual",
-      "comment": "Body of the same-name dialog: the user decides, we never attach by name match on our own.",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Add this album's photos to the existing Proton album, or cancel and rename one of the albums." } },
-        "de": { "stringUnit": { "state": "translated", "value": "Füge die Fotos dieses Albums dem bestehenden Proton-Album hinzu, oder brich ab und benenne eines der Alben um." } }
       }
     },
     "settings.albumsync_conflict_multiple": {

@@ -68,6 +68,11 @@ public final class AlbumSyncMappingStore: @unchecked Sendable {
           last_attached   INTEGER NOT NULL DEFAULT 0,
           last_failed     INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS album_sync_selection(
+          local_album_id  TEXT PRIMARY KEY,
+          title           TEXT NOT NULL,
+          added_at        REAL NOT NULL
+        );
         """
         guard sqlite3_exec(handle, schema, nil, nil, nil) == SQLITE_OK,
               verifyAndStampVersion(handle) else {
@@ -167,6 +172,60 @@ public final class AlbumSyncMappingStore: @unchecked Sendable {
         lock.withLock {
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, "DELETE FROM album_sync_mapping WHERE local_album_id=?;", -1, &stmt, nil) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, localAlbumID, -1, Self.transient)
+            _ = sqlite3_step(stmt)
+        }
+    }
+
+    // MARK: Selection (which local albums the user chose to sync)
+
+    /// Deselecting an album removes ONLY the selection row - the album mapping stays, so
+    /// re-selecting later reuses the same Proton album without a name-conflict round.
+    public func selections() -> [AlbumSyncSelection] {
+        lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "SELECT local_album_id, title, added_at FROM album_sync_selection ORDER BY title;",
+                -1, &stmt, nil
+            ) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            var result: [AlbumSyncSelection] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+                      let title = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) else { continue }
+                result.append(AlbumSyncSelection(
+                    localAlbumID: id,
+                    title: title,
+                    addedAt: Date(timeIntervalSinceReferenceDate: sqlite3_column_double(stmt, 2))
+                ))
+            }
+            return result
+        }
+    }
+
+    public func addSelection(_ selection: AlbumSyncSelection) {
+        lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "INSERT INTO album_sync_selection(local_album_id, title, added_at) VALUES (?,?,?) "
+                    + "ON CONFLICT(local_album_id) DO UPDATE SET title=excluded.title;",
+                -1, &stmt, nil
+            ) == SQLITE_OK else { return }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_text(stmt, 1, selection.localAlbumID, -1, Self.transient)
+            sqlite3_bind_text(stmt, 2, selection.title, -1, Self.transient)
+            sqlite3_bind_double(stmt, 3, selection.addedAt.timeIntervalSinceReferenceDate)
+            _ = sqlite3_step(stmt)
+        }
+    }
+
+    public func removeSelection(localAlbumID: String) {
+        lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "DELETE FROM album_sync_selection WHERE local_album_id=?;", -1, &stmt, nil) == SQLITE_OK else { return }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text(stmt, 1, localAlbumID, -1, Self.transient)
             _ = sqlite3_step(stmt)

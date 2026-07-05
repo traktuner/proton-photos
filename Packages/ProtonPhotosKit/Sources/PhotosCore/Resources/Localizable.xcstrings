@@ -49,10 +49,10 @@
     },
     "backup.phase_checking": {
       "extractionState": "manual",
-      "comment": "Headline while proving items are already backed up (identity + duplicate check). NEVER worded as uploading or hashing.",
+      "comment": "Headline while proving items are already backed up (identity + duplicate check). NEVER worded as uploading or hashing - a user whose library already lives in Proton (e.g. synced via the official Drive app) must read this as verification, not as a re-upload.",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Checking backup status" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Backup-Status wird geprüft" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Checking what’s already backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Es wird geprüft, was bereits gesichert ist" } }
       }
     },
     "backup.phase_completed": {
@@ -293,6 +293,38 @@
             "value": "Synchronisierung gestoppt. Der Fortschritt bleibt erhalten, der nächste Lauf setzt fort."
           }
         }
+      }
+    },
+    "albumsync.state_not_synced": {
+      "extractionState": "manual",
+      "comment": "Selected-album row state: chosen for sync but no run has completed yet.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not synced yet" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Noch nicht synchronisiert" } }
+      }
+    },
+    "albumsync.state_synced %@": {
+      "extractionState": "manual",
+      "comment": "Selected-album row state. %@ is a relative time like 'yesterday' / 'gestern'.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Synced %@" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Synchronisiert %@" } }
+      }
+    },
+    "albumsync.state_missing": {
+      "extractionState": "manual",
+      "comment": "Selected-album row state: the album no longer exists in the local photo library.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No longer in the photo library" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Nicht mehr in der Foto-Mediathek" } }
+      }
+    },
+    "albumsync.state_needs_decision": {
+      "extractionState": "manual",
+      "comment": "Selected-album row state: a same-name Proton album exists and the user has not decided yet.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Waiting for your decision" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Wartet auf deine Entscheidung" } }
       }
     },
     "brand.product_name": {
@@ -1483,18 +1515,18 @@
     },
     "upload.state_hashing": {
       "extractionState": "manual",
-      "comment": "Upload queue item state.",
+      "comment": "Upload queue item state while the duplicate-check fingerprint is computed. No jargon ('hashing') and no upload claim - this step decides whether an upload is needed at all.",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hashing…"
+            "value": "Checking for duplicates…"
           }
         },
         "de": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hash wird berechnet …"
+            "value": "Auf Duplikate wird geprüft …"
           }
         }
       }
