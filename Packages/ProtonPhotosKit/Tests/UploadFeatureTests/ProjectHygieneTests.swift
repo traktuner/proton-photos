@@ -277,6 +277,60 @@ final class ProjectHygieneTests: XCTestCase {
         }
     }
 
+    func testAlbumSyncCoreStaysPureSwift() {
+        let coreDir = repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/AlbumSyncCore")
+        let files = sourceFiles(in: coreDir)
+        XCTAssertFalse(files.isEmpty, "the AlbumSyncCore target must exist")
+        for url in files {
+            let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let importLines = Set(
+                text.split(whereSeparator: \.isNewline)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { $0.hasPrefix("import ") }
+            )
+            // The sync engine is universal: platform frameworks, PhotoKit, and the SDK live in
+            // adapters only.
+            for forbidden in [
+                "import UIKit",
+                "import AppKit",
+                "import SwiftUI",
+                "import Photos",
+                "import PhotosUI",
+                "import BackgroundTasks",
+                "import ProtonDriveSDK",
+                "import ProtonCore"
+            ] {
+                XCTAssertFalse(importLines.contains(forbidden),
+                               "\(url.lastPathComponent) must keep \(forbidden) out of AlbumSyncCore")
+            }
+        }
+    }
+
+    /// GPL-contamination guard: the Proton Drive iOS app (GPL-3.0) may be consulted as a
+    /// BEHAVIORAL reference only. Its distinctive type/module names must never appear in our
+    /// production sources - their presence would indicate copied code rather than clean-room work.
+    func testNoGPLProtonDriveSymbolsInProductionSources() {
+        let productionDirs = [
+            "App", "iOSApp", "Packages/ProtonPhotosKit/Sources",
+        ].map { repoRoot.appendingPathComponent($0) }
+        let gplMarkers = [
+            "PDCore", "PDPhotos", "PDClient", "PDUploadVerifier",
+            "CreateAlbumInteractor", "AddPhotosToOwnAlbumInteractor",
+            "NodeHashKeyDecryption", "SignersKit", "CloudSlot",
+        ]
+        for dir in productionDirs {
+            for url in sourceFiles(in: dir) {
+                let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+                for marker in gplMarkers {
+                    XCTAssertFalse(
+                        text.contains(marker),
+                        "\(url.lastPathComponent) contains GPL Proton Drive symbol '\(marker)' - production code must stay clean-room"
+                    )
+                }
+            }
+        }
+    }
+
     func testPhotoBackupPermissionAndBackgroundDeclarations() throws {
         // iOS: usage description + BG processing declarations must stay consistent with the
         // registered task identifier.

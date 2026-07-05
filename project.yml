@@ -62,6 +62,8 @@ targets:
       - package: ProtonPhotosKit
         product: AlbumsFeature
       - package: ProtonPhotosKit
+        product: AlbumSyncCore
+      - package: ProtonPhotosKit
         product: UploadFeature
       - package: ProtonPhotosKit
         product: PhotoLibraryBackupAdapter
@@ -131,6 +133,8 @@ targets:
         product: MetalGridTextureUIKitAdapter
       - package: ProtonPhotosKit
         product: AlbumsFeature
+      - package: ProtonPhotosKit
+        product: AlbumSyncCore
       - package: ProtonPhotosKit
         product: UploadCore
       - package: ProtonPhotosKit

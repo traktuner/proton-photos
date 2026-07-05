@@ -36,6 +36,116 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Photos access is not allowed. You can grant it in Settings." } }
       }
     },
+    "settings.albumsync_row" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Alben mit Proton synchronisieren" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync albums to Proton" } }
+      }
+    },
+    "settings.albumsync_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Album-Synchronisierung" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Album Sync" } }
+      }
+    },
+    "settings.albumsync_explainer" : {
+      "extractionState" : "manual",
+      "comment" : "Footer of the album list. Honest wording: already-backed-up photos are linked, never re-uploaded.",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Synchronisiere ein Apple-Fotos-Album in ein Proton Photos-Album. Bereits gesicherte Fotos werden nur verknüpft, nie erneut hochgeladen." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync an Apple Photos album into a Proton Photos album. Photos already backed up are only linked, never uploaded again." } }
+      }
+    },
+    "settings.albumsync_no_albums" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Keine lokalen Alben gefunden." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No local albums found." } }
+      }
+    },
+    "settings.albumsync_unavailable" : {
+      "extractionState" : "manual",
+      "comment" : "Shown when the album-sync mapping database or duplicate protection could not be opened.",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Album-Synchronisierung ist nicht verfügbar, weil die lokale Datenbank nicht geöffnet werden konnte." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Album sync is unavailable because its local database could not be opened." } }
+      }
+    },
+    "settings.albumsync_sync" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Synchronisieren" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync" } }
+      }
+    },
+    "settings.albumsync_stop" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Stoppen" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop" } }
+      }
+    },
+    "settings.albumsync_photo_count %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "variations" : {
+            "plural" : {
+              "one" : { "stringUnit" : { "state" : "translated", "value" : "%lld Foto" } },
+              "other" : { "stringUnit" : { "state" : "translated", "value" : "%lld Fotos" } }
+            }
+          }
+        },
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : { "stringUnit" : { "state" : "translated", "value" : "%lld photo" } },
+              "other" : { "stringUnit" : { "state" : "translated", "value" : "%lld photos" } }
+            }
+          }
+        }
+      }
+    },
+    "settings.albumsync_last_synced %@" : {
+      "extractionState" : "manual",
+      "comment" : "%@ is a relative time like 'yesterday' / 'gestern'.",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Synchronisiert %@" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Synced %@" } }
+      }
+    },
+    "settings.albumsync_conflict_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Ein Proton-Album mit diesem Namen existiert bereits" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A Proton album with this name already exists" } }
+      }
+    },
+    "settings.albumsync_conflict_message" : {
+      "extractionState" : "manual",
+      "comment" : "Body of the same-name dialog: the user decides, the app never attaches by name match on its own.",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Füge die Fotos dieses Albums dem bestehenden Proton-Album hinzu, oder brich ab und benenne eines der Alben um." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add this album's photos to the existing Proton album, or cancel and rename one of the albums." } }
+      }
+    },
+    "settings.albumsync_conflict_multiple" : {
+      "extractionState" : "manual",
+      "comment" : "Same-name dialog when SEVERAL Proton albums share the name: linking would be ambiguous, only cancel is offered.",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Mehrere Proton-Alben tragen diesen Namen, eine eindeutige Verknüpfung ist nicht möglich. Benenne eines der Alben um und versuche es erneut." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Several Proton albums share this name, so linking would be ambiguous. Rename one of the albums and try again." } }
+      }
+    },
+    "settings.albumsync_use_existing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : { "stringUnit" : { "state" : "translated", "value" : "Bestehendes Album verwenden" } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use existing album" } }
+      }
+    },
     "settings.photos_backup_open_settings" : {
       "extractionState" : "manual",
       "localizations" : {

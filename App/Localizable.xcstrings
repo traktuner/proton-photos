@@ -118,6 +118,101 @@
         "de": { "stringUnit": { "state": "translated", "value": "Jetzt sichern" } }
       }
     },
+    "settings.albumsync_section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Photos Albums" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Foto-Alben" } }
+      }
+    },
+    "settings.albumsync_explainer": {
+      "extractionState": "manual",
+      "comment": "Shown before the local album list is loaded. Loading requires photo access, which is only requested on the button press.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sync an Apple Photos album into a Proton Photos album. Photos already backed up are only linked, never uploaded again." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Synchronisiere ein Apple-Fotos-Album in ein Proton Photos-Album. Bereits gesicherte Fotos werden nur verknüpft, nie erneut hochgeladen." } }
+      }
+    },
+    "settings.albumsync_load_albums": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show local albums" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Lokale Alben anzeigen" } }
+      }
+    },
+    "settings.albumsync_refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Refresh albums" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Alben aktualisieren" } }
+      }
+    },
+    "settings.albumsync_sync": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Sync to Proton Album" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Mit Proton-Album synchronisieren" } }
+      }
+    },
+    "settings.albumsync_photo_count %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld photo" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld photos" } }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld Foto" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld Fotos" } }
+            }
+          }
+        }
+      }
+    },
+    "settings.albumsync_last_synced %@": {
+      "extractionState": "manual",
+      "comment": "%@ is a relative time like 'yesterday' / 'gestern'.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Synced %@" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Synchronisiert %@" } }
+      }
+    },
+    "settings.albumsync_conflict_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "A Proton album with this name already exists" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Ein Proton-Album mit diesem Namen existiert bereits" } }
+      }
+    },
+    "settings.albumsync_conflict_message": {
+      "extractionState": "manual",
+      "comment": "Body of the same-name dialog: the user decides, we never attach by name match on our own.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Add this album's photos to the existing Proton album, or cancel and rename one of the albums." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Füge die Fotos dieses Albums dem bestehenden Proton-Album hinzu, oder brich ab und benenne eines der Alben um." } }
+      }
+    },
+    "settings.albumsync_conflict_multiple": {
+      "extractionState": "manual",
+      "comment": "Same-name dialog when SEVERAL Proton albums share the name: attaching would be ambiguous, so only cancel is offered.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Several Proton albums share this name, so linking would be ambiguous. Rename one of the albums and try again." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Mehrere Proton-Alben tragen diesen Namen, eine eindeutige Verknüpfung ist nicht möglich. Benenne eines der Alben um und versuche es erneut." } }
+      }
+    },
+    "settings.albumsync_use_existing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Use existing album" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Bestehendes Album verwenden" } }
+      }
+    },
     "settings.backup_stop": {
       "extractionState": "manual",
       "localizations": {

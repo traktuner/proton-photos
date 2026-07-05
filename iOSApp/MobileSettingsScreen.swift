@@ -112,6 +112,13 @@ struct MobileSettingsScreen: View {
             if let photoBackup = libraryModel.photoBackup {
                 MobilePhotoBackupRows(controller: photoBackup)
             }
+            if let albumSync = libraryModel.albumSync {
+                NavigationLink {
+                    MobileAlbumSyncScreen(controller: albumSync)
+                } label: {
+                    Label(String(localized: "settings.albumsync_row"), systemImage: "rectangle.stack.badge.plus")
+                }
+            }
             backupStatusRow
         } header: {
             Text(String(localized: "settings.section_backup"))

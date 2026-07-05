@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import AlbumSyncCore
 import PhotoLibraryBackupAdapter
 import PhotosCore
 import DesignSystem
@@ -11,6 +12,7 @@ struct SettingsView: View {
     let uploadCoordinator: UploadCoordinator?
     let backup: FolderBackupController?
     let photoBackup: PhotoLibraryBackupController?
+    let albumSync: AlbumSyncController?
     let signOut: () -> Void
 
     var body: some View {
@@ -20,7 +22,7 @@ struct SettingsView: View {
             LibrarySettingsTab()
                 .tabItem { Label("settings.library_tab", systemImage: "photo.on.rectangle.angled") }
             if let backup {
-                BackupSettingsTab(backup: backup, photoBackup: photoBackup, uploadCoordinator: uploadCoordinator)
+                BackupSettingsTab(backup: backup, photoBackup: photoBackup, albumSync: albumSync, uploadCoordinator: uploadCoordinator)
                     .tabItem { Label("settings.backup_tab", systemImage: "arrow.triangle.2.circlepath.icloud") }
             }
             CacheStatusTab()
@@ -35,6 +37,7 @@ struct SettingsView: View {
 private struct BackupSettingsTab: View {
     @State var backup: FolderBackupController
     let photoBackup: PhotoLibraryBackupController?
+    let albumSync: AlbumSyncController?
     let uploadCoordinator: UploadCoordinator?
 
     var body: some View {
@@ -44,6 +47,13 @@ private struct BackupSettingsTab: View {
                     PhotoLibraryBackupSection(controller: photoBackup)
                 } header: {
                     Text("settings.photos_backup_section")
+                }
+            }
+            if let albumSync {
+                Section {
+                    AlbumSyncSection(controller: albumSync)
+                } header: {
+                    Text("settings.albumsync_section")
                 }
             }
             Section {
@@ -433,6 +443,138 @@ private struct PhotoLibraryBackupSection: View {
                     .controlSize(.small)
             }
         }
+    }
+}
+
+/// Local-album → Proton-album sync over the SHARED cross-platform controller. Presentation only:
+/// album list on demand (explicit user action requests photo access), per-album sync state from
+/// the persisted mapping, honest phase wording from the shared Core progress model, and the
+/// same-name conflict resolved by the user - never by guessing.
+private struct AlbumSyncSection: View {
+    @State var controller: AlbumSyncController
+
+    var body: some View {
+        if !controller.isAvailable {
+            Text("settings.backup_unavailable")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        } else if controller.localAlbums.isEmpty {
+            Text("settings.albumsync_explainer")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                if controller.accessState == .denied || controller.accessState == .restricted {
+                    Text("settings.photos_backup_denied")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.orange)
+                }
+                Spacer()
+                Button("settings.albumsync_load_albums") {
+                    Task { await controller.refreshAlbums() }
+                }
+            }
+        } else {
+            ForEach(controller.localAlbums) { album in
+                albumRow(album)
+            }
+            if controller.isSyncing {
+                syncProgress
+            }
+            if let message = controller.lastMessage {
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Spacer()
+                Button("settings.albumsync_refresh") {
+                    Task { await controller.refreshAlbums() }
+                }
+                .controlSize(.small)
+                .disabled(controller.isSyncing)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func albumRow(_ album: LocalAlbumSummary) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(album.title)
+                    .font(.system(size: 12))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Text("settings.albumsync_photo_count \(album.assetCount)")
+                    if let synced = controller.mapping(for: album)?.lastSyncedAt {
+                        Text("settings.albumsync_last_synced \(synced.formatted(.relative(presentation: .named)))")
+                    }
+                }
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if controller.isSyncing, controller.progress.localAlbumID == album.id {
+                Button("settings.backup_stop") { controller.stopSync() }
+            } else {
+                Button("settings.albumsync_sync") { controller.startSync(album: album) }
+                    .disabled(controller.isSyncing)
+            }
+        }
+        .confirmationDialog(
+            "settings.albumsync_conflict_title",
+            isPresented: conflictBinding(for: album),
+            titleVisibility: .visible
+        ) {
+            if let conflict = controller.pendingConflict, conflict.existing.count == 1,
+               let existing = conflict.existing.first {
+                Button("settings.albumsync_use_existing") {
+                    controller.resolveConflict(useExisting: existing.id)
+                }
+            }
+            Button("action.cancel", role: .cancel) {
+                controller.resolveConflict(useExisting: nil)
+            }
+        } message: {
+            if let conflict = controller.pendingConflict, conflict.existing.count > 1 {
+                Text("settings.albumsync_conflict_multiple")
+            } else {
+                Text("settings.albumsync_conflict_message")
+            }
+        }
+    }
+
+    private var syncProgress: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(controller.progress.albumTitle)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Text(controller.progress.localizedTitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            if let detail = controller.progress.localizedDetail {
+                Text(detail)
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            ProgressView()
+                .controlSize(.small)
+        }
+    }
+
+    private func conflictBinding(for album: LocalAlbumSummary) -> Binding<Bool> {
+        Binding(
+            get: { controller.pendingConflict?.album.id == album.id },
+            set: { presented in
+                if !presented, controller.pendingConflict?.album.id == album.id {
+                    controller.resolveConflict(useExisting: nil)
+                }
+            }
+        )
     }
 }
 

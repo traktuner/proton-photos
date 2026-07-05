@@ -35,6 +35,9 @@ final class AppModel {
     /// Photos-library backup: the SHARED cross-platform controller from the PhotoKit adapter,
     /// composed with this account's dedupe pipeline and uploader.
     private(set) var photoBackupController: PhotoLibraryBackupController?
+    /// Local-album → Proton-album sync: the SHARED cross-platform controller, composed with this
+    /// account's dedupe pipeline, uploader, and the backend's album write service.
+    private(set) var albumSyncController: AlbumSyncController?
     /// True once the signed-in library has finished its first load (loaded / empty / failed). Drives the
     /// launch veil, which lifts only after the real grid is ready to be revealed. Reset on sign-out and on a
     /// fresh backend build so a new session shows the veil again.
@@ -104,6 +107,8 @@ final class AppModel {
         backupController = nil
         photoBackupController?.stopSync()
         photoBackupController = nil
+        albumSyncController?.stopSync()
+        albumSyncController = nil
         facade = nil
         libraryReady = false
         // FULL PURGE: sign-out must leave nothing tied to the account on disk. Erase the encrypted
@@ -149,6 +154,15 @@ final class AppModel {
                     ),
                     identityResolver: client.uploadIdentityResolver,
                     uploader: client.photoUploader
+                )
+                albumSyncController = AlbumSyncController(
+                    configuration: .init(
+                        accountDataDirectory: client.accountDataDirectory,
+                        databasePolicy: client.accountDatabasePolicy
+                    ),
+                    identityResolver: client.uploadIdentityResolver,
+                    uploader: client.photoUploader,
+                    remoteOps: client.albumSyncRemoteOps
                 )
                 await client.uploadCoordinator.start()
                 backend = .ready(client.backend)

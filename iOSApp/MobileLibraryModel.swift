@@ -74,6 +74,8 @@ final class MobileLibraryModel {
     private(set) var facade: ProtonClientFacade?
     /// Photos-library backup: the SHARED cross-platform controller (same code as macOS).
     private(set) var photoBackup: PhotoLibraryBackupController?
+    /// Local-album → Proton-album sync: the SHARED cross-platform controller (same code as macOS).
+    private(set) var albumSync: AlbumSyncController?
 
     /// Whole-library GPS index for the Map tab (shared MediaLocationCore). Persisted encrypted at rest with the
     /// same per-account key as the media caches, so the Map is instant on relaunch.
@@ -253,6 +255,8 @@ final class MobileLibraryModel {
         facade = nil
         photoBackup?.stopSync()
         photoBackup = nil
+        albumSync?.stopSync()
+        albumSync = nil
         snapshot = TimelineSnapshot()
         thumbnailFeed = nil
         thumbnailCache = nil
@@ -279,6 +283,8 @@ final class MobileLibraryModel {
         facade = nil
         photoBackup?.stopSync()
         photoBackup = nil
+        albumSync?.stopSync()
+        albumSync = nil
         snapshot = TimelineSnapshot()
         thumbnailFeed = nil
         loadState = .preparingInventory
@@ -343,6 +349,15 @@ final class MobileLibraryModel {
                     ),
                     identityResolver: client.uploadIdentityResolver,
                     uploader: client.photoUploader
+                )
+                self.albumSync = AlbumSyncController(
+                    configuration: .init(
+                        accountDataDirectory: client.accountDataDirectory,
+                        databasePolicy: client.accountDatabasePolicy
+                    ),
+                    identityResolver: client.uploadIdentityResolver,
+                    uploader: client.photoUploader,
+                    remoteOps: client.albumSyncRemoteOps
                 )
                 PhotoLibraryBackupSharedRef.shared.controller = self.photoBackup
                 await client.uploadCoordinator.start()
