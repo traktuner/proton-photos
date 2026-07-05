@@ -27,7 +27,7 @@ public final class UIKitLibraryMapHostView: UIView {
         self.onSelectPhoto = onSelectPhoto
         super.init(frame: .zero)
         configureMap()
-        frameToAllDataIfNeeded()
+        frameToDenseCoreIfNeeded()
         reloadVisible()
     }
 
@@ -48,7 +48,7 @@ public final class UIKitLibraryMapHostView: UIView {
     public func refreshIfChanged() {
         guard index.revision != lastRevision else { return }
         lastRevision = index.revision
-        frameToAllDataIfNeeded()
+        frameToDenseCoreIfNeeded()
         reloadVisible()
     }
 
@@ -72,13 +72,12 @@ public final class UIKitLibraryMapHostView: UIView {
         ])
     }
 
-    private func frameToAllDataIfNeeded() {
+    private func frameToDenseCoreIfNeeded() {
         guard !didFrame, !index.coordinates.isEmpty else { return }
-        let rect = boundingRect(
-            of: index.coordinates.map {
-                CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
-            }
-        )
+        // Frame where most of the photos are, not the bounds of every coordinate: one photo from a
+        // trip abroad shouldn't drag the center out into the ocean.
+        guard let box = PhotoLocationFraming.denseBoundingBox(for: index.coordinates) else { return }
+        let rect = mapRect(for: box)
         guard !rect.isNull else { return }
         mapView.setVisibleMapRect(
             rect,
@@ -86,6 +85,12 @@ public final class UIKitLibraryMapHostView: UIView {
             animated: false
         )
         didFrame = true
+    }
+
+    private func mapRect(for box: GeoBoundingBox) -> MKMapRect {
+        let a = MKMapPoint(CLLocationCoordinate2D(latitude: box.minLatitude, longitude: box.minLongitude))
+        let b = MKMapPoint(CLLocationCoordinate2D(latitude: box.maxLatitude, longitude: box.maxLongitude))
+        return MKMapRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
 
     private func reloadVisible() {

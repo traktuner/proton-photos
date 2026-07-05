@@ -70,22 +70,27 @@ public struct LibraryMapView: NSViewRepresentable {
 
         func attach(_ map: MKMapView) {
             self.map = map
-            frameToAllDataIfNeeded()
+            frameToDenseCoreIfNeeded()
             reloadVisible()
         }
 
         func refreshIfChanged(revision: Int) {
             guard revision != lastRevision else { return }
             lastRevision = revision
-            frameToAllDataIfNeeded()
+            frameToDenseCoreIfNeeded()
             reloadVisible()
         }
 
-        /// Land the user on their photos: frame the map to fit all coordinates (once, when the first
-        /// coordinates arrive). Re-runs until there is data so the very first crawl batch frames it.
-        private func frameToAllDataIfNeeded() {
+        /// Land the user where most of their photos are (once, when the first coordinates arrive).
+        /// Frames the dense core, not the bounds of every coordinate, so a single photo from a trip
+        /// abroad doesn't drag the center out into the ocean. Re-runs until there is data so the very
+        /// first crawl batch frames it.
+        private func frameToDenseCoreIfNeeded() {
             guard !didFrame, let map, !index.coordinates.isEmpty else { return }
-            let rect = boundingRect(of: index.coordinates.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) })
+            guard let box = PhotoLocationFraming.denseBoundingBox(for: index.coordinates) else { return }
+            let a = MKMapPoint(CLLocationCoordinate2D(latitude: box.minLatitude, longitude: box.minLongitude))
+            let b = MKMapPoint(CLLocationCoordinate2D(latitude: box.maxLatitude, longitude: box.maxLongitude))
+            let rect = MKMapRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
             guard !rect.isNull else { return }
             map.setVisibleMapRect(rect, edgePadding: NSEdgeInsets(top: 80, left: 80, bottom: 80, right: 80), animated: false)
             didFrame = true
