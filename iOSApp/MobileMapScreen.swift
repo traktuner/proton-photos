@@ -9,6 +9,7 @@ import UIKit
 /// fills. Shows a real, honest empty state until geotagged photos are found; tapping a pin opens the viewer.
 struct MobileMapScreen: View {
     @Environment(MobileLibraryModel.self) private var model
+    @State private var networkMonitor = NetworkMonitor.shared
     @State private var viewer: MobileViewerPresentation?
 
     var body: some View {
@@ -23,31 +24,35 @@ struct MobileMapScreen: View {
                     // only once it COMPLETED with zero finds, and a real-failure state when every probe
                     // failed. Only `.idle` (crawl not started, e.g. library still loading) keeps the
                     // generic message.
-                    switch model.locationIndex.scanProgress.phase {
-                    case .scanning:
-                        let progress = model.locationIndex.scanProgress
-                        ContentUnavailableView {
-                            Label("map.scanning_title", systemImage: "location.magnifyingglass")
-                        } description: {
-                            Text("map.scanning_message \(progress.scanned) \(progress.total)")
-                        }
-                    case .failed:
-                        ContentUnavailableView {
-                            Label("map.scan_failed_title", systemImage: "exclamationmark.triangle")
-                        } description: {
-                            Text("map.scan_failed_message")
-                        }
-                    case .completed:
-                        ContentUnavailableView {
-                            Label("map.empty_title", systemImage: "mappin.slash")
-                        } description: {
-                            Text("map.no_places_found_message")
-                        }
-                    case .idle:
-                        ContentUnavailableView {
-                            Label("map.empty_title", systemImage: "mappin.slash")
-                        } description: {
-                            Text("map.empty_message")
+                    if !networkMonitor.isOnline {
+                        OfflineContentUnavailableView()
+                    } else {
+                        switch model.locationIndex.scanProgress.phase {
+                        case .scanning:
+                            let progress = model.locationIndex.scanProgress
+                            ContentUnavailableView {
+                                Label("map.scanning_title", systemImage: "location.magnifyingglass")
+                            } description: {
+                                Text("map.scanning_message \(progress.scanned) \(progress.total)")
+                            }
+                        case .failed:
+                            ContentUnavailableView {
+                                Label("map.scan_failed_title", systemImage: "exclamationmark.triangle")
+                            } description: {
+                                Text("map.scan_failed_message")
+                            }
+                        case .completed:
+                            ContentUnavailableView {
+                                Label("map.empty_title", systemImage: "mappin.slash")
+                            } description: {
+                                Text("map.no_places_found_message")
+                            }
+                        case .idle:
+                            ContentUnavailableView {
+                                Label("map.empty_title", systemImage: "mappin.slash")
+                            } description: {
+                                Text("map.empty_message")
+                            }
                         }
                     }
                 } else {
@@ -65,6 +70,11 @@ struct MobileMapScreen: View {
             // Re-runs when the library finishes loading, so opening Map before the timeline is ready still starts
             // the crawl once items exist (the start is idempotent).
             .task(id: model.items.isEmpty) { model.startLocationCrawlIfNeeded() }
+            .onChange(of: networkMonitor.didRecentlyRestoreConnection) { _, restored in
+                if restored {
+                    model.restartLocationCrawlIfNeeded()
+                }
+            }
         }
         .fullScreenCover(item: $viewer) { presentation in
             MobilePhotoViewer(items: presentation.items, startIndex: presentation.index, libraryModel: model)

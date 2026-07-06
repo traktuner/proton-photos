@@ -1547,6 +1547,40 @@
         }
       }
     },
+    "offline.content_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Offline"
+          }
+        }
+      }
+    },
+    "offline.content_message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Ansicht braucht Zugriff auf Proton. Sobald die Verbindung wieder da ist, geht es automatisch weiter."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This view needs Proton access. It will continue automatically when the connection is back."
+          }
+        }
+      }
+    },
     "settings.library_still_loading" : {
       "extractionState" : "manual",
       "localizations" : {

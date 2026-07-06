@@ -241,6 +241,12 @@ final class MobileLibraryModel {
         }
     }
 
+    func restartLocationCrawlIfNeeded() {
+        guard !items.isEmpty else { return }
+        locationCrawlStarted = false
+        startLocationCrawlIfNeeded()
+    }
+
     private func teardown() {
         loadToken &+= 1   // supersede any in-flight snapshot sort
         loadTask?.cancel()

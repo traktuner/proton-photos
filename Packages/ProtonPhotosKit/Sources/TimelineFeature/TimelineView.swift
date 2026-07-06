@@ -22,6 +22,7 @@ public struct TimelineView: View {
     private let media: FullMediaProvider?
     private let metadataProvider: PhotoMetadataProvider?
     private let favoriteUIDs: Set<PhotoUID>
+    private let isOffline: Bool
     private let gridProfile: GridLevelProfile
     private let gridProfileResolver: TimelineGridProfileResolver?
     private let gridFillOrder: GridFillOrder
@@ -39,6 +40,7 @@ public struct TimelineView: View {
         media: FullMediaProvider? = nil,
         metadataProvider: PhotoMetadataProvider? = nil,
         favoriteUIDs: Set<PhotoUID> = [],
+        isOffline: Bool = false,
         onSelectionChange: @escaping (Set<PhotoUID>) -> Void = { _ in },
         onOpen: @escaping (PhotoItem, [PhotoItem]) -> Void = { _, _ in }
     ) {
@@ -56,6 +58,7 @@ public struct TimelineView: View {
         self.media = media
         self.metadataProvider = metadataProvider
         self.favoriteUIDs = favoriteUIDs
+        self.isOffline = isOffline
         self.onSelectionChange = onSelectionChange
         self.onOpen = onOpen
     }
@@ -67,16 +70,26 @@ public struct TimelineView: View {
                 // Route switches (RAW / album / trash …) show the same animated Proton mark as the app's launch
                 // veil - never a black surface, never a stale grid. The leading inset keeps the 64pt mark
                 // centered in the VISIBLE area when the floating sidebar is open.
-                LoadingMark()
-                    .frame(width: 64, height: 64)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.leading, leadingInset)
+                if isOffline {
+                    OfflineContentUnavailableView()
+                        .padding(.leading, leadingInset)
+                } else {
+                    LoadingMark()
+                        .frame(width: 64, height: 64)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.leading, leadingInset)
+                }
             case .empty:
                 emptyState
                     .padding(.leading, leadingInset)
             case let .failed(message):
-                errorState(message)
-                    .padding(.leading, leadingInset)
+                if isOffline {
+                    OfflineContentUnavailableView()
+                        .padding(.leading, leadingInset)
+                } else {
+                    errorState(message)
+                        .padding(.leading, leadingInset)
+                }
             case .loaded:
                 let showsMonthLabels = gridProfile.showsMonthLabels(level: level)
                 let visibleContent = model.visibleContent(

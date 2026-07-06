@@ -130,6 +130,7 @@ struct MainView: View {
                              routeInitialScrollAnchor: routeInitialScrollAnchor,
                              searchText: committedSearchText,
                              selectionMode: selectionMode, media: backend, metadataProvider: backend, favoriteUIDs: favorites,
+                             isOffline: !networkMonitor.isOnline,
                              onSelectionChange: { selectedUIDs = $0 }) { item, items in
                     openPhoto(item, items)
                 }
@@ -139,7 +140,7 @@ struct MainView: View {
                         GridTopFrost(height: topBarInset + 12)
                     }
                 }
-                .navigationTitle(viewerModel == nil ? title : "")
+                .navigationTitle("")
                 .searchable(text: $searchText, placement: .toolbar, prompt: Text("search.prompt \(title)"))
                 .toolbar { toolbarContent }
                 // Native Liquid Glass everywhere: no `.toolbarBackground` style is registered, so both the grid
@@ -207,6 +208,11 @@ struct MainView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .protonPhotosToggleSidebar)) { _ in
                 toggleSidebar()
+            }
+            .onChange(of: networkMonitor.didRecentlyRestoreConnection) { _, restored in
+                if restored {
+                    retryAfterConnectivityRestored()
+                }
             }
             .task { await uploadCoordinator.start() }
             .onReceive(NotificationCenter.default.publisher(for: .protonPhotosUploadPhotos)) { notification in
@@ -683,6 +689,13 @@ struct MainView: View {
         }
     }
 
+    private func retryAfterConnectivityRestored() {
+        if selection.hasTimeline {
+            Task { await timelineModel.retry() }
+        }
+        OfflineLibraryManager.shared.restartLocationCrawl(items: timelineModel.allItems, metadata: backend)
+    }
+
     private var gridFillOrder: GridFillOrder {
         selection == .all && committedSearchText.isEmpty ? .newestBottomTrailing : .topLeading
     }
@@ -817,30 +830,34 @@ struct MainView: View {
     @ViewBuilder private var mapEmptyStateOverlay: some View {
         let index = OfflineLibraryManager.shared.locationIndex
         if index.coordinates.isEmpty {
-            switch index.scanProgress.phase {
-            case .scanning:
-                ContentUnavailableView {
-                    Label("map.scanning_title", systemImage: "location.magnifyingglass")
-                } description: {
-                    Text("map.scanning_message \(index.scanProgress.scanned) \(index.scanProgress.total)")
-                }
-            case .failed:
-                ContentUnavailableView {
-                    Label("map.scan_failed_title", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text("map.scan_failed_message")
-                }
-            case .completed:
-                ContentUnavailableView {
-                    Label("map.empty_title", systemImage: "mappin.slash")
-                } description: {
-                    Text("map.no_places_found_message")
-                }
-            case .idle:
-                ContentUnavailableView {
-                    Label("map.empty_title", systemImage: "mappin.slash")
-                } description: {
-                    Text("map.empty_message")
+            if !networkMonitor.isOnline {
+                OfflineContentUnavailableView()
+            } else {
+                switch index.scanProgress.phase {
+                case .scanning:
+                    ContentUnavailableView {
+                        Label("map.scanning_title", systemImage: "location.magnifyingglass")
+                    } description: {
+                        Text("map.scanning_message \(index.scanProgress.scanned) \(index.scanProgress.total)")
+                    }
+                case .failed:
+                    ContentUnavailableView {
+                        Label("map.scan_failed_title", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text("map.scan_failed_message")
+                    }
+                case .completed:
+                    ContentUnavailableView {
+                        Label("map.empty_title", systemImage: "mappin.slash")
+                    } description: {
+                        Text("map.no_places_found_message")
+                    }
+                case .idle:
+                    ContentUnavailableView {
+                        Label("map.empty_title", systemImage: "mappin.slash")
+                    } description: {
+                        Text("map.empty_message")
+                    }
                 }
             }
         }
@@ -1093,9 +1110,11 @@ struct MainView: View {
             // click opens. The toolbar is stable - the download (or restore) + trash actions are always
             // present and just enable when something is selected.
             ToolbarItem(placement: .navigation) {
-                LibraryTitleStatusIndicator(
+                LibraryTitleStatusLabel(
+                    title: title,
                     status: libraryTitleStatus,
-                    accessibilityLabel: libraryTitleStatusAccessibilityLabel
+                    accessibilityLabel: libraryTitleStatusAccessibilityLabel,
+                    titleFont: .title2.weight(.semibold)
                 )
                 .help(Text(libraryTitleStatusAccessibilityLabel))
             }

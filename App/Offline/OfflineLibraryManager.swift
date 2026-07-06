@@ -210,6 +210,12 @@ final class OfflineLibraryManager {
         }
     }
 
+    func restartLocationCrawl(items: [PhotoItem], metadata: any PhotoMetadataProvider) {
+        guard !items.isEmpty else { return }
+        locationCrawlStarted = false
+        startLocationCrawl(items: items, metadata: metadata)
+    }
+
     /// Flips the Offline Photo Library switch and persists it. ON ⇒ the viewer persists full originals to the
     /// encrypted `originals` cache; OFF ⇒ it stops (and the Settings UI calls `purgeOriginalsCache()` to drop the
     /// ones already kept). The thumbnail crawl is decoupled and always runs (per `OfflineLibraryPolicy`).

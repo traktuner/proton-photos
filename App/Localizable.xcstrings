@@ -1034,6 +1034,42 @@
         }
       }
     },
+    "offline.content_title": {
+      "extractionState": "manual",
+      "comment": "Title for a blank state shown when a surface needs Proton but the device is offline.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        }
+      }
+    },
+    "offline.content_message": {
+      "extractionState": "manual",
+      "comment": "Message for a blank state shown when a surface needs Proton but the device is offline.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This view needs Proton access. It will continue automatically when the connection is back."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Ansicht braucht Zugriff auf Proton. Sobald die Verbindung wieder da ist, geht es automatisch weiter."
+          }
+        }
+      }
+    },
     "sidebar.all_photos": {
       "extractionState": "manual",
       "comment": "Sidebar item for the whole library.",

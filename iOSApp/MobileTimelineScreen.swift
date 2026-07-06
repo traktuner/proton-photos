@@ -183,7 +183,9 @@ struct MobileTimelineScreen: View {
     }
 
     @ViewBuilder private var overlay: some View {
-        if model.loadState.isLoading {
+        if !networkMonitor.isOnline && model.items.isEmpty && (model.loadState.isLoading || model.loadState.failure != nil) {
+            OfflineContentUnavailableView()
+        } else if model.loadState.isLoading {
             MobileLibraryLoadingView(state: model.loadState)
                 .transition(.opacity)
         } else if model.loadState.isEmpty {
