@@ -20,6 +20,11 @@ public enum ViewerImageLoadPolicy {
     /// blow the per-image memory even if the viewport reading is unavailable. ~3072² · 4 ≈ 36 MB worst case.
     public static let maxDisplayPixelSize = 3072
 
+    /// Absolute pixel ceiling (longest side) for a ZOOMED-IN decode. Covers a typical 12–24 MP original fully
+    /// (≤ 6144 longest side) while capping monster panoramas/48 MP originals at ~6144×4608·4 ≈ 113 MB —
+    /// transient (one page, replaces the display entry in the same cost-limited cache).
+    public static let maxZoomedPixelSize = 6144
+
     /// How many pages either side of the current one may load their display image. `0` = current only (the tightest
     /// bound: no fetch/decode fan-out to swipe-preview neighbours). Kept as a knob so a future preload of ±1 is a
     /// one-line change, not a rewrite.
@@ -38,5 +43,18 @@ public enum ViewerImageLoadPolicy {
         guard longestPoints > 0, scale.isFinite, scale > 0 else { return maxDisplayPixelSize }
         let px = Int((longestPoints * scale * displayZoomHeadroom).rounded())
         return min(maxDisplayPixelSize, max(1, px))
+    }
+
+    /// The bounded decode size for a SETTLED zoom level: what the screen actually needs at that zoom
+    /// (fit-size × zoom, no extra headroom — the zoom already happened), clamped to `maxZoomedPixelSize`
+    /// and never below the display tier's size. The decoder itself never upscales past the source, so a
+    /// small original simply decodes fully.
+    public static func zoomedMaxPixelSize(viewportPoints: CGSize, scale: CGFloat, zoom: CGFloat) -> Int {
+        let base = displayMaxPixelSize(viewportPoints: viewportPoints, scale: scale)
+        guard zoom.isFinite, zoom > 1 else { return base }
+        let longestPoints = max(viewportPoints.width, viewportPoints.height)
+        guard longestPoints > 0, scale.isFinite, scale > 0 else { return maxZoomedPixelSize }
+        let px = Int((longestPoints * scale * zoom).rounded())
+        return min(maxZoomedPixelSize, max(base, px))
     }
 }

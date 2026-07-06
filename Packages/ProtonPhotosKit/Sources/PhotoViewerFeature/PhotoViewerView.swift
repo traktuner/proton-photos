@@ -133,6 +133,11 @@ public struct PhotoViewerView: View {
     /// the badge inset to the image edge, not at the window edge.
     @State private var contentSize: CGSize = .zero
 
+    /// The DISPLAYED photo rect (aspect-fit area, magnification/pan-transformed), reported live by the zoom
+    /// scroll view. Frames the Live Photo motion overlay so a zoomed-in still plays its motion at the SAME
+    /// zoom/position — not as an unzoomed clip floating on top.
+    @State private var livePhotoFrame: CGRect?
+
     public init(model: PhotoViewerModel,
                 isFavorite: @escaping (PhotoUID) -> Bool = { _ in false },
                 onToggleFavorite: @escaping (PhotoUID) -> Void = { _ in },
@@ -258,12 +263,24 @@ public struct PhotoViewerView: View {
                                   onPinchDismissChanged: onPinchDismissChanged,
                                   onPinchDismissEnded: onPinchDismissEnded,
                                   onForceClick: { model.playMotion() },        // press → play (with sound)
-                                  onForceClickEnded: { model.stopMotion() })   // release → stop, crossfade to still
+                                  onForceClickEnded: { model.stopMotion() },   // release → stop, crossfade to still
+                                  onPhotoFrameChanged: { livePhotoFrame = $0 })
+                // Framed to the DISPLAYED photo rect (magnification/pan-transformed), so a zoomed-in Live Photo
+                // plays its motion at the same zoom/position as the still — never an unzoomed clip on top.
                 if model.current.isLivePhoto, let motion = model.motionPlayer {
-                    MotionPlayerLayerView(player: motion)
-                        .opacity(model.isMotionPlaying ? 1 : 0)
-                        .animation(mediaTransition.opacityAnimation, value: model.isMotionPlaying)
-                        .allowsHitTesting(false)
+                    if let pf = livePhotoFrame {
+                        MotionPlayerLayerView(player: motion)
+                            .frame(width: pf.width, height: pf.height)
+                            .position(x: pf.midX, y: pf.midY)
+                            .opacity(model.isMotionPlaying ? 1 : 0)
+                            .animation(mediaTransition.opacityAnimation, value: model.isMotionPlaying)
+                            .allowsHitTesting(false)
+                    } else {
+                        MotionPlayerLayerView(player: motion)
+                            .opacity(model.isMotionPlaying ? 1 : 0)
+                            .animation(mediaTransition.opacityAnimation, value: model.isMotionPlaying)
+                            .allowsHitTesting(false)
+                    }
                 }
             }
             // "Come alive": a subtle zoom while the motion plays (and back on stop) that, together with the

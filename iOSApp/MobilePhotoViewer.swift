@@ -179,6 +179,11 @@ private struct MobileImagePage: View {
 
     @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
+    /// The displayed photo rect (aspect-fit area, zoom/pan-transformed) in page coordinates, reported live by
+    /// the zoomable scroll view. Anchors the Live badge and the motion overlay to the PHOTO, not the viewer.
+    @State private var photoFrame: CGRect?
+    /// In-flight zoom-tier decode — replaced (cancelling the old fetch) when the zoom settles elsewhere.
+    @State private var zoomDecodeTask: Task<Void, Never>?
     /// Shared Live Photo motion controller for the current page.
     @State private var motion = LivePhotoMotionController()
 
@@ -194,28 +199,40 @@ private struct MobileImagePage: View {
                     onSingleTap: onToggleChrome,
                     onCloseRequested: onCloseRequested,
                     onMotionStart: item.isLivePhoto ? { motion.play() } : nil,
-                    onMotionStop: item.isLivePhoto ? { motion.stop() } : nil
+                    onMotionStop: item.isLivePhoto ? { motion.stop() } : nil,
+                    onPhotoFrameChanged: { photoFrame = $0 },
+                    onZoomSettled: { loadZoomedDecodeIfNeeded(zoom: $0) }
                 )
             } else {
                 ProgressView().tint(.white)
             }
 
             // The paired motion clip, crossfaded in over the still while the press is held (once preloaded).
+            // Framed to the DISPLAYED photo rect (zoom- and pan-transformed), so a zoomed-in Live Photo plays
+            // its motion at the same zoom/position as the still — never an unzoomed clip floating on top.
             if item.isLivePhoto, let player = motion.player {
-                MobileMotionPlayerLayer(player: player)
-                    .allowsHitTesting(false)
-                    .opacity(motion.isPlaying ? 1 : 0)
-                    .animation(.easeInOut(duration: transition.opacityDuration), value: motion.isPlaying)
+                if let pf = photoFrame {
+                    MobileMotionPlayerLayer(player: player)
+                        .frame(width: pf.width, height: pf.height)
+                        .position(x: pf.midX, y: pf.midY)
+                        .allowsHitTesting(false)
+                        .opacity(motion.isPlaying ? 1 : 0)
+                        .animation(.easeInOut(duration: transition.opacityDuration), value: motion.isPlaying)
+                } else {
+                    MobileMotionPlayerLayer(player: player)
+                        .allowsHitTesting(false)
+                        .opacity(motion.isPlaying ? 1 : 0)
+                        .animation(.easeInOut(duration: transition.opacityDuration), value: motion.isPlaying)
+                }
             }
 
-            // The LIVE affordance, top-leading — hidden while the motion is playing.
+            // The LIVE affordance — GLUED to the photo's top-left corner (not the viewer's). When zoom/pan
+            // pushes that corner off-screen, the badge clamps to the viewer's edge instead of leaving it.
             if item.isLivePhoto {
                 MobileLiveBadge()
                     .opacity(motion.isPlaying ? 0 : 1)
                     .animation(.easeInOut(duration: transition.opacityDuration), value: motion.isPlaying)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 64)
+                    .modifier(MobilePhotoAnchoredTopLeading(photoFrame: photoFrame))
                     .allowsHitTesting(false)
             }
         }
@@ -275,6 +292,61 @@ private struct MobileImagePage: View {
                 MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=\(original.source, privacy: .public)")
             }
         }
+    }
+
+    /// Zoom settled beyond fit → decode the original at the size this zoom actually needs and swap it in.
+    /// The swap is SEAMLESS by construction: only `UIImageView.image` changes (same aspect ratio), the scroll
+    /// view's zoomScale/contentOffset are untouched, so nothing moves — the pixels just get sharper. The store
+    /// serves the bytes from the E2EE originals cache (already fetched by the base tier) and its
+    /// `decodedCap` cache gate turns repeat settles at the same zoom into instant hits.
+    private func loadZoomedDecodeIfNeeded(zoom: CGFloat) {
+        guard zoom > 1.01, isCurrent else { return }
+        let cap = ViewerImageLoadPolicy.zoomedMaxPixelSize(
+            viewportPoints: UIScreen.main.bounds.size, scale: displayScale, zoom: zoom)
+        zoomDecodeTask?.cancel()
+        zoomDecodeTask = Task {
+            guard let sharp = await imageStore.originalImage(for: item.uid, maxPixelSize: cap),
+                  !Task.isCancelled else { return }
+            image = sharp.image
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=zoomed cap=\(cap)")
+            }
+        }
+    }
+}
+
+/// Positions content at the photo's top-left corner (inset), clamping to the viewer's edges when zoom/pan
+/// pushes that corner off-screen — the badge sticks to the photo but never leaves the viewer. Falls back to
+/// the classic viewer-corner placement until the first photo frame arrives.
+private struct MobilePhotoAnchoredTopLeading: ViewModifier {
+    let photoFrame: CGRect?
+    /// Inset from the photo's corner, and the minimum distance the badge keeps from the viewer edges
+    /// (top clearance leaves room for the chrome's close/title row).
+    private static let inset: CGFloat = 12
+    private static let minTop: CGFloat = 64
+
+    func body(content: Content) -> some View {
+        GeometryReader { proxy in
+            let anchor = anchorPoint(in: proxy.size)
+            content
+                .fixedSize()
+                .position(x: anchor.x, y: anchor.y)
+        }
+    }
+
+    private func anchorPoint(in viewport: CGSize) -> CGPoint {
+        // Approximate badge half-size for centering via .position (the badge is a small fixed capsule).
+        let half = CGSize(width: 34, height: 14)
+        guard let pf = photoFrame else {
+            return CGPoint(x: 16 + half.width, y: Self.minTop + half.height)
+        }
+        let x = max(pf.minX + Self.inset, Self.inset) + half.width
+        let y = max(pf.minY + Self.inset, Self.minTop) + half.height
+        // Never past the viewer's right/bottom edge either (extreme pans).
+        return CGPoint(
+            x: min(x, viewport.width - Self.inset - half.width),
+            y: min(y, viewport.height - Self.inset - half.height)
+        )
     }
 }
 
@@ -510,6 +582,13 @@ private struct MobileZoomableImage: UIViewRepresentable {
     /// photo, in which case no long-press recognizer is installed.
     var onMotionStart: (() -> Void)? = nil
     var onMotionStop: (() -> Void)? = nil
+    /// Reports the DISPLAYED photo rect (the aspect-fit image area, zoom- and pan-transformed) in the page's
+    /// coordinate space whenever layout/zoom/pan changes it. Drives the photo-anchored Live badge and the
+    /// motion overlay's geometry, so both stay glued to the photo instead of the viewer.
+    var onPhotoFrameChanged: ((CGRect) -> Void)? = nil
+    /// Fired when a zoom gesture/animation SETTLES, with the final zoom scale — the page uses it to swap in a
+    /// sharper decode sized for that zoom (never during the gesture, so the interaction stays fluid).
+    var onZoomSettled: ((CGFloat) -> Void)? = nil
 
     func makeUIView(context: Context) -> UIScrollView {
         let scrollView = UIScrollView()
@@ -572,8 +651,14 @@ private struct MobileZoomableImage: UIViewRepresentable {
         context.coordinator.onCloseRequested = onCloseRequested
         context.coordinator.onMotionStart = onMotionStart
         context.coordinator.onMotionStop = onMotionStop
+        context.coordinator.onPhotoFrameChanged = onPhotoFrameChanged
+        context.coordinator.onZoomSettled = onZoomSettled
         if context.coordinator.imageView?.image !== image {
             context.coordinator.imageView?.image = image
+        }
+        // Initial/refresh report, async: we're inside a SwiftUI view update, and the callback writes @State.
+        DispatchQueue.main.async { [weak coordinator = context.coordinator] in
+            coordinator?.reportPhotoFrame()
         }
     }
 
@@ -589,6 +674,10 @@ private struct MobileZoomableImage: UIViewRepresentable {
         var onCloseRequested: () -> Void
         var onMotionStart: (() -> Void)?
         var onMotionStop: (() -> Void)?
+        var onPhotoFrameChanged: ((CGRect) -> Void)?
+        var onZoomSettled: ((CGFloat) -> Void)?
+        /// Last reported photo rect — reports are de-duplicated so a steady frame never spams @State updates.
+        private var lastReportedPhotoFrame: CGRect = .null
 
         private var dismissPinchActive = false
         private var pinchStartCentroid: CGPoint = .zero
@@ -622,6 +711,34 @@ private struct MobileZoomableImage: UIViewRepresentable {
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+
+        /// The displayed photo rect: the aspect-FIT area of the image inside the (zoom-scaled) image view,
+        /// converted to the scroll view's superview space — the same space the page's SwiftUI overlays use.
+        func displayedPhotoFrame() -> CGRect? {
+            guard let scrollView, let imageView, let img = imageView.image,
+                  img.size.width > 0, img.size.height > 0 else { return nil }
+            let fitted = AVMakeRect(aspectRatio: img.size, insideRect: imageView.bounds)
+            return imageView.convert(fitted, to: scrollView.superview)
+        }
+
+        func reportPhotoFrame() {
+            guard let frame = displayedPhotoFrame() else { return }
+            // Sub-point changes are invisible; skip them so pan/zoom doesn't flood SwiftUI with state writes.
+            if abs(frame.minX - lastReportedPhotoFrame.minX) < 0.5,
+               abs(frame.minY - lastReportedPhotoFrame.minY) < 0.5,
+               abs(frame.width - lastReportedPhotoFrame.width) < 0.5,
+               abs(frame.height - lastReportedPhotoFrame.height) < 0.5 { return }
+            lastReportedPhotoFrame = frame
+            onPhotoFrameChanged?(frame)
+        }
+
+        func scrollViewDidZoom(_ scrollView: UIScrollView) { reportPhotoFrame() }
+        func scrollViewDidScroll(_ scrollView: UIScrollView) { reportPhotoFrame() }
+
+        func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+            reportPhotoFrame()
+            onZoomSettled?(scale)
+        }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -691,6 +808,13 @@ private struct MobileZoomableImage: UIViewRepresentable {
                 let zoomRect = CGRect(x: point.x - side.width / 6, y: point.y - side.height / 6,
                                       width: side.width / 3, height: side.height / 3)
                 scrollView.zoom(to: zoomRect, animated: true)
+            }
+            // Programmatic zooms don't reliably deliver `scrollViewDidEndZooming` — settle explicitly once the
+            // zoom animation is over, so a double-tap zoom also gets its sharper decode.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak scrollView] in
+                guard let self, let scrollView else { return }
+                self.reportPhotoFrame()
+                self.onZoomSettled?(scrollView.zoomScale)
             }
         }
 
