@@ -1,4 +1,5 @@
 import Foundation
+import PhotosCore
 
 /// Bounded, crash-safe temp storage for exported backup resources (PhotoKit originals are
 /// materialized here before hashing/upload). Platform-neutral Foundation only.
@@ -14,8 +15,15 @@ import Foundation
 ///   which callers treat as retryable (park + backoff), never as data loss.
 public final class BackupTempFileStore: @unchecked Sendable {
 
-    public enum BackupTempFileError: Error, Equatable {
+    public enum BackupTempFileError: Error, Equatable, LocalizedError {
         case diskBudgetExceeded
+
+        public var errorDescription: String? {
+            switch self {
+            case .diskBudgetExceeded:
+                return L10n.string("backup.error_low_space")
+            }
+        }
     }
 
     public let directory: URL

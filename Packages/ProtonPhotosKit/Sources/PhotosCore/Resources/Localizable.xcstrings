@@ -12,8 +12,8 @@
     "backup.detail_attention %lld": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "%lld files need attention" } },
-        "de": { "stringUnit": { "state": "translated", "value": "%lld Dateien benötigen Aufmerksamkeit" } }
+        "en": { "stringUnit": { "state": "translated", "value": "%lld files not backed up yet" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld Dateien noch nicht gesichert" } }
       }
     },
     "backup.detail_backed_up %lld %lld": {
@@ -43,8 +43,8 @@
     "backup.phase_attention": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Some files need attention" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Einige Dateien benötigen Aufmerksamkeit" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Some files were not backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Einige Dateien wurden nicht gesichert" } }
       }
     },
     "backup.phase_checking": {
@@ -99,6 +99,24 @@
         "de": { "stringUnit": { "state": "translated", "value": "Wartet auf Fortsetzung" } }
       }
     },
+    "backup.error_low_space": {
+      "extractionState": "manual",
+      "comment": "Backup queue row error: the device is too low on free space to prepare the file for upload. Retryable, never permanent; shown in diagnostics/bug reports.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not enough space on this device to prepare the file"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zu wenig Speicher auf diesem Gerät, um die Datei vorzubereiten"
+          }
+        }
+      }
+    },
     "backup.error_source_missing": {
       "extractionState": "manual",
       "comment": "Backup queue row error: the local source file disappeared before it could be backed up.",
@@ -145,10 +163,10 @@
     },
     "backup.status_attention_detail": {
       "extractionState": "manual",
-      "comment": "Backup status subtitle: plain-language note that some items could not be backed up.",
+      "comment": "Backup status subtitle: tells the user the concrete recovery action. The button on both platforms is labelled the same as backup.backup_sync_now / settings.backup_sync_now.",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Some items could not be backed up" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Einige Objekte konnten nicht gesichert werden" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Tap Back up now to try again" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Für einen neuen Versuch auf Jetzt sichern tippen" } }
       }
     },
     "backup.status_checking_detail": {

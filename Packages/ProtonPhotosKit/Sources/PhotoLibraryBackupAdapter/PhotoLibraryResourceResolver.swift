@@ -35,7 +35,11 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
         // reuse across re-exports), so it uses the asset's stable creation date.
         let captureDate = asset.creationDate ?? asset.modificationDate ?? Date()
         let additionalMetadata = try PhotoLibraryUploadMetadataBuilder.metadata(for: asset)
-        let primaryURL = try await export(primaryResource, uploadFilename: plan.primary.uploadFilename)
+        // Track every temp export so the runner can release them the moment the entry settles.
+        // Without this the store's footprint grows across a pass until it trips the disk budget
+        // and every remaining item fails - the exact failure that stranded a full library.
+        let exportedURLs = ExportedURLBox()
+        let primaryURL = try await export(primaryResource, uploadFilename: plan.primary.uploadFilename, tracking: exportedURLs)
         let primaryDescriptor = descriptor(
             source: candidate.snapshot.source,
             fileURL: primaryURL,
@@ -48,7 +52,7 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
             guard let resource = PhotoKitAssetMapper.resource(for: item.role, ordinal: item.ordinal, of: asset) else {
                 throw UploadError.backend("missing PhotoKit resource \(item.role.rawValue)#\(item.ordinal)")
             }
-            let url = try await export(resource, uploadFilename: item.uploadFilename)
+            let url = try await export(resource, uploadFilename: item.uploadFilename, tracking: exportedURLs)
             let source = UploadSourceIdentity(
                 kind: .photoLibraryAsset,
                 identifier: entry.source.identifier,
@@ -68,6 +72,7 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
             ))
         }
 
+        let tempStore = self.tempStore
         return BackupResolvedResource(
             candidate: candidate,
             descriptor: primaryDescriptor,
@@ -76,8 +81,19 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
                 ?? "application/octet-stream",
             additionalMetadata: additionalMetadata,
             captureDate: captureDate,
-            secondaries: secondaries
+            secondaries: secondaries,
+            cleanup: { for url in exportedURLs.urls { tempStore.discard(url) } }
         )
+    }
+
+    /// Collects committed export URLs so the whole compound can be discarded in one cleanup call.
+    /// A reference box (not an inout array) so it survives the async export hops and is captured
+    /// by the `cleanup` closure.
+    private final class ExportedURLBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: [URL] = []
+        func append(_ url: URL) { lock.withLock { stored.append(url) } }
+        var urls: [URL] { lock.withLock { stored } }
     }
 
     private func descriptor(
@@ -99,8 +115,8 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
     /// Streams one resource's original bytes into the temp store: chunks arrive on PhotoKit's
     /// serial queue and go straight to disk - the whole file is never in memory. Write errors
     /// fail the export loudly (a silently truncated file would hash "consistently wrong").
-    private func export(_ resource: PHAssetResource, uploadFilename: String) async throws -> URL {
-        let partialURL = try tempStore.reserve(filename: uploadFilename, expectedBytes: 0)
+    private func export(_ resource: PHAssetResource, uploadFilename: String, tracking exported: ExportedURLBox) async throws -> URL {
+        let partialURL = try tempStore.reserve(filename: uploadFilename, expectedBytes: Self.expectedBytes(of: resource))
         FileManager.default.createFile(atPath: partialURL.path, contents: nil)
         let handle = try FileHandle(forWritingTo: partialURL)
 
@@ -132,6 +148,17 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
             tempStore.discard(partialURL)
             throw error
         }
-        return try tempStore.commit(partialURL)
+        let finalURL = try tempStore.commit(partialURL)
+        exported.append(finalURL)
+        return finalURL
+    }
+
+    /// Best-effort byte estimate for the disk-budget reservation. PhotoKit exposes the resource
+    /// size only through the undocumented `fileSize` key; a miss simply falls back to 0 (the
+    /// reservation then still enforces the free-space floor, just not a size-aware headroom).
+    private static func expectedBytes(of resource: PHAssetResource) -> Int64 {
+        if let size = resource.value(forKey: "fileSize") as? Int64 { return size }
+        if let size = resource.value(forKey: "fileSize") as? Int { return Int64(size) }
+        return 0
     }
 }

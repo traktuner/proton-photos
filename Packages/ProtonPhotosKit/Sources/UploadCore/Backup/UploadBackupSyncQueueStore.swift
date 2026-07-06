@@ -169,6 +169,29 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
         }
     }
 
+    /// Resets every parked `.failed` row back to runnable with a fresh retry budget. Called when
+    /// the user explicitly asks to back up again (or re-enables backup), so a manual "back up now"
+    /// actually retries the items behind a "needs attention" state instead of being a no-op.
+    @discardableResult
+    public func requeueFailed(updatedAt: Date) -> Int {
+        lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                """
+                UPDATE backup_sync_queue
+                SET state = 'discovered', attempts = 0, last_error = NULL, updated_at = ?
+                WHERE state = 'failed';
+                """,
+                -1, &stmt, nil
+            ) == SQLITE_OK else { return 0 }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, updatedAt.timeIntervalSince1970)
+            guard sqlite3_step(stmt) == SQLITE_DONE else { return 0 }
+            return Int(sqlite3_changes(db))
+        }
+    }
+
     public func updateState(
         source: UploadSourceIdentity,
         revision: UploadBackupRevision,

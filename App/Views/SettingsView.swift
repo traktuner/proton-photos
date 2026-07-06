@@ -399,7 +399,7 @@ private struct PhotoLibraryBackupSection: View {
                 if controller.isSyncing {
                     Button("settings.backup_stop") { controller.stopSync() }
                 } else {
-                    Button("settings.backup_sync_now") { controller.syncNow() }
+                    Button("settings.backup_sync_now") { controller.retryFailedAndSync() }
                 }
             }
             if controller.status.isActive || controller.status.phase == .paused {

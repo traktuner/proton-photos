@@ -161,6 +161,10 @@ public final class PhotoLibraryBackupController {
         isEnabled = true
         defaults.set(true, forKey: Self.enabledDefaultsKey)
         startObservingChanges()
+        // Re-enabling is an explicit user action: give anything previously parked as failed a fresh
+        // start so toggling backup off/on is a real recovery path, not a no-op.
+        queueStore?.requeueFailed(updatedAt: Date())
+        refreshFromQueue()
         syncNow()
     }
 
@@ -179,6 +183,17 @@ public final class PhotoLibraryBackupController {
     /// Foreground/user-initiated pass.
     public func syncNow() {
         startSync(owner: .foreground)
+    }
+
+    /// The manual "back up now" entry point. Unlike `syncNow()` (also used by automatic
+    /// change-driven passes), this first requeues everything parked as `.failed`, so a user who
+    /// sees "needs attention" and taps back-up-now actually retries those items instead of
+    /// triggering a pass that skips them. A no-op while a pass is already running.
+    public func retryFailedAndSync() {
+        guard !isSyncing else { return }
+        queueStore?.requeueFailed(updatedAt: Date())
+        refreshFromQueue()
+        syncNow()
     }
 
     /// One full catch-up pass for OS background windows (BGProcessingTask on iOS, background

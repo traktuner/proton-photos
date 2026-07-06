@@ -71,6 +71,10 @@ public actor BackupSyncRunner {
 
     private var isRunning = false
     private var stopRequested = false
+    /// Consecutive items that could not even reserve disk space since the last one that did.
+    /// Reset to 0 the moment any export succeeds; when it reaches a full wave the drain ends the
+    /// pass (rows stay runnable) instead of spinning against a genuinely full volume.
+    private var resourcePressureStreak = 0
     /// Earliest next-attempt time per queue row (in-memory: losing it on crash only means one
     /// immediate retry; the persisted attempt count keeps the budget bounded).
     private var notBefore: [String: Date] = [:]
@@ -132,6 +136,7 @@ public actor BackupSyncRunner {
         isRunning = true
         stopRequested = false
         notBefore = [:]
+        resourcePressureStreak = 0
         defer {
             isRunning = false
             progress.isRunning = false
@@ -176,6 +181,11 @@ public actor BackupSyncRunner {
                     group.addTask { await self.process(entry) }
                 }
             }
+
+            // A whole wave that could not reserve disk space means the volume is full, not busy.
+            // Stop draining and leave the rows runnable: the next pass retries once space frees,
+            // and the status reads "waiting" (never a permanent, unactionable failure).
+            if resourcePressureStreak >= configuration.batchSize { break }
         }
 
         // Truth re-sync from the store: incremental counters were exact (single writer), but the
@@ -243,7 +253,10 @@ public actor BackupSyncRunner {
         var persistedState = entry.state
         inFlightNames[key] = entry.originalFilename
         progress.currentItemName = entry.originalFilename
+        // Released the instant this entry settles, so temp exports never accumulate across a pass.
+        var resourceCleanup: (@Sendable () -> Void)?
         defer {
+            resourceCleanup?()
             inFlightNames[key] = nil
             if progress.currentItemName == entry.originalFilename {
                 progress.currentItemName = inFlightNames.values.first
@@ -271,6 +284,8 @@ public actor BackupSyncRunner {
                    message: L10n.string("backup.error_source_missing"), resolved: nil)
             return
         }
+        resourceCleanup = resolved.cleanup
+        resourcePressureStreak = 0    // an export succeeded → the volume has space again
         if stopRequested { revert(entry, from: persistedState); return }
 
         // Identity + duplicate decision (manifest-cached hash → HMACs → remote check). The
@@ -557,8 +572,25 @@ public actor BackupSyncRunner {
         from oldState: UploadBackupSyncQueueState,
         error: Error
     ) {
-        let attempts = entry.attempts + 1
         let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+
+        // Disk-space pressure is not the item's fault: it must NEVER burn the retry budget into a
+        // permanent `.failed` (that is exactly what stranded a whole library behind an unactionable
+        // "needs attention"). Requeue it runnable with a short backoff, leave its attempt count
+        // untouched, and let the pass-level guard end the drain if the volume stays full.
+        if Self.isTransientResourcePressure(error) {
+            resourcePressureStreak += 1
+            queue.updateState(
+                source: entry.source, revision: entry.revision,
+                state: .discovered, attempts: entry.attempts, lastError: message, updatedAt: now()
+            )
+            notBefore[Self.key(entry)] = now().addingTimeInterval(configuration.retry.delay(afterAttempts: 1))
+            adjustProgress(from: oldState, to: .discovered)
+            emitProgress()
+            return
+        }
+
+        let attempts = entry.attempts + 1
         if configuration.retry.shouldPark(attempts: attempts) {
             queue.updateState(
                 source: entry.source, revision: entry.revision,
@@ -634,6 +666,12 @@ public actor BackupSyncRunner {
 
     private func emitProgress() {
         onProgress?(progress)
+    }
+
+    /// Errors that reflect a temporary lack of disk space rather than a bad item. These are
+    /// retried indefinitely (with backoff) and never parked as `.failed`.
+    private static func isTransientResourcePressure(_ error: Error) -> Bool {
+        (error as? BackupTempFileStore.BackupTempFileError) == .diskBudgetExceeded
     }
 
     private static func key(_ entry: UploadBackupSyncQueueEntry) -> String {

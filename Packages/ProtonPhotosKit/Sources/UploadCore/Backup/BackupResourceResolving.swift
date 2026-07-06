@@ -37,6 +37,11 @@ public struct BackupResolvedResource: Sendable {
     /// Secondary resources of the compound, uploaded after the primary settles. Empty for plain
     /// files and non-Live photo-library assets.
     public let secondaries: [BackupSecondaryResource]
+    /// Releases any temporary exports this resource materialized (e.g. PhotoKit originals streamed
+    /// into the temp store). The runner calls it once the entry settles - success, park, or revert -
+    /// so exports are freed per item instead of piling up until the whole pass ends. `nil` when the
+    /// resource points at a durable location the pipeline must not delete (e.g. a user's real file).
+    public let cleanup: (@Sendable () -> Void)?
 
     public init(
         candidate: UploadBackupAssetCandidate,
@@ -44,7 +49,8 @@ public struct BackupResolvedResource: Sendable {
         mediaType: String,
         additionalMetadata: [PhotoUploadAdditionalMetadata] = [],
         captureDate: Date,
-        secondaries: [BackupSecondaryResource] = []
+        secondaries: [BackupSecondaryResource] = [],
+        cleanup: (@Sendable () -> Void)? = nil
     ) {
         self.candidate = candidate
         self.descriptor = descriptor
@@ -52,6 +58,7 @@ public struct BackupResolvedResource: Sendable {
         self.additionalMetadata = additionalMetadata
         self.captureDate = captureDate
         self.secondaries = secondaries
+        self.cleanup = cleanup
     }
 }
 

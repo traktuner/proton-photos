@@ -385,7 +385,7 @@ private struct MobilePhotoBackupRows: View {
                 Button(String(localized: "settings.photos_backup_pause")) { controller.stopSync() }
                     .font(.footnote)
             } else {
-                Button(String(localized: "settings.photos_backup_sync_now")) { controller.syncNow() }
+                Button(String(localized: "settings.photos_backup_sync_now")) { controller.retryFailedAndSync() }
                     .font(.footnote)
             }
         }

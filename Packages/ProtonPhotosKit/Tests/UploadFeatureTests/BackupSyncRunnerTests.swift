@@ -39,6 +39,9 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
         case missing
         /// Throw `error` for the first `times` resolves, then behave like `.standard`.
         case transientFailure(times: Int)
+        /// Throw `BackupTempFileError.diskBudgetExceeded` for the first `times` resolves, then
+        /// behave like `.standard`. Models a device low on space while a pass runs.
+        case diskPressure(times: Int)
     }
 
     private let lock = NSLock()
@@ -69,6 +72,7 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
         lock.withLock {
             behaviors[identifier] = behavior
             if case let .transientFailure(times) = behavior { remainingFailures[identifier] = times }
+            if case let .diskPressure(times) = behavior { remainingFailures[identifier] = times }
         }
     }
 
@@ -86,18 +90,26 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
             _resolveCounts[id, default: 0] += 1
             return behaviors[id] ?? .standard
         }
-        switch behavior {
-        case .missing:
-            return nil
-        case let .transientFailure(times):
-            let shouldFail: Bool = lock.withLock {
-                let left = remainingFailures[id] ?? times
+        func consumeFailure() -> Bool {
+            lock.withLock {
+                let left = remainingFailures[id] ?? 0
                 if left > 0 { remainingFailures[id] = left - 1; return true }
                 return false
             }
-            if shouldFail { throw UploadError.backend("transient resolve failure for \(id)") }
-            fallthrough
+        }
+        switch behavior {
+        case .missing:
+            return nil
+        case .transientFailure:
+            if consumeFailure() { throw UploadError.backend("transient resolve failure for \(id)") }
+        case .diskPressure:
+            if consumeFailure() { throw BackupTempFileStore.BackupTempFileError.diskBudgetExceeded }
         case .standard:
+            break
+        }
+
+        // Standard resolution (also reached once a transient/disk-pressure budget is exhausted).
+        do {
             let modified = lock.withLock { modifiedOverrides[id] } ?? defaultModified
             let secondaries = lock.withLock { secondaryNames[id] } ?? []
             let additionalMetadata = lock.withLock { metadataByIdentifier[id] } ?? []
@@ -336,6 +348,53 @@ final class BackupSyncRunnerTests: XCTestCase {
     override func tearDownWithError() throws {
         queueStore.close()
         try? FileManager.default.removeItem(at: tempDir)
+    }
+
+    // MARK: Disk-space pressure is retryable, never a permanent failure
+
+    func testDiskPressureNeverBurnsRetryBudgetAndRecovers() async throws {
+        // More consecutive disk-pressure failures than the park threshold (maxAttempts: 4). A
+        // budget-consuming error would park as .failed after 4; disk pressure must not - it is not
+        // the item's fault. This is the regression for a full library stranded as "needs attention".
+        let entry = seedEntry("crowded.jpg")
+        resolver.set(.diskPressure(times: 7), for: entry.source.identifier)
+
+        let runner = makeRunner()
+        let progress = await runner.runUntilDrained()
+
+        XCTAssertEqual(state(of: entry), .completed, "disk pressure must never park an item as failed")
+        XCTAssertEqual(uploader.requests.count, 1)
+        XCTAssertEqual(progress.failed, 0)
+        XCTAssertEqual(resolver.resolveCount(for: entry.source.identifier), 8, "7 pressure failures, then success")
+    }
+
+    func testSustainedDiskPressureEndsPassRunnableNotFailed() async throws {
+        // The volume stays full for the whole pass: no item can ever export.
+        let a = seedEntry("a.jpg")
+        let b = seedEntry("b.jpg")
+        resolver.set(.diskPressure(times: .max), for: a.source.identifier)
+        resolver.set(.diskPressure(times: .max), for: b.source.identifier)
+
+        let runner = makeRunner()
+        let progress = await runner.runUntilDrained()
+
+        XCTAssertEqual(progress.failed, 0, "a full disk must not manufacture permanent failures")
+        XCTAssertEqual(uploader.requests.count, 0)
+        XCTAssertEqual(state(of: a), .discovered, "rows stay runnable for the next pass")
+        XCTAssertEqual(state(of: b), .discovered)
+    }
+
+    func testRequeueFailedResetsParkedRowsToRunnable() {
+        let failed = seedEntry("stuck.jpg", state: .failed, attempts: 4)
+        let done = seedEntry("done.jpg", state: .completed)
+
+        let count = queueStore.requeueFailed(updatedAt: clock.now)
+
+        XCTAssertEqual(count, 1, "only the failed row is requeued")
+        XCTAssertEqual(state(of: failed), .discovered)
+        XCTAssertEqual(queueStore.entry(for: failed.source, revision: failed.revision)?.attempts, 0,
+                       "requeue grants a fresh retry budget")
+        XCTAssertEqual(state(of: done), .completed, "terminal-success rows are untouched")
     }
 
     // MARK: Composition helpers
