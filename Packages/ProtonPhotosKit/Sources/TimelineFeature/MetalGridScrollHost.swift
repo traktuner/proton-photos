@@ -314,6 +314,11 @@ final class MetalGridScrollHost: NSView {
     @objc private func windowWillLiveResize() {
         stickToBottom = false
         liveResizeStartFrame = viewportScreenFrame()
+        // ARM the synchronized present for the whole gesture: the renderer then commits, waits until
+        // scheduled and presents INSIDE the window's CATransaction (see `MetalGridRenderer.present`).
+        // Without this the async present races the layer resize — the previous frame gets stretched to the
+        // new size for a beat every tick, which reads as jitter/shimmer while dragging the window edge.
+        metalView.presentsWithTransaction = true
         coordinator.liveResizeChanged?(true)
         guard coordinator.canPresentResize else { return }
         coordinator.beginPresentationResize()
@@ -324,6 +329,7 @@ final class MetalGridScrollHost: NSView {
     /// gesture had already fallen back (vertical/corner), the presentation is inactive and the normal `layout()`
     /// path already settled it, so this is a no-op beyond clearing the sync-present flag.
     @objc private func windowDidEndLiveResize() {
+        metalView.presentsWithTransaction = false   // back to the cheaper async present once settled
         coordinator.liveResizeChanged?(false)
         guard coordinator.presentationResizeActive else { applyResolvedGridProfileAfterLiveResizeFallback(); return }
         // SETTLE = NO snap. The settle scroll depends on the axis: a WIDTH/corner change scales the tiles (fixed
