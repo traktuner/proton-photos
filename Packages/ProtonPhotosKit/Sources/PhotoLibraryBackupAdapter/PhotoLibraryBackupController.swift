@@ -48,8 +48,12 @@ public final class PhotoLibraryBackupController {
     public private(set) var status = BackupStatus()
     public private(set) var isSyncing = false
     public private(set) var lastMessage: String?
-    /// Latest local-catalog scan tally (inventory only, never implies upload). Exposed for debug /
-    /// optional status; no UI depends on it, so surfacing it later needs no Core change.
+    /// Latest local-catalog scan tally (scanned/discovered/changed/removed) - pure inventory, it
+    /// never implies upload. DELIBERATELY not shown in the backup status row: mid-scan these counts
+    /// have no known denominator, so a live "1,240 scanned" would be indeterminate noise next to the
+    /// honest scanning/checking/uploading phases the shared `BackupStatus` already drives (and would
+    /// risk reading as a second, competing progress surface). Kept as a debug/telemetry hook - and
+    /// the scan-progress seam the catalog-sync tests exercise; surfacing it later needs no Core change.
     public private(set) var lastCatalogProgress: PhotoLibraryCatalogProgress?
 
     /// False when the dedupe manifest or the backup stores could not open - backup then refuses

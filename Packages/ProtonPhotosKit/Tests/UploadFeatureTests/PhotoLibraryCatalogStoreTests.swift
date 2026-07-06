@@ -263,6 +263,40 @@ final class PhotoLibraryCatalogStoreTests: XCTestCase {
         queue.close()
     }
 
+    /// Abort mid-scan (cancellation reaching the enumerator, or an enumeration failure) must not
+    /// advance the catalog for assets it never delivered - they re-yield cleanly on the next pass.
+    /// Combined with the queue-row-before-catalog-advance ordering, this closes the data-loss window.
+    func testAbortedScanDoesNotStrandUndeliveredAssets() async throws {
+        let store = try makeStore()
+
+        // Pass 1 delivers only A, then aborts (the real PhotoKit enumerator finishes with a
+        // CancellationError the same way when its detached fetch is cancelled).
+        let aborting = AbortingEnumerator(chunks: [[photoInfo(id: "A")]], thenThrow: CancellationError())
+        let e1 = RecordingEnqueuer()
+        do {
+            _ = try await PhotoLibraryCatalogSync(
+                store: store, enumerator: aborting, chunkSize: 1, now: { Date(timeIntervalSince1970: 100) }
+            ).run(engine: e1)
+            XCTFail("an aborted scan must rethrow, not silently succeed")
+        } catch is CancellationError {
+            // expected
+        }
+
+        XCTAssertEqual(e1.enqueued, ["A"], "the delivered asset was enqueued before the abort")
+        XCTAssertNotNil(store.entry(for: "A"), "the delivered asset's catalog row is committed")
+        XCTAssertEqual(store.count(), 1, "the abort must not catalog anything beyond what it delivered")
+
+        // Pass 2 is a clean full scan that now also sees B. A is unchanged (not re-enqueued); B was
+        // never stranded by the aborted pass, so it re-yields as new.
+        let clean = StubEnumerator(infos: [photoInfo(id: "A"), photoInfo(id: "B")])
+        let e2 = RecordingEnqueuer()
+        _ = try await PhotoLibraryCatalogSync(
+            store: store, enumerator: clean, chunkSize: 2, now: { Date(timeIntervalSince1970: 200) }
+        ).run(engine: e2)
+
+        XCTAssertEqual(e2.enqueued, ["B"], "the previously-undelivered asset re-yields; the delivered one does not")
+    }
+
     // MARK: - Helpers
 
     private func runDriver(
@@ -336,6 +370,26 @@ final class PhotoLibraryCatalogStoreTests: XCTestCase {
 
         func count() -> Int {
             lock.withLock { rows.values.reduce(0) { $0 + $1.count } }
+        }
+    }
+
+    /// Yields the given chunks, then finishes with `thenThrow` - models a scan that aborts partway
+    /// (cancellation reaching the producer, or a PhotoKit enumeration failure).
+    private final class AbortingEnumerator: PhotoLibraryAssetEnumerator, @unchecked Sendable {
+        private let chunks: [[PhotoBackupAssetInfo]]
+        private let thenThrow: any Error
+        init(chunks: [[PhotoBackupAssetInfo]], thenThrow: any Error) {
+            self.chunks = chunks
+            self.thenThrow = thenThrow
+        }
+
+        func infoChunks(identifiers: [String]?, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
+            let chunks = chunks
+            let error = thenThrow
+            return AsyncThrowingStream { continuation in
+                for chunk in chunks { continuation.yield(chunk) }
+                continuation.finish(throwing: error)
+            }
         }
     }
 
