@@ -26,9 +26,7 @@ struct MainView: View {
     // Initial default = aspectFitInsideSquare (matches the coordinator's default).
     @State private var gridContentMode: TileContentDisplayMode = .aspectFitInsideSquare
 
-    /// True while the Metal grid is presenting a live resize or sidebar-scale gesture. Used to suspend the
-    /// within-window `GridTopFrost` vibrancy blur (it samples + blurs the Metal layer every frame at changing
-    /// geometry — a measurable compositing cost that competes with the per-tick scale render).
+    /// Suspends the title-bar frost while the Metal surface is being scaled during resize.
     @State private var gridLiveResizeActive = false
     @State private var sidebarOpen: Bool
     @State private var sidebarWidth: CGFloat

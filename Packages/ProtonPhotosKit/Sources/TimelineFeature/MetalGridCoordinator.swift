@@ -23,12 +23,10 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     private(set) var gridProfile: GridLevelProfile
     private var fillOrder: GridFillOrder = .newestBottomTrailing
 
-    /// Fired ONCE, the first time every visible cell is GPU-resident (the first fully-drawn frame). The shell
-    /// holds the launch veil until this so it never lifts onto blank thumbnails. See `streamTextures`.
+    /// Fired when the first visible frame is fully populated.
     var onFirstContentReady: (() -> Void)?
     private var firstContentReported = false
-    /// Live resize/sidebar presentation active state notification - used by the shell to suspend costly
-    /// within-window compositing (e.g. vibrancy blur) while the Metal surface scales per tick.
+    /// Notifies the shell while the grid is presenting a live resize.
     var liveResizeChanged: ((Bool) -> Void)?
     /// One-shot cold-start `[FirstContent]` trace state: the wall-clock of the first on-screen frame with real
     /// visible cells, used to report how long the grid stayed on placeholders before it became resident.
@@ -797,8 +795,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// content's LEFT edge at `inset` and scales by `currentLayoutWidth / startLayoutWidth`.
     private var presentationStartInset: CGFloat = 0
     private var presentationStartLayoutWidth: CGFloat = 1
-    /// Viewport size at gesture start = exactly what the offscreen resize canvas covers (its UV [0,1]
-    /// maps to this rect). The presentation transform is applied to this rect to place the canvas quad.
+    /// Gesture-start viewport covered by the offscreen resize canvas.
     private var presentationStartViewportSize: CGSize = .zero
     /// The settled render slots snapshotted ONCE at gesture start (+ their display mode). Each frame these are
     /// presented uniformly SCALED - one coherent surface - never re-resolved (re-resolving would reflow).
@@ -828,10 +825,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         zoomTransaction == nil && !gridTransition.isActive && overviewDissolve == nil && !isCommitBridging && !presentationSidebarActive
     }
 
-    /// Snapshot the settled render slots ONCE (generous overscan so a scale-down reveals real older rows) plus the
-    /// box they were laid out in (layout width, inset) and the start scroll. A presentation/sidebar transition then
-    /// presents these SCALED - never re-resolved. The snapshot also includes an OFFSCREEN canvas rasterisation
-    /// so each resize tick can draw a single transformed quad instead of rebuilding groups per cell.
+    /// Captures the settled grid geometry and resize canvas used during live resize.
     private func captureSnapshot() {
         guard let clip = clipView, let view = metalView else { return }
         let viewportSize = view.bounds.size
@@ -845,10 +839,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         presentationSnapshotDisplayMode = effectiveDisplayMode
         presentationStartLayoutWidth = w
         presentationStartInset = leadingObstructionInset
-        presentationStartViewportSize = viewportSize   // == the region the offscreen canvas covers
+        presentationStartViewportSize = viewportSize
         presentationStartScrollY = scrollY
-        // Rasterise the snapshot groups into the cached offscreen canvas ONCE. From now on each resize
-        // tick is a single transformed textured-quad draw - no per-tick buildRealGroups or per-cell binds.
         let (groups, _) = buildRealGroups(slots: presentationSnapshotSlots, flatUIDs: dataSource.flatUIDs,
                                           viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
         renderer.rasterizeResizeSnapshot(groups: { groups }, viewportSize: viewportSize, backingScale: backingScale)
@@ -942,7 +934,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         presentationResizeActive = false
         presentationSnapshotSlots = []
         presentationVerticalShift = 0
-        renderer.endResizeCanvas()   // drop the offscreen snapshot texture (GPU memory freed asynchronously)
+        renderer.endResizeCanvas()
     }
 
     // MARK: - Sidebar resize (open/close scales the grid like a left-edge resize - RIGHT-anchored, inset-driven)
@@ -1019,7 +1011,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         }
         presentationSidebarActive = false
         sidebarObstructionInset = presentationSidebarToEventInset   // commit the WIDTH (engine re-adds the gap)
-        renderer.endResizeCanvas()   // drop the offscreen snapshot texture
+        renderer.endResizeCanvas()
         // Match the presentation's vertical anchor: bottom only at the newest end, centre in the middle of the
         // timeline.
         let scroll = presentationSidebarBottomPinned ? bottomAnchoredScroll() : centerAnchoredScroll()
@@ -1054,29 +1046,16 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         renderer.endResizeCanvas()
     }
 
-    /// Present the snapshot SCALED right-anchored to fill [inset(t), V] for the current sidebar progress. With the
-    /// offscreen canvas: one textured-quad draw per tick instead of rebuilds/bind-per-cell.
+    /// Presents the sidebar resize snapshot with the current right-anchored inset.
     private func drawSidebarResize(in view: MTKView, viewportSize: CGSize) {
-        // The offscreen-canvas fast path is intentionally NOT used here yet: the sidebar uses a
-        // RIGHT-anchored viewport->canvas mapping that has not been visually verified, and shipping an
-        // unverified textured-quad mapping risks the same aspect distortion the window path just had.
-        // The sidebar resize already avoids per-tick engine resolve; a per-cell group rebuild here is
-        // correct and acceptable. (Window resize - the hot path - uses the canvas fast path above.)
+        // Keep the sidebar path on per-cell groups until its right-anchored quad mapping is verified.
         let scaled = sidebarPresentationSlots(viewportSize: viewportSize, progress: presentationSidebarProgress)
         let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
         renderer.render(in: view, viewportSize: viewportSize, groups: groups)
     }
 
-    /// Present the gesture-start snapshot as ONE coherent surface, UNIFORMLY SCALED to the current width about the
-    /// stationary LEFT edge (x = inset) and the viewport CENTRE. With the offscreen canvas: ONE single textured-quad
-    /// draw per tick (scale via viewport uniform transformation) — no per-tick buildRealGroups / per-cell binds.
+    /// Presents the window-resize snapshot as one uniformly scaled surface.
     private func drawPresentationResize(in view: MTKView, viewportSize: CGSize) {
-        // FAST PATH: the offscreen canvas holds the whole START viewport snapshot; its UV [0,1] maps to
-        // the start viewport rect. Draw it as ONE quad whose destination is that start-viewport rect put
-        // through the SAME uniform scale/anchor/slide the tiles use (presentationScaledRect). It MUST be
-        // the transformed VIEWPORT rect - NOT the union of the scaled tile rects: the tile union has a
-        // different aspect ratio than the viewport-sized canvas, which squished every thumbnail into a
-        // thin, tall sliver. Uniform k on both axes preserves aspect, so no distortion.
         if renderer.hasResizeCanvas, presentationStartViewportSize.width > 0,
            let target = MetalGridDrawableTarget(view: view) {
             let inset = presentationStartInset
@@ -1092,8 +1071,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                 return
             }
         }
-        // FALLBACK: rebuild the per-cell groups this tick (canvas missing / pipeline unusable / draw
-        // failed). A tick must never produce a blank frame.
+        // Fall back to the normal per-cell path if the resize canvas cannot draw.
         let scaled = resizePresentationSlots(viewportSize: viewportSize)
         let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
         renderer.render(in: view, viewportSize: viewportSize, groups: groups)

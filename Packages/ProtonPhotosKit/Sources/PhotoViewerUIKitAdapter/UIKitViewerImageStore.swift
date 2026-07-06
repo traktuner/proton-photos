@@ -92,9 +92,7 @@ public final class UIKitViewerImageStore {
     public func displayImage(for uid: PhotoUID, maxPixelSize: Int) async -> DisplayImage? {
         currentPageUID = uid
         let key = Self.key(uid)
-        // A hit is valid only if the entry was DECODED with at least this request's pixel cap — an entry decoded
-        // against a transient tiny cap (e.g. mid zoom-open transition) must not satisfy a full-screen request,
-        // or the stamp-sized decode would be served as the page's final image.
+        // Avoid reusing a thumbnail-sized decode for a later full-screen request.
         if let cached = cache.image(forKey: key), cached.decodedCap >= maxPixelSize {
             return DisplayImage(image: cached.image, source: cached.source)
         }
@@ -170,21 +168,11 @@ public final class UIKitViewerImageStore {
         return DisplayImage(image: image, source: source)
     }
 
-    /// The full-resolution ORIGINAL image for `uid`, decoded BOUNDED to `maxPixelSize` (the same screen cap the
-    /// preview uses), off the main thread and cached. This is the FINAL quality tier — the iOS parallel to the
-    /// macOS viewer (`PhotoViewerModel`), which likewise decodes the original after the preview. Without it the
-    /// viewer settled on the mid-size `preview` derivative (~1920px) and never reached the source resolution
-    /// ("no high-res"). Fetches via the injected originals override (E2EE originals cache, so a re-open is instant)
-    /// when present, else `media.originalData`. Honors Task cancellation, so a swiped-away page's in-flight
-    /// original never sets a stale image, and it UPGRADES the same cache entry the preview wrote — so a
-    /// `.minimal` memory purge keeps the on-screen (now full-res) image, and a later `displayImage` reuses it
-    /// instead of re-fetching. Returns nil (caller keeps the preview/thumbnail) when the fetch or decode fails.
+    /// Loads the original image tier, decoded off-main to the same bounded display size as previews.
     public func originalImage(for uid: PhotoUID, maxPixelSize: Int) async -> DisplayImage? {
         currentPageUID = uid
         let key = Self.key(uid)
-        // Already at (or beyond) original quality for this page — reuse, never re-fetch the full bytes. Both the
-        // dedicated original path and the preview's original-bytes fallback decode to the same screen cap.
-        // Same decodedCap gate as `displayImage`: an "original" decoded against a transient tiny cap is NOT done.
+        // Reuse original-backed decodes only when they satisfy this request's size.
         if let cached = cache.image(forKey: key), cached.source == "original" || cached.source == "originalFallback",
            cached.decodedCap >= maxPixelSize {
             return DisplayImage(image: cached.image, source: cached.source)
@@ -193,7 +181,7 @@ public final class UIKitViewerImageStore {
         let fetchStart = CACurrentMediaTime()
         let data: Data
         do {
-            // Cache-first + persisting when the host injected an override; otherwise the plain provider.
+            // The host override is the encrypted originals cache; fall back to the media provider.
             if let originalDataOverride {
                 data = try await originalDataOverride(uid)
             } else if let media {
@@ -248,8 +236,7 @@ private final class CachedDisplayImage {
     let image: UIImage
     let source: String
     let cost: Int
-    /// The `maxPixelSize` this entry was DECODED against. A cache hit is valid only for requests at or below
-    /// this cap — see the guards in `displayImage`/`originalImage`.
+    /// Pixel cap used for the decode.
     let decodedCap: Int
 
     init(image: UIImage, source: String, cost: Int, decodedCap: Int) {

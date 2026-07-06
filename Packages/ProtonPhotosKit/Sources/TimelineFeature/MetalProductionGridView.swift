@@ -222,8 +222,7 @@ struct MetalProductionGridView: NSViewRepresentable {
         proxy.zoomOut = stepOut
         // Grid → shell EVENT: first fully-drawn frame → forward to the shell (it holds the launch veil for this).
         host.coordinator.onFirstContentReady = { [weak proxy] in proxy?.onFirstContentReady?() }
-        // Live resize/sidebar presentation active state → forward to the shell (it suspends costly
-        // within-window vibrancy blur while the Metal surface scales per tick, then restores it).
+        // Forward live-resize activity so the shell can suspend expensive overlays.
         host.coordinator.liveResizeChanged = { [weak proxy] active in proxy?.liveResizeChanged?(active) }
         // Aspect/square toggle → the coordinator's content-mode preference (content fit only; no geometry change).
         proxy.toggleContentMode = { [weak host] in host?.coordinator.toggleContentMode() }

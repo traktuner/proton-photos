@@ -179,12 +179,10 @@ private struct MobileImagePage: View {
 
     @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
-    /// Shared Live Photo motion controller — the SAME `PhotoViewerCore` type the macOS viewer uses. It preloads
-    /// the paired clip for the current page; a long press plays it with the shared still→motion transition and
-    /// release returns to the still. No motion work happens for a non-Live item.
+    /// Shared Live Photo motion controller for the current page.
     @State private var motion = LivePhotoMotionController()
 
-    /// The shared still→motion transition timing/scale — identical to macOS.
+    /// Shared still-to-motion transition timing.
     private let transition = ViewerMediaTransitionStyle.standard
     private struct LoadToken: Equatable { let uid: PhotoUID; let current: Bool }
 
@@ -221,7 +219,7 @@ private struct MobileImagePage: View {
                     .allowsHitTesting(false)
             }
         }
-        // The same small still→motion transition macOS uses: a gentle scale under the opacity crossfade above.
+        // Gentle scale under the still-to-motion crossfade.
         .scaleEffect(motion.isPlaying ? transition.liveMotionScale : 1)
         .animation(.easeInOut(duration: transition.scaleDuration), value: motion.isPlaying)
         .task(id: LoadToken(uid: item.uid, current: isCurrent)) {
@@ -241,8 +239,7 @@ private struct MobileImagePage: View {
         }
     }
 
-    /// Preload the Live Photo motion clip for the CURRENT page only — a bounded window, so a swipe-preview
-    /// neighbour never spins up an AVPlayer / network loader; a page that is no longer current tears its clip down.
+    /// Preloads motion only for the visible Live Photo page.
     private func prepareOrStopMotion() {
         guard item.isLivePhoto else { return }
         if isCurrent {
@@ -253,20 +250,16 @@ private struct MobileImagePage: View {
     }
 
     private func load() async {
-        // 1. Instant thumbnail (already decoded for the grid) — never DOWNGRADE a page that already shows a preview.
+        // 1. Immediate grid thumbnail.
         if image == nil, let thumb = imageStore.thumbnail(for: item.uid) {
             image = thumb
             if MobileViewerLog.isEnabled {
                 MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=thumbnail")
             }
         }
-        // 2. Screen-bounded preview — CURRENT page only (bounded window), so neighbours never fan out fetches/decodes.
+        // 2. Screen-bounded preview for the current page only.
         guard ViewerImageLoadPolicy.shouldLoadDisplay(distanceFromCurrent: isCurrent ? 0 : 1) else { return }
-        // Decode bound: the SCREEN, not this page's live geometry. During the zoom-open transition the
-        // initially-opened page is laid out at the grid cell's size — a geometry read at that moment capped the
-        // decode at ~120px and that stamp-sized image was cached as the page's final tier (the "photo opened
-        // from the grid stays blurry, swiped pages are sharp" bug, measured px=90x120 on device). The viewer
-        // is always full-screen, so the screen is the correct, transition-independent bound.
+        // Use the screen as the decode bound; transition geometry can be temporarily thumbnail-sized.
         let cap = ViewerImageLoadPolicy.displayMaxPixelSize(viewportPoints: UIScreen.main.bounds.size, scale: displayScale)
         if let display = await imageStore.displayImage(for: item.uid, maxPixelSize: cap), !Task.isCancelled {
             image = display.image
@@ -274,11 +267,7 @@ private struct MobileImagePage: View {
                 MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=\(display.source, privacy: .public)")
             }
         }
-        // 3. Full-resolution ORIGINAL — CURRENT page only. The `preview` above is a bounded mid-size INTERIM
-        //    (~1920px derivative); this decodes the TRUE original (still bounded to the screen cap, so memory
-        //    stays bounded) so the page actually reaches full resolution instead of settling on the soft preview.
-        //    Matches the macOS viewer, which likewise loads the original after the preview; reuses the E2EE
-        //    originals cache so a re-open is instant, and cancels with the page on swipe-away.
+        // 3. Original bytes, still decoded to the bounded screen cap.
         guard !Task.isCancelled else { return }
         if let original = await imageStore.originalImage(for: item.uid, maxPixelSize: cap), !Task.isCancelled {
             image = original.image
