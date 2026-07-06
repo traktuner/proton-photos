@@ -143,9 +143,9 @@ private struct MobileFilterGridScreen: View {
     let title: String
     let filter: PhotoFilter
 
+    @Environment(MobileViewerRouter.self) private var viewerRouter
     @State private var snapshot = TimelineSnapshot()
     @State private var phase: Phase = .loading
-    @State private var viewer: MobileViewerPresentation?
     @State private var confirmEmptyTrash = false
     @State private var actionError: String?
 
@@ -205,9 +205,6 @@ private struct MobileFilterGridScreen: View {
             Text(actionError ?? "")
         }
         .task(id: filter) { await load() }
-        .fullScreenCover(item: $viewer) { presentation in
-            MobilePhotoViewer(items: presentation.items, startIndex: presentation.index, libraryModel: model)
-        }
     }
 
     private func load() async {
@@ -230,7 +227,7 @@ private struct MobileFilterGridScreen: View {
 
     private func open(_ item: PhotoItem) {
         guard let index = snapshot.index(of: item.uid) else { return }   // O(1)
-        viewer = MobileViewerPresentation(index: index, items: snapshot.items)
+        viewerRouter.presentation = MobileViewerPresentation(index: index, items: snapshot.items)
     }
 
     @MainActor private func emptyTrash() async {

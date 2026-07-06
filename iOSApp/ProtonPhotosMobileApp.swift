@@ -159,13 +159,31 @@ private struct MobileRootView: View {
 /// split-view sidebar. The selected route is the only state; every feature screen below stays shared.
 private struct MobileMainTabView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(MobileLibraryModel.self) private var libraryModel
     @State private var selection: MobileTab = .photos
+    /// Viewer presentation lives HERE — above the size-class branch — because the `if` below swaps the whole
+    /// shell subtree on rotation (e.g. Max iPhone portrait↔landscape), destroying every screen's `@State`.
+    /// A cover presented from inside the swapped subtree was dismissed by the rotation itself.
+    @State private var viewerRouter = MobileViewerRouter()
 
     var body: some View {
-        if horizontalSizeClass == .regular {
-            MobilePadSidebarShell(selection: $selection)
-        } else {
-            MobilePhoneTabShell(selection: $selection)
+        Group {
+            if horizontalSizeClass == .regular {
+                MobilePadSidebarShell(selection: $selection)
+            } else {
+                MobilePhoneTabShell(selection: $selection)
+            }
+        }
+        .environment(viewerRouter)
+        .fullScreenCover(item: Binding(
+            get: { viewerRouter.presentation },
+            set: { viewerRouter.presentation = $0 }
+        )) { presentation in
+            MobilePhotoViewer(
+                items: presentation.items,
+                startIndex: presentation.index,
+                libraryModel: libraryModel
+            )
         }
     }
 }

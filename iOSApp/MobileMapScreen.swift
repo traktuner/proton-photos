@@ -9,8 +9,8 @@ import UIKit
 /// fills. Shows a real, honest empty state until geotagged photos are found; tapping a pin opens the viewer.
 struct MobileMapScreen: View {
     @Environment(MobileLibraryModel.self) private var model
+    @Environment(MobileViewerRouter.self) private var viewerRouter
     @State private var networkMonitor = NetworkMonitor.shared
-    @State private var viewer: MobileViewerPresentation?
 
     var body: some View {
         NavigationStack {
@@ -76,14 +76,11 @@ struct MobileMapScreen: View {
                 }
             }
         }
-        .fullScreenCover(item: $viewer) { presentation in
-            MobilePhotoViewer(items: presentation.items, startIndex: presentation.index, libraryModel: model)
-        }
     }
 
     private func openPhoto(_ uid: PhotoUID) {
         guard let index = model.index(of: uid) else { return }   // O(1) via the snapshot index
-        viewer = MobileViewerPresentation(index: index, items: model.items)
+        viewerRouter.presentation = MobileViewerPresentation(index: index, items: model.items)
     }
 }
 

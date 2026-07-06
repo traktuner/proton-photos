@@ -14,7 +14,7 @@ struct MobileTimelineScreen: View {
     /// Bumped by the tab shell when the already-active Fotos tab is retapped → the grid scrolls to the newest
     /// photos. A pass-through value only; the scroll math stays inside the grid host.
     var scrollToLatestSignal: Int = 0
-    @State private var viewer: MobileViewerPresentation?
+    @Environment(MobileViewerRouter.self) private var viewerRouter
     @State private var selectionMode = false
     @State private var selected: Set<PhotoUID> = []
     @State private var sharePayload: MobileSharePayload?
@@ -54,13 +54,6 @@ struct MobileTimelineScreen: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbarContent }
                 .toolbar(selectionMode ? .hidden : .automatic, for: .tabBar)
-        }
-        .fullScreenCover(item: $viewer) { presentation in
-            MobilePhotoViewer(
-                items: presentation.items,
-                startIndex: presentation.index,
-                libraryModel: model
-            )
         }
         .sheet(item: $sharePayload) { payload in
             MobileActivityView(urls: payload.urls)
@@ -199,7 +192,7 @@ struct MobileTimelineScreen: View {
 
     private func open(_ item: PhotoItem) {
         guard let index = model.index(of: item.uid) else { return }   // O(1), not an O(n) firstIndex scan
-        viewer = MobileViewerPresentation(index: index, items: model.items)
+        viewerRouter.presentation = MobileViewerPresentation(index: index, items: model.items)
     }
 
     private func toggleSelectionMode() {
@@ -264,6 +257,16 @@ struct MobileViewerPresentation: Identifiable {
     let id = UUID()
     let index: Int
     let items: [PhotoItem]
+}
+
+/// App-wide viewer presentation state, owned ABOVE the size-class-adaptive shell. The shell swaps its whole
+/// subtree when `horizontalSizeClass` flips (TabView ↔ NavigationSplitView) — e.g. simply ROTATING a
+/// Max-size iPhone (portrait compact → landscape regular) — which destroys every screen's `@State`, so a
+/// viewer presented from screen-local state was dismissed by the rotation itself. Screens write
+/// `presentation`; the single `fullScreenCover` lives in `MobileMainTabView`, OUTSIDE the swap, so the open
+/// viewer survives rotation and just re-lays-out.
+@MainActor @Observable final class MobileViewerRouter {
+    var presentation: MobileViewerPresentation?
 }
 
 /// A localized, user-facing failure for a selection action (share/trash), surfaced honestly via an alert.
