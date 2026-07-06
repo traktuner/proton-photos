@@ -82,8 +82,14 @@ struct ZoomableImageView: NSViewRepresentable {
             } else {
                 imageView.image = image
             }
-            scrollView.magnification = 1     // reset zoom when the photo changes
-            imageView.frame = scrollView.bounds
+            // Reset zoom ONLY on photo NAVIGATION. A same-item image swap is a QUALITY UPGRADE
+            // (thumbnail → preview → original) — resetting here yanked the user's zoom/pan back to fit
+            // the moment the sharp original arrived. Same aspect ratio, same geometry: keeping
+            // magnification untouched makes the upgrade invisible except for the added sharpness.
+            if !sameItem {
+                scrollView.magnification = 1
+                imageView.frame = scrollView.bounds
+            }
         }
         context.coordinator.itemIdentity = itemIdentity
         context.coordinator.isSharp = isSharp
