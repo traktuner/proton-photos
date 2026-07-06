@@ -8,6 +8,7 @@ import ProtonCoreCryptoPatchedGoImplementation
 import SwiftUI
 import TimelineUIKitAdapter
 import UIKit
+import UploadCore
 
 @main
 struct ProtonPhotosMobileApp: App {
@@ -64,8 +65,10 @@ struct ProtonPhotosMobileApp: App {
                     return
                 }
                 // Every queue transition is checkpointed - expiration simply stops the pass and
-                // the next window (or the next foreground session) resumes exactly.
-                await controller.backgroundCatchUp()
+                // the next window (or the next foreground session) resumes exactly. The BG owner is
+                // recorded on the durable execution lock so a foreground run can recover it if this
+                // window is killed mid-pass.
+                await controller.backgroundCatchUp(owner: .iOSBackgroundTask)
                 schedulePhotoBackupTask()    // keep future windows coming while work may remain
                 processingTask.setTaskCompleted(success: true)
             }

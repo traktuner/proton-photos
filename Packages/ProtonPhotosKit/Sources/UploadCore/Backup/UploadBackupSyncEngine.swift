@@ -16,6 +16,13 @@ public protocol UploadBackupAssetCatalog: Sendable {
     func candidates() -> AsyncThrowingStream<UploadBackupAssetCandidate, any Error>
 }
 
+/// The per-candidate enqueue seam. A scan driver that owns its own loop (the photo catalog sync)
+/// depends on this rather than the concrete engine, so its ordering guarantees are testable.
+public protocol UploadBackupCandidateEnqueueing: Sendable {
+    @discardableResult
+    func enqueue(_ candidate: UploadBackupAssetCandidate) async -> UploadBackupSyncScanResult
+}
+
 public struct UploadBackupSyncScanResult: Sendable, Equatable {
     public var scanned = 0
     public var alreadyBackedUp = 0
@@ -24,11 +31,20 @@ public struct UploadBackupSyncScanResult: Sendable, Equatable {
     public var backendChecksRequired = 0
 
     public init() {}
+
+    /// Folds a per-candidate delta into a running total (used when the loop is driven externally).
+    public mutating func merge(_ delta: UploadBackupSyncScanResult) {
+        scanned += delta.scanned
+        alreadyBackedUp += delta.alreadyBackedUp
+        queuedForWork += delta.queuedForWork
+        pendingResources += delta.pendingResources
+        backendChecksRequired += delta.backendChecksRequired
+    }
 }
 
 /// Shared sync scanner. Platform adapters enumerate assets; this actor owns the safe local
 /// decision and persistent queue update so iOS/iPadOS/macOS never fork backup semantics.
-public actor UploadBackupSyncEngine {
+public actor UploadBackupSyncEngine: UploadBackupCandidateEnqueueing {
     private let preflight: UploadBackupPreflightIndex
     private let queue: any UploadBackupSyncQueueStore
     private let now: @Sendable () -> Date
@@ -47,29 +63,39 @@ public actor UploadBackupSyncEngine {
         var result = UploadBackupSyncScanResult()
         for try await candidate in catalog.candidates() {
             try Task.checkCancellation()
-            result.scanned += 1
-            let decision = await preflight.classify(candidate.snapshot)
-            switch decision {
-            case .alreadyBackedUp:
-                result.alreadyBackedUp += 1
-                queue.upsert(entry(for: candidate, state: .alreadyBackedUp))
-
-            case let .pendingUpload(remainingResources):
-                result.pendingResources += remainingResources
-                result.queuedForWork += 1
-                queue.upsert(entry(for: candidate, state: .queuedForUpload))
-
-            case .newAsset:
-                result.queuedForWork += 1
-                queue.upsert(entry(for: candidate, state: .discovered))
-
-            case .needsBackendCheck:
-                result.backendChecksRequired += 1
-                result.queuedForWork += 1
-                queue.upsert(entry(for: candidate, state: .checking))
-            }
+            result.merge(await enqueue(candidate))
         }
         return result
+    }
+
+    /// Classifies ONE candidate against the preflight and durably records its queue row. The single
+    /// safe decision + queue write, shared by `scan` and by callers that drive the loop themselves
+    /// (the photo catalog sync interleaves this with its own persistence so the queue row is written
+    /// BEFORE the catalog marks the asset seen). Returns the per-candidate result delta.
+    @discardableResult
+    public func enqueue(_ candidate: UploadBackupAssetCandidate) async -> UploadBackupSyncScanResult {
+        var delta = UploadBackupSyncScanResult()
+        delta.scanned = 1
+        switch await preflight.classify(candidate.snapshot) {
+        case .alreadyBackedUp:
+            delta.alreadyBackedUp = 1
+            queue.upsert(entry(for: candidate, state: .alreadyBackedUp))
+
+        case let .pendingUpload(remainingResources):
+            delta.pendingResources = remainingResources
+            delta.queuedForWork = 1
+            queue.upsert(entry(for: candidate, state: .queuedForUpload))
+
+        case .newAsset:
+            delta.queuedForWork = 1
+            queue.upsert(entry(for: candidate, state: .discovered))
+
+        case .needsBackendCheck:
+            delta.backendChecksRequired = 1
+            delta.queuedForWork = 1
+            queue.upsert(entry(for: candidate, state: .checking))
+        }
+        return delta
     }
 
     public func markCompleted(_ candidate: UploadBackupAssetCandidate) async {
