@@ -13,12 +13,12 @@ struct ZoomableImageView: NSViewRepresentable {
     /// shared viewer media reveal, instead of the old hard swap.
     var isSharp: Bool = false
     var transitionStyle: ViewerMediaTransitionStyle = .standard
-    /// True while the host's zoom overlay is rendering the live dismiss: hide THIS image so it doesn't double the
+    /// True while the host's zoom overlay is rendering the live dismiss: hide this image so it doesn't double the
     /// overlay's photo, but keep the scroll view itself hit-testable (alpha 1) so the pinch keeps delivering here.
     var isDismissing: Bool = false
-    // Interactive pinch-out-to-dismiss: the gesture only REPORTS progress (1 = fullscreen, 0 = collapsed into the
+    // Interactive pinch-out-to-dismiss: the gesture only reports progress (1 = fullscreen, 0 = collapsed into the
     // grid cell). The actual shrink-into-the-cell + grid fade is rendered by the shared zoom overlay in the host, so
-    // the photo flies into its EXACT cell (not a local layer shrink toward a corner).
+    // the photo flies into its exact cell (not a local layer shrink toward a corner).
     var onPinchDismissBegan: () -> Void = {}
     var onPinchDismissChanged: (CGFloat) -> Void = { _ in }
     var onPinchDismissEnded: (Bool) -> Void = { _ in }
@@ -170,8 +170,8 @@ private final class ZoomScrollView: NSScrollView {
             super.magnify(with: event)
             return
         }
-        // This view does NOT animate itself - it just REPORTS progress. The host renders the live shrink into the
-        // EXACT grid cell + the grid fade behind, via the shared zoom overlay (the gesture keeps being delivered
+        // This view does not animate itself; it only reports progress. The host renders the live shrink into the
+        // exact grid cell plus the grid fade behind, via the shared zoom overlay (the gesture keeps being delivered
         // here while the host renders the viewer invisible).
         switch event.phase {
         case .began:

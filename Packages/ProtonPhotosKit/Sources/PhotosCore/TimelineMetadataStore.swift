@@ -149,8 +149,8 @@ public struct TimelineSaveResult: Sendable, Equatable {
 /// raw SQLite C API over `Foundation` + Core value types only, with platform tuning injected via
 /// `LibraryDatabasePolicy`.
 ///
-/// Schema rules (see docs + PERF_DB_METAL_AUDIT_2026-07-01.md §5):
-/// - `photos` is the hot path and carries ONLY what the timeline needs; feature data lives in
+/// Schema rules:
+/// - `photos` is the hot path and carries only what the timeline needs; feature data lives in
 ///   feature-owned tables (`photo_tags`, `burst_members`) - never serialized blobs.
 /// - Timeline order is `(t, vol, node)` everywhere; `idx_photos_timeline` serves the ordered scan.
 /// - Saves are O(changes): a digest no-op short-circuit skips unchanged refreshes; a changed

@@ -93,12 +93,8 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         // orphans behind for accounts that last signed in on older builds.
         SDKMetadataStore.purgeOrphanedLegacyTimelineStores(in: caches)
 
-        // SECURITY: the SDK secret cache holds DECRYPTED Proton key material (share/node/content keys). The
-        // SDK writes it UNENCRYPTED unless a `secretCacheEncryptionKey` is supplied - and the ProtonPhotos
-        // client create-path doesn't forward that key to the native core anyway. So we keep secrets
-        // IN-MEMORY only (omit `secretCachePath`): nothing decryptable is persisted at rest. Cost: the
-        // secret cache is re-derived on each cold start. `entityCachePath` (non-secret node metadata) stays
-        // on disk for fast startup. See OFFLINE_THUMBNAIL_SECURITY_REPORT.md.
+        // Keep decrypted SDK secret material in memory only. Node metadata may be cached on disk for
+        // startup speed, but share/node/content keys are re-derived on cold start instead of persisted.
         let config = ProtonDriveClientConfiguration(
             baseURL: "https://drive-api.proton.me/",   // trailing slash required by the C# core
             clientUID: session.uid,

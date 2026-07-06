@@ -33,8 +33,8 @@ struct SDKAccountClient: AccountClientProtocol, @unchecked Sendable {
     }
 
     func getAddressPublicKeysRequest(emailAddress: String) -> [Data] {
-        // TODO: return armored public keys for arbitrary emails (signature verification
-        // of other users' shared content). For own-library timeline/thumbnails this is not needed.
+        // Shared-content signature verification can supply external public keys here when that surface is added.
+        // Own-library timeline, thumbnails, uploads, and album sync only need the signed-in account keys above.
         []
     }
 }

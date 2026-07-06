@@ -5,10 +5,9 @@ import PhotosCore
 import DesignSystem
 import PhotoViewerCore
 
-/// `AVPlayerView` that turns a pinch-OUT into the SAME "fly closed" dismiss the still image uses - so a PLAYING
-/// video can be pinched/swiped shut too (previously the gesture only existed on the image path, so it did nothing
-/// over a video). It only REPORTS progress; the host's shared zoom overlay renders the shrink into the exact grid
-/// cell, identical to the image path.
+/// `AVPlayerView` that turns a pinch-out into the same "fly closed" dismiss the still image uses, so a playing
+/// video can be pinched/swiped shut too. It only reports progress; the host's shared zoom overlay renders the
+/// shrink into the exact grid cell, identical to the image path.
 private final class DismissableAVPlayerView: AVPlayerView {
     var onPinchDismissBegan: () -> Void = {}
     var onPinchDismissChanged: (CGFloat) -> Void = { _ in }
