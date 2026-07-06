@@ -140,7 +140,24 @@ struct MainView: View {
                         GridTopFrost(height: topBarInset + 12)
                     }
                 }
-                .navigationTitle("")
+                .overlay(alignment: .topLeading) {
+                    // Library status lives in the CONTENT layer, never a toolbar item. On macOS 26 every custom
+                    // toolbar item is wrapped in a Liquid-Glass capsule, which is what put the rejected permanent
+                    // pill around the title. This is an unframed indicator (no background, pill, border or blur)
+                    // pinned just below the toolbar at the leading edge, directly under the native title. It fades
+                    // between states, reserves nothing that could shift the title, is non-interactive, and is
+                    // accessibility-hidden while idle - so nothing lingers when activity stops.
+                    if viewerModel == nil {
+                        LibraryTitleStatusIndicator(
+                            status: libraryTitleStatus,
+                            accessibilityLabel: libraryTitleStatusAccessibilityLabel
+                        )
+                        .padding(.leading, leadingObstructionInset + 16)
+                        .padding(.top, topBarInset + 8)
+                        .allowsHitTesting(false)
+                    }
+                }
+                .navigationTitle(viewerModel == nil ? title : "")
                 .searchable(text: $searchText, placement: .toolbar, prompt: Text("search.prompt \(title)"))
                 .toolbar { toolbarContent }
                 // Native Liquid Glass everywhere: no `.toolbarBackground` style is registered, so both the grid
@@ -1108,16 +1125,9 @@ struct MainView: View {
             // sidebar). The ⌥⌘S command still posts `.protonPhotosToggleSidebar` → `toggleSidebar()`.
             // No explicit "select mode": click / ⌘-click / ⇧-click / drag-marquee select directly, double
             // click opens. The toolbar is stable - the download (or restore) + trash actions are always
-            // present and just enable when something is selected.
-            ToolbarItem(placement: .navigation) {
-                LibraryTitleStatusLabel(
-                    title: title,
-                    status: libraryTitleStatus,
-                    accessibilityLabel: libraryTitleStatusAccessibilityLabel,
-                    titleFont: .title2.weight(.semibold)
-                )
-                .help(Text(libraryTitleStatusAccessibilityLabel))
-            }
+            // present and just enable when something is selected. The title is the NATIVE `.navigationTitle`
+            // (no toolbar item ⇒ no Liquid-Glass pill); its activity/offline indicator is an unframed content
+            // overlay, not a toolbar item.
             // Library-preparing pill - its OWN glass pill, right before the upload group. A single determinate
             // progress indicator (the SAME control as the download progress); the system supplies its glass.
             // The trailing `ToolbarSpacer(.fixed)` splits this off as a SEPARATE pill from the upload group.

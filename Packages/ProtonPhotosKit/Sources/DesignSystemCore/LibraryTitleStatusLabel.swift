@@ -15,19 +15,16 @@ public struct LibraryTitleStatusLabel: View {
     private let title: String
     private let status: LibraryTitleStatus
     private let accessibilityLabel: String
-    private let titleFont: Font?
 
-    public init(title: String, status: LibraryTitleStatus, accessibilityLabel: String, titleFont: Font? = nil) {
+    public init(title: String, status: LibraryTitleStatus, accessibilityLabel: String) {
         self.title = title
         self.status = status
         self.accessibilityLabel = accessibilityLabel
-        self.titleFont = titleFont
     }
 
     public var body: some View {
         HStack(spacing: 6) {
             Text(title)
-                .font(titleFont)
                 .lineLimit(1)
             LibraryTitleStatusIndicator(status: status, accessibilityLabel: accessibilityLabel)
         }
