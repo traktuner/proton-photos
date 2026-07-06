@@ -265,11 +265,23 @@ private struct MobileImagePage: View {
         // 2. Screen-bounded preview — CURRENT page only (bounded window), so neighbours never fan out fetches/decodes.
         guard ViewerImageLoadPolicy.shouldLoadDisplay(distanceFromCurrent: isCurrent ? 0 : 1) else { return }
         let cap = ViewerImageLoadPolicy.displayMaxPixelSize(viewportPoints: viewport, scale: displayScale)
-        guard let display = await imageStore.displayImage(for: item.uid, maxPixelSize: cap) else { return }
+        if let display = await imageStore.displayImage(for: item.uid, maxPixelSize: cap), !Task.isCancelled {
+            image = display.image
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=\(display.source, privacy: .public)")
+            }
+        }
+        // 3. Full-resolution ORIGINAL — CURRENT page only. The `preview` above is a bounded mid-size INTERIM
+        //    (~1920px derivative); this decodes the TRUE original (still bounded to the screen cap, so memory
+        //    stays bounded) so the page actually reaches full resolution instead of settling on the soft preview.
+        //    Matches the macOS viewer, which likewise loads the original after the preview; reuses the E2EE
+        //    originals cache so a re-open is instant, and cancels with the page on swipe-away.
         guard !Task.isCancelled else { return }
-        image = display.image
-        if MobileViewerLog.isEnabled {
-            MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=\(display.source, privacy: .public)")
+        if let original = await imageStore.originalImage(for: item.uid, maxPixelSize: cap), !Task.isCancelled {
+            image = original.image
+            if MobileViewerLog.isEnabled {
+                MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=\(original.source, privacy: .public)")
+            }
         }
     }
 }

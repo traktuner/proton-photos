@@ -167,6 +167,69 @@ public final class UIKitViewerImageStore {
         return DisplayImage(image: image, source: source)
     }
 
+    /// The full-resolution ORIGINAL image for `uid`, decoded BOUNDED to `maxPixelSize` (the same screen cap the
+    /// preview uses), off the main thread and cached. This is the FINAL quality tier — the iOS parallel to the
+    /// macOS viewer (`PhotoViewerModel`), which likewise decodes the original after the preview. Without it the
+    /// viewer settled on the mid-size `preview` derivative (~1920px) and never reached the source resolution
+    /// ("no high-res"). Fetches via the injected originals override (E2EE originals cache, so a re-open is instant)
+    /// when present, else `media.originalData`. Honors Task cancellation, so a swiped-away page's in-flight
+    /// original never sets a stale image, and it UPGRADES the same cache entry the preview wrote — so a
+    /// `.minimal` memory purge keeps the on-screen (now full-res) image, and a later `displayImage` reuses it
+    /// instead of re-fetching. Returns nil (caller keeps the preview/thumbnail) when the fetch or decode fails.
+    public func originalImage(for uid: PhotoUID, maxPixelSize: Int) async -> DisplayImage? {
+        currentPageUID = uid
+        let key = Self.key(uid)
+        // Already at (or beyond) original quality for this page — reuse, never re-fetch the full bytes. Both the
+        // dedicated original path and the preview's original-bytes fallback decode to the same screen cap.
+        if let cached = cache.image(forKey: key), cached.source == "original" || cached.source == "originalFallback" {
+            return DisplayImage(image: cached.image, source: cached.source)
+        }
+
+        let fetchStart = CACurrentMediaTime()
+        let data: Data
+        do {
+            // Cache-first + persisting when the host injected an override; otherwise the plain provider.
+            if let originalDataOverride {
+                data = try await originalDataOverride(uid)
+            } else if let media {
+                data = try await media.originalData(for: uid)
+            } else {
+                return nil
+            }
+        } catch {
+            if Self.verbose {
+                Self.logger.notice("[ViewerPerf] original fetch fail uid=\(Self.short(uid), privacy: .public) error=\(String(describing: error), privacy: .public)")
+            }
+            return nil
+        }
+        if Task.isCancelled { return nil }
+        let fetchMs = (CACurrentMediaTime() - fetchStart) * 1000
+
+        let decodeStart = CACurrentMediaTime()
+        let image = await Task.detached(priority: .userInitiated) {
+            UIKitViewerImageAdapter.image(from: data, maxPixelSize: maxPixelSize)
+        }.value
+        if Task.isCancelled { return nil }
+        guard let image else {
+            if Self.verbose {
+                Self.logger.notice("[ViewerPerf] original decode fail uid=\(Self.short(uid), privacy: .public)")
+            }
+            return nil
+        }
+        let decodeMs = (CACurrentMediaTime() - decodeStart) * 1000
+        let px = image.size.applying(CGAffineTransform(scaleX: image.scale, y: image.scale))
+        let cost = Int(px.width * px.height) * 4
+        cache.set(CachedDisplayImage(image: image, source: "original", cost: cost), forKey: key, cost: cost)
+        if Self.verbose {
+            Self.logger.notice("""
+            [ViewerPerf] original ready uid=\(Self.short(uid), privacy: .public) \
+            px=\(Int(px.width))x\(Int(px.height)) fetchMs=\(String(format: "%.0f", fetchMs), privacy: .public) \
+            decodeMs=\(String(format: "%.0f", decodeMs), privacy: .public) bytes=\(data.count)
+            """)
+        }
+        return DisplayImage(image: image, source: "original")
+    }
+
     private static func key(_ uid: PhotoUID) -> NSString {
         "\(uid.volumeID)~\(uid.nodeID)" as NSString
     }
