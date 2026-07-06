@@ -92,7 +92,10 @@ public final class UIKitViewerImageStore {
     public func displayImage(for uid: PhotoUID, maxPixelSize: Int) async -> DisplayImage? {
         currentPageUID = uid
         let key = Self.key(uid)
-        if let cached = cache.image(forKey: key) {
+        // A hit is valid only if the entry was DECODED with at least this request's pixel cap — an entry decoded
+        // against a transient tiny cap (e.g. mid zoom-open transition) must not satisfy a full-screen request,
+        // or the stamp-sized decode would be served as the page's final image.
+        if let cached = cache.image(forKey: key), cached.decodedCap >= maxPixelSize {
             return DisplayImage(image: cached.image, source: cached.source)
         }
         guard let media else { return nil }
@@ -156,7 +159,7 @@ public final class UIKitViewerImageStore {
         let decodeMs = (CACurrentMediaTime() - decodeStart) * 1000
         let px = image.size.applying(CGAffineTransform(scaleX: image.scale, y: image.scale))
         let cost = Int(px.width * px.height) * 4
-        cache.set(CachedDisplayImage(image: image, source: source, cost: cost), forKey: key, cost: cost)
+        cache.set(CachedDisplayImage(image: image, source: source, cost: cost, decodedCap: maxPixelSize), forKey: key, cost: cost)
         if Self.verbose {
             Self.logger.notice("""
             [ViewerPerf] display ready uid=\(Self.short(uid), privacy: .public) source=\(source, privacy: .public) \
@@ -181,7 +184,9 @@ public final class UIKitViewerImageStore {
         let key = Self.key(uid)
         // Already at (or beyond) original quality for this page — reuse, never re-fetch the full bytes. Both the
         // dedicated original path and the preview's original-bytes fallback decode to the same screen cap.
-        if let cached = cache.image(forKey: key), cached.source == "original" || cached.source == "originalFallback" {
+        // Same decodedCap gate as `displayImage`: an "original" decoded against a transient tiny cap is NOT done.
+        if let cached = cache.image(forKey: key), cached.source == "original" || cached.source == "originalFallback",
+           cached.decodedCap >= maxPixelSize {
             return DisplayImage(image: cached.image, source: cached.source)
         }
 
@@ -219,7 +224,7 @@ public final class UIKitViewerImageStore {
         let decodeMs = (CACurrentMediaTime() - decodeStart) * 1000
         let px = image.size.applying(CGAffineTransform(scaleX: image.scale, y: image.scale))
         let cost = Int(px.width * px.height) * 4
-        cache.set(CachedDisplayImage(image: image, source: "original", cost: cost), forKey: key, cost: cost)
+        cache.set(CachedDisplayImage(image: image, source: "original", cost: cost, decodedCap: maxPixelSize), forKey: key, cost: cost)
         if Self.verbose {
             Self.logger.notice("""
             [ViewerPerf] original ready uid=\(Self.short(uid), privacy: .public) \
@@ -243,11 +248,15 @@ private final class CachedDisplayImage {
     let image: UIImage
     let source: String
     let cost: Int
+    /// The `maxPixelSize` this entry was DECODED against. A cache hit is valid only for requests at or below
+    /// this cap — see the guards in `displayImage`/`originalImage`.
+    let decodedCap: Int
 
-    init(image: UIImage, source: String, cost: Int) {
+    init(image: UIImage, source: String, cost: Int, decodedCap: Int) {
         self.image = image
         self.source = source
         self.cost = cost
+        self.decodedCap = decodedCap
     }
 }
 #endif

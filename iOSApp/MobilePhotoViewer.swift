@@ -179,7 +179,6 @@ private struct MobileImagePage: View {
 
     @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
-    @State private var viewport: CGSize = .zero
     /// Shared Live Photo motion controller — the SAME `PhotoViewerCore` type the macOS viewer uses. It preloads
     /// the paired clip for the current page; a long press plays it with the shared still→motion transition and
     /// release returns to the still. No motion work happens for a non-Live item.
@@ -225,7 +224,6 @@ private struct MobileImagePage: View {
         // The same small still→motion transition macOS uses: a gentle scale under the opacity crossfade above.
         .scaleEffect(motion.isPlaying ? transition.liveMotionScale : 1)
         .animation(.easeInOut(duration: transition.scaleDuration), value: motion.isPlaying)
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { viewport = $0 }
         .task(id: LoadToken(uid: item.uid, current: isCurrent)) {
             prepareOrStopMotion()
             await load()
@@ -264,7 +262,12 @@ private struct MobileImagePage: View {
         }
         // 2. Screen-bounded preview — CURRENT page only (bounded window), so neighbours never fan out fetches/decodes.
         guard ViewerImageLoadPolicy.shouldLoadDisplay(distanceFromCurrent: isCurrent ? 0 : 1) else { return }
-        let cap = ViewerImageLoadPolicy.displayMaxPixelSize(viewportPoints: viewport, scale: displayScale)
+        // Decode bound: the SCREEN, not this page's live geometry. During the zoom-open transition the
+        // initially-opened page is laid out at the grid cell's size — a geometry read at that moment capped the
+        // decode at ~120px and that stamp-sized image was cached as the page's final tier (the "photo opened
+        // from the grid stays blurry, swiped pages are sharp" bug, measured px=90x120 on device). The viewer
+        // is always full-screen, so the screen is the correct, transition-independent bound.
+        let cap = ViewerImageLoadPolicy.displayMaxPixelSize(viewportPoints: UIScreen.main.bounds.size, scale: displayScale)
         if let display = await imageStore.displayImage(for: item.uid, maxPixelSize: cap), !Task.isCancelled {
             image = display.image
             if MobileViewerLog.isEnabled {
