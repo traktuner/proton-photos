@@ -650,12 +650,15 @@ package final class MetalGridRenderer {
         );
         TextureQuadOut o;
         o.position = float4(ndc, 0.0, 1.0);
-        // UV maps the destination rect to the full source texture (0..1 in both axes), y-flipped because
-        // the snapshot texture's origin is top-left (matching the grid's viewport-space y-down) but
-        // Metal textures sample bottom-left-up.
+        // UV maps the destination rect to the full source texture (0..1 in both axes), UN-flipped: the snapshot
+        // was rasterised by `metalGridVertex` into `resizeCanvas`, which writes grid-top (viewport y=0 → NDC.y=+1)
+        // to texture row 0 — and Metal samples top-left-origin (uv.y=0 == row 0, unlike GL's bottom-left). So
+        // screen-top must sample uv.y=0, a straight mapping — matching the known-good `metalGridCompositeVertex`.
+        // (A prior `1.0 -` here flipped the snapshot vertically for the whole gesture — the classic Metal-vs-GL
+        // texture-origin mistake.)
         o.uv = float2(
             (p.x - p0.x) / max(p1.x - p0.x, 1.0),
-            1.0 - (p.y - p0.y) / max(p1.y - p0.y, 1.0)
+            (p.y - p0.y) / max(p1.y - p0.y, 1.0)
         );
         return o;
     }
