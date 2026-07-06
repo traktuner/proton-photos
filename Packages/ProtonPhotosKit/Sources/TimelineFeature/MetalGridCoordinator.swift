@@ -27,6 +27,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// holds the launch veil until this so it never lifts onto blank thumbnails. See `streamTextures`.
     var onFirstContentReady: (() -> Void)?
     private var firstContentReported = false
+    /// Live resize/sidebar presentation active state notification - used by the shell to suspend costly
+    /// within-window compositing (e.g. vibrancy blur) while the Metal surface scales per tick.
+    var liveResizeChanged: ((Bool) -> Void)?
     /// One-shot cold-start `[FirstContent]` trace state: the wall-clock of the first on-screen frame with real
     /// visible cells, used to report how long the grid stayed on placeholders before it became resident.
     private var firstContentTraced = false
@@ -824,7 +827,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 
     /// Snapshot the settled render slots ONCE (generous overscan so a scale-down reveals real older rows) plus the
     /// box they were laid out in (layout width, inset) and the start scroll. A presentation/sidebar transition then
-    /// presents these SCALED - never re-resolved.
+    /// presents these SCALED - never re-resolved. The snapshot also includes an OFFSCREEN canvas rasterisation
+    /// so each resize tick can draw a single transformed quad instead of rebuilding groups per cell.
     private func captureSnapshot() {
         guard let clip = clipView, let view = metalView else { return }
         let viewportSize = view.bounds.size
@@ -839,6 +843,11 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         presentationStartLayoutWidth = w
         presentationStartInset = leadingObstructionInset
         presentationStartScrollY = scrollY
+        // Rasterise the snapshot groups into the cached offscreen canvas ONCE. From now on each resize
+        // tick is a single transformed textured-quad draw - no per-tick buildRealGroups or per-cell binds.
+        let (groups, _) = buildRealGroups(slots: presentationSnapshotSlots, flatUIDs: dataSource.flatUIDs,
+                                          viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
+        renderer.rasterizeResizeSnapshot(groups: { groups }, viewportSize: viewportSize, backingScale: backingScale)
     }
 
     /// Begin the live horizontal-resize presentation: snapshot the settled slots ONCE and capture the item at the
@@ -929,6 +938,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         presentationResizeActive = false
         presentationSnapshotSlots = []
         presentationVerticalShift = 0
+        renderer.endResizeCanvas()   // drop the offscreen snapshot texture (GPU memory freed asynchronously)
     }
 
     // MARK: - Sidebar resize (open/close scales the grid like a left-edge resize - RIGHT-anchored, inset-driven)
@@ -1005,6 +1015,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         }
         presentationSidebarActive = false
         sidebarObstructionInset = presentationSidebarToEventInset   // commit the WIDTH (engine re-adds the gap)
+        renderer.endResizeCanvas()   // drop the offscreen snapshot texture
         // Match the presentation's vertical anchor: bottom only at the newest end, centre in the middle of the
         // timeline.
         let scroll = presentationSidebarBottomPinned ? bottomAnchoredScroll() : centerAnchoredScroll()
@@ -1036,27 +1047,45 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         sidebarObstructionInset = presentationSidebarToEventInset
         presentationSnapshotSlots = []
         presentationSidebarBottomPinned = false
+        renderer.endResizeCanvas()
     }
 
-    /// Present the snapshot SCALED right-anchored to fill [inset(t), V] for the current sidebar progress. Coherent
-    /// scale (one surface) - never re-resolved - so the grid scales exactly like a left-edge window drag.
+    /// Present the snapshot SCALED right-anchored to fill [inset(t), V] for the current sidebar progress. With the
+    /// offscreen canvas: one textured-quad draw per tick instead of rebuilds/bind-per-cell.
     private func drawSidebarResize(in view: MTKView, viewportSize: CGSize) {
         let scaled = sidebarPresentationSlots(viewportSize: viewportSize, progress: presentationSidebarProgress)
+        guard let targetRect = scaled.first?.rect.union(scaled.dropFirst().reduce(into: CGRect.null) { $0 = $0.union($1.rect) }),
+              !targetRect.isNull else { return }
+        if renderer.hasResizeCanvas, let target = MetalGridDrawableTarget(view: view),
+           renderer.drawResizeCanvasQuad(to: target, viewportSize: viewportSize,
+                                         dstOrigin: CGPoint(x: targetRect.minX, y: targetRect.minY),
+                                         dstSize: targetRect.size) {
+            return
+        }
+        // Fallback: canvas missing or pipeline unusable → rebuild the per-cell groups this tick.
         let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
         renderer.render(in: view, viewportSize: viewportSize, groups: groups)
     }
 
     /// Present the gesture-start snapshot as ONE coherent surface, UNIFORMLY SCALED to the current width about the
-    /// stationary LEFT edge (x = inset) and the viewport CENTRE. Scaling a single snapshot moves every tile
-    /// together (a smooth zoom), where re-resolving the engine per tick would recompute positions and REFLOW. The
-    /// item under the centre stays pinned (no vertical drift while dragging the side edge); rows scale out
-    /// symmetrically. No engine resolve / group rebuild / texture churn per tick.
+    /// stationary LEFT edge (x = inset) and the viewport CENTRE. With the offscreen canvas: ONE single textured-quad
+    /// draw per tick (scale via viewport uniform transformation) — no per-tick buildRealGroups / per-cell binds.
     private func drawPresentationResize(in view: MTKView, viewportSize: CGSize) {
+        // Compute the scaled destination rect first (the existing pure geometry path, tested directly).
         let scaled = resizePresentationSlots(viewportSize: viewportSize)
+        guard let targetRect = scaled.first?.rect.union(scaled.dropFirst().reduce(into: CGRect.null) { $0 = $0.union($1.rect) }),
+              !targetRect.isNull, targetRect.width > 0, targetRect.height > 0 else { return }
+        // Prefer the cached offscreen canvas (one textured-quad draw per tick). Fall back to the per-cell
+        // rebuild path if the canvas is missing, the pipeline is unusable, or the quad draw failed mid-tick
+        // (none of these should happen in normal use, but a tick must never produce a blank frame).
+        if renderer.hasResizeCanvas, let target = MetalGridDrawableTarget(view: view),
+           renderer.drawResizeCanvasQuad(to: target, viewportSize: viewportSize,
+                                         dstOrigin: CGPoint(x: targetRect.minX, y: targetRect.minY),
+                                         dstSize: targetRect.size) {
+            return
+        }
         let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
         renderer.render(in: view, viewportSize: viewportSize, groups: groups)
-        // The settle scroll is resolved ONCE on release (`windowResizeReleaseScrollY`), never re-anchored per frame -
-        // that bottom-anchored recompute drifted vertically as the tiles scaled with width.
     }
 
     /// Pure geometry for the live window-resize presentation. Kept as a named entry point so tests can exercise

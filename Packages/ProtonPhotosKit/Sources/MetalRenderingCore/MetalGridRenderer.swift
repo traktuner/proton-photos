@@ -16,11 +16,19 @@ package final class MetalGridRenderer {
     /// Opaque 2-texture linear-mix pipeline for the OVERVIEW LAYER DISSOLVE (offscreen compositing). nil if the
     /// composite functions failed to build ⇒ `renderLayerDissolve` falls back to the target settled render.
     private let compositePipeline: MTLRenderPipelineState?
+    /// Fullscreen textured-quad pipeline (single texture, alpha blend) for the RESIZE PRESENTATION path:
+    /// rasterise the gesture-start snapshot ONCE into `resizeCanvas`, then each tick draws a single
+    /// transformed quad of that texture - no per-tick `buildRealGroups`, no per-cell texture binds.
+    private let textureQuadPipeline: MTLRenderPipelineState?
     /// Offscreen per-layer render targets (source, target), lazily sized to the drawable. ONLY used by
     /// `renderLayerDissolve`; the normal `render(...)` path never touches them. Released on `endLayerDissolve`
     /// so a held dissolve's ~two fullscreen private textures don't linger after the gesture.
     private var layerA: MTLTexture?
     private var layerB: MTLTexture?
+    /// Cached offscreen canvas for the resize/sidebar presentation (snapshot taken at gesture start).
+    /// Sized once to the gesture-start viewport in points × backing scale. Released on `endResizeCanvas`
+    /// so it doesn't linger between gestures.
+    private var resizeCanvas: MTLTexture?
     /// Which frozen dissolve layers actually need re-rasterizing this frame (pure state machine); a steady
     /// scrub reuses both offscreen textures and only re-runs the cheap composite.
     private var dissolveCache = DissolveLayerCache()
@@ -54,6 +62,12 @@ package final class MetalGridRenderer {
         var borderWidth: Float
     }
     private struct Uniforms { var viewportSize: SIMD2<Float> }
+    /// Vertex uniforms for the resize-presentation textured-quad pipeline (matches the Metal shader struct).
+    private struct TextureQuadUniforms {
+        var viewportSize: SIMD2<Float>
+        var origin: SIMD2<Float>
+        var size: SIMD2<Float>
+    }
 
     package init?(device: MTLDevice, clearColor: MTLClearColor = MetalGridRenderPalette.clearColor) {
         self.device = device
@@ -86,6 +100,21 @@ package final class MetalGridRenderer {
                 self.compositePipeline = try? device.makeRenderPipelineState(descriptor: cd)
             } else {
                 self.compositePipeline = nil
+            }
+
+            // Texture-quad pipeline: a single textured quad (alpha-blended) for the resize/sidebar
+            // presentation path - one draw call per tick instead of hundreds of per-cell binds. The
+            // vertex shader transforms the unit quad by a scale+translate uniform set per tick.
+            if let tqv = library.makeFunction(name: "metalGridTextureQuadVertex"),
+               let tqf = library.makeFunction(name: "metalGridTextureQuadFragment") {
+                let td = MTLRenderPipelineDescriptor()
+                td.vertexFunction = tqv
+                td.fragmentFunction = tqf
+                td.colorAttachments[0].pixelFormat = .bgra8Unorm
+                td.colorAttachments[0].isBlendingEnabled = false   // opaque fullscreen quad; the snapshot is already over the bg
+                self.textureQuadPipeline = try? device.makeRenderPipelineState(descriptor: td)
+            } else {
+                self.textureQuadPipeline = nil
             }
 
             let sd = MTLSamplerDescriptor()
@@ -255,6 +284,84 @@ package final class MetalGridRenderer {
         layerB = nil
         dissolveCache.release()
     }
+
+    // MARK: - Resize presentation (offscreen-texture cached snapshot)
+
+    /// Ensure the offscreen resize canvas texture exists at the requested pixel size. Re-creates on a size
+    /// change. Called ONCE per gesture at start (the snapshot is rasterised into it, then reused every tick).
+    @MainActor package func ensureResizeCanvas(pixelWidth: Int, pixelHeight: Int) {
+        if let t = resizeCanvas, t.width == pixelWidth, t.height == pixelHeight { return }
+        guard pixelWidth > 0, pixelHeight > 0 else { return }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: pixelWidth, height: pixelHeight, mipmapped: false)
+        d.usage = [.renderTarget, .shaderRead]
+        d.storageMode = .private
+        resizeCanvas = device.makeTexture(descriptor: d)
+    }
+
+    /// Rasterise the snapshot groups ONCE into `resizeCanvas` at gesture start. After this, every resize
+    /// tick is a single textured-quad draw - no per-cell buildRealGroups, no per-cell texture binds, no
+    /// decoration loops. The canvas persists until `endResizeCanvas`.
+    @MainActor package func rasterizeResizeSnapshot(groups: () -> [MetalGridRenderGroup], viewportSize: CGSize, backingScale: CGFloat) {
+        guard let cmd = commandQueue.makeCommandBuffer(), let canvas = resizeCanvas ?? {
+            let pw = max(1, Int(viewportSize.width * backingScale))
+            let ph = max(1, Int(viewportSize.height * backingScale))
+            ensureResizeCanvas(pixelWidth: pw, pixelHeight: ph)
+            return resizeCanvas
+        }() else { return }
+        let stats = encodeLayerPass(into: cmd, texture: canvas, groups: groups(), viewportSize: viewportSize)
+        cmd.commit()
+        // Don't present - this is an offscreen rasterisation. The canvas is sampled on the NEXT tick's
+        // `drawResizeCanvasQuad`. We DO wait for completion so the first tick doesn't sample pre-raster content.
+        cmd.waitUntilCompleted()
+        _ = stats
+    }
+
+    /// Draw the cached `resizeCanvas` texture as a single fullscreen (or sub-rect) quad to the drawable.
+    /// `dstOrigin`/`dstSize` are in viewport points (y-down). One draw call, one texture bind per tick.
+    /// Returns `false` if the draw could not be issued (pipeline missing, canvas missing, encoder allocation
+    /// failed); the caller MUST fall back to the per-cell `buildRealGroups` path on `false` so a tick never
+    /// produces a blank frame.
+    @discardableResult
+    @MainActor package func drawResizeCanvasQuad(to target: MetalGridDrawableTarget, viewportSize: CGSize,
+                                                  dstOrigin: CGPoint, dstSize: CGSize) -> Bool {
+        guard let pipeline = textureQuadPipeline, let canvas = resizeCanvas,
+              let cmd = commandQueue.makeCommandBuffer() else {
+            return false
+        }
+        let pass = target.renderPassDescriptor
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = clearColor
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { cmd.commit(); return false }
+        enc.setRenderPipelineState(pipeline)
+        enc.setFragmentSamplerState(sampler, index: 0)
+        enc.setFragmentTexture(canvas, index: 0)
+        var u = TextureQuadUniforms(
+            viewportSize: SIMD2(Float(max(viewportSize.width, 1)), Float(max(viewportSize.height, 1))),
+            origin: SIMD2(Float(dstOrigin.x), Float(dstOrigin.y)),
+            size: SIMD2(Float(max(dstSize.width, 1)), Float(max(dstSize.height, 1)))
+        )
+        enc.setVertexBytes(&u, length: MemoryLayout<TextureQuadUniforms>.stride, index: 0)
+        enc.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        enc.endEncoding()
+        pendingGpuCommandBuffers.append(cmd)
+        present(cmd, to: target)
+        lastEncodeMs = 0   // negligible on this path
+        lastDrawCalls = 1
+        lastInstanceCount = 1
+        lastTextureBinds = 1
+        return true
+    }
+
+    /// Drop the cached resize canvas (gesture ended). Its GPU memory returns once the last in-flight
+    /// command buffer that referenced it completes.
+    @MainActor package func endResizeCanvas() {
+        resizeCanvas = nil
+    }
+
+    /// True iff a cached resize canvas exists AND the texture-quad pipeline is usable - i.e. the host can
+    /// call `drawResizeCanvasQuad` instead of falling back to `buildRealGroups` per tick. Both gates are
+    /// checked here so a missing pipeline never leads the host into a silent no-draw path.
+    package var hasResizeCanvas: Bool { resizeCanvas != nil && textureQuadPipeline != nil }
 
     private func encodeLayerPass(into cmd: MTLCommandBuffer, texture: MTLTexture,
                                  groups: [MetalGridRenderGroup], viewportSize: CGSize) -> (Int, Int, Int) {
@@ -511,6 +618,54 @@ package final class MetalGridRenderer {
         float4 a = texA.sample(s, in.uv);
         float4 b = texB.sample(s, in.uv);
         return float4(mix(a.rgb, b.rgb, t), 1.0);
+    }
+
+    // Resize/sidebar presentation: a single textured quad drawn fullscreen each tick. The vertex shader
+    // transforms a unit-quad by a scale+translate uniform (set per tick by the host) into the offscreen
+    // snapshot's source rectangle - the snapshot itself was rasterised ONCE at gesture start. The fragment
+    // shader just samples the cached texture (already composited over the grid bg) with bilinear filtering
+    // so the scaled tiles stay smooth instead of nearest-neighbour pixellating.
+    struct TextureQuadOut { float4 position [[position]]; float2 uv; };
+    struct TextureQuadUniforms { float2 viewportSize; float2 origin; float2 size; };
+
+    vertex TextureQuadOut metalGridTextureQuadVertex(
+        uint vid [[vertex_id]],
+        constant TextureQuadUniforms &u [[buffer(0)]]
+    ) {
+        // Two triangles covering the destination rect (origin, origin+size) in viewport pixels (y-down).
+        float2 p0 = u.origin;
+        float2 p1 = u.origin + u.size;
+        float2 pos[4] = {
+            float2(p0.x, p0.y),   // tl
+            float2(p1.x, p0.y),   // tr
+            float2(p0.x, p1.y),   // bl
+            float2(p1.x, p1.y),   // br
+        };
+        // Triangle strip: (tl, tr, bl, br)
+        uint idx[4] = { 0, 1, 2, 3 };
+        float2 p = pos[idx[vid]];
+        float2 ndc = float2(
+            (p.x / max(u.viewportSize.x, 1.0)) * 2.0 - 1.0,
+            1.0 - (p.y / max(u.viewportSize.y, 1.0)) * 2.0
+        );
+        TextureQuadOut o;
+        o.position = float4(ndc, 0.0, 1.0);
+        // UV maps the destination rect to the full source texture (0..1 in both axes), y-flipped because
+        // the snapshot texture's origin is top-left (matching the grid's viewport-space y-down) but
+        // Metal textures sample bottom-left-up.
+        o.uv = float2(
+            (p.x - p0.x) / max(p1.x - p0.x, 1.0),
+            1.0 - (p.y - p0.y) / max(p1.y - p0.y, 1.0)
+        );
+        return o;
+    }
+
+    fragment float4 metalGridTextureQuadFragment(
+        TextureQuadOut in [[stage_in]],
+        texture2d<float> tex [[texture(0)]],
+        sampler s [[sampler(0)]]
+    ) {
+        return tex.sample(s, in.uv);
     }
     """
 }

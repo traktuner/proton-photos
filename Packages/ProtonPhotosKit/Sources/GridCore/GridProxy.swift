@@ -43,4 +43,9 @@ public final class GridProxy<ItemID: Hashable & Sendable> {
 
     /// Grid-to-shell event fired once the first on-screen frame is fully populated.
     public var onFirstContentReady: (() -> Void)?
+
+    /// Live notification of a window-resize / sidebar-scale gesture being in progress.
+    /// The shell uses this to suspend costly compositing (e.g. within-window vibrancy blur)
+    /// while the Metal surface is being scaled per tick, then re-enables it on false.
+    public var liveResizeChanged: ((_ active: Bool) -> Void)?
 }

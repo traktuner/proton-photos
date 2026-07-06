@@ -313,18 +313,10 @@ final class MetalGridScrollHost: NSView {
     /// "open at newest" is preserved. Observer is (re)wired in `viewDidMoveToWindow`.
     @objc private func windowWillLiveResize() {
         stickToBottom = false
-        // Live resize presentation: snapshot the stable grid surface ONCE so the per-tick `layout()` presents it
-        // uniformly scaled/slid (no rubber-band, no per-frame engine resolve). The axis is resolved per tick in
-        // `layout()` - a horizontal drag scales the snapshot, a vertical drag slides it (counter-scroll), a corner
-        // composes both. If the presentation can't run (zoom/transition in flight, no window) the path falls back
-        // to `rebaseForResize`.
         liveResizeStartFrame = viewportScreenFrame()
+        coordinator.liveResizeChanged?(true)
         guard coordinator.canPresentResize else { return }
         coordinator.beginPresentationResize()
-        // NOTE: presentsWithTransaction is NOT used - it locks each present to the window transaction but its
-        // `waitUntilScheduled` blocks ~80ms/present, throttling the whole resize to ~10fps. The per-tick synchronous
-        // `metalView.draw()` in layout() keeps content updating every tick; the async present's ~1-frame offset is
-        // imperceptible and FAR better than a 10fps chunky resize.
     }
 
     /// End of a live WINDOW resize: drop the presentation and SETTLE EXACTLY ONCE - resolve the real layout at the
@@ -332,6 +324,7 @@ final class MetalGridScrollHost: NSView {
     /// gesture had already fallen back (vertical/corner), the presentation is inactive and the normal `layout()`
     /// path already settled it, so this is a no-op beyond clearing the sync-present flag.
     @objc private func windowDidEndLiveResize() {
+        coordinator.liveResizeChanged?(false)
         guard coordinator.presentationResizeActive else { applyResolvedGridProfileAfterLiveResizeFallback(); return }
         // SETTLE = NO snap. The settle scroll depends on the axis: a WIDTH/corner change scales the tiles (fixed
         // columns, no reflow), so the grid settles to the resize anchor - at the newest end the LAST row stays at the
@@ -1007,6 +1000,7 @@ final class MetalGridScrollHost: NSView {
         requestFrame()
         guard t >= 1 else { return }
         let (settleScroll, animating) = coordinator.endSidebarResize()   // commits the inset + bottom-anchored scroll
+        coordinator.liveResizeChanged?(false)
         stickToBottom = false
         applyContentSize(coordinator.contentSize())
         let maxScrollY = max(0, spacer.frame.height - scrollView.contentView.bounds.height)
@@ -1127,6 +1121,7 @@ final class MetalGridScrollHost: NSView {
         // (mid window live-resize, no window, zoom in flight, first layout).
         if window != nil, !inLiveResize, oldFrame != .zero, coordinator.beginSidebarResize(fromInset: oldValue, toInset: eventLeadingInset) {
             sidebarResizeStart = CACurrentMediaTime()
+            coordinator.liveResizeChanged?(true)
             requestFrame()
             return
         }

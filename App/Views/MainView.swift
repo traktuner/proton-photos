@@ -25,6 +25,11 @@ struct MainView: View {
     // overview levels (L4–L5) force squareFillCrop regardless. Toggling changes content fit ONLY, never layout.
     // Initial default = aspectFitInsideSquare (matches the coordinator's default).
     @State private var gridContentMode: TileContentDisplayMode = .aspectFitInsideSquare
+
+    /// True while the Metal grid is presenting a live resize or sidebar-scale gesture. Used to suspend the
+    /// within-window `GridTopFrost` vibrancy blur (it samples + blurs the Metal layer every frame at changing
+    /// geometry — a measurable compositing cost that competes with the per-tick scale render).
+    @State private var gridLiveResizeActive = false
     @State private var sidebarOpen: Bool
     @State private var sidebarWidth: CGFloat
     @State private var columnVisibility: NavigationSplitViewVisibility   // native sidebar show/hide
@@ -138,6 +143,8 @@ struct MainView: View {
                 .overlay(alignment: .top) {
                     if viewerModel == nil {
                         GridTopFrost(height: topBarInset + 12)
+                            .opacity(gridLiveResizeActive ? 0 : 1)
+                            .animation(.easeInOut(duration: 0.12), value: gridLiveResizeActive)
                     }
                 }
                 .overlay(alignment: .topLeading) {
@@ -173,11 +180,9 @@ struct MainView: View {
             .task { await loadAlbums() }
             .onAppear {
                 attachOfflineManager()
-                // Register the live feed's RAM caches with the memory governor (idempotent by identity,
-                // so SwiftUI re-creating this view never double-registers or leaks a stale feed).
                 AppMemoryPressureCoordinator.shared.attachFeed(timelineModel.feed)
-                // The grid calls this once the first on-screen frame is fully drawn → lift the veil then.
                 gridProxy.onFirstContentReady = { [weak model] in model?.markLibraryReady() }
+                gridProxy.liveResizeChanged = { @MainActor [state = self.$gridLiveResizeActive] active in state.wrappedValue = active }
                 evaluateVeilLift()
             }
             .onChange(of: librarySettled) { _, _ in evaluateVeilLift() }
