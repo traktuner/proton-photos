@@ -797,6 +797,9 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// content's LEFT edge at `inset` and scales by `currentLayoutWidth / startLayoutWidth`.
     private var presentationStartInset: CGFloat = 0
     private var presentationStartLayoutWidth: CGFloat = 1
+    /// Viewport size at gesture start = exactly what the offscreen resize canvas covers (its UV [0,1]
+    /// maps to this rect). The presentation transform is applied to this rect to place the canvas quad.
+    private var presentationStartViewportSize: CGSize = .zero
     /// The settled render slots snapshotted ONCE at gesture start (+ their display mode). Each frame these are
     /// presented uniformly SCALED - one coherent surface - never re-resolved (re-resolving would reflow).
     private var presentationSnapshotSlots: [GridRenderSlot] = []
@@ -842,6 +845,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
         presentationSnapshotDisplayMode = effectiveDisplayMode
         presentationStartLayoutWidth = w
         presentationStartInset = leadingObstructionInset
+        presentationStartViewportSize = viewportSize   // == the region the offscreen canvas covers
         presentationStartScrollY = scrollY
         // Rasterise the snapshot groups into the cached offscreen canvas ONCE. From now on each resize
         // tick is a single transformed textured-quad draw - no per-tick buildRealGroups or per-cell binds.
@@ -1053,16 +1057,12 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// Present the snapshot SCALED right-anchored to fill [inset(t), V] for the current sidebar progress. With the
     /// offscreen canvas: one textured-quad draw per tick instead of rebuilds/bind-per-cell.
     private func drawSidebarResize(in view: MTKView, viewportSize: CGSize) {
+        // The offscreen-canvas fast path is intentionally NOT used here yet: the sidebar uses a
+        // RIGHT-anchored viewport->canvas mapping that has not been visually verified, and shipping an
+        // unverified textured-quad mapping risks the same aspect distortion the window path just had.
+        // The sidebar resize already avoids per-tick engine resolve; a per-cell group rebuild here is
+        // correct and acceptable. (Window resize - the hot path - uses the canvas fast path above.)
         let scaled = sidebarPresentationSlots(viewportSize: viewportSize, progress: presentationSidebarProgress)
-        guard let targetRect = scaled.first?.rect.union(scaled.dropFirst().reduce(into: CGRect.null) { $0 = $0.union($1.rect) }),
-              !targetRect.isNull else { return }
-        if renderer.hasResizeCanvas, let target = MetalGridDrawableTarget(view: view),
-           renderer.drawResizeCanvasQuad(to: target, viewportSize: viewportSize,
-                                         dstOrigin: CGPoint(x: targetRect.minX, y: targetRect.minY),
-                                         dstSize: targetRect.size) {
-            return
-        }
-        // Fallback: canvas missing or pipeline unusable → rebuild the per-cell groups this tick.
         let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
         renderer.render(in: view, viewportSize: viewportSize, groups: groups)
     }
@@ -1071,19 +1071,30 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// stationary LEFT edge (x = inset) and the viewport CENTRE. With the offscreen canvas: ONE single textured-quad
     /// draw per tick (scale via viewport uniform transformation) — no per-tick buildRealGroups / per-cell binds.
     private func drawPresentationResize(in view: MTKView, viewportSize: CGSize) {
-        // Compute the scaled destination rect first (the existing pure geometry path, tested directly).
-        let scaled = resizePresentationSlots(viewportSize: viewportSize)
-        guard let targetRect = scaled.first?.rect.union(scaled.dropFirst().reduce(into: CGRect.null) { $0 = $0.union($1.rect) }),
-              !targetRect.isNull, targetRect.width > 0, targetRect.height > 0 else { return }
-        // Prefer the cached offscreen canvas (one textured-quad draw per tick). Fall back to the per-cell
-        // rebuild path if the canvas is missing, the pipeline is unusable, or the quad draw failed mid-tick
-        // (none of these should happen in normal use, but a tick must never produce a blank frame).
-        if renderer.hasResizeCanvas, let target = MetalGridDrawableTarget(view: view),
-           renderer.drawResizeCanvasQuad(to: target, viewportSize: viewportSize,
-                                         dstOrigin: CGPoint(x: targetRect.minX, y: targetRect.minY),
-                                         dstSize: targetRect.size) {
-            return
+        // FAST PATH: the offscreen canvas holds the whole START viewport snapshot; its UV [0,1] maps to
+        // the start viewport rect. Draw it as ONE quad whose destination is that start-viewport rect put
+        // through the SAME uniform scale/anchor/slide the tiles use (presentationScaledRect). It MUST be
+        // the transformed VIEWPORT rect - NOT the union of the scaled tile rects: the tile union has a
+        // different aspect ratio than the viewport-sized canvas, which squished every thumbnail into a
+        // thin, tall sliver. Uniform k on both axes preserves aspect, so no distortion.
+        if renderer.hasResizeCanvas, presentationStartViewportSize.width > 0,
+           let target = MetalGridDrawableTarget(view: view) {
+            let inset = presentationStartInset
+            let curLayoutW = max(1, viewportSize.width - inset - gridHorizontalMargin(forLevel: level))
+            let k = curLayoutW / max(1, presentationStartLayoutWidth)
+            let anchorY = presentationResizeBottomPinned ? viewportSize.height : viewportSize.height / 2
+            let dst = Self.presentationScaledRect(CGRect(origin: .zero, size: presentationStartViewportSize),
+                                                  scale: k, insetX: inset, anchorY: anchorY)
+                          .offsetBy(dx: 0, dy: presentationVerticalShift)
+            if dst.width > 0, dst.height > 0,
+               renderer.drawResizeCanvasQuad(to: target, viewportSize: viewportSize,
+                                             dstOrigin: dst.origin, dstSize: dst.size) {
+                return
+            }
         }
+        // FALLBACK: rebuild the per-cell groups this tick (canvas missing / pipeline unusable / draw
+        // failed). A tick must never produce a blank frame.
+        let scaled = resizePresentationSlots(viewportSize: viewportSize)
         let (groups, _) = buildRealGroups(slots: scaled, flatUIDs: dataSource.flatUIDs, viewportSize: viewportSize, displayMode: presentationSnapshotDisplayMode)
         renderer.render(in: view, viewportSize: viewportSize, groups: groups)
     }
