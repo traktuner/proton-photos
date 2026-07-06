@@ -62,12 +62,16 @@ final class OfflineLibraryManager {
     /// Live thumbnail-cache warm progress (0…100) for the toolbar "preparing library" pill. A lightweight
     /// poll updates it while the background crawl fills; the pill hides once warm.
     private(set) var cachePreparePercent: Double = 0
+    /// True while the shared thumbnail/preview feed still has crawl work after content is presentable.
+    /// Unlike the first-run toolbar pill, this is not dismissed for the session: a later remote sync or manual
+    /// refresh can seed new crawl work and should surface as a tiny title activity indicator.
+    private(set) var isLibraryActivityActive = false
     private var prepareMonitor: Task<Void, Never>?
     /// Became true once this session saw an un-warm cache (the pill is an INITIAL-LOAD affordance only).
     private var prepareActive = false
-    /// The pill whooshed away after the first warm-up; it stays hidden for the rest of the session. We can't
-    /// meaningfully predict a mid-session backlog ("1500 new assets just synced"), so re-showing is deferred -
-    /// a fresh launch with an un-warm cache naturally counts as that launch's initial load.
+    /// The pill whooshed away after the first warm-up; it stays hidden for the rest of the session. Later
+    /// thumbnail work is still surfaced by `isLibraryActivityActive` in the title chrome, not by re-showing this
+    /// toolbar pill.
     private var prepareDismissed = false
     /// Drives the toolbar "preparing library" pill: shown only during the session's first warm-up, hidden the
     /// instant it completes (after the native whoosh-out) and not re-shown.
@@ -97,12 +101,13 @@ final class OfflineLibraryManager {
         startPrepareMonitor()
     }
 
-    /// Polls the thumbnail crawl's coverage so the toolbar "preparing library" pill shows live progress, then
-    /// whooshes the pill away once warm. Cheap: one actor read every 1.5 s. INITIAL-LOAD only - once it completes
-    /// it is not re-shown this session (see `prepareDismissed`); a warm-at-launch cache shows nothing at all.
+    /// Polls the thumbnail crawl's coverage. The first un-warm launch still gets the existing toolbar pill, but
+    /// later crawl work (for example after a remote sync adds new assets) keeps driving the tiny title activity
+    /// indicator. Cheap: one actor read every 1.5 s while the signed-in library is attached.
     private func startPrepareMonitor() {
         prepareMonitor?.cancel()
         cachePreparePercent = 0
+        isLibraryActivityActive = false
         prepareActive = false
         prepareDismissed = false
         prepareMonitor = Task { [weak self] in
@@ -114,20 +119,21 @@ final class OfflineLibraryManager {
                 if let status = await self.feed?.prefetchStatus(), status.diskThumbnailTotal > 0 {
                     let percent = status.diskThumbnailCoverageFraction * 100   // fraction → 0…100 percent
                     self.cachePreparePercent = percent
-                    if percent >= 99.5 { break }
-                    self.prepareActive = true   // un-warm cache → show the pill for this initial load
+                    self.isLibraryActivityActive = self.liveAssetCount > 0 && status.activeJobs + status.currentQueueLength > 0
+                    if percent < 99.5 {
+                        self.prepareActive = true   // un-warm cache → show the pill for this initial load
+                    } else if self.prepareActive, !self.prepareDismissed {
+                        // Only whoosh out a pill that was actually shown (a cache warm at launch never set
+                        // prepareActive). Hold 100 % briefly so completion registers, then hide the initial pill;
+                        // later background work uses the title activity indicator instead.
+                        self.cachePreparePercent = 100
+                        try? await Task.sleep(for: .seconds(0.4))
+                        guard !Task.isCancelled else { return }
+                        withAnimation(.smooth(duration: 0.45)) { self.prepareDismissed = true }
+                    }
                 }
                 try? await Task.sleep(for: .seconds(1.5))
             }
-            guard let self, !Task.isCancelled else { return }
-            self.cachePreparePercent = 100
-            // Only whoosh out a pill that was actually shown (a cache warm at launch never set prepareActive).
-            // Hold 100 % briefly so completion registers, then animate the whole pill away - and keep it hidden.
-            if self.prepareActive {
-                try? await Task.sleep(for: .seconds(0.4))
-                withAnimation(.smooth(duration: 0.45)) { self.prepareDismissed = true }
-            }
-            self.prepareMonitor = nil
         }
     }
 
@@ -167,6 +173,7 @@ final class OfflineLibraryManager {
         Task { await locationCrawl.cancel() }
         prepareMonitor?.cancel()
         cachePreparePercent = 0
+        isLibraryActivityActive = false
         prepareActive = false
         prepareDismissed = false
     }

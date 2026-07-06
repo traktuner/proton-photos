@@ -659,6 +659,11 @@ struct MainView: View {
         }
     }
 
+    private var libraryTitleActivityActive: Bool {
+        if case .loading = timelineModel.state { return true }
+        return OfflineLibraryManager.shared.isLibraryActivityActive
+    }
+
     private var gridFillOrder: GridFillOrder {
         selection == .all && committedSearchText.isEmpty ? .newestBottomTrailing : .topLeading
     }
@@ -1068,6 +1073,13 @@ struct MainView: View {
             // No explicit "select mode": click / ⌘-click / ⇧-click / drag-marquee select directly, double
             // click opens. The toolbar is stable - the download (or restore) + trash actions are always
             // present and just enable when something is selected.
+            ToolbarItem(placement: .navigation) {
+                LibraryTitleActivityIndicator(
+                    isActive: libraryTitleActivityActive,
+                    accessibilityLabel: String(localized: "library.title_activity")
+                )
+                .help(Text("library.title_activity"))
+            }
             // Library-preparing pill - its OWN glass pill, right before the upload group. A single determinate
             // progress indicator (the SAME control as the download progress); the system supplies its glass.
             // The trailing `ToolbarSpacer(.fixed)` splits this off as a SEPARATE pill from the upload group.

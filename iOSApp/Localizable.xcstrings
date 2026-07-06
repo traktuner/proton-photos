@@ -1496,6 +1496,23 @@
         }
       }
     },
+    "library.title_activity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mediathek wird aktualisiert"
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Library is updating"
+          }
+        }
+      }
+    },
     "settings.library_still_loading" : {
       "extractionState" : "manual",
       "localizations" : {

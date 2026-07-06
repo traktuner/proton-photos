@@ -163,6 +163,7 @@ final class MobileLibraryModel {
         await cache.clear()
         if let feed = thumbnailFeed, !items.isEmpty {
             await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
+            startBackgroundActivityMonitorIfNeeded()
         }
     }
 
@@ -373,12 +374,14 @@ final class MobileLibraryModel {
                     try Task.checkCancellation()   // a newer session may have superseded us during the await
                     await applyItems(cached, cached: true)
                     await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
+                    startBackgroundActivityMonitorIfNeeded()
                 }
 
                 let refreshed = try await backend.loadTimeline()
                 try Task.checkCancellation()
                 await applyItems(refreshed, cached: false)
                 await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
+                startBackgroundActivityMonitorIfNeeded()
             } catch is CancellationError {
                 // A newer session/configuration replaced this task.
             } catch {

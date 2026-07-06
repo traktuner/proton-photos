@@ -27,6 +27,7 @@ struct MobileTimelineScreen: View {
     private var selectionBusy: Bool { isExporting }
 
     private var canSelect: Bool { model.loadState.isContentReady && !model.items.isEmpty }
+    private var titleActivityActive: Bool { model.loadState.isLoading || model.isBackgroundLoading }
 
     var body: some View {
         NavigationStack {
@@ -78,6 +79,13 @@ struct MobileTimelineScreen: View {
     }
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            LibraryTitleActivityLabel(
+                title: String(localized: "tab.photos"),
+                isActive: titleActivityActive,
+                activityAccessibilityLabel: String(localized: "library.title_activity")
+            )
+        }
         if canSelect {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(selectionMode ? String(localized: "action.done") : String(localized: "action.select")) {
