@@ -55,6 +55,7 @@ struct MobileMapScreen: View {
                         index: model.locationIndex,
                         revision: revision,
                         thumbnail: { model.thumbnailFeed?.memoryImage(for: $0) },
+                        loadThumbnail: { await model.thumbnailFeed?.cachedImage(for: $0) },
                         onSelectPhoto: openPhoto
                     )
                     .ignoresSafeArea(edges: .bottom)
@@ -82,6 +83,7 @@ private struct MobileLibraryMap: UIViewRepresentable {
     let index: PhotoLocationIndex
     let revision: Int
     let thumbnail: (PhotoUID) -> UIImage?
+    let loadThumbnail: (PhotoUID) async -> UIImage?
     let onSelectPhoto: (PhotoUID) -> Void
 
     func makeUIView(context: Context) -> UIKitLibraryMapHostView {
@@ -89,12 +91,13 @@ private struct MobileLibraryMap: UIViewRepresentable {
             index: index,
             visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1.6, maxCoordinates: 3000),
             thumbnail: thumbnail,
+            loadThumbnail: loadThumbnail,
             onSelectPhoto: onSelectPhoto
         )
     }
 
     func updateUIView(_ view: UIKitLibraryMapHostView, context: Context) {
-        view.configure(thumbnail: thumbnail, onSelectPhoto: onSelectPhoto)
+        view.configure(thumbnail: thumbnail, loadThumbnail: loadThumbnail, onSelectPhoto: onSelectPhoto)
         view.refreshIfChanged()
     }
 }

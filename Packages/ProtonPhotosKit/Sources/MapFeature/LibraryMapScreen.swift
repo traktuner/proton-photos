@@ -11,18 +11,21 @@ import MediaLocationCore
 public struct LibraryMapScreen: View {
     private let index: PhotoLocationIndex
     private let thumbnail: (PhotoUID) -> NSImage?
+    private let loadThumbnail: (PhotoUID) async -> NSImage?
     private let onSelectPhoto: (PhotoUID) -> Void
 
     public init(index: PhotoLocationIndex,
                 thumbnail: @escaping (PhotoUID) -> NSImage?,
+                loadThumbnail: @escaping (PhotoUID) async -> NSImage?,
                 onSelectPhoto: @escaping (PhotoUID) -> Void) {
         self.index = index
         self.thumbnail = thumbnail
+        self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
     }
 
     public var body: some View {
         let _ = index.revision   // observe → re-render (→ updateNSView) as the crawl adds coordinates
-        LibraryMapView(index: index, thumbnail: thumbnail, onSelectPhoto: onSelectPhoto)
+        LibraryMapView(index: index, thumbnail: thumbnail, loadThumbnail: loadThumbnail, onSelectPhoto: onSelectPhoto)
     }
 }

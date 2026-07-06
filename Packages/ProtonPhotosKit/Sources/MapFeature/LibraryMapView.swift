@@ -14,13 +14,16 @@ import MediaLocationCore
 public struct LibraryMapView: NSViewRepresentable {
     private let index: PhotoLocationIndex
     private let thumbnail: (PhotoUID) -> NSImage?
+    private let loadThumbnail: (PhotoUID) async -> NSImage?
     private let onSelectPhoto: (PhotoUID) -> Void
 
     public init(index: PhotoLocationIndex,
                 thumbnail: @escaping (PhotoUID) -> NSImage?,
+                loadThumbnail: @escaping (PhotoUID) async -> NSImage?,
                 onSelectPhoto: @escaping (PhotoUID) -> Void) {
         self.index = index
         self.thumbnail = thumbnail
+        self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
     }
 
@@ -38,21 +41,24 @@ public struct LibraryMapView: NSViewRepresentable {
 
     public func updateNSView(_ map: MKMapView, context: Context) {
         context.coordinator.thumbnail = thumbnail
+        context.coordinator.loadThumbnail = loadThumbnail
         context.coordinator.onSelectPhoto = onSelectPhoto
         context.coordinator.refreshIfChanged(revision: index.revision)
     }
 
     public func makeCoordinator() -> Coordinator {
-        Coordinator(index: index, thumbnail: thumbnail, onSelectPhoto: onSelectPhoto)
+        Coordinator(index: index, thumbnail: thumbnail, loadThumbnail: loadThumbnail, onSelectPhoto: onSelectPhoto)
     }
 
     @MainActor
     public final class Coordinator: NSObject, MKMapViewDelegate {
         private let index: PhotoLocationIndex
         var thumbnail: (PhotoUID) -> NSImage?
+        var loadThumbnail: (PhotoUID) async -> NSImage?
         var onSelectPhoto: (PhotoUID) -> Void
         private weak var map: MKMapView?
         private var shownUIDs = Set<PhotoUID>()
+        private var thumbnailLoadsInFlight = Set<PhotoUID>()
         private var lastRevision = Int.min
         private var didFrame = false
         private let visibleCoordinatePolicy = PhotoLocationVisibleCoordinatePolicy(
@@ -62,9 +68,11 @@ public struct LibraryMapView: NSViewRepresentable {
 
         init(index: PhotoLocationIndex,
              thumbnail: @escaping (PhotoUID) -> NSImage?,
+             loadThumbnail: @escaping (PhotoUID) async -> NSImage?,
              onSelectPhoto: @escaping (PhotoUID) -> Void) {
             self.index = index
             self.thumbnail = thumbnail
+            self.loadThumbnail = loadThumbnail
             self.onSelectPhoto = onSelectPhoto
         }
 
@@ -140,12 +148,20 @@ public struct LibraryMapView: NSViewRepresentable {
                 let view = mapView.dequeueReusableAnnotationView(
                     withIdentifier: MKMapViewDefaultClusterAnnotationViewReuseIdentifier, for: annotation) as! PhotoClusterAnnotationView
                 let hero = cluster.memberAnnotations.first as? PhotoMapAnnotation   // v1: first member (best/cover later)
-                view.configure(thumbnail: hero.flatMap { thumbnail($0.uid) }, count: cluster.memberAnnotations.count)
+                let image = hero.flatMap { thumbnail($0.uid) }
+                view.configure(thumbnail: image, count: cluster.memberAnnotations.count)
+                if image == nil, let hero {
+                    requestThumbnailIfNeeded(hero.uid)
+                }
                 return view
             }
             guard let photo = annotation as? PhotoMapAnnotation else { return nil }
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: PhotoAnnotationView.reuseID, for: annotation) as! PhotoAnnotationView
-            view.setThumbnail(thumbnail(photo.uid))
+            let image = thumbnail(photo.uid)
+            view.setThumbnail(image)
+            if image == nil {
+                requestThumbnailIfNeeded(photo.uid)
+            }
             return view
         }
 
@@ -159,6 +175,38 @@ public struct LibraryMapView: NSViewRepresentable {
             } else if let photo = view.annotation as? PhotoMapAnnotation {
                 onSelectPhoto(photo.uid)
                 mapView.deselectAnnotation(view.annotation, animated: false)
+            }
+        }
+
+        private func requestThumbnailIfNeeded(_ uid: PhotoUID) {
+            guard !thumbnailLoadsInFlight.contains(uid) else { return }
+            thumbnailLoadsInFlight.insert(uid)
+            let loadThumbnail = loadThumbnail
+            Task { @MainActor [weak self] in
+                let image = await loadThumbnail(uid)
+                guard let self else { return }
+                self.thumbnailLoadsInFlight.remove(uid)
+                guard let image else { return }
+                self.applyLoadedThumbnail(image, for: uid)
+            }
+        }
+
+        private func applyLoadedThumbnail(_ image: NSImage, for uid: PhotoUID) {
+            guard let map else { return }
+
+            if let annotation = map.annotations
+                .compactMap({ $0 as? PhotoMapAnnotation })
+                .first(where: { $0.uid == uid }),
+               let view = map.view(for: annotation) as? PhotoAnnotationView {
+                view.setThumbnail(image)
+            }
+
+            for cluster in map.annotations.compactMap({ $0 as? MKClusterAnnotation }) {
+                guard cluster.memberAnnotations.contains(where: { ($0 as? PhotoMapAnnotation)?.uid == uid }),
+                      let view = map.view(for: cluster) as? PhotoClusterAnnotationView,
+                      let hero = cluster.memberAnnotations.first as? PhotoMapAnnotation else { continue }
+                view.configure(thumbnail: thumbnail(hero.uid) ?? (hero.uid == uid ? image : nil),
+                               count: cluster.memberAnnotations.count)
             }
         }
     }

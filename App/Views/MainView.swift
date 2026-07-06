@@ -235,6 +235,7 @@ struct MainView: View {
             if selection == .map {
                 LibraryMapScreen(index: OfflineLibraryManager.shared.locationIndex,
                                  thumbnail: { feed.memoryImage(for: $0) },
+                                 loadThumbnail: { await feed.cachedImage(for: $0) },
                                  onSelectPhoto: { openPhotoByUID($0) })
                     .overlay { mapEmptyStateOverlay }
                     .padding(.leading, leadingObstructionInset)

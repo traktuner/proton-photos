@@ -10,8 +10,10 @@ public final class UIKitLibraryMapHostView: UIView {
     private let index: PhotoLocationIndex
     private let visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy
     private var thumbnail: (PhotoUID) -> UIImage?
+    private var loadThumbnail: (PhotoUID) async -> UIImage?
     private var onSelectPhoto: (PhotoUID) -> Void
     private var shownUIDs = Set<PhotoUID>()
+    private var thumbnailLoadsInFlight = Set<PhotoUID>()
     private var lastRevision = Int.min
     private var didFrame = false
 
@@ -19,11 +21,13 @@ public final class UIKitLibraryMapHostView: UIView {
         index: PhotoLocationIndex,
         visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy,
         thumbnail: @escaping (PhotoUID) -> UIImage?,
+        loadThumbnail: @escaping (PhotoUID) async -> UIImage?,
         onSelectPhoto: @escaping (PhotoUID) -> Void
     ) {
         self.index = index
         self.visibleCoordinatePolicy = visibleCoordinatePolicy
         self.thumbnail = thumbnail
+        self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
         super.init(frame: .zero)
         configureMap()
@@ -38,9 +42,11 @@ public final class UIKitLibraryMapHostView: UIView {
 
     public func configure(
         thumbnail: @escaping (PhotoUID) -> UIImage?,
+        loadThumbnail: @escaping (PhotoUID) async -> UIImage?,
         onSelectPhoto: @escaping (PhotoUID) -> Void
     ) {
         self.thumbnail = thumbnail
+        self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
         reloadVisible()
     }
@@ -139,7 +145,11 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
                 for: annotation
             ) as! UIKitPhotoClusterAnnotationView
             let hero = cluster.memberAnnotations.first as? UIKitPhotoMapAnnotation
-            view.configure(thumbnail: hero.flatMap { thumbnail($0.uid) }, count: cluster.memberAnnotations.count)
+            let image = hero.flatMap { thumbnail($0.uid) }
+            view.configure(thumbnail: image, count: cluster.memberAnnotations.count)
+            if image == nil, let hero {
+                requestThumbnailIfNeeded(hero.uid)
+            }
             return view
         }
 
@@ -148,7 +158,11 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
             withIdentifier: UIKitPhotoAnnotationView.reuseID,
             for: annotation
         ) as! UIKitPhotoAnnotationView
-        view.setThumbnail(thumbnail(photo.uid))
+        let image = thumbnail(photo.uid)
+        view.setThumbnail(image)
+        if image == nil {
+            requestThumbnailIfNeeded(photo.uid)
+        }
         return view
     }
 
@@ -166,6 +180,36 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
         } else if let photo = view.annotation as? UIKitPhotoMapAnnotation {
             onSelectPhoto(photo.uid)
             mapView.deselectAnnotation(view.annotation, animated: false)
+        }
+    }
+
+    private func requestThumbnailIfNeeded(_ uid: PhotoUID) {
+        guard !thumbnailLoadsInFlight.contains(uid) else { return }
+        thumbnailLoadsInFlight.insert(uid)
+        let loadThumbnail = loadThumbnail
+        Task { @MainActor [weak self] in
+            let image = await loadThumbnail(uid)
+            guard let self else { return }
+            self.thumbnailLoadsInFlight.remove(uid)
+            guard let image else { return }
+            self.applyLoadedThumbnail(image, for: uid)
+        }
+    }
+
+    private func applyLoadedThumbnail(_ image: UIImage, for uid: PhotoUID) {
+        if let annotation = mapView.annotations
+            .compactMap({ $0 as? UIKitPhotoMapAnnotation })
+            .first(where: { $0.uid == uid }),
+           let view = mapView.view(for: annotation) as? UIKitPhotoAnnotationView {
+            view.setThumbnail(image)
+        }
+
+        for cluster in mapView.annotations.compactMap({ $0 as? MKClusterAnnotation }) {
+            guard cluster.memberAnnotations.contains(where: { ($0 as? UIKitPhotoMapAnnotation)?.uid == uid }),
+                  let view = mapView.view(for: cluster) as? UIKitPhotoClusterAnnotationView,
+                  let hero = cluster.memberAnnotations.first as? UIKitPhotoMapAnnotation else { continue }
+            view.configure(thumbnail: thumbnail(hero.uid) ?? (hero.uid == uid ? image : nil),
+                           count: cluster.memberAnnotations.count)
         }
     }
 }
