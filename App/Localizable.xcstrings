@@ -998,6 +998,42 @@
         }
       }
     },
+    "library.title_offline": {
+      "extractionState": "manual",
+      "comment": "Accessibility label and tooltip for the small title icon while the device has no usable network path.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        }
+      }
+    },
+    "library.title_online_restored": {
+      "extractionState": "manual",
+      "comment": "Accessibility label and tooltip for the small title icon shown briefly after connectivity returns.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection restored"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verbindung wiederhergestellt"
+          }
+        }
+      }
+    },
     "sidebar.all_photos": {
       "extractionState": "manual",
       "comment": "Sidebar item for the whole library.",

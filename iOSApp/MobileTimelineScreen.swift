@@ -22,12 +22,30 @@ struct MobileTimelineScreen: View {
     @State private var isExporting = false
     @State private var showTrashConfirm = false
     @State private var actionError: MobileSelectionError?
+    @State private var networkMonitor = NetworkMonitor.shared
 
     /// True while any selection action is running, so the other toolbar buttons disable together.
     private var selectionBusy: Bool { isExporting }
 
     private var canSelect: Bool { model.loadState.isContentReady && !model.items.isEmpty }
     private var titleActivityActive: Bool { model.loadState.isLoading || model.isBackgroundLoading }
+    private var titleStatus: LibraryTitleStatus {
+        if !networkMonitor.isOnline { return .offline }
+        if networkMonitor.didRecentlyRestoreConnection { return .onlineRestored }
+        return titleActivityActive ? .activity : .idle
+    }
+    private var titleStatusAccessibilityLabel: String {
+        switch titleStatus {
+        case .idle:
+            ""
+        case .activity:
+            String(localized: "library.title_activity")
+        case .offline:
+            String(localized: "library.title_offline")
+        case .onlineRestored:
+            String(localized: "library.title_online_restored")
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -80,10 +98,10 @@ struct MobileTimelineScreen: View {
 
     @ToolbarContentBuilder private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            LibraryTitleActivityLabel(
+            LibraryTitleStatusLabel(
                 title: String(localized: "tab.photos"),
-                isActive: titleActivityActive,
-                activityAccessibilityLabel: String(localized: "library.title_activity")
+                status: titleStatus,
+                accessibilityLabel: titleStatusAccessibilityLabel
             )
         }
         if canSelect {

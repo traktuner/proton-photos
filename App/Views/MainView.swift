@@ -664,6 +664,25 @@ struct MainView: View {
         return OfflineLibraryManager.shared.isLibraryActivityActive
     }
 
+    private var libraryTitleStatus: LibraryTitleStatus {
+        if !networkMonitor.isOnline { return .offline }
+        if networkMonitor.didRecentlyRestoreConnection { return .onlineRestored }
+        return libraryTitleActivityActive ? .activity : .idle
+    }
+
+    private var libraryTitleStatusAccessibilityLabel: String {
+        switch libraryTitleStatus {
+        case .idle:
+            ""
+        case .activity:
+            String(localized: "library.title_activity")
+        case .offline:
+            String(localized: "library.title_offline")
+        case .onlineRestored:
+            String(localized: "library.title_online_restored")
+        }
+    }
+
     private var gridFillOrder: GridFillOrder {
         selection == .all && committedSearchText.isEmpty ? .newestBottomTrailing : .topLeading
     }
@@ -1074,11 +1093,11 @@ struct MainView: View {
             // click opens. The toolbar is stable - the download (or restore) + trash actions are always
             // present and just enable when something is selected.
             ToolbarItem(placement: .navigation) {
-                LibraryTitleActivityIndicator(
-                    isActive: libraryTitleActivityActive,
-                    accessibilityLabel: String(localized: "library.title_activity")
+                LibraryTitleStatusIndicator(
+                    status: libraryTitleStatus,
+                    accessibilityLabel: libraryTitleStatusAccessibilityLabel
                 )
-                .help(Text("library.title_activity"))
+                .help(Text(libraryTitleStatusAccessibilityLabel))
             }
             // Library-preparing pill - its OWN glass pill, right before the upload group. A single determinate
             // progress indicator (the SAME control as the download progress); the system supplies its glass.
