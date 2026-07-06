@@ -135,6 +135,46 @@
         }
       }
     },
+    "backup.status_active": {
+      "extractionState": "manual",
+      "comment": "Backup status headline shown while a backup run is active; stays stable while the underlying work changes.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backup in progress" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Backup läuft" } }
+      }
+    },
+    "backup.status_attention_detail": {
+      "extractionState": "manual",
+      "comment": "Backup status subtitle: plain-language note that some items could not be backed up.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Some items could not be backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Einige Objekte konnten nicht gesichert werden" } }
+      }
+    },
+    "backup.status_checking_detail": {
+      "extractionState": "manual",
+      "comment": "Backup status subtitle while verifying what is already backed up (checking/dedupe, never called upload).",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Checking what is already backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Prüft, was bereits gesichert ist" } }
+      }
+    },
+    "backup.status_scanning_detail": {
+      "extractionState": "manual",
+      "comment": "Backup status subtitle while finding local photos and videos to consider.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Finding local photos and videos" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Sucht lokale Fotos und Videos" } }
+      }
+    },
+    "backup.status_uploading_detail": {
+      "extractionState": "manual",
+      "comment": "Backup status subtitle shown only while bytes are actually uploading new items.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backing up new items" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Sichert neue Objekte" } }
+      }
+    },
     "albumsync.phase_idle": {
       "extractionState": "manual",
       "comment": "Album sync status: nothing running yet for this album.",

@@ -294,6 +294,7 @@ struct MobileSettingsScreen: View {
 /// from the shared `PhotoLibraryBackupController` + `BackupStatus`; this view is layout only.
 private struct MobilePhotoBackupRows: View {
     @State var controller: PhotoLibraryBackupController
+    @State private var rowModel = BackupStatusRowModel()
 
     var body: some View {
         if !controller.isAvailable {
@@ -326,33 +327,57 @@ private struct MobilePhotoBackupRows: View {
         }
     }
 
+    /// A stable umbrella headline, a calm dwelled subtitle, an optional count, and a reserved
+    /// progress slot. Text is multiline (never truncated) and Dynamic-Type safe; the single spinning
+    /// icon is the only activity indicator. All wording/counts come from the shared, stabilized
+    /// `BackupStatusPresentation` so the row reads the same honest phases on every platform.
     @ViewBuilder private var enabledStatusRows: some View {
-        let status = controller.status
+        let display = rowModel.displayed
 
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
-                .foregroundStyle(status.isActive ? ProtonColor.primary : ProtonColor.textWeak)
-                .frame(width: 18, height: 22, alignment: .center)
-                .spinsWhileActive(status.isActive)
+        HStack(alignment: .top, spacing: 12) {
+            statusIcon(display)
+                .frame(width: 20, height: 24, alignment: .center)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(status.localizedTitle)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(display.localizedHeadline)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(ProtonColor.textNorm)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentTransition(.opacity)
 
-                statusDetail(status)
-                statusProgressSlot(status)
-
-                if status.failed > 0 {
-                    Text(String(localized: "settings.upload_check_attention \(status.failed)"))
+                if let detail = display.localizedDetail {
+                    Text(detail)
                         .font(.footnote)
-                        .foregroundStyle(.orange)
-                        .lineLimit(1)
+                        .foregroundStyle(display.accessory == .attention ? .orange : ProtonColor.textWeak)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
+
+                if let count = display.localizedCount {
+                    Text(count)
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(ProtonColor.textWeak)
+                        .contentTransition(.numericText())
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // A run still in progress may have already hit failures. Surface that in plain
+                // language (not a bare number); the terminal attention phase repeats it on finish.
+                if display.isActive, controller.status.failed > 0 {
+                    Text(L10n.string("backup.status_attention_detail"))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                progressSlot(display)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            // Scope the crossfade to the text column so it never fights the icon's continuous spin.
+            .animation(.easeInOut(duration: 0.2), value: display)
 
             if controller.isSyncing {
                 Button(String(localized: "settings.photos_backup_pause")) { controller.stopSync() }
@@ -362,6 +387,9 @@ private struct MobilePhotoBackupRows: View {
                     .font(.footnote)
             }
         }
+        .onAppear { rowModel.ingest(controller.status) }
+        .onChange(of: controller.status) { _, status in rowModel.ingest(status) }
+        .onDisappear { rowModel.cancel() }
 
         if controller.accessState == .limited {
             VStack(alignment: .leading, spacing: 6) {
@@ -381,21 +409,33 @@ private struct MobilePhotoBackupRows: View {
         .font(.footnote)
     }
 
-    private func statusDetail(_ status: BackupStatus) -> some View {
-        let detail = status.localizedDetail ?? " "
-        return Text(detail)
-            .font(.footnote)
-            .foregroundStyle(ProtonColor.textWeak)
-            .monospacedDigit()
-            .lineLimit(1)
-            .opacity(status.localizedDetail == nil ? 0 : 1)
-            .accessibilityHidden(status.localizedDetail == nil)
-            .frame(minHeight: 18, alignment: .leading)
-            .contentTransition(.opacity)
+    /// The row's single icon. Only `.activity` spins - there is never a second activity indicator.
+    @ViewBuilder private func statusIcon(_ display: BackupStatusPresentation) -> some View {
+        switch display.accessory {
+        case .activity:
+            Image(systemName: "arrow.trianglehead.2.clockwise")
+                .foregroundStyle(ProtonColor.primary)
+                .spinsWhileActive(true)
+        case .attention:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        case .paused:
+            Image(systemName: "pause.circle")
+                .foregroundStyle(ProtonColor.textWeak)
+        case .success:
+            Image(systemName: "checkmark.shield.fill")
+                .foregroundStyle(ProtonColor.primary)
+        case .idle:
+            Image(systemName: "checkmark.shield")
+                .foregroundStyle(ProtonColor.textWeak)
+        }
     }
 
-    @ViewBuilder private func statusProgressSlot(_ status: BackupStatus) -> some View {
-        if (status.isActive || status.phase == .paused), let fraction = status.fractionCompleted {
+    /// Determinate bar while there's an honest fraction; an empty reserved slot otherwise so the row
+    /// height does not pump. Scanning stays barless (indeterminate) - the spinning icon covers it,
+    /// so no second spinner appears.
+    @ViewBuilder private func progressSlot(_ display: BackupStatusPresentation) -> some View {
+        if let fraction = display.progressFraction, display.isActive || display.accessory == .paused {
             ProgressView(value: fraction)
                 .tint(ProtonColor.primary)
                 .frame(height: 4)
@@ -412,5 +452,39 @@ private struct MobilePhotoBackupRows: View {
         var presenter = root
         while let presented = presenter.presentedViewController { presenter = presented }
         PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: presenter)
+    }
+}
+
+/// iOS-only timeful wrapper around the shared, pure `BackupStatusStabilizer`. It turns the raw
+/// (possibly per-frame-flapping) `BackupStatus` stream into a calm `displayed` presentation: the
+/// mapping + hysteresis policy live in Core; this class only supplies the clock and schedules the
+/// single deferred wake the stabilizer asks for. No repeating timer - updates are driven by incoming
+/// status changes, and the pending wake is cancelled on disappear.
+@MainActor
+@Observable
+final class BackupStatusRowModel {
+    private(set) var displayed = BackupStatusPresentation(BackupStatus())
+    private var stabilizer = BackupStatusStabilizer()
+    private var wakeTask: Task<Void, Never>?
+
+    func ingest(_ status: BackupStatus) {
+        apply(stabilizer.ingest(BackupStatusPresentation(status), now: Date()))
+    }
+
+    func cancel() {
+        wakeTask?.cancel()
+        wakeTask = nil
+    }
+
+    private func apply(_ decision: BackupStatusStabilizer.Decision) {
+        displayed = decision.display
+        wakeTask?.cancel()
+        guard let wakeAt = decision.wakeAt else { wakeTask = nil; return }
+        wakeTask = Task { [weak self] in
+            let delay = wakeAt.timeIntervalSinceNow
+            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            guard !Task.isCancelled, let self else { return }
+            self.apply(self.stabilizer.wake(now: Date()))
+        }
     }
 }
