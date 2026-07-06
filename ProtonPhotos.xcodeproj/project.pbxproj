@@ -1,0 +1,970 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		03D9C1C338E08921D83EC6FF /* ProtonCoreCryptoPatchedGoImplementation in Frameworks */ = {isa = PBXBuildFile; productRef = 64ACA2E4B55D74CECC3EEC7E /* ProtonCoreCryptoPatchedGoImplementation */; };
+		0896FAF97CEBEB0973FA33B7 /* MainWindowFrameController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 555486CFFBD51AA57028B613 /* MainWindowFrameController.swift */; };
+		0972ED8CDDDAEC70F81723FE /* ProtonCoreCryptoPatchedGoImplementation in Frameworks */ = {isa = PBXBuildFile; productRef = 22B9855B527839FC3F350F56 /* ProtonCoreCryptoPatchedGoImplementation */; };
+		09DB97103BDF0A6E9FFF0A27 /* MediaLocationCore in Frameworks */ = {isa = PBXBuildFile; productRef = 10ED505A267A9A211CEFF9E0 /* MediaLocationCore */; };
+		0CE5156B42BC351538134B50 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CB38C5FC51F62D9ECD7DC0 /* MainView.swift */; };
+		0D5135381B54D4F08B57948C /* AlbumSyncCore in Frameworks */ = {isa = PBXBuildFile; productRef = 411C7DC640EF3D7C745A5095 /* AlbumSyncCore */; };
+		14BAF094F87C97DB170CE7C5 /* MacBackupScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A801494063F30BB36D1A0D6 /* MacBackupScheduler.swift */; };
+		1984E5A9A6943176B5F8E535 /* PhotoViewerUIKitAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = BF006649F9E88331614EA63A /* PhotoViewerUIKitAdapter */; };
+		1C3C24D5F2274329C9FF7EF5 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C827E13C392A2D5515A8EA2 /* SettingsView.swift */; };
+		1C53E0D502952F1518FAD430 /* UploadMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = 592464BDA7CB687B00219E93 /* UploadMenu.swift */; };
+		1DF273CA750FBAB3EEE534F5 /* ProtonAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 0CD1A2D7D13C18402B92F72B /* ProtonAuth */; };
+		1E1346EF7694343667D5BEB7 /* MobileAlbumSyncScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE15E0C6E2D09EC58BC1CBE6 /* MobileAlbumSyncScreen.swift */; };
+		1FC347D0B7D84565BD4BB23A /* UploadFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 27171EE77D0448E40CCAF2E1 /* UploadFeature */; };
+		2123A245A97EF0A31E9E62C5 /* TimelineUIKitFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 2AD80680F9A60B3DE07B3EA1 /* TimelineUIKitFeature */; };
+		2188BADAC31A84BF09B319D1 /* FolderBackupController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D4379A4529099251CF95B17 /* FolderBackupController.swift */; };
+		24757519F3000555B06CE6A7 /* MobileTimelineScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 405693D87A418F785FCAB57E /* MobileTimelineScreen.swift */; };
+		2DDDB6B91FD1E20FE8F5C07D /* MetalGridTextureUIKitAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = 9413DA3ACC8B750460E80277 /* MetalGridTextureUIKitAdapter */; };
+		2E8F6A6567AB34F3584245C4 /* DesignSystemCore in Frameworks */ = {isa = PBXBuildFile; productRef = AA7FFA1E9BF50B3D44BEB73D /* DesignSystemCore */; };
+		3478EAA2CFEE2CB8D825122A /* BackupThrottleInputs+App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D26156798097B5560733020 /* BackupThrottleInputs+App.swift */; };
+		391DB42F0F1B6FE4C333FE59 /* UploadCore in Frameworks */ = {isa = PBXBuildFile; productRef = 90AE7D1D612EE8D333DD14B0 /* UploadCore */; };
+		4317F0AE37795C813EA0BA9A /* MediaFeedCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19837D31C25EADE5E67C29BF /* MediaFeedCore */; };
+		454044B23DD16D1B09F868C9 /* PhotoViewerCore in Frameworks */ = {isa = PBXBuildFile; productRef = 50C3FB7DE46F4285C79A6F7B /* PhotoViewerCore */; };
+		4808D3F9F38F8AC9D3F9F60A /* MediaCacheUIKitAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = 78D857B653F231B1E990F797 /* MediaCacheUIKitAdapter */; };
+		485F7154E408B9320BC1DA98 /* ProtonAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 4B0320055E3C3F0E2310967B /* ProtonAuth */; };
+		4890A29376EDB4D660B7197C /* ProtonPhotosApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA8F50C30B13E963AC4BBFFF /* ProtonPhotosApp.swift */; };
+		4A00F1CDB9E0C44538D1E52E /* PhotoLibraryBackupAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = 94028A7BDB6639676EA0EE10 /* PhotoLibraryBackupAdapter */; };
+		4B0CBD3A1F95D5E8699F2C48 /* MobileBackupThrottleInputs.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76BBE42C150A629053E624CE /* MobileBackupThrottleInputs.swift */; };
+		4CE15FCECA02E7C9C8B5F1BB /* MediaDecodingCore in Frameworks */ = {isa = PBXBuildFile; productRef = 2992CB76540C0D5BD032D3D2 /* MediaDecodingCore */; };
+		544A83BDAFC1CB8AC91DA9AA /* UploadFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 8D8FAC3AD670DC37A9C008C5 /* UploadFeature */; };
+		57D21EEB34CD3BA6DD22C3AC /* ProtonDriveBackend in Frameworks */ = {isa = PBXBuildFile; productRef = 21E85C4BBA7D593B09AB4958 /* ProtonDriveBackend */; };
+		5AE3CB44AA6F803E2EC54EC6 /* GridCore in Frameworks */ = {isa = PBXBuildFile; productRef = 9F16CA7E4B88E0C00EA83AE7 /* GridCore */; };
+		5BDD952685827A9888136F29 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C25EAD27DEC701428448BC71 /* Localizable.xcstrings */; };
+		5F28D0D2AD4036F24931FCE2 /* MetalGridTextureCore in Frameworks */ = {isa = PBXBuildFile; productRef = DB2D09079E1440B5A9BD41B1 /* MetalGridTextureCore */; };
+		5F854DD1093CF12CF9F56CEE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2BFA0176456508DF81C25499 /* Assets.xcassets */; };
+		6038DC1AB7E3B3D292758187 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9B69F459F32CBC180F58A730 /* PrivacyInfo.xcprivacy */; };
+		624FE2CE56E1D8052DBBC092 /* GridCore in Frameworks */ = {isa = PBXBuildFile; productRef = 22A6CE7C04F370DAD4FFE932 /* GridCore */; };
+		6CA812ECC18FDC192A0A398D /* MediaCacheCore in Frameworks */ = {isa = PBXBuildFile; productRef = 9128AA243B26E0DB33042192 /* MediaCacheCore */; };
+		7410E7B37158F2E2248203A9 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A5537BDC2850F8AB3CF0F545 /* PrivacyInfo.xcprivacy */; };
+		749C81D2DD51C2F88F35BD0B /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9048736A9588BF37B7B76DAE /* LoginView.swift */; };
+		7FEF800025DF6F3D1FA2563A /* TimelineUIKitAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = 1A7FE92F9B8FECFAECD1DD14 /* TimelineUIKitAdapter */; };
+		80D7FC45B59693EAF7DBABC0 /* OfflineLibraryManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C8EB39B00036207B6FF1406 /* OfflineLibraryManager.swift */; };
+		8E0580888F363E864A06B75D /* AlbumSyncCore in Frameworks */ = {isa = PBXBuildFile; productRef = 6CE397F1BB71BD26900F5C72 /* AlbumSyncCore */; };
+		8E310B65BE2E3CB5535C19E7 /* PhotoBackupBackgroundGrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA369C35129D2DD63E1F55A /* PhotoBackupBackgroundGrace.swift */; };
+		8E908ECFA7AC92686A19FA91 /* AlbumsFeature in Frameworks */ = {isa = PBXBuildFile; productRef = B4AF894787421FACE3988650 /* AlbumsFeature */; };
+		9030B03233C851652B095088 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6389557B8BB9CD2AFDD4FCB1 /* Assets.xcassets */; };
+		90A06713F0937F98DE36F262 /* SingleInstanceGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A3EE6A1E0B0B9E54B3F0919 /* SingleInstanceGuard.swift */; };
+		92128B6144685A40C4C5E585 /* AlbumsFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 05DB24C75A0DDB7992823B86 /* AlbumsFeature */; };
+		95C7B8E78C64B6E02B850DA1 /* TimelineFeature in Frameworks */ = {isa = PBXBuildFile; productRef = FCFFE83E165FBF07CE9077FD /* TimelineFeature */; };
+		9954FB35D3BAD702C5D5D4EF /* PhotoViewerFeature in Frameworks */ = {isa = PBXBuildFile; productRef = EAD83F13999863F23A825390 /* PhotoViewerFeature */; };
+		9C6FB188CB6B121BAE9BD736 /* ProtonDriveBackend in Frameworks */ = {isa = PBXBuildFile; productRef = AC35A5EFDB71E44FA9BB52E0 /* ProtonDriveBackend */; };
+		9D3479413DECC292656F95F2 /* MobileLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D49885EBBA2D9BCB6561BEB /* MobileLibraryModel.swift */; };
+		A49B2A1CF10697FD42EE8146 /* MobileViewerImageStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FC775026DDB52A561DBEA5B /* MobileViewerImageStore.swift */; };
+		A87AF2BDD68DFF6417835A77 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3116CFC5F183B9FEA4FC4A8 /* AppModel.swift */; };
+		AA9D8314F3BAA4771C9352D6 /* DesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 3627E6DF29F2B20C45FBCEFF /* DesignSystem */; };
+		AE7BF8D441C54550C702034E /* PhotosCore in Frameworks */ = {isa = PBXBuildFile; productRef = 17DF2BE409D959C66ACBFF09 /* PhotosCore */; };
+		AFB9899A8D61943308BBFB34 /* PhotoLibraryBackupAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = E9D23CB5B83DF4EC647D4446 /* PhotoLibraryBackupAdapter */; };
+		BF935A448A24AA3FCD8B36E6 /* TimelineCore in Frameworks */ = {isa = PBXBuildFile; productRef = 02A32D700A17D2958EFC220E /* TimelineCore */; };
+		C0AA9BEB30144A20D4B377E3 /* PhotosCore in Frameworks */ = {isa = PBXBuildFile; productRef = A50712D5CDEDCBEFF1016CC2 /* PhotosCore */; };
+		C10594B4822C6F6A9CC2121A /* MobilePhotoViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 154957D1D66F8E3FF31B9353 /* MobilePhotoViewer.swift */; };
+		C11E5159D48DADC3D0E1A96E /* MetalRenderingCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8782D8E260D5EF50AA52A0E3 /* MetalRenderingCore */; };
+		CB08F0B6B6CFF656D4CC6884 /* PhotoLibraryBackupSharedRef.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A108624DFD73749D3A61C58 /* PhotoLibraryBackupSharedRef.swift */; };
+		CFAAFDAE064597B0BAFD476D /* MapFeature in Frameworks */ = {isa = PBXBuildFile; productRef = 5B93E661E41D1AA30B71BCA8 /* MapFeature */; };
+		D155B1C8CFE395132A2A4C23 /* MobileLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 940723865752E6D87B7BF277 /* MobileLoginView.swift */; };
+		DAC11656D9879F8C38A2CE11 /* MobileAlbumsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E0C67845F4584A610462B31 /* MobileAlbumsScreen.swift */; };
+		DD02FB74872D5B572A6AF3B6 /* MapUIKitAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = 079F6FEFF75AF4E11D31EDFC /* MapUIKitAdapter */; };
+		E2B3C87D948610A0A708F0C0 /* MobileMapScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A14BF9FD7AF9F926586A6B19 /* MobileMapScreen.swift */; };
+		3A1B2C3D4E5F6A7B8C9D0E1F /* MobileMapClusterSeriesScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3F1A2C4B5E6F7A8B9C0D1E2 /* MobileMapClusterSeriesScreen.swift */; };
+		E37E0AC161623348E6C6E2B9 /* MobileSettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83CF1869257A117B9D2B7141 /* MobileSettingsScreen.swift */; };
+		E40CD1F0AAE6BD2C3F057E00 /* MediaCache in Frameworks */ = {isa = PBXBuildFile; productRef = B74637C02C5B8E5CD180D1DC /* MediaCache */; };
+		E5101FF0AF0BB7E2B8342CE7 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 0DD652FBE55018063C6686BA /* Localizable.xcstrings */; };
+		E6B8DD56D5DD1E365A21D504 /* MobileLibraryStateViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88955A8D96E88ED46CEB2CA6 /* MobileLibraryStateViews.swift */; };
+		EA17D512BCCB02D1022561F5 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AE115F6EEE1AF3E8231DC076 /* LaunchScreen.storyboard */; };
+		ECE673A2F2B3FD9359530F46 /* MediaByteCache in Frameworks */ = {isa = PBXBuildFile; productRef = 7EA3DF30F6ABBD9472C55E01 /* MediaByteCache */; };
+		ED6D590BB9D35B40AAA87144 /* AppMemoryPressureCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2131FCAB621CCC8379C4640F /* AppMemoryPressureCoordinator.swift */; };
+		F0687A63C8213CA65DCDD610 /* MobileSelectionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2105CB2CC429104FCAB7A6F8 /* MobileSelectionSupport.swift */; };
+		F231D84D6729BFCC2B7A41A0 /* ProtonPhotosMobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61C22408B908E70927CE025 /* ProtonPhotosMobileApp.swift */; };
+		FDEE6D4783DD0CA056B6F845 /* MobileSessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA8661540E839776DF2D78E9 /* MobileSessionModel.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		02C4127817247900F97112EF /* ProtonPhotosMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ProtonPhotosMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0A108624DFD73749D3A61C58 /* PhotoLibraryBackupSharedRef.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoLibraryBackupSharedRef.swift; sourceTree = "<group>"; };
+		0A801494063F30BB36D1A0D6 /* MacBackupScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBackupScheduler.swift; sourceTree = "<group>"; };
+		0C827E13C392A2D5515A8EA2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		0DD652FBE55018063C6686BA /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		104C5E6A4E64C5AEBA34C778 /* ProtonPhotos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = ProtonPhotos.app; path = "Proton Photos.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1541172160C92EBA6E152E0F /* ProtonPhotos.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ProtonPhotos.entitlements; sourceTree = "<group>"; };
+		154957D1D66F8E3FF31B9353 /* MobilePhotoViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobilePhotoViewer.swift; sourceTree = "<group>"; };
+		2105CB2CC429104FCAB7A6F8 /* MobileSelectionSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSelectionSupport.swift; sourceTree = "<group>"; };
+		2131FCAB621CCC8379C4640F /* AppMemoryPressureCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppMemoryPressureCoordinator.swift; sourceTree = "<group>"; };
+		2A3EE6A1E0B0B9E54B3F0919 /* SingleInstanceGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingleInstanceGuard.swift; sourceTree = "<group>"; };
+		2BFA0176456508DF81C25499 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		2CA369C35129D2DD63E1F55A /* PhotoBackupBackgroundGrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoBackupBackgroundGrace.swift; sourceTree = "<group>"; };
+		2D26156798097B5560733020 /* BackupThrottleInputs+App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BackupThrottleInputs+App.swift"; sourceTree = "<group>"; };
+		3D4379A4529099251CF95B17 /* FolderBackupController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderBackupController.swift; sourceTree = "<group>"; };
+		405693D87A418F785FCAB57E /* MobileTimelineScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileTimelineScreen.swift; sourceTree = "<group>"; };
+		41C0F2BA75F75034A2805561 /* sdk-swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "sdk-swift"; path = "Vendor/sdk-swift"; sourceTree = SOURCE_ROOT; };
+		555486CFFBD51AA57028B613 /* MainWindowFrameController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowFrameController.swift; sourceTree = "<group>"; };
+		592464BDA7CB687B00219E93 /* UploadMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadMenu.swift; sourceTree = "<group>"; };
+		5C8EB39B00036207B6FF1406 /* OfflineLibraryManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineLibraryManager.swift; sourceTree = "<group>"; };
+		5D49885EBBA2D9BCB6561BEB /* MobileLibraryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileLibraryModel.swift; sourceTree = "<group>"; };
+		6389557B8BB9CD2AFDD4FCB1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		653C1BE4288373621D6F553D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		76BBE42C150A629053E624CE /* MobileBackupThrottleInputs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileBackupThrottleInputs.swift; sourceTree = "<group>"; };
+		83CF1869257A117B9D2B7141 /* MobileSettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSettingsScreen.swift; sourceTree = "<group>"; };
+		88955A8D96E88ED46CEB2CA6 /* MobileLibraryStateViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileLibraryStateViews.swift; sourceTree = "<group>"; };
+		8FC775026DDB52A561DBEA5B /* MobileViewerImageStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileViewerImageStore.swift; sourceTree = "<group>"; };
+		9048736A9588BF37B7B76DAE /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		940723865752E6D87B7BF277 /* MobileLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileLoginView.swift; sourceTree = "<group>"; };
+		9B69F459F32CBC180F58A730 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		9E0C67845F4584A610462B31 /* MobileAlbumsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileAlbumsScreen.swift; sourceTree = "<group>"; };
+		A14BF9FD7AF9F926586A6B19 /* MobileMapScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileMapScreen.swift; sourceTree = "<group>"; };
+		D3F1A2C4B5E6F7A8B9C0D1E2 /* MobileMapClusterSeriesScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileMapClusterSeriesScreen.swift; sourceTree = "<group>"; };
+		A5537BDC2850F8AB3CF0F545 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A5CB38C5FC51F62D9ECD7DC0 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		AA8F50C30B13E963AC4BBFFF /* ProtonPhotosApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtonPhotosApp.swift; sourceTree = "<group>"; };
+		AE115F6EEE1AF3E8231DC076 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		C25EAD27DEC701428448BC71 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		CA8661540E839776DF2D78E9 /* MobileSessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileSessionModel.swift; sourceTree = "<group>"; };
+		E3116CFC5F183B9FEA4FC4A8 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		E61C22408B908E70927CE025 /* ProtonPhotosMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtonPhotosMobileApp.swift; sourceTree = "<group>"; };
+		EE15E0C6E2D09EC58BC1CBE6 /* MobileAlbumSyncScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileAlbumSyncScreen.swift; sourceTree = "<group>"; };
+		F9FAD2A4E0EFEF57AE227A76 /* ProtonPhotosKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ProtonPhotosKit; path = Packages/ProtonPhotosKit; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		15A6790607A90793AE893D60 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AE7BF8D441C54550C702034E /* PhotosCore in Frameworks */,
+				AA9D8314F3BAA4771C9352D6 /* DesignSystem in Frameworks */,
+				485F7154E408B9320BC1DA98 /* ProtonAuth in Frameworks */,
+				9C6FB188CB6B121BAE9BD736 /* ProtonDriveBackend in Frameworks */,
+				E40CD1F0AAE6BD2C3F057E00 /* MediaCache in Frameworks */,
+				624FE2CE56E1D8052DBBC092 /* GridCore in Frameworks */,
+				95C7B8E78C64B6E02B850DA1 /* TimelineFeature in Frameworks */,
+				9954FB35D3BAD702C5D5D4EF /* PhotoViewerFeature in Frameworks */,
+				8E908ECFA7AC92686A19FA91 /* AlbumsFeature in Frameworks */,
+				8E0580888F363E864A06B75D /* AlbumSyncCore in Frameworks */,
+				544A83BDAFC1CB8AC91DA9AA /* UploadFeature in Frameworks */,
+				AFB9899A8D61943308BBFB34 /* PhotoLibraryBackupAdapter in Frameworks */,
+				CFAAFDAE064597B0BAFD476D /* MapFeature in Frameworks */,
+				03D9C1C338E08921D83EC6FF /* ProtonCoreCryptoPatchedGoImplementation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CA90F0FD116B6278F47627FD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C0AA9BEB30144A20D4B377E3 /* PhotosCore in Frameworks */,
+				1DF273CA750FBAB3EEE534F5 /* ProtonAuth in Frameworks */,
+				57D21EEB34CD3BA6DD22C3AC /* ProtonDriveBackend in Frameworks */,
+				2E8F6A6567AB34F3584245C4 /* DesignSystemCore in Frameworks */,
+				5AE3CB44AA6F803E2EC54EC6 /* GridCore in Frameworks */,
+				BF935A448A24AA3FCD8B36E6 /* TimelineCore in Frameworks */,
+				7FEF800025DF6F3D1FA2563A /* TimelineUIKitAdapter in Frameworks */,
+				2123A245A97EF0A31E9E62C5 /* TimelineUIKitFeature in Frameworks */,
+				ECE673A2F2B3FD9359530F46 /* MediaByteCache in Frameworks */,
+				4CE15FCECA02E7C9C8B5F1BB /* MediaDecodingCore in Frameworks */,
+				4317F0AE37795C813EA0BA9A /* MediaFeedCore in Frameworks */,
+				6CA812ECC18FDC192A0A398D /* MediaCacheCore in Frameworks */,
+				4808D3F9F38F8AC9D3F9F60A /* MediaCacheUIKitAdapter in Frameworks */,
+				C11E5159D48DADC3D0E1A96E /* MetalRenderingCore in Frameworks */,
+				5F28D0D2AD4036F24931FCE2 /* MetalGridTextureCore in Frameworks */,
+				2DDDB6B91FD1E20FE8F5C07D /* MetalGridTextureUIKitAdapter in Frameworks */,
+				92128B6144685A40C4C5E585 /* AlbumsFeature in Frameworks */,
+				0D5135381B54D4F08B57948C /* AlbumSyncCore in Frameworks */,
+				391DB42F0F1B6FE4C333FE59 /* UploadCore in Frameworks */,
+				1FC347D0B7D84565BD4BB23A /* UploadFeature in Frameworks */,
+				4A00F1CDB9E0C44538D1E52E /* PhotoLibraryBackupAdapter in Frameworks */,
+				454044B23DD16D1B09F868C9 /* PhotoViewerCore in Frameworks */,
+				1984E5A9A6943176B5F8E535 /* PhotoViewerUIKitAdapter in Frameworks */,
+				09DB97103BDF0A6E9FFF0A27 /* MediaLocationCore in Frameworks */,
+				DD02FB74872D5B572A6AF3B6 /* MapUIKitAdapter in Frameworks */,
+				0972ED8CDDDAEC70F81723FE /* ProtonCoreCryptoPatchedGoImplementation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0B9FB84A38B2F376FA4CAF1C /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				104C5E6A4E64C5AEBA34C778 /* ProtonPhotos.app */,
+				02C4127817247900F97112EF /* ProtonPhotosMobile.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		4FDE8635C252CDFC5FC6E91D /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				9048736A9588BF37B7B76DAE /* LoginView.swift */,
+				A5CB38C5FC51F62D9ECD7DC0 /* MainView.swift */,
+				0C827E13C392A2D5515A8EA2 /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		690BDF1D0B259DCC119A1489 = {
+			isa = PBXGroup;
+			children = (
+				DBB073414DDE333FA4907A24 /* App */,
+				F42726D4988CD3F7440D0F77 /* iOSApp */,
+				869F5FFC7D39E8E73B26AA19 /* Packages */,
+				0B9FB84A38B2F376FA4CAF1C /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		6FA7583EA09E75A49B83C513 /* Windowing */ = {
+			isa = PBXGroup;
+			children = (
+				555486CFFBD51AA57028B613 /* MainWindowFrameController.swift */,
+			);
+			path = Windowing;
+			sourceTree = "<group>";
+		};
+		869F5FFC7D39E8E73B26AA19 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				F9FAD2A4E0EFEF57AE227A76 /* ProtonPhotosKit */,
+				41C0F2BA75F75034A2805561 /* sdk-swift */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		D17BD7F2AB4FCFCB4FEF7DAF /* Offline */ = {
+			isa = PBXGroup;
+			children = (
+				5C8EB39B00036207B6FF1406 /* OfflineLibraryManager.swift */,
+			);
+			path = Offline;
+			sourceTree = "<group>";
+		};
+		DBB073414DDE333FA4907A24 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				2131FCAB621CCC8379C4640F /* AppMemoryPressureCoordinator.swift */,
+				E3116CFC5F183B9FEA4FC4A8 /* AppModel.swift */,
+				6389557B8BB9CD2AFDD4FCB1 /* Assets.xcassets */,
+				2D26156798097B5560733020 /* BackupThrottleInputs+App.swift */,
+				3D4379A4529099251CF95B17 /* FolderBackupController.swift */,
+				0DD652FBE55018063C6686BA /* Localizable.xcstrings */,
+				0A801494063F30BB36D1A0D6 /* MacBackupScheduler.swift */,
+				A5537BDC2850F8AB3CF0F545 /* PrivacyInfo.xcprivacy */,
+				1541172160C92EBA6E152E0F /* ProtonPhotos.entitlements */,
+				AA8F50C30B13E963AC4BBFFF /* ProtonPhotosApp.swift */,
+				2A3EE6A1E0B0B9E54B3F0919 /* SingleInstanceGuard.swift */,
+				592464BDA7CB687B00219E93 /* UploadMenu.swift */,
+				D17BD7F2AB4FCFCB4FEF7DAF /* Offline */,
+				4FDE8635C252CDFC5FC6E91D /* Views */,
+				6FA7583EA09E75A49B83C513 /* Windowing */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		F42726D4988CD3F7440D0F77 /* iOSApp */ = {
+			isa = PBXGroup;
+			children = (
+				2BFA0176456508DF81C25499 /* Assets.xcassets */,
+				653C1BE4288373621D6F553D /* Info.plist */,
+				AE115F6EEE1AF3E8231DC076 /* LaunchScreen.storyboard */,
+				C25EAD27DEC701428448BC71 /* Localizable.xcstrings */,
+				9E0C67845F4584A610462B31 /* MobileAlbumsScreen.swift */,
+				EE15E0C6E2D09EC58BC1CBE6 /* MobileAlbumSyncScreen.swift */,
+				76BBE42C150A629053E624CE /* MobileBackupThrottleInputs.swift */,
+				5D49885EBBA2D9BCB6561BEB /* MobileLibraryModel.swift */,
+				88955A8D96E88ED46CEB2CA6 /* MobileLibraryStateViews.swift */,
+				940723865752E6D87B7BF277 /* MobileLoginView.swift */,
+				A14BF9FD7AF9F926586A6B19 /* MobileMapScreen.swift */,
+				D3F1A2C4B5E6F7A8B9C0D1E2 /* MobileMapClusterSeriesScreen.swift */,
+				154957D1D66F8E3FF31B9353 /* MobilePhotoViewer.swift */,
+				2105CB2CC429104FCAB7A6F8 /* MobileSelectionSupport.swift */,
+				CA8661540E839776DF2D78E9 /* MobileSessionModel.swift */,
+				83CF1869257A117B9D2B7141 /* MobileSettingsScreen.swift */,
+				405693D87A418F785FCAB57E /* MobileTimelineScreen.swift */,
+				8FC775026DDB52A561DBEA5B /* MobileViewerImageStore.swift */,
+				2CA369C35129D2DD63E1F55A /* PhotoBackupBackgroundGrace.swift */,
+				0A108624DFD73749D3A61C58 /* PhotoLibraryBackupSharedRef.swift */,
+				9B69F459F32CBC180F58A730 /* PrivacyInfo.xcprivacy */,
+				E61C22408B908E70927CE025 /* ProtonPhotosMobileApp.swift */,
+			);
+			path = iOSApp;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		29D13541EBCAEDF1BA5F3430 /* ProtonPhotos */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 989DA735FD30F778D5B82599 /* Build configuration list for PBXNativeTarget "ProtonPhotos" */;
+			buildPhases = (
+				380FBDD674360CEBAA8934F7 /* Sources */,
+				AE5BB77E63A406836B349D29 /* Resources */,
+				15A6790607A90793AE893D60 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ProtonPhotos;
+			packageProductDependencies = (
+				17DF2BE409D959C66ACBFF09 /* PhotosCore */,
+				3627E6DF29F2B20C45FBCEFF /* DesignSystem */,
+				4B0320055E3C3F0E2310967B /* ProtonAuth */,
+				AC35A5EFDB71E44FA9BB52E0 /* ProtonDriveBackend */,
+				B74637C02C5B8E5CD180D1DC /* MediaCache */,
+				22A6CE7C04F370DAD4FFE932 /* GridCore */,
+				FCFFE83E165FBF07CE9077FD /* TimelineFeature */,
+				EAD83F13999863F23A825390 /* PhotoViewerFeature */,
+				B4AF894787421FACE3988650 /* AlbumsFeature */,
+				6CE397F1BB71BD26900F5C72 /* AlbumSyncCore */,
+				8D8FAC3AD670DC37A9C008C5 /* UploadFeature */,
+				E9D23CB5B83DF4EC647D4446 /* PhotoLibraryBackupAdapter */,
+				5B93E661E41D1AA30B71BCA8 /* MapFeature */,
+				64ACA2E4B55D74CECC3EEC7E /* ProtonCoreCryptoPatchedGoImplementation */,
+			);
+			productName = ProtonPhotos;
+			productReference = 104C5E6A4E64C5AEBA34C778 /* ProtonPhotos.app */;
+			productType = "com.apple.product-type.application";
+		};
+		7AF89D6740C49A4A9D8999C7 /* ProtonPhotosMobile */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 46F8D35F0056DE597F329045 /* Build configuration list for PBXNativeTarget "ProtonPhotosMobile" */;
+			buildPhases = (
+				E3C3EB7C79B8056B75CF96F3 /* Sources */,
+				0479634AB83E1E4D1CC8F15D /* Resources */,
+				CA90F0FD116B6278F47627FD /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ProtonPhotosMobile;
+			packageProductDependencies = (
+				A50712D5CDEDCBEFF1016CC2 /* PhotosCore */,
+				0CD1A2D7D13C18402B92F72B /* ProtonAuth */,
+				21E85C4BBA7D593B09AB4958 /* ProtonDriveBackend */,
+				AA7FFA1E9BF50B3D44BEB73D /* DesignSystemCore */,
+				9F16CA7E4B88E0C00EA83AE7 /* GridCore */,
+				02A32D700A17D2958EFC220E /* TimelineCore */,
+				1A7FE92F9B8FECFAECD1DD14 /* TimelineUIKitAdapter */,
+				2AD80680F9A60B3DE07B3EA1 /* TimelineUIKitFeature */,
+				7EA3DF30F6ABBD9472C55E01 /* MediaByteCache */,
+				2992CB76540C0D5BD032D3D2 /* MediaDecodingCore */,
+				19837D31C25EADE5E67C29BF /* MediaFeedCore */,
+				9128AA243B26E0DB33042192 /* MediaCacheCore */,
+				78D857B653F231B1E990F797 /* MediaCacheUIKitAdapter */,
+				8782D8E260D5EF50AA52A0E3 /* MetalRenderingCore */,
+				DB2D09079E1440B5A9BD41B1 /* MetalGridTextureCore */,
+				9413DA3ACC8B750460E80277 /* MetalGridTextureUIKitAdapter */,
+				05DB24C75A0DDB7992823B86 /* AlbumsFeature */,
+				411C7DC640EF3D7C745A5095 /* AlbumSyncCore */,
+				90AE7D1D612EE8D333DD14B0 /* UploadCore */,
+				27171EE77D0448E40CCAF2E1 /* UploadFeature */,
+				94028A7BDB6639676EA0EE10 /* PhotoLibraryBackupAdapter */,
+				50C3FB7DE46F4285C79A6F7B /* PhotoViewerCore */,
+				BF006649F9E88331614EA63A /* PhotoViewerUIKitAdapter */,
+				10ED505A267A9A211CEFF9E0 /* MediaLocationCore */,
+				079F6FEFF75AF4E11D31EDFC /* MapUIKitAdapter */,
+				22B9855B527839FC3F350F56 /* ProtonCoreCryptoPatchedGoImplementation */,
+			);
+			productName = ProtonPhotosMobile;
+			productReference = 02C4127817247900F97112EF /* ProtonPhotosMobile.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7340E2D3A5AEFEF2A8702E73 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					29D13541EBCAEDF1BA5F3430 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 6CDC8D238029BCEF9FBAC5B8 /* Build configuration list for PBXProject "ProtonPhotos" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				de,
+				en,
+			);
+			mainGroup = 690BDF1D0B259DCC119A1489;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				CD71AB4787546F631A1077A6 /* XCRemoteSwiftPackageReference "protoncore_ios" */,
+				AF5CD88A81165782D3A43306 /* XCLocalSwiftPackageReference "Vendor/sdk-swift" */,
+				8AEA6E7D6583EAB565FE814F /* XCLocalSwiftPackageReference "Packages/ProtonPhotosKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 0B9FB84A38B2F376FA4CAF1C /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				29D13541EBCAEDF1BA5F3430 /* ProtonPhotos */,
+				7AF89D6740C49A4A9D8999C7 /* ProtonPhotosMobile */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		0479634AB83E1E4D1CC8F15D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5F854DD1093CF12CF9F56CEE /* Assets.xcassets in Resources */,
+				EA17D512BCCB02D1022561F5 /* LaunchScreen.storyboard in Resources */,
+				5BDD952685827A9888136F29 /* Localizable.xcstrings in Resources */,
+				6038DC1AB7E3B3D292758187 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AE5BB77E63A406836B349D29 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9030B03233C851652B095088 /* Assets.xcassets in Resources */,
+				E5101FF0AF0BB7E2B8342CE7 /* Localizable.xcstrings in Resources */,
+				7410E7B37158F2E2248203A9 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		380FBDD674360CEBAA8934F7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ED6D590BB9D35B40AAA87144 /* AppMemoryPressureCoordinator.swift in Sources */,
+				A87AF2BDD68DFF6417835A77 /* AppModel.swift in Sources */,
+				3478EAA2CFEE2CB8D825122A /* BackupThrottleInputs+App.swift in Sources */,
+				2188BADAC31A84BF09B319D1 /* FolderBackupController.swift in Sources */,
+				749C81D2DD51C2F88F35BD0B /* LoginView.swift in Sources */,
+				14BAF094F87C97DB170CE7C5 /* MacBackupScheduler.swift in Sources */,
+				0CE5156B42BC351538134B50 /* MainView.swift in Sources */,
+				0896FAF97CEBEB0973FA33B7 /* MainWindowFrameController.swift in Sources */,
+				80D7FC45B59693EAF7DBABC0 /* OfflineLibraryManager.swift in Sources */,
+				4890A29376EDB4D660B7197C /* ProtonPhotosApp.swift in Sources */,
+				1C3C24D5F2274329C9FF7EF5 /* SettingsView.swift in Sources */,
+				90A06713F0937F98DE36F262 /* SingleInstanceGuard.swift in Sources */,
+				1C53E0D502952F1518FAD430 /* UploadMenu.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E3C3EB7C79B8056B75CF96F3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1E1346EF7694343667D5BEB7 /* MobileAlbumSyncScreen.swift in Sources */,
+				DAC11656D9879F8C38A2CE11 /* MobileAlbumsScreen.swift in Sources */,
+				4B0CBD3A1F95D5E8699F2C48 /* MobileBackupThrottleInputs.swift in Sources */,
+				9D3479413DECC292656F95F2 /* MobileLibraryModel.swift in Sources */,
+				E6B8DD56D5DD1E365A21D504 /* MobileLibraryStateViews.swift in Sources */,
+				D155B1C8CFE395132A2A4C23 /* MobileLoginView.swift in Sources */,
+				E2B3C87D948610A0A708F0C0 /* MobileMapScreen.swift in Sources */,
+				3A1B2C3D4E5F6A7B8C9D0E1F /* MobileMapClusterSeriesScreen.swift in Sources */,
+				C10594B4822C6F6A9CC2121A /* MobilePhotoViewer.swift in Sources */,
+				F0687A63C8213CA65DCDD610 /* MobileSelectionSupport.swift in Sources */,
+				FDEE6D4783DD0CA056B6F845 /* MobileSessionModel.swift in Sources */,
+				E37E0AC161623348E6C6E2B9 /* MobileSettingsScreen.swift in Sources */,
+				24757519F3000555B06CE6A7 /* MobileTimelineScreen.swift in Sources */,
+				A49B2A1CF10697FD42EE8146 /* MobileViewerImageStore.swift in Sources */,
+				8E310B65BE2E3CB5535C19E7 /* PhotoBackupBackgroundGrace.swift in Sources */,
+				CB08F0B6B6CFF656D4CC6884 /* PhotoLibraryBackupSharedRef.swift in Sources */,
+				F231D84D6729BFCC2B7A41A0 /* ProtonPhotosMobileApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		16E384587F72356D55DFDFE2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 587T3YR252;
+				INFOPLIST_FILE = iOSApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Vendor/sdk-swift/Resources",
+				);
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"-llibbootstrapperdll.ios-arm64.o",
+				);
+				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=arm64]" = (
+					"$(inherited)",
+					"-llibbootstrapperdll.iossimulator-arm64.o",
+				);
+				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=x86_64]" = (
+					"$(inherited)",
+					"-llibbootstrapperdll.iossimulator-x64.o",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = me.protonphotos.ios;
+				PRODUCT_NAME = ProtonPhotosMobile;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2DEFDD770C3C281E18339B26 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				APP_DISPLAY_NAME = "Proton Photos";
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		5AB17BB332FED323B2E48064 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/ProtonPhotos.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(APP_DISPLAY_NAME)";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Proton Photos backs up the photos and videos in your Photos library, end-to-end encrypted.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Vendor/sdk-swift/Resources",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				OTHER_CODE_SIGN_FLAGS = "--options runtime";
+				PRODUCT_BUNDLE_IDENTIFIER = me.protonphotos.mac;
+				PRODUCT_NAME = "Proton Photos";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		654BE60F912E6A2D47C4A346 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				APP_DISPLAY_NAME = "Proton Photos";
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = minimal;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		CFEAAA2914787238BEFF77FE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 587T3YR252;
+				INFOPLIST_FILE = iOSApp/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Vendor/sdk-swift/Resources",
+				);
+				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
+					"$(inherited)",
+					"-llibbootstrapperdll.ios-arm64.o",
+				);
+				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=arm64]" = (
+					"$(inherited)",
+					"-llibbootstrapperdll.iossimulator-arm64.o",
+				);
+				"OTHER_LDFLAGS[sdk=iphonesimulator*][arch=x86_64]" = (
+					"$(inherited)",
+					"-llibbootstrapperdll.iossimulator-x64.o",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = me.protonphotos.ios;
+				PRODUCT_NAME = ProtonPhotosMobile;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D1C30BF752885A0EC4562CA6 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = App/ProtonPhotos.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(APP_DISPLAY_NAME)";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.photography";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Proton Photos backs up the photos and videos in your Photos library, end-to-end encrypted.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/Vendor/sdk-swift/Resources",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				OTHER_CODE_SIGN_FLAGS = "--options runtime";
+				PRODUCT_BUNDLE_IDENTIFIER = me.protonphotos.mac;
+				PRODUCT_NAME = "Proton Photos";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		46F8D35F0056DE597F329045 /* Build configuration list for PBXNativeTarget "ProtonPhotosMobile" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFEAAA2914787238BEFF77FE /* Debug */,
+				16E384587F72356D55DFDFE2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6CDC8D238029BCEF9FBAC5B8 /* Build configuration list for PBXProject "ProtonPhotos" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				654BE60F912E6A2D47C4A346 /* Debug */,
+				2DEFDD770C3C281E18339B26 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		989DA735FD30F778D5B82599 /* Build configuration list for PBXNativeTarget "ProtonPhotos" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D1C30BF752885A0EC4562CA6 /* Debug */,
+				5AB17BB332FED323B2E48064 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		8AEA6E7D6583EAB565FE814F /* XCLocalSwiftPackageReference "Packages/ProtonPhotosKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ProtonPhotosKit;
+		};
+		AF5CD88A81165782D3A43306 /* XCLocalSwiftPackageReference "Vendor/sdk-swift" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "Vendor/sdk-swift";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CD71AB4787546F631A1077A6 /* XCRemoteSwiftPackageReference "protoncore_ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ProtonMail/protoncore_ios.git";
+			requirement = {
+				kind = exactVersion;
+				version = 37.3.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		02A32D700A17D2958EFC220E /* TimelineCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TimelineCore;
+		};
+		05DB24C75A0DDB7992823B86 /* AlbumsFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AlbumsFeature;
+		};
+		079F6FEFF75AF4E11D31EDFC /* MapUIKitAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MapUIKitAdapter;
+		};
+		0CD1A2D7D13C18402B92F72B /* ProtonAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ProtonAuth;
+		};
+		10ED505A267A9A211CEFF9E0 /* MediaLocationCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaLocationCore;
+		};
+		17DF2BE409D959C66ACBFF09 /* PhotosCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PhotosCore;
+		};
+		19837D31C25EADE5E67C29BF /* MediaFeedCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaFeedCore;
+		};
+		1A7FE92F9B8FECFAECD1DD14 /* TimelineUIKitAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TimelineUIKitAdapter;
+		};
+		21E85C4BBA7D593B09AB4958 /* ProtonDriveBackend */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ProtonDriveBackend;
+		};
+		22A6CE7C04F370DAD4FFE932 /* GridCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GridCore;
+		};
+		22B9855B527839FC3F350F56 /* ProtonCoreCryptoPatchedGoImplementation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD71AB4787546F631A1077A6 /* XCRemoteSwiftPackageReference "protoncore_ios" */;
+			productName = ProtonCoreCryptoPatchedGoImplementation;
+		};
+		27171EE77D0448E40CCAF2E1 /* UploadFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = UploadFeature;
+		};
+		2992CB76540C0D5BD032D3D2 /* MediaDecodingCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaDecodingCore;
+		};
+		2AD80680F9A60B3DE07B3EA1 /* TimelineUIKitFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TimelineUIKitFeature;
+		};
+		3627E6DF29F2B20C45FBCEFF /* DesignSystem */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DesignSystem;
+		};
+		411C7DC640EF3D7C745A5095 /* AlbumSyncCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AlbumSyncCore;
+		};
+		4B0320055E3C3F0E2310967B /* ProtonAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ProtonAuth;
+		};
+		50C3FB7DE46F4285C79A6F7B /* PhotoViewerCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PhotoViewerCore;
+		};
+		5B93E661E41D1AA30B71BCA8 /* MapFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MapFeature;
+		};
+		64ACA2E4B55D74CECC3EEC7E /* ProtonCoreCryptoPatchedGoImplementation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CD71AB4787546F631A1077A6 /* XCRemoteSwiftPackageReference "protoncore_ios" */;
+			productName = ProtonCoreCryptoPatchedGoImplementation;
+		};
+		6CE397F1BB71BD26900F5C72 /* AlbumSyncCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AlbumSyncCore;
+		};
+		78D857B653F231B1E990F797 /* MediaCacheUIKitAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaCacheUIKitAdapter;
+		};
+		7EA3DF30F6ABBD9472C55E01 /* MediaByteCache */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaByteCache;
+		};
+		8782D8E260D5EF50AA52A0E3 /* MetalRenderingCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MetalRenderingCore;
+		};
+		8D8FAC3AD670DC37A9C008C5 /* UploadFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = UploadFeature;
+		};
+		90AE7D1D612EE8D333DD14B0 /* UploadCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = UploadCore;
+		};
+		9128AA243B26E0DB33042192 /* MediaCacheCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaCacheCore;
+		};
+		94028A7BDB6639676EA0EE10 /* PhotoLibraryBackupAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PhotoLibraryBackupAdapter;
+		};
+		9413DA3ACC8B750460E80277 /* MetalGridTextureUIKitAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MetalGridTextureUIKitAdapter;
+		};
+		9F16CA7E4B88E0C00EA83AE7 /* GridCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = GridCore;
+		};
+		A50712D5CDEDCBEFF1016CC2 /* PhotosCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PhotosCore;
+		};
+		AA7FFA1E9BF50B3D44BEB73D /* DesignSystemCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DesignSystemCore;
+		};
+		AC35A5EFDB71E44FA9BB52E0 /* ProtonDriveBackend */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ProtonDriveBackend;
+		};
+		B4AF894787421FACE3988650 /* AlbumsFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AlbumsFeature;
+		};
+		B74637C02C5B8E5CD180D1DC /* MediaCache */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MediaCache;
+		};
+		BF006649F9E88331614EA63A /* PhotoViewerUIKitAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PhotoViewerUIKitAdapter;
+		};
+		DB2D09079E1440B5A9BD41B1 /* MetalGridTextureCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MetalGridTextureCore;
+		};
+		E9D23CB5B83DF4EC647D4446 /* PhotoLibraryBackupAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PhotoLibraryBackupAdapter;
+		};
+		EAD83F13999863F23A825390 /* PhotoViewerFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PhotoViewerFeature;
+		};
+		FCFFE83E165FBF07CE9077FD /* TimelineFeature */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TimelineFeature;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 7340E2D3A5AEFEF2A8702E73 /* Project object */;
+}

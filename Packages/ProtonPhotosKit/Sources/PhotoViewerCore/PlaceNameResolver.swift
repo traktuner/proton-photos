@@ -5,14 +5,14 @@ import MapKit
 /// Apple-Photos "named location" headline (e.g. *Schlosspark Atzenbrugg*). Pure coordinate→name
 /// reverse geocoding needs no location authorization. Results are cached per (rounded) coordinate so
 /// re-viewing nearby photos is instant and we stay well under reverse-geocoding rate limits.
-actor PlaceNameResolver {
-    static let shared = PlaceNameResolver()
+public actor PlaceNameResolver {
+    public static let shared = PlaceNameResolver()
 
     /// `nil` value = geocoded but no usable name (so we don't re-request it).
     private var cache: [String: String?] = [:]
 
     /// Best place name for a coordinate, or `nil` if none could be resolved.
-    func placeName(latitude: Double, longitude: Double) async -> String? {
+    public func placeName(latitude: Double, longitude: Double) async -> String? {
         let key = Self.cacheKey(latitude, longitude)
         if let cached = cache[key] { return cached }
         let name = await Self.reverseGeocode(latitude: latitude, longitude: longitude)

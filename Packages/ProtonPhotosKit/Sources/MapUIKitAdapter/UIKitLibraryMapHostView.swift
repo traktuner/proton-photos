@@ -12,6 +12,7 @@ public final class UIKitLibraryMapHostView: UIView {
     private var thumbnail: (PhotoUID) -> UIImage?
     private var loadThumbnail: (PhotoUID) async -> UIImage?
     private var onSelectPhoto: (PhotoUID) -> Void
+    private var onSelectCluster: (([PhotoUID], CLLocationCoordinate2D) -> Void)?
     private var shownUIDs = Set<PhotoUID>()
     private var thumbnailLoadsInFlight = Set<PhotoUID>()
     private var lastRevision = Int.min
@@ -22,13 +23,15 @@ public final class UIKitLibraryMapHostView: UIView {
         visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy,
         thumbnail: @escaping (PhotoUID) -> UIImage?,
         loadThumbnail: @escaping (PhotoUID) async -> UIImage?,
-        onSelectPhoto: @escaping (PhotoUID) -> Void
+        onSelectPhoto: @escaping (PhotoUID) -> Void,
+        onSelectCluster: (([PhotoUID], CLLocationCoordinate2D) -> Void)? = nil
     ) {
         self.index = index
         self.visibleCoordinatePolicy = visibleCoordinatePolicy
         self.thumbnail = thumbnail
         self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
+        self.onSelectCluster = onSelectCluster
         super.init(frame: .zero)
         configureMap()
         frameToDenseCoreIfNeeded()
@@ -43,11 +46,13 @@ public final class UIKitLibraryMapHostView: UIView {
     public func configure(
         thumbnail: @escaping (PhotoUID) -> UIImage?,
         loadThumbnail: @escaping (PhotoUID) async -> UIImage?,
-        onSelectPhoto: @escaping (PhotoUID) -> Void
+        onSelectPhoto: @escaping (PhotoUID) -> Void,
+        onSelectCluster: (([PhotoUID], CLLocationCoordinate2D) -> Void)? = nil
     ) {
         self.thumbnail = thumbnail
         self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
+        self.onSelectCluster = onSelectCluster
         reloadVisible()
     }
 
@@ -168,13 +173,18 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
 
     public func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
         if let cluster = view.annotation as? MKClusterAnnotation {
-            let rect = boundingRect(of: cluster.memberAnnotations.map(\.coordinate))
-            if !rect.isNull {
-                mapView.setVisibleMapRect(
-                    rect,
-                    edgePadding: UIEdgeInsets(top: 120, left: 120, bottom: 120, right: 120),
-                    animated: true
-                )
+            if let handler = onSelectCluster {
+                let uids = cluster.memberAnnotations.compactMap { ($0 as? UIKitPhotoMapAnnotation)?.uid }
+                handler(uids, cluster.coordinate)
+            } else {
+                let rect = boundingRect(of: cluster.memberAnnotations.map(\.coordinate))
+                if !rect.isNull {
+                    mapView.setVisibleMapRect(
+                        rect,
+                        edgePadding: UIEdgeInsets(top: 120, left: 120, bottom: 120, right: 120),
+                        animated: true
+                    )
+                }
             }
             mapView.deselectAnnotation(view.annotation, animated: false)
         } else if let photo = view.annotation as? UIKitPhotoMapAnnotation {

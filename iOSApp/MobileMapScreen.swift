@@ -1,3 +1,4 @@
+import CoreLocation
 import DesignSystemCore
 import MapUIKitAdapter
 import MediaLocationCore
@@ -7,10 +8,12 @@ import UIKit
 
 /// Map tab. Presents the shared `UIKitLibraryMapHostView` over the library's GPS index, which a background crawl
 /// fills. Shows a real, honest empty state until geotagged photos are found; tapping a pin opens the viewer.
+/// Tapping a cluster pushes `MobileMapClusterSeriesScreen`, which lists all member photos in the shared grid.
 struct MobileMapScreen: View {
     @Environment(MobileLibraryModel.self) private var model
     @Environment(MobileViewerRouter.self) private var viewerRouter
     @State private var networkMonitor = NetworkMonitor.shared
+    @State private var clusterPresentation: MobileMapClusterPresentation?
 
     var body: some View {
         NavigationStack {
@@ -61,12 +64,18 @@ struct MobileMapScreen: View {
                         revision: revision,
                         thumbnail: { model.thumbnailFeed?.memoryImage(for: $0) },
                         loadThumbnail: { await model.thumbnailFeed?.cachedImage(for: $0) },
-                        onSelectPhoto: openPhoto
+                        onSelectPhoto: openPhoto,
+                        onSelectCluster: { uids, coordinate in
+                            clusterPresentation = MobileMapClusterPresentation(uids: uids, coordinate: coordinate)
+                        }
                     )
                     .ignoresSafeArea(edges: .bottom)
                 }
             }
             .navigationTitle(String(localized: "tab.map"))
+            .navigationDestination(item: $clusterPresentation) { presentation in
+                MobileMapClusterSeriesScreen(uids: presentation.uids, coordinate: presentation.coordinate)
+            }
             // Re-runs when the library finishes loading, so opening Map before the timeline is ready still starts
             // the crawl once items exist (the start is idempotent).
             .task(id: model.items.isEmpty) { model.startLocationCrawlIfNeeded() }
@@ -84,6 +93,22 @@ struct MobileMapScreen: View {
     }
 }
 
+/// Identifiable payload for pushing the cluster series screen: the member UIDs and the cluster's center
+/// coordinate (used for reverse-geocoding the title).
+private struct MobileMapClusterPresentation: Identifiable, Hashable {
+    let id = UUID()
+    let uids: [PhotoUID]
+    let coordinate: CLLocationCoordinate2D
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: MobileMapClusterPresentation, rhs: MobileMapClusterPresentation) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
 /// SwiftUI wrapper around the shared UIKit map host. `revision` is an input only so SwiftUI re-invokes
 /// `updateUIView` (→ `refreshIfChanged`) as the crawl adds coordinates.
 private struct MobileLibraryMap: UIViewRepresentable {
@@ -92,6 +117,7 @@ private struct MobileLibraryMap: UIViewRepresentable {
     let thumbnail: (PhotoUID) -> UIImage?
     let loadThumbnail: (PhotoUID) async -> UIImage?
     let onSelectPhoto: (PhotoUID) -> Void
+    let onSelectCluster: ([PhotoUID], CLLocationCoordinate2D) -> Void
 
     func makeUIView(context: Context) -> UIKitLibraryMapHostView {
         UIKitLibraryMapHostView(
@@ -99,12 +125,18 @@ private struct MobileLibraryMap: UIViewRepresentable {
             visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1.6, maxCoordinates: 3000),
             thumbnail: thumbnail,
             loadThumbnail: loadThumbnail,
-            onSelectPhoto: onSelectPhoto
+            onSelectPhoto: onSelectPhoto,
+            onSelectCluster: onSelectCluster
         )
     }
 
     func updateUIView(_ view: UIKitLibraryMapHostView, context: Context) {
-        view.configure(thumbnail: thumbnail, loadThumbnail: loadThumbnail, onSelectPhoto: onSelectPhoto)
+        view.configure(
+            thumbnail: thumbnail,
+            loadThumbnail: loadThumbnail,
+            onSelectPhoto: onSelectPhoto,
+            onSelectCluster: onSelectCluster
+        )
         view.refreshIfChanged()
     }
 }
