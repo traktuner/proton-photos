@@ -322,57 +322,85 @@ private struct MobilePhotoBackupRows: View {
                 }
             }
         } else {
-            HStack(spacing: 10) {
-                Image(systemName: controller.status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
-                    .foregroundStyle(controller.status.isActive ? ProtonColor.primary : ProtonColor.textWeak)
-                    .frame(width: 18)
-                    .spinsWhileActive(controller.status.isActive)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(controller.status.localizedTitle)
-                        .foregroundStyle(ProtonColor.textNorm)
-                    if let detail = controller.status.localizedDetail {
-                        Text(detail)
-                            .font(.footnote)
-                            .foregroundStyle(ProtonColor.textWeak)
-                            .monospacedDigit()
-                    }
-                    if controller.status.isActive || controller.status.phase == .paused {
-                        if let fraction = controller.status.fractionCompleted {
-                            ProgressView(value: fraction).tint(ProtonColor.primary)
-                        } else {
-                            ProgressView().tint(ProtonColor.primary)
-                        }
-                    }
-                    if controller.status.failed > 0 {
-                        Text(String(localized: "settings.upload_check_attention \(controller.status.failed)"))
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                    }
-                }
-                Spacer()
-                if controller.isSyncing {
-                    Button(String(localized: "settings.photos_backup_pause")) { controller.stopSync() }
+            enabledStatusRows
+        }
+    }
+
+    @ViewBuilder private var enabledStatusRows: some View {
+        let status = controller.status
+
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
+                .foregroundStyle(status.isActive ? ProtonColor.primary : ProtonColor.textWeak)
+                .frame(width: 18, height: 22, alignment: .center)
+                .spinsWhileActive(status.isActive)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(status.localizedTitle)
+                    .foregroundStyle(ProtonColor.textNorm)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentTransition(.opacity)
+
+                statusDetail(status)
+                statusProgressSlot(status)
+
+                if status.failed > 0 {
+                    Text(String(localized: "settings.upload_check_attention \(status.failed)"))
                         .font(.footnote)
-                } else {
-                    Button(String(localized: "settings.photos_backup_sync_now")) { controller.syncNow() }
-                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .lineLimit(1)
                 }
             }
-            if controller.accessState == .limited {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(String(localized: "settings.photos_backup_limited"))
-                        .font(.footnote)
-                        .foregroundStyle(ProtonColor.textWeak)
-                    Button(String(localized: "settings.photos_backup_manage_selection")) {
-                        presentLimitedLibraryPicker()
-                    }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if controller.isSyncing {
+                Button(String(localized: "settings.photos_backup_pause")) { controller.stopSync() }
                     .font(.footnote)
+            } else {
+                Button(String(localized: "settings.photos_backup_sync_now")) { controller.syncNow() }
+                    .font(.footnote)
+            }
+        }
+
+        if controller.accessState == .limited {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(String(localized: "settings.photos_backup_limited"))
+                    .font(.footnote)
+                    .foregroundStyle(ProtonColor.textWeak)
+                Button(String(localized: "settings.photos_backup_manage_selection")) {
+                    presentLimitedLibraryPicker()
                 }
+                .font(.footnote)
             }
-            Button(String(localized: "settings.photos_backup_disable"), role: .destructive) {
-                controller.disableBackup()
-            }
+        }
+
+        Button(String(localized: "settings.photos_backup_disable"), role: .destructive) {
+            controller.disableBackup()
+        }
+        .font(.footnote)
+    }
+
+    private func statusDetail(_ status: BackupStatus) -> some View {
+        let detail = status.localizedDetail ?? " "
+        return Text(detail)
             .font(.footnote)
+            .foregroundStyle(ProtonColor.textWeak)
+            .monospacedDigit()
+            .lineLimit(1)
+            .opacity(status.localizedDetail == nil ? 0 : 1)
+            .accessibilityHidden(status.localizedDetail == nil)
+            .frame(minHeight: 18, alignment: .leading)
+            .contentTransition(.opacity)
+    }
+
+    @ViewBuilder private func statusProgressSlot(_ status: BackupStatus) -> some View {
+        if (status.isActive || status.phase == .paused), let fraction = status.fractionCompleted {
+            ProgressView(value: fraction)
+                .tint(ProtonColor.primary)
+                .frame(height: 4)
+        } else {
+            Color.clear.frame(height: 4)
         }
     }
 
