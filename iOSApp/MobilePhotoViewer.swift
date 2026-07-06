@@ -54,20 +54,21 @@ struct MobilePhotoViewer: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            TabView(selection: $index) {
-                ForEach(items.indices, id: \.self) { i in
-                    MobileViewerPage(
-                        item: items[i],
-                        isCurrent: i == index,
-                        libraryModel: libraryModel,
-                        imageStore: imageStore,
-                        onToggleChrome: { withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() } },
-                        onCloseRequested: { dismiss() }
-                    )
-                    .tag(i)
-                }
+            // UIKit pager (UIPageViewController) instead of SwiftUI's page TabView, for ONE reason: rotation.
+            // The SwiftUI pager keeps its width-bound content offset and page size through a device rotation,
+            // so the photo rotated displaced in a corner and snapped to centre only afterwards (a rebuild via
+            // `.id` was a hard cut instead). UIPageViewController participates in the size transition and keeps
+            // the current page centred through the whole rotation — the Photos-app behavior.
+            MobileViewerPager(count: items.count, index: $index) { i, isCurrent in
+                MobileViewerPage(
+                    item: items[i],
+                    isCurrent: isCurrent,
+                    libraryModel: libraryModel,
+                    imageStore: imageStore,
+                    onToggleChrome: { withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() } },
+                    onCloseRequested: { dismiss() }
+                )
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
             .ignoresSafeArea()
 
             if chromeVisible {
@@ -133,6 +134,96 @@ struct MobilePhotoViewer: View {
     }
 }
 
+/// Native horizontal photo pager: `UIPageViewController(.scroll)` hosting the SwiftUI pages. Chosen over
+/// SwiftUI's `TabView(.page)` because it participates in the device-rotation size transition — the current
+/// page stays centred and refits THROUGH the rotation animation instead of snapping afterwards. Selection
+/// syncs both ways via the `index` binding; `isCurrent` is re-injected into every live page on change, so
+/// pages keep their bounded load/teardown behavior (current page only).
+private struct MobileViewerPager<Page: View>: UIViewControllerRepresentable {
+    let count: Int
+    @Binding var index: Int
+    @ViewBuilder let page: (Int, Bool) -> Page
+
+    func makeUIViewController(context: Context) -> UIPageViewController {
+        let pvc = UIPageViewController(
+            transitionStyle: .scroll,
+            navigationOrientation: .horizontal,
+            options: [.interPageSpacing: 12]   // the small black gutter between pages, like Photos
+        )
+        pvc.dataSource = context.coordinator
+        pvc.delegate = context.coordinator
+        pvc.view.backgroundColor = .clear
+        pvc.setViewControllers([context.coordinator.pageController(at: index)], direction: .forward, animated: false)
+        return pvc
+    }
+
+    func updateUIViewController(_ pvc: UIPageViewController, context: Context) {
+        context.coordinator.parent = self
+        // External index change (e.g. programmatic) → jump to that page; user swipes come back via the delegate.
+        if let visible = (pvc.viewControllers?.first as? HostedPage)?.pageIndex, visible != index {
+            pvc.setViewControllers([context.coordinator.pageController(at: index)],
+                                   direction: visible < index ? .forward : .reverse, animated: false)
+        }
+        context.coordinator.refreshLivePages()
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    /// Hosts one page and remembers which index it shows (the pager's data source is index-based).
+    final class HostedPage: UIHostingController<AnyView> {
+        let pageIndex: Int
+        init(index: Int, root: AnyView) {
+            self.pageIndex = index
+            super.init(rootView: root)
+            view.backgroundColor = .clear   // never flash the hosting default background between pages
+        }
+        @available(*, unavailable)
+        @MainActor required dynamic init?(coder: NSCoder) { fatalError("not supported") }
+    }
+
+    final class Coordinator: NSObject, UIPageViewControllerDataSource, UIPageViewControllerDelegate {
+        var parent: MobileViewerPager
+        /// Live pages by index, kept to a window around the requested page. Evicted pages are still retained
+        /// by UIPageViewController while on screen; we only lose SwiftUI-state reuse, and the viewer store's
+        /// cache makes a re-created page's image instant.
+        private var live = [Int: HostedPage]()
+
+        init(parent: MobileViewerPager) { self.parent = parent }
+
+        func pageController(at i: Int) -> HostedPage {
+            if let vc = live[i] { return vc }
+            let vc = HostedPage(index: i, root: AnyView(parent.page(i, i == parent.index)))
+            live[i] = vc
+            live = live.filter { abs($0.key - i) <= 2 }
+            return vc
+        }
+
+        /// Re-inject `isCurrent` into every live page after a selection change, preserving the pages'
+        /// current-only load/teardown gating.
+        func refreshLivePages() {
+            for (i, vc) in live { vc.rootView = AnyView(parent.page(i, i == parent.index)) }
+        }
+
+        func pageViewController(_ pageViewController: UIPageViewController,
+                                viewControllerBefore viewController: UIViewController) -> UIViewController? {
+            guard let i = (viewController as? HostedPage)?.pageIndex, i > 0 else { return nil }
+            return pageController(at: i - 1)
+        }
+
+        func pageViewController(_ pageViewController: UIPageViewController,
+                                viewControllerAfter viewController: UIViewController) -> UIViewController? {
+            guard let i = (viewController as? HostedPage)?.pageIndex, i < parent.count - 1 else { return nil }
+            return pageController(at: i + 1)
+        }
+
+        func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool,
+                                previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
+            guard completed, let i = (pageViewController.viewControllers?.first as? HostedPage)?.pageIndex else { return }
+            parent.index = i   // binding write → SwiftUI update → refreshLivePages flips isCurrent
+        }
+    }
+}
+
 /// A single viewer page — a zoomable image, or a native video player for video items.
 private struct MobileViewerPage: View {
     let item: PhotoItem
@@ -184,6 +275,10 @@ private struct MobileImagePage: View {
     @State private var photoFrame: CGRect?
     /// In-flight zoom-tier decode — replaced (cancelling the old fetch) when the zoom settles elsewhere.
     @State private var zoomDecodeTask: Task<Void, Never>?
+    /// The decode cap of the image currently DISPLAYED (0 = grid thumbnail). Tier assignments are gated on
+    /// `newCap >= displayedCap`, so a slower base-tier load can never DOWNGRADE a sharper zoom decode that
+    /// landed while it was still in flight.
+    @State private var displayedCap = 0
     /// Shared Live Photo motion controller for the current page.
     @State private var motion = LivePhotoMotionController()
 
@@ -278,16 +373,20 @@ private struct MobileImagePage: View {
         guard ViewerImageLoadPolicy.shouldLoadDisplay(distanceFromCurrent: isCurrent ? 0 : 1) else { return }
         // Use the screen as the decode bound; transition geometry can be temporarily thumbnail-sized.
         let cap = ViewerImageLoadPolicy.displayMaxPixelSize(viewportPoints: UIScreen.main.bounds.size, scale: displayScale)
-        if let display = await imageStore.displayImage(for: item.uid, maxPixelSize: cap), !Task.isCancelled {
+        if let display = await imageStore.displayImage(for: item.uid, maxPixelSize: cap), !Task.isCancelled,
+           cap >= displayedCap {
             image = display.image
+            displayedCap = cap
             if MobileViewerLog.isEnabled {
                 MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=\(display.source, privacy: .public)")
             }
         }
         // 3. Original bytes, still decoded to the bounded screen cap.
         guard !Task.isCancelled else { return }
-        if let original = await imageStore.originalImage(for: item.uid, maxPixelSize: cap), !Task.isCancelled {
+        if let original = await imageStore.originalImage(for: item.uid, maxPixelSize: cap), !Task.isCancelled,
+           cap >= displayedCap {
             image = original.image
+            displayedCap = cap
             if MobileViewerLog.isEnabled {
                 MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=\(original.source, privacy: .public)")
             }
@@ -308,6 +407,7 @@ private struct MobileImagePage: View {
             guard let sharp = await imageStore.originalImage(for: item.uid, maxPixelSize: cap),
                   !Task.isCancelled else { return }
             image = sharp.image
+            displayedCap = max(displayedCap, cap)
             if MobileViewerLog.isEnabled {
                 MobileViewerLog.logger.notice("[ViewerPerf] display uid=\(MobileViewerLog.short(item.uid), privacy: .public) tier=zoomed cap=\(cap)")
             }
