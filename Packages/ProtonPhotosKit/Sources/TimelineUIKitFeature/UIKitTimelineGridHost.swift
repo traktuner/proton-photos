@@ -518,12 +518,15 @@ public final class UIKitTimelineGridHostView: UIView {
     /// under the (translucent) bar for the full-bleed look, but the content range ends above it, so fully
     /// scrolled to the newest photo every thumbnail of the final row stays visible and tappable. Safe-area
     /// driven — tab bar, home indicator, orientation and iPad sidebar layouts all flow through the same inset.
+    /// ALSO adds a TOP inset equal to safeAreaInsets.top so the first row rests below the navigation bar
+    /// instead of being covered by it.
     private func applyContentInsets() {
+        let top = safeAreaInsets.top
         let bottom = safeAreaInsets.bottom
-        if scrollView.contentInset.bottom != bottom {
-            scrollView.contentInset = UIEdgeInsets(top: 0, left: 0, bottom: bottom, right: 0)
+        if scrollView.contentInset.top != top || scrollView.contentInset.bottom != bottom {
+            scrollView.contentInset = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
         }
-        scrollView.verticalScrollIndicatorInsets = UIEdgeInsets(top: safeAreaInsets.top, left: 0, bottom: bottom, right: 0)
+        scrollView.verticalScrollIndicatorInsets = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
     }
 
     /// The largest valid vertical content offset given the current content size and bottom inset.

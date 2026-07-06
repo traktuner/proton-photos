@@ -120,6 +120,9 @@ private struct MobileLibraryMap: UIViewRepresentable {
     let onSelectCluster: ([PhotoUID], CLLocationCoordinate2D) -> Void
 
     func makeUIView(context: Context) -> UIKitLibraryMapHostView {
+        // NOTE: maxCoordinates=3000 is the original value. We have NOT changed it blindly—a fix cap
+        // would silently drop photos and corrupt cluster counts. Instead the perf fixes go into the
+        // host (cancellation, O(1) diffing) and the index layer (aggregation). See MAP_PERF_NOTES.
         UIKitLibraryMapHostView(
             index: index,
             visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1.6, maxCoordinates: 3000),
