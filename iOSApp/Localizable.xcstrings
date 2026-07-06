@@ -1,517 +1,266 @@
 {
-  "sourceLanguage" : "en",
-  "strings" : {
-    "settings.photos_backup_unavailable" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Foto-Backup ist nicht verfügbar, weil der Duplikatschutz nicht initialisiert werden konnte." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Photos backup is unavailable because duplicate protection could not be initialized." } }
-      }
-    },
-    "settings.photos_backup_explainer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Sichert deine Fotos und Videos verschlüsselt in Proton Photos. Deine Originale bleiben unverändert. Fotos, die schon in Proton Photos liegen, werden erkannt und nicht noch mal hochgeladen. Zum Aktivieren braucht die App Zugriff auf deine Fotos." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Backs up your photos and videos to Proton Photos, encrypted. Your originals stay untouched. Photos that are already in Proton Photos get recognized and are never uploaded again. Turning this on needs access to your photos." } }
-      }
-    },
-    "settings.photos_backup_enable" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Foto-Backup aktivieren…" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable Photos backup…" } }
-      }
-    },
-    "settings.photos_backup_disable" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Foto-Backup deaktivieren" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn off Photos backup" } }
-      }
-    },
-    "settings.photos_backup_denied" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Zugriff auf Fotos ist nicht erlaubt. Du kannst ihn in den Einstellungen erlauben." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Photos access is not allowed. You can grant it in Settings." } }
-      }
-    },
-    "settings.albumsync_add_albums" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Alben auswählen" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose albums" } }
-      }
-    },
-    "settings.albumsync_sync_all" : {
-      "extractionState" : "manual",
-      "comment" : "Syncs every selected album (sequentially).",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Jetzt synchronisieren" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync now" } }
-      }
-    },
-    "settings.albumsync_remove" : {
-      "extractionState" : "manual",
-      "comment" : "Swipe/VoiceOver label of the per-row remove control. Removal only stops syncing - nothing is deleted on Proton.",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Aus Sync entfernen" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove from sync" } }
-      }
-    },
-    "settings.albumsync_decide" : {
-      "extractionState" : "manual",
-      "comment" : "Row button re-opening the same-name conflict dialog.",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Entscheiden…" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Decide…" } }
-      }
-    },
-    "settings.albumsync_row_attention %lld" : {
-      "extractionState" : "manual",
-      "comment" : "Per-row count of photos the last run could not back up or attach.",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "%lld benötigen Aufmerksamkeit" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld need attention" } }
-      }
-    },
-    "settings.albumsync_picker_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Alben für Sync auswählen" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose albums to sync" } }
-      }
-    },
-    "settings.albumsync_picker_search" : {
-      "extractionState" : "manual",
-      "comment" : "Search prompt of the album picker.",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Alben durchsuchen" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search albums" } }
-      }
-    },
-    "settings.albumsync_picker_empty" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Keine passenden Alben." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "No albums match." } }
-      }
-    },
-    "settings.albumsync_picker_selected %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : { "stringUnit" : { "state" : "translated", "value" : "%lld Album ausgewählt" } },
-              "other" : { "stringUnit" : { "state" : "translated", "value" : "%lld Alben ausgewählt" } }
-            }
+  "sourceLanguage": "en",
+  "strings": {
+    "settings.photos_backup_unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Foto-Backup ist nicht verfügbar, weil der Duplikatschutz nicht initialisiert werden konnte."
           }
         },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : { "stringUnit" : { "state" : "translated", "value" : "%lld album selected" } },
-              "other" : { "stringUnit" : { "state" : "translated", "value" : "%lld albums selected" } }
-            }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos backup is unavailable because duplicate protection could not be initialized."
           }
         }
       }
     },
-    "settings.albumsync_picker_apply" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Übernehmen" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Apply" } }
-      }
-    },
-    "settings.albumsync_conflict_message %@" : {
-      "extractionState" : "manual",
-      "comment" : "Body of the same-name dialog; %@ is the local album title. The user decides, the app never attaches by name match on its own.",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Füge die Fotos von „%@“ dem bestehenden Proton-Album hinzu, oder brich ab und benenne eines der Alben um." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add the photos of “%@” to the existing Proton album, or cancel and rename one of the albums." } }
-      }
-    },
-    "settings.albumsync_row" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Alben mit Proton synchronisieren" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync albums to Proton" } }
-      }
-    },
-    "settings.albumsync_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Album-Synchronisierung" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Album Sync" } }
-      }
-    },
-    "settings.albumsync_explainer" : {
-      "extractionState" : "manual",
-      "comment" : "Footer of the album list. Honest wording: already-backed-up photos are linked, never re-uploaded.",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Synchronisiere ein Apple-Fotos-Album in ein Proton Photos-Album. Bereits gesicherte Fotos werden nur verknüpft, nie erneut hochgeladen." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync an Apple Photos album into a Proton Photos album. Photos already backed up are only linked, never uploaded again." } }
-      }
-    },
-    "settings.albumsync_unavailable" : {
-      "extractionState" : "manual",
-      "comment" : "Shown when the album-sync mapping database or duplicate protection could not be opened.",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Album-Synchronisierung ist nicht verfügbar, weil die lokale Datenbank nicht geöffnet werden konnte." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Album sync is unavailable because its local database could not be opened." } }
-      }
-    },
-    "settings.albumsync_stop" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Stoppen" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop" } }
-      }
-    },
-    "settings.albumsync_photo_count %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : { "stringUnit" : { "state" : "translated", "value" : "%lld Foto" } },
-              "other" : { "stringUnit" : { "state" : "translated", "value" : "%lld Fotos" } }
-            }
+    "settings.photos_backup_explainer": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sichert deine Fotos und Videos verschlüsselt in Proton Photos. Deine Originale bleiben unverändert. Fotos, die schon in Proton Photos liegen, werden erkannt und nicht noch mal hochgeladen. Zum Aktivieren braucht die App Zugriff auf deine Fotos."
           }
         },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : { "stringUnit" : { "state" : "translated", "value" : "%lld photo" } },
-              "other" : { "stringUnit" : { "state" : "translated", "value" : "%lld photos" } }
-            }
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backs up your photos and videos to Proton Photos, encrypted. Your originals stay untouched. Photos that are already in Proton Photos get recognized and are never uploaded again. Turning this on needs access to your photos."
           }
         }
       }
     },
-    "settings.albumsync_conflict_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Ein Proton-Album mit diesem Namen existiert bereits" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "A Proton album with this name already exists" } }
-      }
-    },
-    "settings.albumsync_conflict_multiple" : {
-      "extractionState" : "manual",
-      "comment" : "Same-name dialog when SEVERAL Proton albums share the name: linking would be ambiguous, only cancel is offered.",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Mehrere Proton-Alben tragen diesen Namen, eine eindeutige Verknüpfung ist nicht möglich. Benenne eines der Alben um und versuche es erneut." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Several Proton albums share this name, so linking would be ambiguous. Rename one of the albums and try again." } }
-      }
-    },
-    "settings.albumsync_use_existing" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Bestehendes Album verwenden" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use existing album" } }
-      }
-    },
-    "settings.photos_backup_open_settings" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Einstellungen öffnen" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Settings" } }
-      }
-    },
-    "settings.photos_backup_limited" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Nur die von dir ausgewählten Fotos werden gesichert." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only the photos you selected are backed up." } }
-      }
-    },
-    "settings.photos_backup_manage_selection" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Auswahl ändern…" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Change selection…" } }
-      }
-    },
-    "settings.photos_backup_pause" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Pausieren" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pause" } }
-      }
-    },
-    "settings.photos_backup_sync_now" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Jetzt sichern" } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Back up now" } }
-      }
-    },
-    "settings.photos_backup_background_note" : {
-      "extractionState" : "manual",
-      "comment" : "Honest background wording: uploads continue while the app is open and in system-granted charging windows; iOS may pause them otherwise.",
-      "localizations" : {
-        "de" : { "stringUnit" : { "state" : "translated", "value" : "Die Sicherung läuft, während die App offen ist, und manchmal im Hintergrund (meist beim Laden). Wird sie unterbrochen, macht sie von selbst weiter." } },
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Backup runs while the app is open, and sometimes in the background (usually while charging). If it stops, it picks up again on its own." } }
-      }
-    },
-    "settings.section_backup" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Backup"
+    "settings.photos_backup_enable": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Foto-Backup aktivieren…"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Backup"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable Photos backup…"
           }
         }
       }
     },
-    "action.cancel" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Abbrechen"
+    "settings.photos_backup_disable": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Foto-Backup deaktivieren"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cancel"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn off Photos backup"
           }
         }
       }
     },
-    "action.done" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fertig"
+    "settings.photos_backup_denied": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zugriff auf Fotos ist nicht erlaubt. Du kannst ihn in den Einstellungen erlauben."
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Done"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos access is not allowed. You can grant it in Settings."
           }
         }
       }
     },
-    "action.ok" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OK"
+    "settings.albumsync_add_albums": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alben auswählen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "OK"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose albums"
           }
         }
       }
     },
-    "action.select" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Auswählen"
+    "settings.albumsync_sync_all": {
+      "extractionState": "manual",
+      "comment": "Syncs every selected album (sequentially).",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jetzt synchronisieren"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync now"
           }
         }
       }
     },
-    "action.sign_out" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Abmelden"
+    "settings.albumsync_remove": {
+      "extractionState": "manual",
+      "comment": "Swipe/VoiceOver label of the per-row remove control. Removal only stops syncing - nothing is deleted on Proton.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aus Sync entfernen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign out"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove from sync"
           }
         }
       }
     },
-    "action.try_again" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Erneut versuchen"
+    "settings.albumsync_decide": {
+      "extractionState": "manual",
+      "comment": "Row button re-opening the same-name conflict dialog.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Entscheiden…"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Try again"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Decide…"
           }
         }
       }
     },
-    "albums.detail_empty" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Leeres Album"
+    "settings.albumsync_row_attention %lld": {
+      "extractionState": "manual",
+      "comment": "Per-row count of photos the last run could not back up or attach.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld benötigen Aufmerksamkeit"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Empty album"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld need attention"
           }
         }
       }
     },
-    "albums.detail_load_failed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Album konnte nicht geladen werden"
+    "settings.albumsync_picker_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alben für Sync auswählen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't load album"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose albums to sync"
           }
         }
       }
     },
-    "albums.empty_message %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Alben, die Sie in %@ erstellen, erscheinen hier."
+    "settings.albumsync_picker_search": {
+      "extractionState": "manual",
+      "comment": "Search prompt of the album picker.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alben durchsuchen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albums you create in %@ will appear here."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search albums"
           }
         }
       }
     },
-    "albums.empty_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Keine Alben"
+    "settings.albumsync_picker_empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine passenden Alben."
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No albums"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No albums match."
           }
         }
       }
     },
-    "albums.load_failed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Alben konnten nicht geladen werden"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't load albums"
-          }
-        }
-      }
-    },
-    "albums.photo_count %@" : {
-      "comment" : "A label showing the number of photos in an album. The argument is the number of photos in the album.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ Fotos"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ photos"
-          }
-        }
-      }
-    },
-    "albums.photo_count %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Foto"
+    "settings.albumsync_picker_selected %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Album ausgewählt"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Fotos"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Alben ausgewählt"
                 }
               }
             }
           }
         },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld photo"
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld album selected"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld photos"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld albums selected"
                 }
               }
             }
@@ -519,380 +268,162 @@
         }
       }
     },
-    "auth.checking_session" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ihre Sitzung wird überprüft …"
+    "settings.albumsync_picker_apply": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Übernehmen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Checking your session…"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply"
           }
         }
       }
     },
-    "auth.finalizing" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ihre Sitzung wird abgeschlossen …"
+    "settings.albumsync_conflict_message %@": {
+      "extractionState": "manual",
+      "comment": "Body of the same-name dialog; %@ is the local album title. The user decides, the app never attaches by name match on its own.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Füge die Fotos von „%@“ dem bestehenden Proton-Album hinzu, oder brich ab und benenne eines der Alben um."
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Finalizing your session…"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add the photos of “%@” to the existing Proton album, or cancel and rename one of the albums."
           }
         }
       }
     },
-    "auth.requesting_link" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Anmeldelink wird angefordert …"
+    "settings.albumsync_row": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alben mit Proton synchronisieren"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Requesting a sign-in link…"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync albums to Proton"
           }
         }
       }
     },
-    "auth.sign_in_failed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Anmeldung fehlgeschlagen."
+    "settings.albumsync_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album-Synchronisierung"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign-in failed."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album Sync"
           }
         }
       }
     },
-    "auth.sign_in_prompt" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Melden Sie sich mit Ihrem Proton-Konto an, um Ihre Fotos zu sehen."
+    "settings.albumsync_explainer": {
+      "extractionState": "manual",
+      "comment": "Footer of the album list. Honest wording: already-backed-up photos are linked, never re-uploaded.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Synchronisiere ein Apple-Fotos-Album in ein Proton Photos-Album. Bereits gesicherte Fotos werden nur verknüpft, nie erneut hochgeladen."
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign in with your Proton account to see your photos."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync an Apple Photos album into a Proton Photos album. Photos already backed up are only linked, never uploaded again."
           }
         }
       }
     },
-    "auth.signed_in" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Angemeldet."
+    "settings.albumsync_unavailable": {
+      "extractionState": "manual",
+      "comment": "Shown when the album-sync mapping database or duplicate protection could not be opened.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album-Synchronisierung ist nicht verfügbar, weil die lokale Datenbank nicht geöffnet werden konnte."
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Signed in."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album sync is unavailable because its local database could not be opened."
           }
         }
       }
     },
-    "auth.waiting_for_browser" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Anmeldung in Safari abschließen …"
+    "settings.albumsync_stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stoppen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Complete sign-in in Safari…"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop"
           }
         }
       }
     },
-    "collections.empty_albums %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Deine %@-Alben erscheinen hier."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your %@ albums appear here."
-          }
-        }
-      }
-    },
-    "collections.filter_empty" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hier ist noch nichts"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nothing here yet"
-          }
-        }
-      }
-    },
-    "collections.loading_albums" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Alben werden geladen …"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Loading albums…"
-          }
-        }
-      }
-    },
-    "collections.section_albums" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Alben"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albums"
-          }
-        }
-      }
-    },
-    "collections.section_library" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mediathek"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Library"
-          }
-        }
-      }
-    },
-    "collections.trash" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Papierkorb"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Trash"
-          }
-        }
-      }
-    },
-    "device.no_metal_renderer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Dieses Gerät stellt keinen Metal-Renderer bereit."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This device does not expose a Metal renderer."
-          }
-        }
-      }
-    },
-    "device.requires_metal3 %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ benötigt eine Metal-3-fähige Apple-GPU."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ requires a Metal 3-capable Apple GPU."
-          }
-        }
-      }
-    },
-    "device.unsupported_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nicht unterstütztes Gerät"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unsupported device"
-          }
-        }
-      }
-    },
-    "empty.message %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fotos, die Sie in %@ sichern, erscheinen hier."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Photos you back up to %@ will appear here."
-          }
-        }
-      }
-    },
-    "empty.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Noch keine Fotos"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No photos yet"
-          }
-        }
-      }
-    },
-    "error.library_load_failed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ihre Mediathek konnte nicht geladen werden"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn't load your library"
-          }
-        }
-      }
-    },
-    "loading.library_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ihre Mediathek wird geladen …"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Loading your library…"
-          }
-        }
-      }
-    },
-    "loading.preparing_count %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Foto wird vorbereitet"
+    "settings.albumsync_photo_count %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Foto"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Fotos werden vorbereitet"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Fotos"
                 }
               }
             }
           }
         },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Preparing %lld photo"
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld photo"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Preparing %lld photos"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld photos"
                 }
               }
             }
@@ -900,772 +431,417 @@
         }
       }
     },
-    "login.footer" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Die Anmeldung öffnet Safari. Die App speichert nur die resultierende Sitzung im iOS-Schlüsselbund."
+    "settings.albumsync_conflict_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ein Proton-Album mit diesem Namen existiert bereits"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign-in opens Safari. The app stores only the resulting session in the iOS Keychain."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A Proton album with this name already exists"
           }
         }
       }
     },
-    "login.sign_in_button" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mit Proton anmelden"
+    "settings.albumsync_conflict_multiple": {
+      "extractionState": "manual",
+      "comment": "Same-name dialog when SEVERAL Proton albums share the name: linking would be ambiguous, only cancel is offered.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mehrere Proton-Alben tragen diesen Namen, eine eindeutige Verknüpfung ist nicht möglich. Benenne eines der Alben um und versuche es erneut."
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign in with Proton"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Several Proton albums share this name, so linking would be ambiguous. Rename one of the albums and try again."
           }
         }
       }
     },
-    "login.waiting_button" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Warten auf die Anmeldung im Browser …"
+    "settings.albumsync_use_existing": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bestehendes Album verwenden"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for browser sign-in…"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use existing album"
           }
         }
       }
     },
-    "map.empty_message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fotos mit Standortdaten erscheinen hier. Direkt nach der Anmeldung kann dies einen Moment dauern, während Ihre Mediathek durchsucht wird."
+    "settings.photos_backup_open_settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einstellungen öffnen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Photos with location data appear here. If you just signed in, this can take a moment while your library is scanned."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Settings"
           }
         }
       }
     },
-    "map.empty_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Noch keine Orte"
+    "settings.photos_backup_limited": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nur die von dir ausgewählten Fotos werden gesichert."
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No places yet"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the photos you selected are backed up."
           }
         }
       }
     },
-    "map.no_places_found_message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Die Suche ist abgeschlossen – deine Fotos enthalten keine Standortdaten."
+    "settings.photos_backup_manage_selection": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auswahl ändern…"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scan complete — no location data was found in your photos."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change selection…"
           }
         }
       }
     },
-    "map.scan_failed_message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Die Standortdaten konnten nicht geladen werden. Bitte später erneut versuchen."
+    "settings.photos_backup_pause": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pausieren"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Location data couldn't be loaded. Please try again later."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pause"
           }
         }
       }
     },
-    "map.scan_failed_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Suche fehlgeschlagen"
+    "settings.photos_backup_sync_now": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Jetzt sichern"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scan failed"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back up now"
           }
         }
       }
     },
-    "map.scanning_message %@ %@" : {
-      "comment" : "A message that shows the number of geotagged photos found so far and the total number of photos.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ von %2$@ Fotos durchsucht. Orte erscheinen, sobald sie gefunden werden."
+    "settings.photos_backup_background_note": {
+      "extractionState": "manual",
+      "comment": "Honest background wording: uploads continue while the app is open and in system-granted charging windows; iOS may pause them otherwise.",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Sicherung läuft, während die App offen ist, und manchmal im Hintergrund (meist beim Laden). Wird sie unterbrochen, macht sie von selbst weiter."
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ of %2$@ photos scanned. Places appear as they are found."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup runs while the app is open, and sometimes in the background (usually while charging). If it stops, it picks up again on its own."
           }
         }
       }
     },
-    "map.scanning_message %lld %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld von %2$lld Fotos durchsucht. Orte erscheinen, sobald sie gefunden werden."
+    "settings.section_backup": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld of %2$lld photos scanned. Places appear as they are found."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup"
           }
         }
       }
     },
-    "map.scanning_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Suche nach Orten …"
+    "action.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abbrechen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Scanning for places…"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
           }
         }
       }
     },
-    "selection.count_selected %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld Objekte ausgewählt"
+    "action.done": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fertig"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld Items Selected"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
           }
         }
       }
     },
-    "selection.select_items" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Objekte auswählen"
+    "action.ok": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select Items"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
           }
         }
       }
     },
-    "selection.share_a11y" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ausgewählte Objekte teilen"
+    "action.select": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auswählen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Share selected items"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select"
           }
         }
       }
     },
-    "selection.share_failed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Die ausgewählten Objekte konnten nicht zum Teilen vorbereitet werden."
+    "action.sign_out": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Abmelden"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn’t prepare the selected items for sharing."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out"
           }
         }
       }
     },
-    "selection.share_partial_message %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld Objekt(e) konnten nicht heruntergeladen werden und werden ausgelassen."
+    "action.try_again": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Erneut versuchen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld item(s) couldn’t be downloaded and will be left out."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again"
           }
         }
       }
     },
-    "selection.share_partial_proceed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Verfügbare Objekte teilen"
+    "albums.detail_empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leeres Album"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Share Available Items"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empty album"
           }
         }
       }
     },
-    "selection.share_partial_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Einige Objekte konnten nicht vorbereitet werden"
+    "albums.detail_load_failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album konnte nicht geladen werden"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Some items couldn’t be prepared"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't load album"
           }
         }
       }
     },
-    "selection.trash_a11y" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ausgewählte Objekte in den Papierkorb verschieben"
+    "albums.empty_message %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alben, die Sie in %@ erstellen, erscheinen hier."
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Move selected items to Trash"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Albums you create in %@ will appear here."
           }
         }
       }
     },
-    "selection.trash_confirm" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "In den Papierkorb verschieben"
+    "albums.empty_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keine Alben"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Move to Trash"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No albums"
           }
         }
       }
     },
-    "selection.trash_failed" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Die ausgewählten Objekte konnten nicht in den Papierkorb verschoben werden."
+    "albums.load_failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alben konnten nicht geladen werden"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn’t move the selected items to Trash."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't load albums"
           }
         }
       }
     },
-    "selection.trash_message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Die ausgewählten Objekte werden in den Papierkorb verschoben und können von dort wiederhergestellt werden."
+    "albums.photo_count %@": {
+      "comment": "A label showing the number of photos in an album. The argument is the number of photos in the album.",
+      "isCommentAutoGenerated": true,
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ Fotos"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The selected items move to Trash and can be restored from there."
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ photos"
           }
         }
       }
     },
-    "selection.trash_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "In den Papierkorb verschieben?"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Move to Trash?"
-          }
-        }
-      }
-    },
-    "trash.empty_button" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Papierkorb leeren"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Empty Recently Deleted"
-          }
-        }
-      }
-    },
-    "trash.empty_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Papierkorb endgültig leeren?"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Empty Recently Deleted?"
-          }
-        }
-      }
-    },
-    "trash.empty_message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Alle Fotos und Videos in „Zuletzt gelöscht“ werden endgültig gelöscht. Das kann nicht rückgängig gemacht werden."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "All photos and videos in Recently Deleted will be permanently deleted. This can’t be undone."
-          }
-        }
-      }
-    },
-    "trash.empty_confirm" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Endgültig löschen"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Delete Permanently"
-          }
-        }
-      }
-    },
-    "trash.empty_failed_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Papierkorb konnte nicht geleert werden"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Couldn’t Empty Recently Deleted"
-          }
-        }
-      }
-    },
-    "trash.empty_failed_message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "„Zuletzt gelöscht“ konnte nicht geleert werden. Die Objekte sind weiterhin dort."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Recently Deleted couldn’t be emptied. The items are still there."
-          }
-        }
-      }
-    },
-    "settings.account_email" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "E-Mail"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Email"
-          }
-        }
-      }
-    },
-    "settings.cache_size" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cache-Größe"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cache Size"
-          }
-        }
-      }
-    },
-    "settings.clear_cache" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cache leeren"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Clear Cache"
-          }
-        }
-      }
-    },
-    "settings.clear_cache_message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Zwischengespeicherte Vorschaubilder werden bei Bedarf erneut geladen."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cached thumbnails will be re-downloaded as needed."
-          }
-        }
-      }
-    },
-    "settings.clear_cache_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cache leeren?"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Clear Cache?"
-          }
-        }
-      }
-    },
-    "settings.library_loading" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mediathek wird geladen"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Loading library"
-          }
-        }
-      }
-    },
-    "library.title_activity" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mediathek wird aktualisiert"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Library is updating"
-          }
-        }
-      }
-    },
-    "library.title_offline" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline"
-          }
-        }
-      }
-    },
-    "library.title_online_restored" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Verbindung wiederhergestellt"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Connection restored"
-          }
-        }
-      }
-    },
-    "offline.content_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Offline"
-          }
-        }
-      }
-    },
-    "offline.content_message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Diese Ansicht braucht Zugriff auf Proton. Sobald die Verbindung wieder da ist, geht es automatisch weiter."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This view needs Proton access. It will continue automatically when the connection is back."
-          }
-        }
-      }
-    },
-    "settings.library_still_loading" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vorschauen werden geladen …"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Loading previews…"
-          }
-        }
-      }
-    },
-    "settings.upload_check_idle_help" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Vor dem Hochladen prüft die App, ob ein Foto schon gesichert ist. Falls ja, wird es übersprungen."
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Before uploading, the app checks whether a photo is already backed up. If it is, it’s skipped."
-          }
-        }
-      }
-    },
-    "settings.upload_check_progress %lld %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld von %lld geprüft"
-          }
-        },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld of %lld checked"
-          }
-        }
-      }
-    },
-    "settings.upload_check_duplicates %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld bereits in deiner Mediathek"
+    "albums.photo_count %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Foto"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld bereits in deiner Mediathek"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Fotos"
                 }
               }
             }
           }
         },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld already in your library"
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld photo"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld already in your library"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld photos"
                 }
               }
             }
@@ -1673,40 +849,380 @@
         }
       }
     },
-    "settings.upload_check_attention %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld benötigt Aufmerksamkeit"
+    "auth.checking_session": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ihre Sitzung wird überprüft …"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking your session…"
+          }
+        }
+      }
+    },
+    "auth.finalizing": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ihre Sitzung wird abgeschlossen …"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finalizing your session…"
+          }
+        }
+      }
+    },
+    "auth.requesting_link": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anmeldelink wird angefordert …"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Requesting a sign-in link…"
+          }
+        }
+      }
+    },
+    "auth.sign_in_failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anmeldung fehlgeschlagen."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign-in failed."
+          }
+        }
+      }
+    },
+    "auth.sign_in_prompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Melden Sie sich mit Ihrem Proton-Konto an, um Ihre Fotos zu sehen."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in with your Proton account to see your photos."
+          }
+        }
+      }
+    },
+    "auth.signed_in": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Angemeldet."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed in."
+          }
+        }
+      }
+    },
+    "auth.waiting_for_browser": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anmeldung in Safari abschließen …"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Complete sign-in in Safari…"
+          }
+        }
+      }
+    },
+    "collections.empty_albums %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deine %@-Alben erscheinen hier."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your %@ albums appear here."
+          }
+        }
+      }
+    },
+    "collections.filter_empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hier ist noch nichts"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing here yet"
+          }
+        }
+      }
+    },
+    "collections.loading_albums": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alben werden geladen …"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading albums…"
+          }
+        }
+      }
+    },
+    "collections.section_albums": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alben"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Albums"
+          }
+        }
+      }
+    },
+    "collections.section_library": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mediathek"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library"
+          }
+        }
+      }
+    },
+    "collections.trash": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Papierkorb"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trash"
+          }
+        }
+      }
+    },
+    "device.no_metal_renderer": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dieses Gerät stellt keinen Metal-Renderer bereit."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device does not expose a Metal renderer."
+          }
+        }
+      }
+    },
+    "device.requires_metal3 %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ benötigt eine Metal-3-fähige Apple-GPU."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ requires a Metal 3-capable Apple GPU."
+          }
+        }
+      }
+    },
+    "device.unsupported_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nicht unterstütztes Gerät"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unsupported device"
+          }
+        }
+      }
+    },
+    "empty.message %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fotos, die Sie in %@ sichern, erscheinen hier."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos you back up to %@ will appear here."
+          }
+        }
+      }
+    },
+    "empty.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch keine Fotos"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No photos yet"
+          }
+        }
+      }
+    },
+    "error.library_load_failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ihre Mediathek konnte nicht geladen werden"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't load your library"
+          }
+        }
+      }
+    },
+    "loading.library_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ihre Mediathek wird geladen …"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading your library…"
+          }
+        }
+      }
+    },
+    "loading.preparing_count %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Foto wird vorbereitet"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld benötigen Aufmerksamkeit"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Fotos werden vorbereitet"
                 }
               }
             }
           }
         },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld needs attention"
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Preparing %lld photo"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld need attention"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Preparing %lld photos"
                 }
               }
             }
@@ -1714,40 +1230,772 @@
         }
       }
     },
-    "settings.photo_count %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Foto"
+    "login.footer": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Anmeldung öffnet Safari. Die App speichert nur die resultierende Sitzung im iOS-Schlüsselbund."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign-in opens Safari. The app stores only the resulting session in the iOS Keychain."
+          }
+        }
+      }
+    },
+    "login.sign_in_button": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mit Proton anmelden"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in with Proton"
+          }
+        }
+      }
+    },
+    "login.waiting_button": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warten auf die Anmeldung im Browser …"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for browser sign-in…"
+          }
+        }
+      }
+    },
+    "map.empty_message": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fotos mit Standortdaten erscheinen hier. Direkt nach der Anmeldung kann dies einen Moment dauern, während Ihre Mediathek durchsucht wird."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos with location data appear here. If you just signed in, this can take a moment while your library is scanned."
+          }
+        }
+      }
+    },
+    "map.empty_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Noch keine Orte"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No places yet"
+          }
+        }
+      }
+    },
+    "map.no_places_found_message": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Suche ist abgeschlossen – deine Fotos enthalten keine Standortdaten."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scan complete — no location data was found in your photos."
+          }
+        }
+      }
+    },
+    "map.scan_failed_message": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die Standortdaten konnten nicht geladen werden. Bitte später erneut versuchen."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Location data couldn't be loaded. Please try again later."
+          }
+        }
+      }
+    },
+    "map.scan_failed_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suche fehlgeschlagen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scan failed"
+          }
+        }
+      }
+    },
+    "map.scanning_message %@ %@": {
+      "comment": "A message that shows the number of geotagged photos found so far and the total number of photos.",
+      "isCommentAutoGenerated": true,
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ von %2$@ Fotos durchsucht. Orte erscheinen, sobald sie gefunden werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ of %2$@ photos scanned. Places appear as they are found."
+          }
+        }
+      }
+    },
+    "map.scanning_message %lld %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld von %2$lld Fotos durchsucht. Orte erscheinen, sobald sie gefunden werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$lld of %2$lld photos scanned. Places appear as they are found."
+          }
+        }
+      }
+    },
+    "map.scanning_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suche nach Orten …"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scanning for places…"
+          }
+        }
+      }
+    },
+    "selection.count_selected %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Objekte ausgewählt"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Items Selected"
+          }
+        }
+      }
+    },
+    "selection.select_items": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Objekte auswählen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select Items"
+          }
+        }
+      }
+    },
+    "selection.share_a11y": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ausgewählte Objekte teilen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share selected items"
+          }
+        }
+      }
+    },
+    "selection.share_failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die ausgewählten Objekte konnten nicht zum Teilen vorbereitet werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t prepare the selected items for sharing."
+          }
+        }
+      }
+    },
+    "selection.share_partial_message %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld Objekt(e) konnten nicht heruntergeladen werden und werden ausgelassen."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld item(s) couldn’t be downloaded and will be left out."
+          }
+        }
+      }
+    },
+    "selection.share_partial_proceed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verfügbare Objekte teilen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share Available Items"
+          }
+        }
+      }
+    },
+    "selection.share_partial_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einige Objekte konnten nicht vorbereitet werden"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some items couldn’t be prepared"
+          }
+        }
+      }
+    },
+    "selection.trash_a11y": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ausgewählte Objekte in den Papierkorb verschieben"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move selected items to Trash"
+          }
+        }
+      }
+    },
+    "selection.trash_confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In den Papierkorb verschieben"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to Trash"
+          }
+        }
+      }
+    },
+    "selection.trash_failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die ausgewählten Objekte konnten nicht in den Papierkorb verschoben werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t move the selected items to Trash."
+          }
+        }
+      }
+    },
+    "selection.trash_message": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Die ausgewählten Objekte werden in den Papierkorb verschoben und können von dort wiederhergestellt werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The selected items move to Trash and can be restored from there."
+          }
+        }
+      }
+    },
+    "selection.trash_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In den Papierkorb verschieben?"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move to Trash?"
+          }
+        }
+      }
+    },
+    "trash.empty_button": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Papierkorb leeren"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empty Recently Deleted"
+          }
+        }
+      }
+    },
+    "trash.empty_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Papierkorb endgültig leeren?"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Empty Recently Deleted?"
+          }
+        }
+      }
+    },
+    "trash.empty_message": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alle Fotos und Videos in „Zuletzt gelöscht“ werden endgültig gelöscht. Das kann nicht rückgängig gemacht werden."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All photos and videos in Recently Deleted will be permanently deleted. This can’t be undone."
+          }
+        }
+      }
+    },
+    "trash.empty_confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Endgültig löschen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete Permanently"
+          }
+        }
+      }
+    },
+    "trash.empty_failed_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Papierkorb konnte nicht geleert werden"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t Empty Recently Deleted"
+          }
+        }
+      }
+    },
+    "trash.empty_failed_message": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "„Zuletzt gelöscht“ konnte nicht geleert werden. Die Objekte sind weiterhin dort."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recently Deleted couldn’t be emptied. The items are still there."
+          }
+        }
+      }
+    },
+    "settings.account_email": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "E-Mail"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Email"
+          }
+        }
+      }
+    },
+    "settings.cache_size": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache-Größe"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache Size"
+          }
+        }
+      }
+    },
+    "settings.clear_cache": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache leeren"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear Cache"
+          }
+        }
+      }
+    },
+    "settings.clear_cache_message": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zwischengespeicherte Vorschaubilder werden bei Bedarf erneut geladen."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cached thumbnails will be re-downloaded as needed."
+          }
+        }
+      }
+    },
+    "settings.clear_cache_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache leeren?"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear Cache?"
+          }
+        }
+      }
+    },
+    "settings.library_loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mediathek wird geladen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading library"
+          }
+        }
+      }
+    },
+    "library.title_activity": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mediathek wird aktualisiert"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library is updating"
+          }
+        }
+      }
+    },
+    "library.title_offline": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        }
+      }
+    },
+    "library.title_online_restored": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Verbindung wiederhergestellt"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connection restored"
+          }
+        }
+      }
+    },
+    "offline.content_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Offline"
+          }
+        }
+      }
+    },
+    "offline.content_message": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Diese Ansicht braucht Zugriff auf Proton. Sobald die Verbindung wieder da ist, geht es automatisch weiter."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This view needs Proton access. It will continue automatically when the connection is back."
+          }
+        }
+      }
+    },
+    "settings.library_still_loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vorschauen werden geladen …"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading previews…"
+          }
+        }
+      }
+    },
+    "settings.upload_check_idle_help": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vor dem Hochladen prüft die App, ob ein Foto schon gesichert ist. Falls ja, wird es übersprungen."
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Before uploading, the app checks whether a photo is already backed up. If it is, it’s skipped."
+          }
+        }
+      }
+    },
+    "settings.upload_check_progress %lld %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld von %lld geprüft"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld of %lld checked"
+          }
+        }
+      }
+    },
+    "settings.upload_check_duplicates %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld bereits in deiner Mediathek"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Fotos"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld bereits in deiner Mediathek"
                 }
               }
             }
           }
         },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Photo"
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld already in your library"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld Photos"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld already in your library"
                 }
               }
             }
@@ -1755,40 +2003,40 @@
         }
       }
     },
-    "settings.previews_remaining %lld" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Noch %lld Vorschau"
+    "settings.upload_check_attention %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld benötigt Aufmerksamkeit"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Noch %lld Vorschauen"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld benötigen Aufmerksamkeit"
                 }
               }
             }
           }
         },
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld preview remaining"
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld needs attention"
                 }
               },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld previews remaining"
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld need attention"
                 }
               }
             }
@@ -1796,210 +2044,292 @@
         }
       }
     },
-    "settings.section_account" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Account"
+    "settings.previews_remaining %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Noch %lld Vorschau"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Noch %lld Vorschauen"
+                }
+              }
+            }
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Account"
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld preview remaining"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld previews remaining"
+                }
+              }
+            }
           }
         }
       }
     },
-    "settings.section_cache" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cache"
+    "settings.section_account": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cache"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Account"
           }
         }
       }
     },
-    "settings.section_library" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mediathek"
+    "settings.section_cache": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Library"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cache"
           }
         }
       }
     },
-    "settings.sign_out_confirm %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Von %@ abmelden?"
+    "settings.section_library": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mediathek"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sign out of %@?"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library"
           }
         }
       }
     },
-    "settings.storage" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Speicher"
+    "settings.sign_out_confirm %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Von %@ abmelden?"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Storage"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out of %@?"
           }
         }
       }
     },
-    "settings.storage_usage %@ %@" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ / %2$@"
+    "settings.storage": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speicher"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ / %2$@"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Storage"
           }
         }
       }
     },
-    "tab.albums" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Alben"
+    "settings.storage_usage %@ %@": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ / %2$@"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Albums"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ / %2$@"
           }
         }
       }
     },
-    "tab.collections" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sammlungen"
+    "tab.albums": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alben"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Collections"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Albums"
           }
         }
       }
     },
-    "tab.map" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Karte"
+    "tab.collections": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sammlungen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Map"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collections"
           }
         }
       }
     },
-    "tab.photos" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fotos"
+    "tab.map": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Karte"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Photos"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Map"
           }
         }
       }
     },
-    "tab.settings" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Einstellungen"
+    "tab.photos": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fotos"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Settings"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos"
           }
         }
       }
     },
-    "viewer.close_a11y" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "de" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Schließen"
+    "tab.settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Einstellungen"
           }
         },
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Close"
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings"
+          }
+        }
+      }
+    },
+    "viewer.close_a11y": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schließen"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        }
+      }
+    },
+    "settings.item_count %lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Objekt"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld Objekte"
+                }
+              }
+            }
+          }
+        },
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld item"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld items"
+                }
+              }
+            }
           }
         }
       }
     }
   },
-  "version" : "1.1"
+  "version": "1.1"
 }

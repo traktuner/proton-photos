@@ -88,7 +88,9 @@ struct MobileSettingsScreen: View {
     @ViewBuilder private var librarySection: some View {
         Section(String(localized: "settings.section_library")) {
             if let count = libraryModel.loadState.knownCount, libraryModel.loadState.hasSettled {
-                Text(String(localized: "settings.photo_count \(count)"))
+                // "Objekte"/"items" (Apple-Photos wording), NOT "Fotos": the timeline count mixes photos and
+                // videos, and the SDK exposes no reliable per-type split to count them separately.
+                Text(String(localized: "settings.item_count \(count)"))
                     .monospacedDigit()
             }
             if libraryModel.loadState.isLoading {
