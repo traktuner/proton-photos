@@ -112,12 +112,8 @@ struct MobileAlbumSyncScreen: View {
                     if let count = album.assetCount {
                         Text(String(localized: "settings.albumsync_photo_count \(count)"))
                     }
-                    Text(isActive ? controller.progress.localizedTitle : album.localizedStateDescription)
+                    Text(isActive ? controller.progress.localizedTitle : album.localizedRowStatusDescription)
                         .foregroundStyle(stateColor(album, isActive: isActive))
-                    if album.needsAttentionCount > 0, !isActive {
-                        Text(String(localized: "settings.albumsync_row_attention \(album.needsAttentionCount)"))
-                            .foregroundStyle(.orange)
-                    }
                 }
                 .font(.footnote.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -153,6 +149,7 @@ struct MobileAlbumSyncScreen: View {
 
     private func stateColor(_ album: AlbumSyncController.SelectedAlbum, isActive: Bool) -> Color {
         if isActive { return .secondary }
+        if album.hasNeedsAttention { return .orange }
         switch album.state {
         case .missingLocally, .needsDecision: return .orange
         case .notSynced, .synced: return .secondary

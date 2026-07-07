@@ -76,6 +76,9 @@ final class MobileLibraryModel {
     private(set) var photoBackup: PhotoLibraryBackupController?
     /// Local-album → Proton-album sync: the SHARED cross-platform controller (same code as macOS).
     private(set) var albumSync: AlbumSyncController?
+    /// Bumped by the shared album-sync controller after remote album mutations so Collections can
+    /// refresh without reloading the whole timeline.
+    private(set) var albumCatalogRevision = 0
 
     /// Whole-library GPS index for the Map tab (shared MediaLocationCore). Persisted encrypted at rest with the
     /// same per-account key as the media caches, so the Map is instant on relaunch.
@@ -264,6 +267,7 @@ final class MobileLibraryModel {
         photoBackup = nil
         albumSync?.stopSync()
         albumSync = nil
+        albumCatalogRevision = 0
         snapshot = TimelineSnapshot()
         thumbnailFeed = nil
         thumbnailCache = nil
@@ -357,7 +361,7 @@ final class MobileLibraryModel {
                     identityResolver: client.uploadIdentityResolver,
                     uploader: client.photoUploader
                 )
-                self.albumSync = AlbumSyncController(
+                let albumSync = AlbumSyncController(
                     configuration: .init(
                         accountDataDirectory: client.accountDataDirectory,
                         databasePolicy: client.accountDatabasePolicy
@@ -366,6 +370,10 @@ final class MobileLibraryModel {
                     uploader: client.photoUploader,
                     remoteOps: client.albumSyncRemoteOps
                 )
+                albumSync.setRemoteAlbumsChangedHandler { [weak self] in
+                    self?.albumCatalogRevision &+= 1
+                }
+                self.albumSync = albumSync
                 PhotoLibraryBackupSharedRef.shared.controller = self.photoBackup
                 await client.uploadCoordinator.start()
                 self.backend = backend

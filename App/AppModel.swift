@@ -38,6 +38,9 @@ final class AppModel {
     /// Local-album → Proton-album sync: the SHARED cross-platform controller, composed with this
     /// account's dedupe pipeline, uploader, and the backend's album write service.
     private(set) var albumSyncController: AlbumSyncController?
+    /// Bumped after album sync creates or mutates Proton albums. Views use it only to refresh
+    /// visible album lists; sync correctness lives in the shared controller.
+    private(set) var albumCatalogRevision = 0
     /// True once the signed-in library has finished its first load (loaded / empty / failed). Drives the
     /// launch veil, which lifts only after the real grid is ready to be revealed. Reset on sign-out and on a
     /// fresh backend build so a new session shows the veil again.
@@ -109,6 +112,7 @@ final class AppModel {
         photoBackupController = nil
         albumSyncController?.stopSync()
         albumSyncController = nil
+        albumCatalogRevision = 0
         facade = nil
         libraryReady = false
         // FULL PURGE: sign-out must leave nothing tied to the account on disk. Erase the encrypted
@@ -155,7 +159,7 @@ final class AppModel {
                     identityResolver: client.uploadIdentityResolver,
                     uploader: client.photoUploader
                 )
-                albumSyncController = AlbumSyncController(
+                let albumSync = AlbumSyncController(
                     configuration: .init(
                         accountDataDirectory: client.accountDataDirectory,
                         databasePolicy: client.accountDatabasePolicy
@@ -164,6 +168,10 @@ final class AppModel {
                     uploader: client.photoUploader,
                     remoteOps: client.albumSyncRemoteOps
                 )
+                albumSync.setRemoteAlbumsChangedHandler { [weak self] in
+                    self?.albumCatalogRevision &+= 1
+                }
+                albumSyncController = albumSync
                 await client.uploadCoordinator.start()
                 backend = .ready(client.backend)
                 // Start coordinating cache footprint with system memory pressure / thermal state now

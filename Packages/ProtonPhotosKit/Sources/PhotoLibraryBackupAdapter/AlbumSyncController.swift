@@ -50,6 +50,8 @@ public final class AlbumSyncController {
         /// Photos of the last run that could not be backed up or attached.
         public var needsAttentionCount: Int
 
+        public var hasNeedsAttention: Bool { needsAttentionCount > 0 }
+
         /// Shared en/de wording (PhotosCore catalog) - platforms never re-invent these states.
         public var localizedStateDescription: String {
             switch state {
@@ -62,6 +64,14 @@ public final class AlbumSyncController {
             case .needsDecision:
                 L10n.string("albumsync.state_needs_decision")
             }
+        }
+
+        /// Row-level status with the correct priority. A previous failed photo means this album is
+        /// not cleanly synced, even when `lastSyncedAt` is recent.
+        public var localizedRowStatusDescription: String {
+            hasNeedsAttention
+                ? L10n.string("albumsync.detail_needs_attention \(needsAttentionCount)")
+                : localizedStateDescription
         }
     }
 
@@ -94,7 +104,9 @@ public final class AlbumSyncController {
     private let backupExecutor: PhotoAlbumBackupExecutor?
     private let localSource = PhotoKitAlbumSource()
     private let mappingStore: AlbumSyncMappingStore?
+    private let changeMonitor: PhotoLibraryChangeMonitor
     private var syncTask: Task<Void, Never>?
+    private var changeDebounceTask: Task<Void, Never>?
     private var queuedAlbumIDs: [String] = []
     /// Unanswered same-name conflicts by album id (one dialog at a time; rows offer "Decide…").
     private var openConflicts: [String: [AlbumSyncRemoteAlbum]] = [:]
@@ -102,6 +114,10 @@ public final class AlbumSyncController {
     /// claimed honestly.
     private var libraryWasRead = false
     private var lastProgressUpdate = Date.distantPast
+    private var isObservingChanges = false
+    private var changePendingDuringSync = false
+    private var remoteAlbumsChangedDuringBatch = false
+    private var onRemoteAlbumsChanged: (@MainActor @Sendable () -> Void)?
 
     public init(
         configuration: Configuration,
@@ -112,6 +128,7 @@ public final class AlbumSyncController {
         accessState = PhotoLibraryAuthorization.currentState()
 
         let directory = configuration.accountDataDirectory
+        changeMonitor = PhotoLibraryChangeMonitor(tokenURL: directory.appendingPathComponent("album-sync-change-token.v1"))
         let mappingStore = AlbumSyncMappingStore(
             url: directory.appendingPathComponent(AlbumSyncMappingStore.databaseFileName),
             policy: configuration.databasePolicy
@@ -144,6 +161,7 @@ public final class AlbumSyncController {
         }
 
         reloadSelection()
+        startObservingChangesIfNeeded(scheduleCatchUp: true)
         if let runner {
             Task {
                 await runner.setOnProgress { snapshot in
@@ -151,6 +169,13 @@ public final class AlbumSyncController {
                 }
             }
         }
+    }
+
+    /// Platform shells call this once at composition time to refresh their visible Proton album
+    /// lists after this shared controller creates or mutates a remote album. The callback is UI
+    /// invalidation only; sync correctness never depends on it.
+    public func setRemoteAlbumsChangedHandler(_ handler: (@MainActor @Sendable () -> Void)?) {
+        onRemoteAlbumsChanged = handler
     }
 
     // MARK: - Album list (explicit user action; requests photo access)
@@ -169,6 +194,7 @@ public final class AlbumSyncController {
             lastMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         reloadSelection()
+        startObservingChangesIfNeeded()
     }
 
     public func refreshAccessState() {
@@ -192,6 +218,7 @@ public final class AlbumSyncController {
             openConflicts[removed] = nil
         }
         reloadSelection()
+        startObservingChangesIfNeeded()
     }
 
     /// The row's ✕: stop syncing this album. Keeps the mapping - never touches Proton.
@@ -208,6 +235,7 @@ public final class AlbumSyncController {
     /// Syncs every selected album, sequentially. Albums missing from the library are skipped
     /// honestly (their row says so); same-name conflicts pause only the affected album.
     public func syncSelected() {
+        startObservingChangesIfNeeded()
         let ids = selectedAlbums
             .filter { $0.state != .missingLocally }
             .map(\.id)
@@ -216,6 +244,7 @@ public final class AlbumSyncController {
 
     /// Re-sync one album from its row.
     public func syncNow(albumID: String) {
+        startObservingChangesIfNeeded()
         enqueue([albumID])
     }
 
@@ -249,6 +278,9 @@ public final class AlbumSyncController {
 
     public func stopSync() {
         queuedAlbumIDs.removeAll()
+        changeDebounceTask?.cancel()
+        changeDebounceTask = nil
+        changePendingDuringSync = false
         guard let runner else { return }
         Task { await runner.stop() }
     }
@@ -266,12 +298,14 @@ public final class AlbumSyncController {
     private func startBatchIfIdle() {
         guard let runner, !isSyncing, !queuedAlbumIDs.isEmpty else { return }
         isSyncing = true
+        remoteAlbumsChangedDuringBatch = false
         lastMessage = nil
 
         syncTask = Task { [weak self] in
-            while let album = await self?.dequeueNextAlbum() {
+            while let album = self?.dequeueNextAlbum() {
                 do {
                     _ = try await runner.sync(album: album, resolution: .automatic)
+                    self?.remoteAlbumsChangedDuringBatch = true
                 } catch let error as AlbumSyncError {
                     switch error {
                     case let .nameConflict(existing):
@@ -310,6 +344,58 @@ public final class AlbumSyncController {
     private func finishSync() {
         isSyncing = false
         reloadSelection()
+        if remoteAlbumsChangedDuringBatch {
+            remoteAlbumsChangedDuringBatch = false
+            onRemoteAlbumsChanged?()
+        }
+        if changePendingDuringSync {
+            changePendingDuringSync = false
+            scheduleChangeDrivenSync()
+        }
+    }
+
+    // MARK: - Change-driven sync for selected albums
+
+    private func startObservingChangesIfNeeded(scheduleCatchUp: Bool = false) {
+        guard accessState.allowsBackup, !selectedAlbums.isEmpty else { return }
+        if !isObservingChanges {
+            isObservingChanges = true
+            changeMonitor.startObserving { [weak self] in
+                Task { @MainActor in self?.scheduleChangeDrivenSync() }
+            }
+        }
+        if scheduleCatchUp {
+            scheduleChangeDrivenSync()
+        }
+    }
+
+    private func scheduleChangeDrivenSync() {
+        guard accessState.allowsBackup, !selectedAlbums.isEmpty else { return }
+        if isSyncing {
+            changePendingDuringSync = true
+            return
+        }
+        changeDebounceTask?.cancel()
+        changeDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.refreshLocalAlbumsForAutomaticSync()
+            await MainActor.run { [weak self] in
+                guard let self, self.accessState.allowsBackup, !self.selectedAlbums.isEmpty, !self.isSyncing else { return }
+                self.syncSelected()
+            }
+        }
+    }
+
+    private func refreshLocalAlbumsForAutomaticSync() async {
+        guard accessState.allowsBackup else { return }
+        do {
+            availableAlbums = try await localSource.listAlbums()
+            libraryWasRead = true
+            reloadSelection()
+        } catch {
+            lastMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     // MARK: - Row derivation

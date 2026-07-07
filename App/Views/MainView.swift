@@ -182,7 +182,7 @@ struct MainView: View {
                 .environment(\.gridTopBarInset, topBarInset)   // first grid row rests below the translucent toolbar
                 .onChange(of: searchText) { _, value in scheduleSearchCommit(value) }
             }
-            .task { await loadAlbums() }
+            .task(id: model.albumCatalogRevision) { await loadAlbums() }
             .onAppear {
                 attachOfflineManager()
                 AppMemoryPressureCoordinator.shared.attachFeed(timelineModel.feed)

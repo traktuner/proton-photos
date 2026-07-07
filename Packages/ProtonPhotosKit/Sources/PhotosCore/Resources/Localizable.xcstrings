@@ -277,8 +277,22 @@
       "extractionState": "manual",
       "comment": "Album sync attention detail: photos that could not be backed up or added to the album.",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "%lld photos need attention" } },
-        "de": { "stringUnit": { "state": "translated", "value": "%lld Fotos benötigen Aufmerksamkeit" } }
+        "en": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld photo needs attention" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld photos need attention" } }
+            }
+          }
+        },
+        "de": {
+          "variations": {
+            "plural": {
+              "one": { "stringUnit": { "state": "translated", "value": "%lld Foto benötigt Aufmerksamkeit" } },
+              "other": { "stringUnit": { "state": "translated", "value": "%lld Fotos benötigen Aufmerksamkeit" } }
+            }
+          }
+        }
       }
     },
     "albumsync.error_name_conflict": {

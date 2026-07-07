@@ -157,24 +157,6 @@
         }
       }
     },
-    "settings.albumsync_row_attention %lld": {
-      "extractionState": "manual",
-      "comment": "Per-row count of photos the last run could not back up or attach.",
-      "localizations": {
-        "de": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld benötigen Aufmerksamkeit"
-          }
-        },
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld need attention"
-          }
-        }
-      }
-    },
     "settings.albumsync_picker_title": {
       "extractionState": "manual",
       "localizations": {

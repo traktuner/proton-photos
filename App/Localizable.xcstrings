@@ -149,14 +149,6 @@
         "de": { "stringUnit": { "state": "translated", "value": "Entscheiden…" } }
       }
     },
-    "settings.albumsync_row_attention %lld": {
-      "extractionState": "manual",
-      "comment": "Per-row count of photos the last run could not back up or attach.",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "%lld need attention" } },
-        "de": { "stringUnit": { "state": "translated", "value": "%lld benötigen Aufmerksamkeit" } }
-      }
-    },
     "settings.albumsync_picker_title": {
       "extractionState": "manual",
       "localizations": {

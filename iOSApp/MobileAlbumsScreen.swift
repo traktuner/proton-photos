@@ -19,6 +19,10 @@ struct MobileCollectionsScreen: View {
     @State private var albumsPhase: Phase = .loading
 
     private enum Phase: Equatable { case loading, loaded, failed(String) }
+    private struct AlbumsReloadKey: Equatable {
+        var backendReady: Bool
+        var revision: Int
+    }
 
     /// Smart categories backed by real, present capabilities in this repo (server-side `PhotoTag` filters). The
     /// titles + icons come from the shared `PhotoTag` (already localized), so no per-category strings live here.
@@ -49,7 +53,9 @@ struct MobileCollectionsScreen: View {
             .listStyle(.insetGrouped)
             .navigationTitle(String(localized: "tab.collections"))
             .navigationBarTitleDisplayMode(.inline)
-            .task(id: model.backend == nil) { await loadAlbums() }
+            .task(id: AlbumsReloadKey(backendReady: model.backend != nil, revision: model.albumCatalogRevision)) {
+                await loadAlbums()
+            }
             .refreshable { await loadAlbums() }
         }
     }

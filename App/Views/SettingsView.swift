@@ -540,12 +540,8 @@ private struct AlbumSyncSection: View {
                     if let count = album.assetCount {
                         Text("settings.albumsync_photo_count \(count)")
                     }
-                    Text(isActive ? controller.progress.localizedTitle : album.localizedStateDescription)
+                    Text(isActive ? controller.progress.localizedTitle : album.localizedRowStatusDescription)
                         .foregroundStyle(rowStateColor(album, isActive: isActive))
-                    if album.needsAttentionCount > 0, !isActive {
-                        Text("settings.albumsync_row_attention \(album.needsAttentionCount)")
-                            .foregroundStyle(.orange)
-                    }
                 }
                 .font(.system(size: 11).monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -573,6 +569,7 @@ private struct AlbumSyncSection: View {
 
     private func rowStateColor(_ album: AlbumSyncController.SelectedAlbum, isActive: Bool) -> Color {
         if isActive { return .secondary }
+        if album.hasNeedsAttention { return .orange }
         switch album.state {
         case .missingLocally, .needsDecision: return .orange
         case .notSynced, .synced: return .secondary

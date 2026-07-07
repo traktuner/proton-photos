@@ -306,6 +306,33 @@ final class ProjectHygieneTests: XCTestCase {
         }
     }
 
+    func testAlbumSyncRefreshAndChangeObservationStayShared() throws {
+        let controller = try String(
+            contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoLibraryBackupAdapter/AlbumSyncController.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(controller.contains("private let changeMonitor: PhotoLibraryChangeMonitor"))
+        XCTAssertTrue(controller.contains("changeMonitor.startObserving"))
+        XCTAssertTrue(controller.contains("scheduleChangeDrivenSync()"))
+        XCTAssertTrue(controller.contains("syncSelected()"))
+        XCTAssertTrue(controller.contains("setRemoteAlbumsChangedHandler"))
+        XCTAssertTrue(controller.contains("onRemoteAlbumsChanged?()"))
+
+        let appModel = try String(contentsOf: repoRoot.appendingPathComponent("App/AppModel.swift"), encoding: .utf8)
+        XCTAssertTrue(appModel.contains("private(set) var albumCatalogRevision"))
+        XCTAssertTrue(appModel.contains("albumSync.setRemoteAlbumsChangedHandler"))
+
+        let mainView = try String(contentsOf: repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
+        XCTAssertTrue(mainView.contains(".task(id: model.albumCatalogRevision) { await loadAlbums() }"))
+
+        let mobileModel = try String(contentsOf: repoRoot.appendingPathComponent("iOSApp/MobileLibraryModel.swift"), encoding: .utf8)
+        XCTAssertTrue(mobileModel.contains("private(set) var albumCatalogRevision"))
+        XCTAssertTrue(mobileModel.contains("albumSync.setRemoteAlbumsChangedHandler"))
+
+        let mobileAlbums = try String(contentsOf: repoRoot.appendingPathComponent("iOSApp/MobileAlbumsScreen.swift"), encoding: .utf8)
+        XCTAssertTrue(mobileAlbums.contains("AlbumsReloadKey(backendReady: model.backend != nil, revision: model.albumCatalogRevision)"))
+    }
+
     /// GPL-contamination guard: the Proton Drive iOS app (GPL-3.0) may be consulted as a
     /// BEHAVIORAL reference only. Its distinctive type/module names must never appear in our
     /// production sources - their presence would indicate copied code rather than clean-room work.
