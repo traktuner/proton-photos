@@ -2,7 +2,7 @@
 import PackageDescription
 
 // Xcode 26.x currently crashes in dynamic actor-isolation checks on the Live Photo AVPlayer path.
-// Keep the workaround local to this path dependency and re-test it before removing the flag on a newer toolchain.
+// Keep this flag scoped to the SDK-backed targets and re-test before removing it on a newer toolchain.
 let disableDynamicActorIsolation: [SwiftSetting] = [
     .unsafeFlags(["-Xfrontend", "-disable-dynamic-actor-isolation"])
 ]
