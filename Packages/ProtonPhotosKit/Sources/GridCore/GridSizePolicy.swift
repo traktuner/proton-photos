@@ -49,7 +49,7 @@ public enum GridSizePolicy {
         return max(1, base * scale(sizeClass))
     }
 
-    /// The size class for a desktop viewport width. Desktop ships `.regular` ONLY for now - responsive
+    /// The size class for a desktop viewport width. Desktop currently uses only `.regular`; responsive
     /// breakpoints are reserved so that enabling them is a deliberate, isolated change, never a silent jump.
     public static func sizeClass(forWidth width: CGFloat) -> SizeClass { .regular }
 
