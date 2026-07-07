@@ -360,6 +360,21 @@ final class ProjectHygieneTests: XCTestCase {
                       "photo backup needs a usage description on macOS")
     }
 
+    func testMobileAppStoreDeviceCapabilitiesDeclareRendererFloor() throws {
+        let infoData = try Data(contentsOf: repoRoot.appendingPathComponent("iOSApp/Info.plist"))
+        let info = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: infoData, options: [], format: nil) as? [String: Any]
+        )
+        let capabilities = try XCTUnwrap(info["UIRequiredDeviceCapabilities"] as? [String])
+
+        XCTAssertTrue(capabilities.contains("arm64"))
+        XCTAssertTrue(capabilities.contains("metal"))
+        XCTAssertTrue(
+            capabilities.contains("iphone-ipad-minimum-performance-a12"),
+            "App Store distribution must exclude devices below the shared mobile renderer floor"
+        )
+    }
+
     func testUploadCoreStaysPlatformAndSDKAgnostic() {
         for url in sourceFiles(in: uploadCoreDir) {
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""

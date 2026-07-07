@@ -227,9 +227,9 @@ private struct TimelineDateScrubber: View {
         GeometryReader { geometry in
             let active = activeIndex.flatMap { markers[safe: $0] }
             ZStack(alignment: .trailing) {
-                Capsule(style: .continuous)
-                    .fill(.ultraThinMaterial)
+                Color.clear
                     .frame(width: hovering || active != nil ? 7 : 4)
+                    .protonGlass(in: Capsule(style: .continuous))
                     .opacity(hovering || active != nil ? 0.72 : 0.22)
                     .padding(.trailing, 10)
 
@@ -240,7 +240,7 @@ private struct TimelineDateScrubber: View {
                         .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .glassEffect(in: Capsule(style: .continuous))   // native Liquid Glass (was .ultraThinMaterial)
+                        .protonGlass(in: Capsule(style: .continuous))
                         .position(x: geometry.size.width - 66,
                                   y: markerY(index: index, height: geometry.size.height))
                 }

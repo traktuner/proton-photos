@@ -281,7 +281,7 @@ private struct BackendErrorView: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
             HStack(spacing: 10) {
-                Button("action.retry", action: retry).buttonStyle(.glassProminent).frame(width: 120)
+                Button("action.retry", action: retry).protonProminentGlassButton().frame(width: 120)
                 Button("action.sign_out", action: signOut)
                     .buttonStyle(.plain)
                     .foregroundStyle(ProtonColor.textHint)

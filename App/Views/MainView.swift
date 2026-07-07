@@ -450,7 +450,7 @@ struct MainView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .glassEffect(in: Capsule())   // native Liquid Glass (was .ultraThinMaterial)
+        .protonGlass(in: Capsule())
     }
 
     @ViewBuilder private var uploadRefreshBanner: some View {
@@ -471,7 +471,7 @@ struct MainView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .glassEffect(in: Capsule())   // native Liquid Glass (was .regularMaterial)
+                .protonGlass(in: Capsule())
                 .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
                 .padding(.bottom, 20)
             }
@@ -1037,7 +1037,7 @@ struct MainView: View {
     ///
     /// Deliberately the SAME control as `exportProgressIndicator` (the download progress) - a determinate
     /// `.circular` `ProgressView` at `.controlSize(.regular)` - so the two read identically and the pill sizes
-    /// itself the same proven way. No glyph, no label. No manual `.glassEffect`: the toolbar glass is system-owned.
+    /// itself the same proven way. No glyph, no label. The toolbar owns its own glass.
     private var libraryPreparePill: some View {
         let pct = Int(OfflineLibraryManager.shared.cachePreparePercent.rounded())
         // Wrapped in a Button so it gets the SAME round, padded toolbar pill as the aspect-toggle button (a bare
@@ -1078,9 +1078,7 @@ struct MainView: View {
                 .fixedSize()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-                // No manual `.glassEffect` here: this is a `.principal` toolbar item and the system toolbar OWNS
-                // the Liquid-Glass background. A manual Capsule glass rendered a DOUBLE pill (inner manual capsule
-                // inside the outer system pill). The system supplies the single glass background.
+                // The system toolbar supplies the single glass background for the principal item.
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {

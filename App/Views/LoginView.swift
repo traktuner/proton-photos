@@ -62,7 +62,7 @@ struct LoginView: View {
                 } label: {
                     Text("login.sign_in_button")
                 }
-                .buttonStyle(.glassProminent)
+                .protonProminentGlassButton()
 
                 if case let .signedOut(error?) = model.auth {
                     Text(error)

@@ -293,8 +293,7 @@ public struct PhotoViewerView: View {
     }
 
     /// Apple-style LIVE indicator, top-left in full view. Hovering it plays the motion clip with sound (instant -
-    /// it's preloaded); moving off stops it. Native Liquid Glass (a custom view OUTSIDE the toolbar, so
-    /// `.glassEffect` applies). Force-click-and-hold anywhere on the photo plays it too; releasing stops it
+    /// it's preloaded); moving off stops it. Force-click-and-hold anywhere on the photo plays it too; releasing stops it
     /// (see `onForceClick` / `onForceClickEnded`).
     private var livePhotoBadge: some View {
         HStack(spacing: 5) {
@@ -306,7 +305,7 @@ public struct PhotoViewerView: View {
         .foregroundStyle(.primary)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .glassEffect(in: Capsule())
+        .protonGlass(in: Capsule())
         .padding(.top, 14)
         .padding(.leading, 14)
         .onHover { hovering in
@@ -343,7 +342,7 @@ public struct PhotoViewerView: View {
         .foregroundStyle(.primary)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
-        .glassEffect(in: Capsule())
+        .protonGlass(in: Capsule())
         .padding(.top, model.current.isLivePhoto ? 0 : 14)
         .padding(.leading, 14)
         .accessibilityLabel(Text(L10n.string("viewer.burst_filmstrip_label")))
@@ -375,7 +374,7 @@ public struct PhotoViewerView: View {
         .padding(.top, 10)
         .padding(.bottom, 12)
         .frame(width: width)
-        .glassEffect(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .protonGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(.bottom, 16)
     }
 
@@ -430,7 +429,7 @@ public struct PhotoViewerView: View {
             }
         }
         .padding(22)
-        .glassEffect(in: RoundedRectangle(cornerRadius: 12))
+        .protonGlass(in: RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder private var busyOverlay: some View {
@@ -442,11 +441,11 @@ public struct PhotoViewerView: View {
                     .font(.headline.monospacedDigit())
             }
             .padding(18)
-            .glassEffect(in: RoundedRectangle(cornerRadius: 12))
+            .protonGlass(in: RoundedRectangle(cornerRadius: 12))
         } else {
             ProgressView().controlSize(.large)
                 .padding(16)
-                .glassEffect(in: Circle())
+                .protonGlass(in: Circle())
         }
     }
 
@@ -458,11 +457,11 @@ public struct PhotoViewerView: View {
                     .font(.headline.monospacedDigit())
             }
             .padding(18)
-            .glassEffect(in: RoundedRectangle(cornerRadius: 12))
+            .protonGlass(in: RoundedRectangle(cornerRadius: 12))
         } else {
             ProgressView().controlSize(.large)
                 .padding(16)
-                .glassEffect(in: Circle())
+                .protonGlass(in: Circle())
         }
     }
 
@@ -502,7 +501,7 @@ public struct PhotoViewerView: View {
                 .contentShape(Rectangle())   // whole frame is clickable, not just the glyph pixels
         }
         .buttonStyle(.plain)
-        .glassEffect(in: Circle())
+        .protonGlass(in: Circle())
         .opacity(enabled ? 1 : 0.25)
         .disabled(!enabled)
         .accessibilityLabel(accessibilityTitle(for: symbol))
