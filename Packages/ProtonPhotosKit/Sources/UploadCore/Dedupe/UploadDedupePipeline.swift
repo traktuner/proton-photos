@@ -164,6 +164,31 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
             try Task.checkCancellation()
         }
 
+        do {
+            if let remoteContent = try await checker.findDuplicate(contentHash: contentHash) {
+                let decision = decisionForRemoteContent(remoteContent)
+                switch decision {
+                case let .skip(.activeDuplicate, remoteLinkID):
+                    record.outcome = UploadIdentityManifestStore.Outcome.duplicateActive.rawValue
+                    record.remoteLinkID = remoteLinkID
+                    record.updatedAt = now()
+                    store.upsert(record)
+                case .skip(.trashedDuplicate, _):
+                    record.outcome = UploadIdentityManifestStore.Outcome.duplicateTrashed.rawValue
+                    record.updatedAt = now()
+                    store.upsert(record)
+                default:
+                    break
+                }
+                releasePendingContentClaim(contentKey, owner: descriptor.source)
+                return UploadPreflightResult(identity: identity, decision: decision)
+            }
+            try Task.checkCancellation()
+        } catch {
+            releasePendingContentClaim(contentKey, owner: descriptor.source)
+            throw error
+        }
+
         let remoteItems: [RemotePhotoDuplicate]
         do {
             remoteItems = try await duplicates(forNameHash: nameHash)
@@ -206,6 +231,22 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
         return UploadPreflightResult(identity: identity, decision: decision)
     }
 
+    private func decisionForRemoteContent(_ remote: RemotePhotoDuplicate) -> UploadDuplicateDecision {
+        switch remote.linkState {
+        case .draft:
+            return .skip(.draftExists, remoteLinkID: remote.linkID)
+        case .trashed:
+            return .skip(.trashedDuplicate, remoteLinkID: remote.linkID)
+        case nil:
+            return .skip(.deletedRemotely, remoteLinkID: remote.linkID)
+        case .active:
+            guard let linkID = remote.linkID, !linkID.isEmpty else {
+                return .skip(.inconsistentRemoteState, remoteLinkID: nil)
+            }
+            return .skip(.activeDuplicate, remoteLinkID: linkID)
+        }
+    }
+
     /// Releases the same-content claim (if `owner` still holds it) and wakes every waiter so it
     /// re-checks the manifest / re-resolves against fresh state.
     private func releasePendingContentClaim(_ key: String, owner: UploadSourceIdentity) {
@@ -220,6 +261,7 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
     public func invalidateCachedRemoteState() async {
         cacheGeneration += 1
         duplicateCache.removeAll()
+        await checker.invalidateCachedRemoteState()
         // Don't cancel running lookups (their callers still get server truth as of their start),
         // but stop new callers from joining them and stop their results from repopulating the
         // invalidated cache (guarded by `cacheGeneration` in `lookup`).

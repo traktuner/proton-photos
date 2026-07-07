@@ -63,9 +63,11 @@ final class FakeChecker: UploadDuplicateChecking, @unchecked Sendable {
     private let lock = NSLock()
     var epoch = "epoch-1"
     var remoteItemsByNameHash: [String: [RemotePhotoDuplicate]] = [:]
+    var remoteItemsByContentHash: [String: RemotePhotoDuplicate] = [:]
     var findError: Error?
     private(set) var findBatches: [[String]] = []
     private(set) var nameHashCalls = 0
+    private var invalidationCount = 0
 
     func nameHash(forCorrectedName name: String) async throws -> String {
         lock.withLock { nameHashCalls += 1 }
@@ -84,9 +86,18 @@ final class FakeChecker: UploadDuplicateChecking, @unchecked Sendable {
         }
     }
 
+    func findDuplicate(contentHash: String) async throws -> RemotePhotoDuplicate? {
+        lock.withLock { remoteItemsByContentHash[contentHash] }
+    }
+
+    func invalidateCachedRemoteState() async {
+        lock.withLock { invalidationCount += 1 }
+    }
+
     func hashKeyEpoch() async throws -> String { epoch }
 
     var findCallCount: Int { lock.withLock { findBatches.count } }
+    var invalidateCallCount: Int { lock.withLock { invalidationCount } }
 }
 
 // MARK: - Tests
@@ -152,6 +163,48 @@ final class UploadDedupePipelineTests: XCTestCase {
         XCTAssertEqual(copyRow?.outcome, UploadIdentityManifestStore.Outcome.duplicateActive.rawValue)
         XCTAssertEqual(copyRow?.remoteLinkID, "link-a",
                        "the copy source must adopt the original's remote link for future fast-path hits")
+    }
+
+    func testRemoteContentDuplicateWithDifferentNameSkipsWithoutUpload() async throws {
+        hasher.contentSeeds["/local/renamed-copy.HEIC"] = "already-remote-bytes"
+        let sha1 = fakeSHA1Hex(seed: "already-remote-bytes")
+        let contentHash = "ch(\(sha1))"
+        checker.remoteItemsByContentHash[contentHash] = RemotePhotoDuplicate(
+            nameHash: "nh(IMG_0001.HEIC)",
+            contentHash: contentHash,
+            linkState: .active,
+            linkID: "remote-existing"
+        )
+
+        let local = descriptor(path: "/local/renamed-copy.HEIC")
+        let result = try await pipeline.resolve(local)
+
+        XCTAssertEqual(result.decision, .skip(.activeDuplicate, remoteLinkID: "remote-existing"),
+                       "remote content identity must win even when the name hash is different")
+        XCTAssertTrue(checker.findBatches.isEmpty,
+                      "content-index hits must skip the name-hash duplicate query")
+        let row = store.record(for: local.source)
+        XCTAssertEqual(row?.outcome, UploadIdentityManifestStore.Outcome.duplicateActive.rawValue)
+        XCTAssertEqual(row?.remoteLinkID, "remote-existing")
+    }
+
+    func testRemoteStateInvalidationPropagatesToContentIndexOwner() async {
+        XCTAssertEqual(checker.invalidateCallCount, 0)
+
+        await pipeline.invalidateCachedRemoteState()
+
+        XCTAssertEqual(checker.invalidateCallCount, 1,
+                       "stale-name invalidation must also drop backend content-index state")
+    }
+
+    func testDedupeUnavailableResolverFailsBeforeUploadDecision() async {
+        let resolver = DedupeUnavailableIdentityResolver(message: "dedupe unavailable")
+        do {
+            _ = try await resolver.resolve(descriptor())
+            XCTFail("expected fail-closed resolver to throw")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("dedupe unavailable"))
+        }
     }
 
     func testTrashedContentRowIsNeverTrustedAsBackedUp() async throws {

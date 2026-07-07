@@ -101,9 +101,11 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         }
         // Scan phase through the persistent-catalog driver.
         let sync = PhotoLibraryCatalogSync(store: catalog, enumerator: enumerator, chunkSize: 50, now: { [clock] in clock!.now })
+        let needsFullScan = fullRescan || !catalog.hasCompletedFullScan()
         do {
-            if fullRescan {
+            if needsFullScan {
                 _ = try await sync.run(engine: engine, identifiers: nil)
+                catalog.markFullScanCompleted()
             } else if let identifiers, !identifiers.isEmpty {
                 _ = try await sync.run(engine: engine, identifiers: identifiers)
             }
@@ -128,6 +130,19 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         XCTAssertEqual(queue.summary().uploaded, 2)
         XCTAssertEqual(catalog.snapshot(), PhotoLibraryCatalogSnapshot(total: 2, present: 2, removed: 0))
         XCTAssertNil(lockStore.currentLock(), "the lock is released when the pass finishes")
+        XCTAssertTrue(catalog.hasCompletedFullScan(), "a successful full pass unlocks future incremental scans")
+    }
+
+    func testIncrementalTokenCannotSkipInitialFullCatalogScan() async throws {
+        enumerator.infos = [photoInfo("A"), photoInfo("B"), photoInfo("C")]
+
+        let ran = await runPass(owner: .foreground, fullRescan: false, identifiers: ["B"])
+
+        XCTAssertTrue(ran)
+        XCTAssertEqual(Set(uploader.requests.map(\.name)), ["IMG_A.HEIC", "IMG_B.HEIC", "IMG_C.HEIC"],
+                       "a PhotoKit change token is not enough proof that the local backup catalog knows the full library")
+        XCTAssertEqual(catalog.snapshot(), PhotoLibraryCatalogSnapshot(total: 3, present: 3, removed: 0))
+        XCTAssertTrue(catalog.hasCompletedFullScan())
     }
 
     func testRepeatPassOverUnchangedCatalogUploadsNothingNew() async throws {

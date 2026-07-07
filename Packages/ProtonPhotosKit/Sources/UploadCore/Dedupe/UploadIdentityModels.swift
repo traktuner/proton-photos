@@ -310,9 +310,40 @@ public protocol UploadDuplicateChecking: Sendable {
     /// Remote occupants of the given name hashes. Callers pass at most
     /// `UploadDedupePipeline.protonDuplicateBatchSize` hashes per call.
     func findDuplicates(nameHashes: [String]) async throws -> [RemotePhotoDuplicate]
+    /// Optional stronger lookup: an active remote photo with the same content hash, independent
+    /// of filename/name hash. Backends that cannot provide a remote content index return nil.
+    func findDuplicate(contentHash: String) async throws -> RemotePhotoDuplicate?
+    /// Drops backend-owned remote duplicate/content caches. Called whenever the upload resolver's
+    /// remote view is known stale; the next lookup must re-read server state.
+    func invalidateCachedRemoteState() async
     /// Irreversible fingerprint of the current photos-root hash key (for manifest validity) -
     /// never the key itself.
     func hashKeyEpoch() async throws -> String
+}
+
+public extension UploadDuplicateChecking {
+    func findDuplicate(contentHash: String) async throws -> RemotePhotoDuplicate? { nil }
+    func invalidateCachedRemoteState() async {}
+}
+
+/// Fail-closed resolver used when the account's identity manifest cannot be opened. Uploading
+/// without duplicate checks would violate the "same bytes upload once" contract, so every resolve
+/// fails before any media bytes can leave the device.
+public struct DedupeUnavailableIdentityResolver: UploadIdentityResolving {
+    private let message: String
+
+    public init(message: String = "Duplicate protection is unavailable; upload cannot start safely.") {
+        self.message = message
+    }
+
+    public func resolve(_ descriptor: UploadResourceDescriptor) async throws -> UploadPreflightResult {
+        throw UploadError.backend(message)
+    }
+
+    public func prime(_ descriptors: [UploadResourceDescriptor]) async {}
+    public func recordUploaded(_ descriptor: UploadResourceDescriptor, identity: UploadIdentity, remoteVolumeID: String, remoteLinkID: String) async {}
+    public func invalidateCachedRemoteState() async {}
+    public func uploadDidFail(_ descriptor: UploadResourceDescriptor) async {}
 }
 
 /// The pipeline seam `UploadManager` drives: resolve one descriptor to its identity + decision.

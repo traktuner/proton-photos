@@ -51,12 +51,16 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
 
     private struct Material {
         let context: PhotosShareContext
+        let rootKey: UnlockableKey
         let hashKey: Data
         let epoch: String
     }
 
     private var material: Material?
     private var materialTask: Task<Material, any Error>?
+    private var remoteContentIndex: [String: RemotePhotoDuplicate]?
+    private var remoteContentIndexTask: Task<[String: RemotePhotoDuplicate], any Error>?
+    private var remoteContentIndexGeneration = 0
 
     init(
         session: DriveSession,
@@ -97,6 +101,18 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
         }
     }
 
+    func findDuplicate(contentHash: String) async throws -> RemotePhotoDuplicate? {
+        let index = try await resolveRemoteContentIndex()
+        return index[contentHash]
+    }
+
+    func invalidateCachedRemoteState() async {
+        remoteContentIndexGeneration += 1
+        remoteContentIndex = nil
+        remoteContentIndexTask?.cancel()
+        remoteContentIndexTask = nil
+    }
+
     // MARK: Key material
 
     /// Share bootstrap + root link fetch + key-chain decryption, resolved once and cached for the
@@ -128,7 +144,7 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
             // Irreversible fingerprint for manifest validity - never the key itself.
             let epoch = SHA256.hash(data: hashKey).prefix(8).map { String(format: "%02x", $0) }.joined()
             DebugLog.log("[Dedupe] photos root hash key resolved (epoch \(epoch))")
-            return Material(context: context, hashKey: hashKey, epoch: epoch)
+            return Material(context: context, rootKey: nodeKey, hashKey: hashKey, epoch: epoch)
         }
         materialTask = task
         defer { materialTask = nil }
@@ -139,6 +155,87 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
         } catch {
             DebugLog.log("[Dedupe] hash key resolution FAILED - \(error)")
             throw error
+        }
+    }
+
+    // MARK: Remote content index
+
+    private func resolveRemoteContentIndex() async throws -> [String: RemotePhotoDuplicate] {
+        if let remoteContentIndex { return remoteContentIndex }
+        if let remoteContentIndexTask { return try await remoteContentIndexTask.value }
+        let session = self.session
+        let crypto = self.crypto
+        let material = try await resolveMaterial()
+        let generation = remoteContentIndexGeneration
+        let task = Task { () -> [String: RemotePhotoDuplicate] in
+            let photos = try await session.fetchPhotosList(volumeID: material.context.volumeID)
+            guard !photos.isEmpty else { return [:] }
+
+            var links: [String: AlbumPhotoLinkBody] = [:]
+            let ids = photos.map(\.linkID)
+            for chunk in stride(from: 0, to: ids.count, by: UploadDedupePipeline.protonDuplicateBatchSize)
+                .map({ Array(ids[$0 ..< min($0 + UploadDedupePipeline.protonDuplicateBatchSize, ids.count)]) }) {
+                try Task.checkCancellation()
+                for link in try await session.fetchPhotoLinksMetadata(shareID: material.context.shareID, linkIDs: chunk) {
+                    if let id = link.linkID { links[id] = link }
+                }
+            }
+
+            var index: [String: RemotePhotoDuplicate] = [:]
+            index.reserveCapacity(photos.count)
+            var unresolved = 0
+            for id in ids {
+                try Task.checkCancellation()
+                guard let link = links[id],
+                      let nodeKey = link.nodeKey,
+                      let nodePassphrase = link.nodePassphrase,
+                      let armoredXAttr = link.xAttr ?? link.fileProperties?.activeRevision?.xAttr,
+                      let fileKey = try? crypto.unlockNode(key: nodeKey, passphrase: nodePassphrase, parent: material.rootKey),
+                      let data = try? crypto.decryptXAttr(armoredXAttr, node: fileKey),
+                      let sha1 = (try? JSONDecoder().decode(DedupeXAttrDigests.self, from: data))?.common?.digests?.sha1?.lowercased(),
+                      !sha1.isEmpty else {
+                    unresolved += 1
+                    continue
+                }
+                let contentHash = ProtonPhotoHMAC.hex(message: sha1, key: material.hashKey)
+                index[contentHash] = RemotePhotoDuplicate(
+                    nameHash: "",
+                    contentHash: contentHash,
+                    linkState: .active,
+                    linkID: id
+                )
+            }
+            guard unresolved == 0 else {
+                throw UploadError.backend("Remote duplicate index is incomplete (\(unresolved) photos lack SHA-1 metadata).")
+            }
+            DebugLog.log("[Dedupe] remote content index built photos=\(photos.count)")
+            return index
+        }
+        remoteContentIndexTask = task
+        do {
+            let resolved = try await task.value
+            guard remoteContentIndexGeneration == generation else { throw CancellationError() }
+            remoteContentIndexTask = nil
+            remoteContentIndex = resolved
+            return resolved
+        } catch {
+            if remoteContentIndexGeneration == generation {
+                remoteContentIndexTask = nil
+            }
+            throw error
+        }
+    }
+}
+
+private struct DedupeXAttrDigests: Decodable {
+    let common: Common?
+    enum CodingKeys: String, CodingKey { case common = "Common" }
+    struct Common: Decodable {
+        let digests: Digests?
+        enum CodingKeys: String, CodingKey { case digests = "Digests" }
+        struct Digests: Decodable {
+            let sha1: String?
+            enum CodingKeys: String, CodingKey { case sha1 = "SHA1" }
         }
     }
 }

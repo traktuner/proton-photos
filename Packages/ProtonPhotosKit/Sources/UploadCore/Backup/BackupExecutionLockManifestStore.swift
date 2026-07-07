@@ -130,6 +130,39 @@ public final class BackupExecutionLockManifestStore: BackupExecutionLockStore, @
         }
     }
 
+    /// Recovers a lock left by a previous process on the same platform after an OS kill / force quit.
+    ///
+    /// Lease-based recovery is still the primary safety net. This narrower recovery only fires when
+    /// both process contexts have the expected `platform/pid-N` shape, the platform matches, the PID
+    /// differs, and the caller proves that old PID is no longer alive. A live owner is never stolen.
+    @discardableResult
+    public func recoverAbandonedProcessLocks(
+        currentProcessContext: String,
+        isProcessAlive: (Int32) -> Bool
+    ) -> [BackupExecutionLock] {
+        lock.withLock {
+            guard let existing = readLock(),
+                  let old = Self.parseProcessContext(existing.processContext),
+                  let current = Self.parseProcessContext(currentProcessContext),
+                  old.platform == current.platform,
+                  old.pid != current.pid,
+                  !isProcessAlive(old.pid) else {
+                return []
+            }
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "DELETE FROM backup_execution_lock WHERE lock_name=? AND run_id=?;",
+                -1, &stmt, nil
+            ) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, 1, lockName)
+            bindText(stmt, 2, existing.runID)
+            guard sqlite3_step(stmt) == SQLITE_DONE, sqlite3_changes(db) > 0 else { return [] }
+            return [existing]
+        }
+    }
+
     // MARK: - Read/write (must be called under `lock`)
 
     private func readLock() -> BackupExecutionLock? {
@@ -242,6 +275,18 @@ public final class BackupExecutionLockManifestStore: BackupExecutionLockStore, @
                 + "ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
             nil, nil, nil
         ) == SQLITE_OK
+    }
+
+    private static func parseProcessContext(_ raw: String?) -> (platform: String, pid: Int32)? {
+        guard let raw,
+              let slash = raw.firstIndex(of: "/") else { return nil }
+        let platform = String(raw[..<slash])
+        let suffix = raw[raw.index(after: slash)...]
+        guard suffix.hasPrefix("pid-"),
+              let pid = Int32(suffix.dropFirst(4)),
+              !platform.isEmpty,
+              pid > 0 else { return nil }
+        return (platform, pid)
     }
 
     // MARK: - Bind/column helpers

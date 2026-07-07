@@ -10,6 +10,7 @@ public final class PhotoLibraryCatalogManifestStore: PhotoLibraryCatalogStore, @
     public static let databaseFileName = "photo-library-catalog-v1.sqlite"
 
     private static let schemaVersion = 1
+    private static let completedFullScanKey = "completed_full_scan"
     private var db: OpaquePointer?
     private let lock = NSLock()
     private let encoder = JSONEncoder()
@@ -136,6 +137,18 @@ public final class PhotoLibraryCatalogManifestStore: PhotoLibraryCatalogStore, @
         }
     }
 
+    /// True only after a full-library scan finished successfully at least once. A PhotoKit
+    /// persistent-change token can exist before our own catalog is complete; this marker prevents
+    /// the first real backup pass from mistaking "changed since token" for "entire library known".
+    public func hasCompletedFullScan() -> Bool {
+        lock.withLock { readInfoValue(Self.completedFullScanKey) == 1 }
+    }
+
+    /// Called only after the full scan and its catalog writes finished without throwing/canceling.
+    public func markFullScanCompleted() {
+        lock.withLock { writeInfoValue(Self.completedFullScanKey, 1) }
+    }
+
     // MARK: - Read/write helpers (must be called under `lock`)
 
     private func classify(existing: PhotoLibraryCatalogEntry?, incoming: PhotoLibraryCatalogEntry) -> PhotoLibraryCatalogChange {
@@ -231,6 +244,30 @@ public final class PhotoLibraryCatalogManifestStore: PhotoLibraryCatalogStore, @
             isRemoved: sqlite3_column_int(stmt, 12) != 0,
             removedAt: columnDate(stmt, 13)
         )
+    }
+
+    private func readInfoValue(_ key: String) -> Int? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT value FROM photo_catalog_info WHERE key=?;", -1, &stmt, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, key)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return Int(sqlite3_column_int(stmt, 0))
+    }
+
+    private func writeInfoValue(_ key: String, _ value: Int) {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "INSERT INTO photo_catalog_info(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, key)
+        sqlite3_bind_int(stmt, 2, Int32(value))
+        _ = sqlite3_step(stmt)
     }
 
     // MARK: - Open / schema (mirrors the other backup stores)

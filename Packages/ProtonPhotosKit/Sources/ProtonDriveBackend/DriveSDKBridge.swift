@@ -591,12 +591,12 @@ extension DriveSDKBridge: PhotoUploading {
 
     /// The universal dedupe pipeline for this account: the SQLite identity manifest (per-account
     /// directory, purged on sign-out) + the Proton-keyed duplicate service. Built once at facade
-    /// composition; nil only if the manifest database cannot be opened, in which case uploads
-    /// simply run without dedupe rather than failing the whole feature.
-    nonisolated func makeUploadIdentityResolver() -> UploadDedupePipeline? {
+    /// composition. If the manifest cannot open, return a fail-closed resolver: uploading without
+    /// duplicate protection would risk library duplicates.
+    nonisolated func makeUploadIdentityResolver() -> any UploadIdentityResolving {
         guard let store = UploadIdentityManifestStore(url: uploadManifestURL, policy: uploadManifestPolicy) else {
-            DebugLog.log("[Dedupe] manifest store unavailable - uploads run without dedupe")
-            return nil
+            DebugLog.log("[Dedupe] manifest store unavailable - uploads disabled")
+            return DedupeUnavailableIdentityResolver()
         }
         let service = ProtonUploadDedupeService(session: driveSession, crypto: crypto) { [self] in
             try await photosShareContext()

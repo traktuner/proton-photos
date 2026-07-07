@@ -103,6 +103,52 @@ final class BackupExecutionLockStoreTests: XCTestCase {
                       "a stale background lock recovers on the next foreground start")
     }
 
+    func testAbandonedProcessLockCanBeRecoveredBeforeLeaseExpires() throws {
+        let store = try makeStore(lease: 120)
+        XCTAssertTrue(store.acquire(
+            owner: .foreground,
+            runID: "old",
+            phase: "uploading",
+            processContext: "ios/pid-123"
+        ).didAcquire)
+
+        let recovered = store.recoverAbandonedProcessLocks(
+            currentProcessContext: "ios/pid-456",
+            isProcessAlive: { pid in pid != 123 }
+        )
+
+        XCTAssertEqual(recovered.map(\.runID), ["old"])
+        XCTAssertNil(store.currentLock())
+        XCTAssertTrue(store.acquire(
+            owner: .foreground,
+            runID: "new",
+            phase: "scanning",
+            processContext: "ios/pid-456"
+        ).didAcquire)
+    }
+
+    func testAbandonedProcessRecoveryDoesNotStealLiveOrUnrelatedLocks() throws {
+        let store = try makeStore(lease: 120)
+        XCTAssertTrue(store.acquire(
+            owner: .foreground,
+            runID: "live",
+            phase: "uploading",
+            processContext: "ios/pid-123"
+        ).didAcquire)
+
+        XCTAssertTrue(store.recoverAbandonedProcessLocks(
+            currentProcessContext: "ios/pid-456",
+            isProcessAlive: { _ in true }
+        ).isEmpty)
+        XCTAssertEqual(store.currentLock()?.runID, "live")
+
+        XCTAssertTrue(store.recoverAbandonedProcessLocks(
+            currentProcessContext: "macos/pid-456",
+            isProcessAlive: { _ in false }
+        ).isEmpty)
+        XCTAssertEqual(store.currentLock()?.runID, "live")
+    }
+
     func testAcquireAutoRecoversStaleWithoutExplicitCall() throws {
         let store = try makeStore(lease: 30)
         XCTAssertTrue(store.acquire(owner: .background, runID: "dead").didAcquire)

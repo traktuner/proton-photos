@@ -162,6 +162,20 @@ final class PhotoLibraryCatalogStoreTests: XCTestCase {
         XCTAssertEqual(reopened.count(), 0)
     }
 
+    func testCompletedFullScanMarkerPersistsAcrossReopen() throws {
+        let url = tempDir.appendingPathComponent(PhotoLibraryCatalogManifestStore.databaseFileName)
+        do {
+            let store = try XCTUnwrap(PhotoLibraryCatalogManifestStore(url: url))
+            XCTAssertFalse(store.hasCompletedFullScan())
+            store.markFullScanCompleted()
+            XCTAssertTrue(store.hasCompletedFullScan())
+            store.close()
+        }
+
+        let reopened = try XCTUnwrap(PhotoLibraryCatalogManifestStore(url: url))
+        XCTAssertTrue(reopened.hasCompletedFullScan())
+    }
+
     // MARK: - Catalog sync driver (integration with the engine's enqueue contract)
 
     func testDriverEnqueuesOnlyNewAndChangedAssets() async throws {

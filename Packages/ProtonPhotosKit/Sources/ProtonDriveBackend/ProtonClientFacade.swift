@@ -22,10 +22,9 @@ public final class ProtonClientFacade {
     /// The raw upload transport (the SDK bridge) for the backup sync runner - shares the exact
     /// upload semantics with the manual queue.
     public let photoUploader: any PhotoUploading
-    /// The ONE dedupe pipeline instance for this account, shared by manual uploads and backup
-    /// sync so both see the same manifest and the same cached remote view. Nil only when the
-    /// manifest database could not open - manual uploads then run without dedupe, but backup
-    /// sync must NOT start (it would risk double uploads).
+    /// The ONE dedupe resolver for this account, shared by manual uploads and backup sync so both
+    /// see the same manifest and remote duplicate view. If the manifest database cannot open,
+    /// the bridge supplies a fail-closed resolver; uploads must never silently run without dedupe.
     public let uploadIdentityResolver: (any UploadIdentityResolving)?
     /// Per-account data directory (holds `library-v1.sqlite` + upload manifests). Backup sync
     /// stores live here too, so the sign-out purge covers them wholesale.

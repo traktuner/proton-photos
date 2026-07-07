@@ -2,6 +2,9 @@ import Foundation
 import Observation
 import PhotosCore
 import UploadCore
+#if canImport(Darwin)
+import Darwin
+#endif
 
 /// The ONE photo-library backup orchestrator, shared verbatim by iOS, iPadOS, and macOS. It
 /// composes the universal core (engine, runner, dedupe pipeline, status model, catalog, execution
@@ -9,8 +12,9 @@ import UploadCore
 /// apps contribute ONLY: dependency injection, OS scheduling hooks (BGTask on iOS), permission UI,
 /// and settings screens.
 ///
-/// Consent contract: backup NEVER starts on its own. `enableBackup()` is the only entry point
-/// that requests photo access, and it must be called from an explicit user action.
+/// Consent contract: backup never enables itself. `enableBackup()` is the only entry point that
+/// requests photo access, and it must be called from an explicit user action. Once enabled, the
+/// controller may resume interrupted work on launch.
 @MainActor
 @Observable
 public final class PhotoLibraryBackupController {
@@ -147,6 +151,9 @@ public final class PhotoLibraryBackupController {
         }
         if isEnabled {
             startObservingChanges()
+            Task { @MainActor [weak self] in
+                self?.resumeEnabledBackupAfterLaunch()
+            }
         }
     }
 
@@ -215,8 +222,13 @@ public final class PhotoLibraryBackupController {
         if let lockStore {
             // Recovery must precede the drain: clear any owner that stopped heartbeating (crash,
             // OS kill, BG expiration) so a dead run can never permanently block backup.
+            let processContext = Self.processContext
+            lockStore.recoverAbandonedProcessLocks(
+                currentProcessContext: processContext,
+                isProcessAlive: Self.processIsAlive
+            )
             lockStore.recoverStaleLocks(olderThan: Date().addingTimeInterval(-Self.lockLease))
-            switch lockStore.acquire(owner: owner, runID: runID, phase: "scanning", processContext: Self.processContext) {
+            switch lockStore.acquire(owner: owner, runID: runID, phase: "scanning", processContext: processContext) {
             case .acquired:
                 break
             case .busy:
@@ -272,19 +284,25 @@ public final class PhotoLibraryBackupController {
                     Task { @MainActor in self?.lastCatalogProgress = progress }
                 }
             )
-            if changes.requiresFullRescan {
+            let needsFullScan = changes.requiresFullRescan || !catalogStore.hasCompletedFullScan()
+            if needsFullScan {
                 _ = try await sync.run(engine: engine, identifiers: nil)
+                catalogStore.markFullScanCompleted()
             } else if !changes.changedIdentifiers.isEmpty {
                 _ = try await sync.run(engine: engine, identifiers: changes.changedIdentifiers)
             }
             return
         }
-        // Catalog unavailable: preserve the pre-catalog behavior so backup still works.
-        if changes.requiresFullRescan {
-            _ = try await engine.scan(PhotoLibraryBackupCatalog())
-        } else if !changes.changedIdentifiers.isEmpty {
-            _ = try await engine.scan(PhotoLibraryBackupCatalog(localIdentifiers: changes.changedIdentifiers))
-        }
+        // Catalog unavailable: there is no durable proof that we know the full library, so prefer a
+        // complete pass. This is slower only in the degraded path, but avoids silently backing up a
+        // PhotoKit delta as if it were the entire library.
+        _ = try await engine.scan(PhotoLibraryBackupCatalog())
+    }
+
+    private func resumeEnabledBackupAfterLaunch() {
+        refreshAccessState()
+        guard isEnabled, accessState.allowsBackup, !isSyncing else { return }
+        syncNow()
     }
 
     public func stopSync() {
@@ -379,5 +397,16 @@ public final class PhotoLibraryBackupController {
         let platform = "ios"
         #endif
         return "\(platform)/pid-\(process.processIdentifier)"
+    }
+
+    private static func processIsAlive(_ pid: Int32) -> Bool {
+        guard pid > 0 else { return false }
+        if pid == Int32(ProcessInfo.processInfo.processIdentifier) { return true }
+        #if canImport(Darwin)
+        if Darwin.kill(pid, 0) == 0 { return true }
+        return errno == EPERM
+        #else
+        return true
+        #endif
     }
 }
