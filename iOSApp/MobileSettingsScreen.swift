@@ -376,7 +376,7 @@ private struct MobilePhotoBackupRows: View {
                     Text(live)
                         .font(.caption2)
                         .monospacedDigit()
-                        .foregroundStyle(ProtonColor.textWeak)
+                        .foregroundStyle(display.liveItemIsUploading ? ProtonColor.primary : ProtonColor.textWeak)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .frame(maxWidth: .infinity, alignment: .leading)

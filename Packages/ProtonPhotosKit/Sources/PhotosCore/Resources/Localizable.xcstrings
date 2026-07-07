@@ -219,6 +219,14 @@
         "de": { "stringUnit": { "state": "translated", "value": "Aktuell: %@" } }
       }
     },
+    "backup.status_backing_up_item %@": {
+      "extractionState": "manual",
+      "comment": "Backup status liveness line for the file whose bytes are actually uploading right now (not merely being checked).",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backing up %@" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Wird gesichert: %@" } }
+      }
+    },
     "albumsync.phase_idle": {
       "extractionState": "manual",
       "comment": "Album sync status: nothing running yet for this album.",

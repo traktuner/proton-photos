@@ -76,6 +76,9 @@ public struct BackupStatusPresentation: Sendable, Equatable {
     /// items, so it can be flat for a minute while bytes actually move - the rotating name proves the
     /// pass is alive rather than stuck. nil outside active phases (nothing is being worked on).
     public var liveItemName: String?
+    /// True when `liveItemName` is a file whose bytes are actually moving (the `.uploading` step), so
+    /// the line reads "wird gesichert: X"; false means it is only being checked ("Aktuell: X").
+    public var liveItemIsUploading: Bool
 
     public init(
         headlineKey: String,
@@ -84,7 +87,8 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         progressFraction: Double?,
         isActive: Bool,
         accessory: Accessory,
-        liveItemName: String? = nil
+        liveItemName: String? = nil,
+        liveItemIsUploading: Bool = false
     ) {
         self.headlineKey = headlineKey
         self.detailKey = detailKey
@@ -93,6 +97,7 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         self.isActive = isActive
         self.accessory = accessory
         self.liveItemName = liveItemName
+        self.liveItemIsUploading = liveItemIsUploading
     }
 
     // MARK: - Mapping from the shared status
@@ -105,16 +110,20 @@ public struct BackupStatusPresentation: Sendable, Equatable {
                       count: nil, progressFraction: nil, isActive: true, accessory: .activity)
 
         case .checking:
+            // Even while the pass as a whole is still "checking" a big backlog, a specific file may
+            // already be uploading - surface THAT as "wird gesichert" so the proof is honest.
+            let live = Self.liveItem(status)
             self.init(headlineKey: Self.activeHeadline, detailKey: "backup.status_checking_detail",
                       count: Self.countOfTotal("backup.detail_checked", value: status.checked, total: status.totalConsidered),
                       progressFraction: status.fractionCompleted, isActive: true, accessory: .activity,
-                      liveItemName: status.currentItemName)
+                      liveItemName: live.name, liveItemIsUploading: live.isUploading)
 
         case .uploading:
+            let live = Self.liveItem(status)
             self.init(headlineKey: Self.activeHeadline, detailKey: "backup.status_uploading_detail",
                       count: Self.countOfTotal("backup.detail_backed_up", value: status.backedUp, total: status.totalConsidered),
                       progressFraction: status.fractionCompleted, isActive: true, accessory: .activity,
-                      liveItemName: status.currentItemName)
+                      liveItemName: live.name, liveItemIsUploading: live.isUploading)
 
         case .paused:
             self.init(headlineKey: "backup.phase_paused", detailKey: nil,
@@ -152,6 +161,15 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         return Count(key: key, value: value, total: total)
     }
 
+    /// Prefer the file actually pushing bytes (so the line can honestly say "wird gesichert"); fall
+    /// back to whatever is merely being checked.
+    private static func liveItem(_ status: BackupStatus) -> (name: String?, isUploading: Bool) {
+        if let uploading = status.uploadingItemName, !uploading.isEmpty {
+            return (uploading, true)
+        }
+        return (status.currentItemName, false)
+    }
+
     // MARK: - Localized accessors (finite key sets; no dynamic-key lookups)
 
     public var localizedHeadline: String {
@@ -182,6 +200,8 @@ public struct BackupStatusPresentation: Sendable, Equatable {
     /// "still moving" from "stuck" when the settled count is momentarily flat.
     public var localizedLiveItem: String? {
         guard let name = liveItemName, !name.isEmpty else { return nil }
-        return L10n.string("backup.status_working_on \(name)")
+        return liveItemIsUploading
+            ? L10n.string("backup.status_backing_up_item \(name)")
+            : L10n.string("backup.status_working_on \(name)")
     }
 }

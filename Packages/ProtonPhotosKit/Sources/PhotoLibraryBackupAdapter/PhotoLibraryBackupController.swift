@@ -98,6 +98,9 @@ public final class PhotoLibraryBackupController {
     /// every refresh. The runner's in-memory mirror is the only source of the in-flight name, so we
     /// stash it here and fold it into `currentQueueProgress()`. Cleared when a pass ends.
     private var lastRunnerItemName: String?
+    /// Same caching for the item whose bytes are moving right now, so the "wird gesichert: X" line
+    /// survives the DB-truth refresh. nil whenever nothing is mid-transfer.
+    private var lastRunnerUploadingName: String?
 
     public init(
         configuration: Configuration,
@@ -476,6 +479,7 @@ public final class PhotoLibraryBackupController {
         // Capture the in-flight name unconditionally (even when the throttle below drops this update)
         // so the periodic DB-truth refresh can keep showing a live "Working on <file>" line.
         if let name = snapshot.currentItemName { lastRunnerItemName = name }
+        lastRunnerUploadingName = snapshot.currentUploadingName
         let candidate = BackupStatus(progress: snapshot, isScanning: isScanning, isUserPaused: isUserPaused)
         guard candidate != status else { return }
         let now = Date()
@@ -505,6 +509,7 @@ public final class PhotoLibraryBackupController {
         isSyncing = false
         isScanning = false
         lastRunnerItemName = nil
+        lastRunnerUploadingName = nil
         let shouldRestart = pendingSyncAfterStop && isEnabled && accessState.allowsBackup
         pendingSyncAfterStop = false
         refreshFromQueue()
@@ -544,6 +549,7 @@ public final class PhotoLibraryBackupController {
         return BackupSyncProgress(
             summary: queueStore.summary(),
             currentItemName: isSyncing ? lastRunnerItemName : nil,
+            currentUploadingName: isSyncing ? lastRunnerUploadingName : nil,
             isRunning: isSyncing
         )
     }

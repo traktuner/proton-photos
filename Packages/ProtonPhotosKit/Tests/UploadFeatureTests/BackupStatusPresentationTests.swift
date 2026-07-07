@@ -159,8 +159,20 @@ final class BackupStatusPresentationTests: XCTestCase {
             p.currentItemName = "IMG_3917.heic"
             let pres = BackupStatusPresentation(status(p))
             XCTAssertEqual(pres.liveItemName, "IMG_3917.heic", "\(label): the in-flight name is the liveness signal")
-            XCTAssertNotNil(pres.localizedLiveItem, "\(label): renders a localized 'working on' line")
+            XCTAssertFalse(pres.liveItemIsUploading, "\(label): only checking, so not 'wird gesichert'")
+            XCTAssertNotNil(pres.localizedLiveItem, "\(label): renders a localized liveness line")
         }
+    }
+
+    func testUploadingFilePrefersBackingUpWordingOverCheckingFile() {
+        // A file is genuinely pushing bytes while another is merely being checked: the "wird
+        // gesichert" name must win, so the user sees the actual upload proven.
+        var p = progress(total: 100, uploadQueued: 5, checking: 1, uploading: 1, alreadyBackedUp: 20, isRunning: true)
+        p.currentItemName = "IMG_checking.heic"
+        p.currentUploadingName = "IMG_uploading.heic"
+        let pres = BackupStatusPresentation(status(p))
+        XCTAssertEqual(pres.liveItemName, "IMG_uploading.heic", "the uploading file is the honest proof")
+        XCTAssertTrue(pres.liveItemIsUploading)
     }
 
     func testLivenessNameIsAbsentWhenIdleOrEmpty() {

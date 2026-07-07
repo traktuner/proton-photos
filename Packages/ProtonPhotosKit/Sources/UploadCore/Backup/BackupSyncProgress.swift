@@ -30,6 +30,11 @@ public struct BackupSyncProgress: Sendable, Equatable {
     public var paused = 0
     /// The file currently being processed, for "wird geprüft: IMG_0042.HEIC" style rows.
     public var currentItemName: String?
+    /// The file whose BYTES are being pushed right now (a subset of processing: the `.uploading`
+    /// step). Distinct from `currentItemName` so the UI can honestly say "wird gesichert: X" only
+    /// when that specific file is actually being uploaded, not merely checked. nil when nothing is
+    /// mid-transfer.
+    public var currentUploadingName: String?
     /// True while a runner pass is draining the queue.
     public var isRunning = false
     /// True while the throttle policy holds the running pass at zero concurrency
@@ -61,7 +66,7 @@ public struct BackupSyncProgress: Sendable, Equatable {
     }
 
     /// Seeds the queue-derived counters from a summary; live fields stay as set by the runner.
-    public init(summary: UploadBackupSyncQueueSummary, currentItemName: String? = nil, isRunning: Bool = false) {
+    public init(summary: UploadBackupSyncQueueSummary, currentItemName: String? = nil, currentUploadingName: String? = nil, isRunning: Bool = false) {
         self.init()
         total = summary.total
         waiting = summary.waiting
@@ -76,6 +81,7 @@ public struct BackupSyncProgress: Sendable, Equatable {
         failed = summary.failed
         paused = summary.paused
         self.currentItemName = currentItemName
+        self.currentUploadingName = currentUploadingName
         self.isRunning = isRunning
     }
 }

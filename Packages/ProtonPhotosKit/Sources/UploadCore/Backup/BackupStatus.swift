@@ -48,6 +48,9 @@ public struct BackupStatus: Sendable, Equatable {
     /// Items parked for a later re-check (remote draft backoff).
     public var waitingRetry = 0
     public var currentItemName: String?
+    /// The file whose bytes are being pushed right now, if any - lets the UI say "wird gesichert: X"
+    /// only when that specific item is genuinely uploading, never for mere checking.
+    public var uploadingItemName: String?
     /// Honest progress; `nil` = indeterminate (unknown total or nothing measurable).
     public var fractionCompleted: Double?
 
@@ -74,6 +77,7 @@ public struct BackupStatus: Sendable, Equatable {
         sourceMissing = progress.sourceMissing
         waitingRetry = progress.blocked
         currentItemName = progress.currentItemName
+        uploadingItemName = progress.currentUploadingName
 
         // An explicit user pause wins over everything: show "Pausiert", not "checking"/"waiting".
         if isUserPaused {

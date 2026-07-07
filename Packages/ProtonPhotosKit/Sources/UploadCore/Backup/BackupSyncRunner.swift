@@ -87,6 +87,9 @@ public actor BackupSyncRunner {
     /// Cancellation tokens of uploads currently in flight, so `stop()` can abort transfers.
     private var inFlightTokens: [String: UUID] = [:]
     private var inFlightNames: [String: String] = [:]
+    /// Names of items whose BYTES are moving right now (the `.uploading` step only) - drives the
+    /// honest "wird gesichert: X" line, kept apart from `inFlightNames` (which also covers checking).
+    private var uploadingNames: [String: String] = [:]
 
     private var progress = BackupSyncProgress()
     private var onProgress: (@Sendable (BackupSyncProgress) -> Void)?
@@ -419,7 +422,19 @@ public actor BackupSyncRunner {
         let persistedState = transition(entry, from: state, to: .uploading)
         let token = UUID()
         inFlightTokens[key] = token
-        defer { inFlightTokens[key] = nil }
+        // This item is now genuinely pushing bytes: expose it as the "wird gesichert" name so the UI
+        // can prove a specific file is being backed up (not just checked). emitProgress right away so
+        // the change is visible immediately, not only at the next settle.
+        uploadingNames[key] = entry.originalFilename
+        progress.currentUploadingName = entry.originalFilename
+        emitProgress()
+        defer {
+            inFlightTokens[key] = nil
+            uploadingNames[key] = nil
+            if progress.currentUploadingName == entry.originalFilename {
+                progress.currentUploadingName = uploadingNames.values.first
+            }
+        }
 
         let request = PhotoUploadRequest(
             queueItemID: UUID(),
