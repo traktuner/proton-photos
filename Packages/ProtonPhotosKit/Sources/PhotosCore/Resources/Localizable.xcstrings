@@ -211,20 +211,20 @@
         "de": { "stringUnit": { "state": "translated", "value": "Sichert neue Objekte" } }
       }
     },
-    "backup.status_working_on %@": {
+    "backup.progress_backed_up %lld %lld": {
       "extractionState": "manual",
-      "comment": "Backup status: the item (filename) being worked on right now - a small liveness line under the count so the user can see the pass is alive even when the settled count sits still.",
+      "comment": "Backup status subtitle: how many items are safely backed up out of the total. Single honest progress line shown on every platform.",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Working on %@" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Aktuell: %@" } }
+        "en": { "stringUnit": { "state": "translated", "value": "%lld of %lld backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld von %lld gesichert" } }
       }
     },
-    "backup.status_backing_up_item %@": {
+    "backup.progress_attention %lld": {
       "extractionState": "manual",
-      "comment": "Backup status liveness line for the file whose bytes are actually uploading right now (not merely being checked).",
+      "comment": "Backup status attention line, shown only when some items could not be backed up and need the user.",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Backing up %@" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Wird gesichert: %@" } }
+        "en": { "stringUnit": { "state": "translated", "value": "%lld couldn’t be backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld nicht gesichert" } }
       }
     },
     "albumsync.phase_idle": {

@@ -87,7 +87,9 @@ public struct BackupStatusStabilizer: Sendable {
     }
 
     private static func sameSubtitle(_ a: BackupStatusPresentation, _ b: BackupStatusPresentation) -> Bool {
-        a.headlineKey == b.headlineKey && a.detailKey == b.detailKey && a.accessory == b.accessory
+        // Dwell on the phase (headline) + icon; the numeric subtitle and upload percentage within an
+        // unchanged phase pass through immediately (they advance on their own).
+        a.headlineKey == b.headlineKey && a.accessory == b.accessory
     }
 
     private static let restingIdle = BackupStatusPresentation(BackupStatus())

@@ -2,8 +2,9 @@ import Foundation
 import XCTest
 @testable import UploadCore
 
-/// The shared display projection of `BackupStatus`: a stable umbrella headline while active, an
-/// honest per-phase subtitle, and counts that never mislabel checking as uploading.
+/// The shared display projection of `BackupStatus`: a compact, honest row - an icon, a phase
+/// headline (checking vs backing up, driven by real byte movement), one subtitle line
+/// ("<n> of <m>" + a live upload %), and an optional attention line. Same model on every platform.
 final class BackupStatusPresentationTests: XCTestCase {
 
     private func progress(
@@ -25,71 +26,77 @@ final class BackupStatusPresentationTests: XCTestCase {
         BackupStatus(progress: p, isScanning: isScanning)
     }
 
-    // MARK: Active phases share ONE stable umbrella headline
+    // MARK: The one distinction that must always be right: checking vs backing up
 
-    func testScanningIsUmbrellaHeadlineWithScanningSubtitleAndNoFakeProgress() {
+    func testCheckingHeadlineWhenNoBytesAreMoving() {
+        // A running pass with no in-flight upload is CHECKING - never "backing up".
+        let s = status(progress(total: 100, uploadQueued: 5, checking: 1, alreadyBackedUp: 20, isRunning: true))
+        let p = BackupStatusPresentation(s)
+        XCTAssertEqual(p.headlineKey, "backup.phase_checking")
+        XCTAssertNotEqual(p.headlineKey, "backup.phase_uploading",
+                          "checking/hashing must never be worded as uploading")
+        XCTAssertNil(p.uploadPercent, "no byte transfer => no percentage")
+        XCTAssertTrue(p.isActive)
+        XCTAssertEqual(p.accessory, .activity)
+    }
+
+    func testBackingUpHeadlineOnlyWhenBytesAreActuallyMoving() {
+        // Same big backlog, but one file is genuinely uploading: headline flips to backing up and a
+        // live percentage appears - proving the upload even while the overall pass is mostly checking.
+        var raw = progress(total: 100, uploadQueued: 5, checking: 1, uploading: 1, alreadyBackedUp: 20, isRunning: true)
+        raw.currentUploadingName = "IMG_5560.MOV"
+        raw.currentUploadingFraction = 0.43
+        let p = BackupStatusPresentation(status(raw))
+        XCTAssertEqual(p.headlineKey, "backup.phase_uploading")
+        XCTAssertEqual(p.uploadPercent, 43)
+        let subtitle = try? XCTUnwrap(p.localizedSubtitle)
+        XCTAssertEqual(subtitle?.contains("43 %"), true, "the live percentage proves the upload is moving")
+        XCTAssertFalse(subtitle?.contains("IMG_5560.MOV") ?? true, "no filename in the subtitle")
+    }
+
+    func testSubtitleIsCountOfBackedUpOverTotalWithNoPercentWhenNotUploading() {
+        let s = status(progress(total: 100, checking: 1, uploaded: 10, alreadyBackedUp: 20, isRunning: true))
+        let p = BackupStatusPresentation(s)
+        XCTAssertEqual(p.backedUp, 30)
+        XCTAssertEqual(p.total, 100)
+        XCTAssertNil(p.uploadPercent)
+        let subtitle = try? XCTUnwrap(p.localizedSubtitle)
+        XCTAssertEqual(subtitle?.contains("30"), true)
+        XCTAssertEqual(subtitle?.contains("100"), true)
+        XCTAssertEqual(subtitle?.contains("%"), false)
+    }
+
+    func testScanningHasNoFakeProgressAndNoSubtitle() {
         let s = status(progress(total: 40, waiting: 40), isScanning: true)
         XCTAssertEqual(s.phase, .scanning)
         let p = BackupStatusPresentation(s)
-        XCTAssertEqual(p.headlineKey, "backup.status_active")
-        XCTAssertEqual(p.detailKey, "backup.status_scanning_detail")
-        XCTAssertNil(p.count, "scanning has no honest total, so no count")
+        XCTAssertEqual(p.headlineKey, "backup.phase_scanning")
         XCTAssertNil(p.progressFraction, "scanning must stay indeterminate")
-        XCTAssertTrue(p.isActive)
-        XCTAssertEqual(p.accessory, .activity)
-    }
-
-    func testCheckingUsesCheckingSubtitleAndCheckedCountNeverUploadWording() {
-        let s = status(progress(total: 100, uploadQueued: 5, checking: 1, alreadyBackedUp: 20, isRunning: true))
-        XCTAssertEqual(s.phase, .checking)
-        let p = BackupStatusPresentation(s)
-        XCTAssertEqual(p.headlineKey, "backup.status_active", "the title is the stable umbrella, not the phase")
-        XCTAssertEqual(p.detailKey, "backup.status_checking_detail")
-        XCTAssertNotEqual(p.detailKey, "backup.status_uploading_detail",
-                          "checking/hashing/dedupe must never be worded as uploading")
-        XCTAssertEqual(p.count?.key, "backup.detail_checked")
-        XCTAssertEqual(p.count?.value, s.checked)
-        XCTAssertEqual(p.count?.total, s.totalConsidered)
-        XCTAssertTrue(p.isActive)
-        XCTAssertEqual(p.accessory, .activity)
-    }
-
-    func testUploadingUsesUploadingSubtitleAndBackedUpCountOnlyWhenBytesMove() {
-        let s = status(progress(total: 100, uploading: 3, uploaded: 12, alreadyBackedUp: 20, isRunning: true))
-        XCTAssertEqual(s.phase, .uploading)
-        let p = BackupStatusPresentation(s)
-        XCTAssertEqual(p.headlineKey, "backup.status_active")
-        XCTAssertEqual(p.detailKey, "backup.status_uploading_detail")
-        XCTAssertEqual(p.count?.key, "backup.detail_backed_up")
-        XCTAssertEqual(p.count?.value, s.backedUp)
-        XCTAssertEqual(p.count?.total, s.totalConsidered)
+        XCTAssertNil(p.localizedSubtitle, "no honest total mid-scan => no subtitle")
         XCTAssertTrue(p.isActive)
     }
 
     // MARK: Resting / terminal phases
 
-    func testCompletedIsSuccessAndNeverUploading() {
+    func testCompletedIsSuccessAndNotActive() {
         let s = status(progress(total: 10, uploaded: 4, alreadyBackedUp: 6))
         XCTAssertEqual(s.phase, .completed)
         let p = BackupStatusPresentation(s)
         XCTAssertEqual(p.headlineKey, "backup.phase_completed")
         XCTAssertFalse(p.isActive)
         XCTAssertEqual(p.accessory, .success)
-        XCTAssertNotEqual(p.detailKey, "backup.status_uploading_detail")
-        XCTAssertEqual(p.count?.key, "backup.detail_already_backed_up")
-        XCTAssertEqual(p.count?.value, 6)
     }
 
-    func testNeedsAttentionExplainsInPlainLanguageWithCount() {
+    func testAttentionLineAppearsOnlyWhenSomethingNeedsTheUser() {
+        let clean = BackupStatusPresentation(status(progress(total: 10, checking: 1, alreadyBackedUp: 5, isRunning: true)))
+        XCTAssertNil(clean.localizedAttention, "nothing failed => no attention line")
+
         let s = status(progress(total: 10, uploaded: 5, sourceMissing: 1, failed: 2))
-        XCTAssertEqual(s.phase, .needsAttention)
         let p = BackupStatusPresentation(s)
         XCTAssertEqual(p.headlineKey, "backup.phase_attention")
-        XCTAssertEqual(p.detailKey, "backup.status_attention_detail", "a plain sentence, not just a number")
-        XCTAssertEqual(p.count?.key, "backup.detail_attention")
-        XCTAssertEqual(p.count?.value, s.needsAttentionCount)
+        XCTAssertEqual(p.attentionCount, s.needsAttentionCount)
+        XCTAssertNotNil(p.localizedAttention)
         XCTAssertEqual(p.accessory, .attention)
-        XCTAssertFalse(p.isActive)
     }
 
     func testPausedKeepsProgressButIsNotActive() {
@@ -98,104 +105,18 @@ final class BackupStatusPresentationTests: XCTestCase {
         let p = BackupStatusPresentation(s)
         XCTAssertEqual(p.headlineKey, "backup.phase_paused")
         XCTAssertEqual(p.accessory, .paused)
-        XCTAssertFalse(p.isActive, "paused is not spinning-active")
+        XCTAssertFalse(p.isActive)
     }
 
-    func testWaitingAndIdleAreCalmAndCarryNoUploadWording() {
-        let waiting = BackupStatusPresentation(status(progress(total: 10, waiting: 3, uploaded: 2)))
-        XCTAssertEqual(waiting.headlineKey, "backup.phase_waiting")
-        XCTAssertFalse(waiting.isActive)
-        XCTAssertEqual(waiting.accessory, .idle)
-
+    func testIdleIsCalmWithNoSubtitle() {
         let idle = BackupStatusPresentation(status(progress()))
         XCTAssertEqual(idle.headlineKey, "backup.phase_idle")
-        XCTAssertNil(idle.count)
-        XCTAssertNil(idle.detailKey)
+        XCTAssertNil(idle.localizedSubtitle)
         XCTAssertEqual(idle.accessory, .idle)
     }
-
-    // MARK: Determinism & count edge cases
 
     func testMappingIsDeterministic() {
         let s = status(progress(total: 100, checking: 1, alreadyBackedUp: 40, isRunning: true))
         XCTAssertEqual(BackupStatusPresentation(s), BackupStatusPresentation(s))
-    }
-
-    func testCountIsOmittedWhenThereIsNoHonestTotal() {
-        // Running with an unknown total (0) must not fabricate an "X of 0" count.
-        let s = status(progress(total: 0, checking: 1, isRunning: true))
-        let p = BackupStatusPresentation(s)
-        XCTAssertNil(p.count)
-    }
-
-    func testCountLocalizationKeysAreFinite() {
-        // Every count the mapping can emit maps to a real catalog key via the localized switch (the
-        // default "\(value)" branch is only a safety net and must not be reached for real counts).
-        for s in [
-            status(progress(total: 100, checking: 1, alreadyBackedUp: 20, isRunning: true)),
-            status(progress(total: 100, uploading: 1, uploaded: 5, isRunning: true)),
-            status(progress(total: 10, uploaded: 4, alreadyBackedUp: 6)),
-            status(progress(total: 10, uploaded: 5, failed: 2)),
-            status(progress(total: 10, waiting: 3, uploaded: 2)),
-        ] {
-            if let count = BackupStatusPresentation(s).count {
-                XCTAssertTrue(
-                    ["backup.detail_checked", "backup.detail_backed_up", "backup.detail_already_backed_up",
-                     "backup.detail_attention", "backup.detail_waiting"].contains(count.key),
-                    "unexpected count key \(count.key)"
-                )
-            }
-        }
-    }
-
-    // MARK: Liveness line - the "still moving" signal when the settled count sits flat
-
-    func testActivePhasesSurfaceCurrentItemAsLivenessName() {
-        for (label, base) in [
-            ("uploading", progress(total: 100, uploading: 3, uploaded: 12, alreadyBackedUp: 20, isRunning: true)),
-            ("checking", progress(total: 100, uploadQueued: 5, checking: 1, alreadyBackedUp: 20, isRunning: true)),
-        ] {
-            var p = base
-            p.currentItemName = "IMG_3917.heic"
-            let pres = BackupStatusPresentation(status(p))
-            XCTAssertEqual(pres.liveItemName, "IMG_3917.heic", "\(label): the in-flight name is the liveness signal")
-            XCTAssertFalse(pres.liveItemIsUploading, "\(label): only checking, so not 'wird gesichert'")
-            XCTAssertNotNil(pres.localizedLiveItem, "\(label): renders a localized liveness line")
-        }
-    }
-
-    func testUploadingLiveLineShowsPercentAndSizeForLargeVideo() {
-        var p = progress(total: 100, uploading: 1, isRunning: true)
-        p.currentUploadingName = "IMG_5560.MOV"
-        p.currentUploadingFraction = 0.43
-        p.currentUploadingByteCount = 465 * 1_000_000
-        let pres = BackupStatusPresentation(status(p))
-        XCTAssertEqual(pres.liveItemFraction, 0.43)
-        let line = try? XCTUnwrap(pres.localizedLiveItem)
-        XCTAssertEqual(line?.contains("IMG_5560.MOV"), true)
-        XCTAssertEqual(line?.contains("43 %"), true, "a moving percentage proves the big upload is alive")
-        XCTAssertEqual(line?.contains("MB"), true, "size explains why one item lingers")
-    }
-
-    func testUploadingFilePrefersBackingUpWordingOverCheckingFile() {
-        // A file is genuinely pushing bytes while another is merely being checked: the "wird
-        // gesichert" name must win, so the user sees the actual upload proven.
-        var p = progress(total: 100, uploadQueued: 5, checking: 1, uploading: 1, alreadyBackedUp: 20, isRunning: true)
-        p.currentItemName = "IMG_checking.heic"
-        p.currentUploadingName = "IMG_uploading.heic"
-        let pres = BackupStatusPresentation(status(p))
-        XCTAssertEqual(pres.liveItemName, "IMG_uploading.heic", "the uploading file is the honest proof")
-        XCTAssertTrue(pres.liveItemIsUploading)
-    }
-
-    func testLivenessNameIsAbsentWhenIdleOrEmpty() {
-        // Settled/terminal states are not "working on" anything.
-        let completed = status(progress(total: 10, uploaded: 10, isRunning: false))
-        XCTAssertNil(BackupStatusPresentation(completed).liveItemName)
-
-        // An empty name never renders a bare "working on" line.
-        var running = progress(total: 100, uploading: 1, isRunning: true)
-        running.currentItemName = ""
-        XCTAssertNil(BackupStatusPresentation(status(running)).localizedLiveItem)
     }
 }

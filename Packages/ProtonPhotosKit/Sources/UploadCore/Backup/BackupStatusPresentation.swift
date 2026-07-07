@@ -1,18 +1,23 @@
 import Foundation
 import PhotosCore
 
-/// Platform-neutral display projection of `BackupStatus` for the settings backup row.
+/// Platform-neutral display projection of `BackupStatus` for the backup status row. ONE mapping so
+/// iOS and macOS render the exact same thing - a compact, honest row instead of per-platform ad-hoc
+/// stacks of lines.
 ///
-/// It exists to keep the row calm and honest with ONE tested mapping instead of per-platform ad-hoc
-/// wording:
-/// - While a run is active the headline is a STABLE umbrella ("Backup in progress") so the title
-///   never flaps as the underlying phase cycles checking↔uploading many times a second during a
-///   drain; the changing work is a calm subtitle underneath.
-/// - "Uploading" wording (`backup.status_uploading_detail`) appears ONLY for the `.uploading` phase,
-///   i.e. only when bytes are actually moving - checking/hashing/dedupe is never called upload.
+/// The row is at most: an icon, a headline (the phase), one subtitle line, and a progress bar.
+/// Design contract:
+/// - The headline tells the truth about the phase, and the single distinction that MUST always be
+///   right is checking vs uploading. It is driven by whether bytes are ACTUALLY moving
+///   (`uploadingItemName`), never by a count heuristic - so it can never claim "backing up" while it
+///   is only hashing/checking, nor hide a real upload behind "checking".
+/// - The subtitle is one line: "<backed up> of <total>", and ONLY while a real byte transfer is in
+///   flight it appends the current file's upload percentage ("· 43 %"). No filename is ever shown -
+///   a filename next to "backing up" reads as a promise the item is safe when it is only mid-check.
+/// - A separate attention line appears only when something actually needs the user.
 ///
-/// This is pure and time-free. The iOS view layers `BackupStatusStabilizer` on top for the timeful
-/// hysteresis (dwell) that stops the subtitle switching more than about once a second.
+/// This is pure and time-free; iOS layers `BackupStatusStabilizer` on top for dwell so the headline
+/// does not strobe as the phase flips many times a second during a fast drain.
 public struct BackupStatusPresentation: Sendable, Equatable {
 
     /// The single activity treatment for the row's one icon (there is never a second spinner).
@@ -24,168 +29,98 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         case paused
     }
 
-    /// A numeric progress line ("12 of 340 checked"). Value-first; the view formats via the catalog.
-    public struct Count: Sendable, Equatable {
-        /// Base catalog key, e.g. `backup.detail_checked`.
-        public var key: String
-        public var value: Int
-        /// nil for single-argument keys (e.g. "%lld files need attention").
-        public var total: Int?
-
-        public init(key: String, value: Int, total: Int? = nil) {
-            self.key = key
-            self.value = value
-            self.total = total
-        }
-
-        /// Localized numeric line. A finite, explicit switch (rather than a dynamic key) so argument
-        /// binding and plural selection are compiler-checked.
-        public var localized: String {
-            switch (key, total) {
-            case let ("backup.detail_checked", total?):
-                return L10n.string("backup.detail_checked \(value) \(total)")
-            case let ("backup.detail_backed_up", total?):
-                return L10n.string("backup.detail_backed_up \(value) \(total)")
-            case ("backup.detail_already_backed_up", _):
-                return L10n.string("backup.detail_already_backed_up \(value)")
-            case ("backup.detail_attention", _):
-                return L10n.string("backup.detail_attention \(value)")
-            case ("backup.detail_waiting", _):
-                return L10n.string("backup.detail_waiting \(value)")
-            default:
-                return "\(value)"
-            }
-        }
-    }
-
-    /// Stable headline key. `backup.status_active` while active (never flaps); otherwise a resting
-    /// phase key.
+    /// Stable phase key, used both for the headline text and by the stabilizer's dwell.
     public var headlineKey: String
-    /// Calm subtitle key describing the current work, or nil.
-    public var detailKey: String?
-    /// Numeric progress line, or nil when there is no honest total.
-    public var count: Count?
-    /// Determinate fraction (0...1), or nil = indeterminate.
-    public var progressFraction: Double?
-    /// True while a run is active - drives the one spinning icon and the reserved progress slot.
+    /// True while a run is active - drives the one spinning icon.
     public var isActive: Bool
     public var accessory: Accessory
-    /// The item the pass is working on right now (a filename), shown as a small "still-moving" line
-    /// under the count. This is the ONLY honest liveness signal when the settled count sits still for
-    /// a while because a handful of large new photos are uploading: the count reflects *finished*
-    /// items, so it can be flat for a minute while bytes actually move - the rotating name proves the
-    /// pass is alive rather than stuck. nil outside active phases (nothing is being worked on).
-    public var liveItemName: String?
-    /// True when `liveItemName` is a file whose bytes are actually moving (the `.uploading` step), so
-    /// the line reads "wird gesichert: X"; false means it is only being checked ("Aktuell: X").
-    public var liveItemIsUploading: Bool
-    /// Byte progress (0…1) and size of the uploading item, so the line can read
-    /// "Wird gesichert: IMG_5560.MOV — 43 % (465 MB)" and prove a big video is moving.
-    public var liveItemFraction: Double?
-    public var liveItemByteCount: Int?
+    /// Determinate overall fraction (settled/total), or nil = indeterminate (scanning) / none.
+    public var progressFraction: Double?
+
+    // Subtitle inputs kept raw so the localized strings are compiler-checked, not built from a
+    // dynamic key. `backedUp`/`total` render "<n> of <m>"; `uploadPercent` is non-nil ONLY while a
+    // real transfer is moving; `attentionCount` drives the optional attention line.
+    public var backedUp: Int
+    public var total: Int
+    public var uploadPercent: Int?
+    public var attentionCount: Int
 
     public init(
         headlineKey: String,
-        detailKey: String?,
-        count: Count?,
-        progressFraction: Double?,
         isActive: Bool,
         accessory: Accessory,
-        liveItemName: String? = nil,
-        liveItemIsUploading: Bool = false,
-        liveItemFraction: Double? = nil,
-        liveItemByteCount: Int? = nil
+        progressFraction: Double?,
+        backedUp: Int = 0,
+        total: Int = 0,
+        uploadPercent: Int? = nil,
+        attentionCount: Int = 0
     ) {
         self.headlineKey = headlineKey
-        self.detailKey = detailKey
-        self.count = count
-        self.progressFraction = progressFraction
         self.isActive = isActive
         self.accessory = accessory
-        self.liveItemName = liveItemName
-        self.liveItemIsUploading = liveItemIsUploading
-        self.liveItemFraction = liveItemFraction
-        self.liveItemByteCount = liveItemByteCount
+        self.progressFraction = progressFraction
+        self.backedUp = backedUp
+        self.total = total
+        self.uploadPercent = uploadPercent
+        self.attentionCount = attentionCount
     }
 
     // MARK: - Mapping from the shared status
 
     public init(_ status: BackupStatus) {
+        let uploadingNow = status.uploadingItemName != nil
+        let percent = uploadingNow
+            ? status.uploadingFraction.map { max(0, min(100, Int(($0 * 100).rounded()))) }
+            : nil
+
         switch status.phase {
         case .scanning:
-            // Enumerating: no honest total yet, so no count and no determinate bar.
-            self.init(headlineKey: Self.activeHeadline, detailKey: "backup.status_scanning_detail",
-                      count: nil, progressFraction: nil, isActive: true, accessory: .activity)
+            self.init(headlineKey: "backup.phase_scanning", isActive: true, accessory: .activity,
+                      progressFraction: nil, backedUp: status.backedUp, total: status.totalConsidered ?? 0,
+                      attentionCount: status.needsAttentionCount)
 
-        case .checking:
-            // Even while the pass as a whole is still "checking" a big backlog, a specific file may
-            // already be uploading - surface THAT as "wird gesichert" so the proof is honest.
-            let live = Self.liveItem(status)
-            self.init(headlineKey: Self.activeHeadline, detailKey: "backup.status_checking_detail",
-                      count: Self.countOfTotal("backup.detail_checked", value: status.checked, total: status.totalConsidered),
-                      progressFraction: status.fractionCompleted, isActive: true, accessory: .activity,
-                      liveItemName: live.name, liveItemIsUploading: live.isUploading,
-                      liveItemFraction: live.fraction, liveItemByteCount: live.byteCount)
-
-        case .uploading:
-            let live = Self.liveItem(status)
-            self.init(headlineKey: Self.activeHeadline, detailKey: "backup.status_uploading_detail",
-                      count: Self.countOfTotal("backup.detail_backed_up", value: status.backedUp, total: status.totalConsidered),
-                      progressFraction: status.fractionCompleted, isActive: true, accessory: .activity,
-                      liveItemName: live.name, liveItemIsUploading: live.isUploading,
-                      liveItemFraction: live.fraction, liveItemByteCount: live.byteCount)
+        case .checking, .uploading:
+            // The one distinction that must always be right: bytes actually moving => "backing up".
+            self.init(headlineKey: uploadingNow ? "backup.phase_uploading" : "backup.phase_checking",
+                      isActive: true, accessory: .activity,
+                      progressFraction: status.fractionCompleted,
+                      backedUp: status.backedUp, total: status.totalConsidered ?? 0,
+                      uploadPercent: percent, attentionCount: status.needsAttentionCount)
 
         case .paused:
-            self.init(headlineKey: "backup.phase_paused", detailKey: nil,
-                      count: Self.countOfTotal("backup.detail_backed_up", value: status.backedUp, total: status.totalConsidered),
-                      progressFraction: status.fractionCompleted, isActive: false, accessory: .paused)
+            self.init(headlineKey: "backup.phase_paused", isActive: false, accessory: .paused,
+                      progressFraction: status.fractionCompleted,
+                      backedUp: status.backedUp, total: status.totalConsidered ?? 0,
+                      attentionCount: status.needsAttentionCount)
 
         case .waiting:
-            let remaining = status.uploadQueued + status.waitingRetry
-                + max(0, (status.totalConsidered ?? 0) - status.checked)
-            self.init(headlineKey: "backup.phase_waiting", detailKey: nil,
-                      count: remaining > 0 ? Count(key: "backup.detail_waiting", value: remaining) : nil,
-                      progressFraction: nil, isActive: false, accessory: .idle)
+            self.init(headlineKey: "backup.phase_waiting", isActive: false, accessory: .idle,
+                      progressFraction: status.fractionCompleted,
+                      backedUp: status.backedUp, total: status.totalConsidered ?? 0,
+                      attentionCount: status.needsAttentionCount)
 
         case .completed:
-            self.init(headlineKey: "backup.phase_completed", detailKey: nil,
-                      count: status.alreadyBackedUp > 0 ? Count(key: "backup.detail_already_backed_up", value: status.alreadyBackedUp) : nil,
-                      progressFraction: nil, isActive: false, accessory: .success)
+            self.init(headlineKey: "backup.phase_completed", isActive: false, accessory: .success,
+                      progressFraction: nil, backedUp: status.backedUp, total: status.totalConsidered ?? 0)
 
         case .needsAttention:
-            // Plain-language explanation first, the number second - never just a scary count.
-            self.init(headlineKey: "backup.phase_attention", detailKey: "backup.status_attention_detail",
-                      count: Count(key: "backup.detail_attention", value: status.needsAttentionCount),
-                      progressFraction: nil, isActive: false, accessory: .attention)
+            self.init(headlineKey: "backup.phase_attention", isActive: false, accessory: .attention,
+                      progressFraction: nil, backedUp: status.backedUp, total: status.totalConsidered ?? 0,
+                      attentionCount: status.needsAttentionCount)
 
         case .idle:
-            self.init(headlineKey: "backup.phase_idle", detailKey: nil,
-                      count: nil, progressFraction: nil, isActive: false, accessory: .idle)
+            self.init(headlineKey: "backup.phase_idle", isActive: false, accessory: .idle,
+                      progressFraction: nil)
         }
-    }
-
-    private static let activeHeadline = "backup.status_active"
-
-    private static func countOfTotal(_ key: String, value: Int, total: Int?) -> Count? {
-        guard let total, total > 0 else { return nil }
-        return Count(key: key, value: value, total: total)
-    }
-
-    /// Prefer the file actually pushing bytes (so the line can honestly say "wird gesichert"); fall
-    /// back to whatever is merely being checked.
-    private static func liveItem(_ status: BackupStatus)
-        -> (name: String?, isUploading: Bool, fraction: Double?, byteCount: Int?) {
-        if let uploading = status.uploadingItemName, !uploading.isEmpty {
-            return (uploading, true, status.uploadingFraction, status.uploadingByteCount)
-        }
-        return (status.currentItemName, false, nil, nil)
     }
 
     // MARK: - Localized accessors (finite key sets; no dynamic-key lookups)
 
     public var localizedHeadline: String {
         switch headlineKey {
-        case "backup.status_active": return L10n.string("backup.status_active")
+        case "backup.phase_scanning": return L10n.string("backup.phase_scanning")
+        case "backup.phase_checking": return L10n.string("backup.phase_checking")
+        case "backup.phase_uploading": return L10n.string("backup.phase_uploading")
         case "backup.phase_paused": return L10n.string("backup.phase_paused")
         case "backup.phase_waiting": return L10n.string("backup.phase_waiting")
         case "backup.phase_completed": return L10n.string("backup.phase_completed")
@@ -194,35 +129,18 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         }
     }
 
-    public var localizedDetail: String? {
-        switch detailKey {
-        case "backup.status_scanning_detail": return L10n.string("backup.status_scanning_detail")
-        case "backup.status_checking_detail": return L10n.string("backup.status_checking_detail")
-        case "backup.status_uploading_detail": return L10n.string("backup.status_uploading_detail")
-        case "backup.status_attention_detail": return L10n.string("backup.status_attention_detail")
-        default: return nil
-        }
+    /// "<n> of <m> backed up", plus "· 43 %" only while a real upload is moving. nil when there is no
+    /// honest total yet (scanning / idle).
+    public var localizedSubtitle: String? {
+        guard total > 0 else { return nil }
+        var line = L10n.string("backup.progress_backed_up \(backedUp) \(total)")
+        if let uploadPercent { line += " · \(uploadPercent) %" }
+        return line
     }
 
-    public var localizedCount: String? { count?.localized }
-
-    /// "Working on <file>" liveness line, or nil when nothing is being worked on. Rendered small and
-    /// truncatable under the count; changes as items finish, which is what tells the user apart
-    /// "still moving" from "stuck" when the settled count is momentarily flat.
-    public var localizedLiveItem: String? {
-        guard let name = liveItemName, !name.isEmpty else { return nil }
-        guard liveItemIsUploading else { return L10n.string("backup.status_working_on \(name)") }
-        // "Wird gesichert: IMG_5560.MOV — 43 % · 465 MB": localized base + locale-neutral numeric
-        // suffix. Percentage and size are the proof a large upload is moving while the count sits still.
-        var line = L10n.string("backup.status_backing_up_item \(name)")
-        var extras: [String] = []
-        if let fraction = liveItemFraction, fraction > 0 {
-            extras.append("\(Int((fraction * 100).rounded())) %")
-        }
-        if let bytes = liveItemByteCount, bytes > 0 {
-            extras.append(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))
-        }
-        if !extras.isEmpty { line += " — " + extras.joined(separator: " · ") }
-        return line
+    /// Shown only when something actually needs the user; nil otherwise.
+    public var localizedAttention: String? {
+        guard attentionCount > 0 else { return nil }
+        return L10n.string("backup.progress_attention \(attentionCount)")
     }
 }

@@ -357,17 +357,11 @@ private struct MobilePhotoBackupRows: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                if let detail = display.localizedDetail {
-                    Text(detail)
+                // One honest progress line: "<n> von <m> gesichert", plus "· 43 %" only while a real
+                // upload is moving. No filename - the phase headline already says checking vs backing up.
+                if let subtitle = display.localizedSubtitle {
+                    Text(subtitle)
                         .font(.footnote)
-                        .foregroundStyle(display.accessory == .attention ? .orange : ProtonColor.textWeak)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if let count = display.localizedCount {
-                    Text(count)
-                        .font(.caption)
                         .monospacedDigit()
                         .foregroundStyle(ProtonColor.textWeak)
                         .contentTransition(.numericText())
@@ -375,23 +369,8 @@ private struct MobilePhotoBackupRows: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                // The one honest "still moving" signal: the file being worked on right now. It rotates
-                // as items finish, so a flat settled count next to a changing name reads as "alive, just
-                // slow" rather than "stuck". Truncated in the middle - filenames can be long.
-                if let live = display.localizedLiveItem {
-                    Text(live)
-                        .font(.caption2)
-                        .monospacedDigit()
-                        .foregroundStyle(display.liveItemIsUploading ? ProtonColor.primary : ProtonColor.textWeak)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                // A run still in progress may have already hit failures. Surface that in plain
-                // language (not a bare number); the terminal attention phase repeats it on finish.
-                if display.isActive, controller.status.failed > 0 {
-                    Text(L10n.string("backup.status_attention_detail"))
+                if let attention = display.localizedAttention {
+                    Text(attention)
                         .font(.caption)
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)

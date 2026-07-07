@@ -385,14 +385,21 @@ private struct PhotoLibraryBackupSection: View {
                 }
             }
         } else {
+            let display = BackupStatusPresentation(controller.status)
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(controller.status.localizedTitle)
+                    Text(display.localizedHeadline)
                         .font(.system(size: 12, weight: .medium))
-                    if let detail = controller.status.localizedDetail {
-                        Text(detail)
+                    // One honest line: "<n> von <m> gesichert" (+ "· 43 %" only during a real upload).
+                    if let subtitle = display.localizedSubtitle {
+                        Text(subtitle)
                             .font(.system(size: 11).monospacedDigit())
                             .foregroundStyle(.secondary)
+                    }
+                    if let attention = display.localizedAttention {
+                        Text(attention)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.orange)
                     }
                 }
                 Spacer()
@@ -402,28 +409,11 @@ private struct PhotoLibraryBackupSection: View {
                     Button("settings.backup_sync_now") { controller.retryFailedAndSync() }
                 }
             }
-            if controller.status.isActive || controller.status.phase == .paused {
-                if let fraction = controller.status.fractionCompleted {
+            if display.isActive || display.accessory == .paused {
+                if let fraction = display.progressFraction {
                     ProgressView(value: fraction)
                 } else {
                     ProgressView()
-                }
-                if let name = controller.status.currentItemName {
-                    Text(name)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            if let total = controller.status.totalConsidered, total > 0 {
-                Text("settings.backup_backed_up \(controller.status.backedUp) \(total)")
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(.secondary)
-                if controller.status.failed > 0 {
-                    Text("settings.backup_row_failed \(controller.status.failed)")
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(.orange)
                 }
             }
             if controller.accessState == .limited {
