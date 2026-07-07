@@ -70,6 +70,12 @@ public struct BackupStatusPresentation: Sendable, Equatable {
     /// True while a run is active - drives the one spinning icon and the reserved progress slot.
     public var isActive: Bool
     public var accessory: Accessory
+    /// The item the pass is working on right now (a filename), shown as a small "still-moving" line
+    /// under the count. This is the ONLY honest liveness signal when the settled count sits still for
+    /// a while because a handful of large new photos are uploading: the count reflects *finished*
+    /// items, so it can be flat for a minute while bytes actually move - the rotating name proves the
+    /// pass is alive rather than stuck. nil outside active phases (nothing is being worked on).
+    public var liveItemName: String?
 
     public init(
         headlineKey: String,
@@ -77,7 +83,8 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         count: Count?,
         progressFraction: Double?,
         isActive: Bool,
-        accessory: Accessory
+        accessory: Accessory,
+        liveItemName: String? = nil
     ) {
         self.headlineKey = headlineKey
         self.detailKey = detailKey
@@ -85,6 +92,7 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         self.progressFraction = progressFraction
         self.isActive = isActive
         self.accessory = accessory
+        self.liveItemName = liveItemName
     }
 
     // MARK: - Mapping from the shared status
@@ -99,12 +107,14 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         case .checking:
             self.init(headlineKey: Self.activeHeadline, detailKey: "backup.status_checking_detail",
                       count: Self.countOfTotal("backup.detail_checked", value: status.checked, total: status.totalConsidered),
-                      progressFraction: status.fractionCompleted, isActive: true, accessory: .activity)
+                      progressFraction: status.fractionCompleted, isActive: true, accessory: .activity,
+                      liveItemName: status.currentItemName)
 
         case .uploading:
             self.init(headlineKey: Self.activeHeadline, detailKey: "backup.status_uploading_detail",
                       count: Self.countOfTotal("backup.detail_backed_up", value: status.backedUp, total: status.totalConsidered),
-                      progressFraction: status.fractionCompleted, isActive: true, accessory: .activity)
+                      progressFraction: status.fractionCompleted, isActive: true, accessory: .activity,
+                      liveItemName: status.currentItemName)
 
         case .paused:
             self.init(headlineKey: "backup.phase_paused", detailKey: nil,
@@ -166,4 +176,12 @@ public struct BackupStatusPresentation: Sendable, Equatable {
     }
 
     public var localizedCount: String? { count?.localized }
+
+    /// "Working on <file>" liveness line, or nil when nothing is being worked on. Rendered small and
+    /// truncatable under the count; changes as items finish, which is what tells the user apart
+    /// "still moving" from "stuck" when the settled count is momentarily flat.
+    public var localizedLiveItem: String? {
+        guard let name = liveItemName, !name.isEmpty else { return nil }
+        return L10n.string("backup.status_working_on \(name)")
+    }
 }

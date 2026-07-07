@@ -369,6 +369,19 @@ private struct MobilePhotoBackupRows: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                // The one honest "still moving" signal: the file being worked on right now. It rotates
+                // as items finish, so a flat settled count next to a changing name reads as "alive, just
+                // slow" rather than "stuck". Truncated in the middle - filenames can be long.
+                if let live = display.localizedLiveItem {
+                    Text(live)
+                        .font(.caption2)
+                        .monospacedDigit()
+                        .foregroundStyle(ProtonColor.textWeak)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 // A run still in progress may have already hit failures. Surface that in plain
                 // language (not a bare number); the terminal attention phase repeats it on finish.
                 if display.isActive, controller.status.failed > 0 {

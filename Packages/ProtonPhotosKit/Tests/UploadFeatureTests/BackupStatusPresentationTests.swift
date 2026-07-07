@@ -147,4 +147,30 @@ final class BackupStatusPresentationTests: XCTestCase {
             }
         }
     }
+
+    // MARK: Liveness line - the "still moving" signal when the settled count sits flat
+
+    func testActivePhasesSurfaceCurrentItemAsLivenessName() {
+        for (label, base) in [
+            ("uploading", progress(total: 100, uploading: 3, uploaded: 12, alreadyBackedUp: 20, isRunning: true)),
+            ("checking", progress(total: 100, uploadQueued: 5, checking: 1, alreadyBackedUp: 20, isRunning: true)),
+        ] {
+            var p = base
+            p.currentItemName = "IMG_3917.heic"
+            let pres = BackupStatusPresentation(status(p))
+            XCTAssertEqual(pres.liveItemName, "IMG_3917.heic", "\(label): the in-flight name is the liveness signal")
+            XCTAssertNotNil(pres.localizedLiveItem, "\(label): renders a localized 'working on' line")
+        }
+    }
+
+    func testLivenessNameIsAbsentWhenIdleOrEmpty() {
+        // Settled/terminal states are not "working on" anything.
+        let completed = status(progress(total: 10, uploaded: 10, isRunning: false))
+        XCTAssertNil(BackupStatusPresentation(completed).liveItemName)
+
+        // An empty name never renders a bare "working on" line.
+        var running = progress(total: 100, uploading: 1, isRunning: true)
+        running.currentItemName = ""
+        XCTAssertNil(BackupStatusPresentation(status(running)).localizedLiveItem)
+    }
 }

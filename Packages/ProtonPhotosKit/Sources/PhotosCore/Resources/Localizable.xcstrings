@@ -211,6 +211,14 @@
         "de": { "stringUnit": { "state": "translated", "value": "Sichert neue Objekte" } }
       }
     },
+    "backup.status_working_on %@": {
+      "extractionState": "manual",
+      "comment": "Backup status: the item (filename) being worked on right now - a small liveness line under the count so the user can see the pass is alive even when the settled count sits still.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Working on %@" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Aktuell: %@" } }
+      }
+    },
     "albumsync.phase_idle": {
       "extractionState": "manual",
       "comment": "Album sync status: nothing running yet for this album.",

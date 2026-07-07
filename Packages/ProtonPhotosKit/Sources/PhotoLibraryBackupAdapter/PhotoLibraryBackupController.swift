@@ -93,6 +93,11 @@ public final class PhotoLibraryBackupController {
     private var pendingSyncAfterStop = false
     private var isScanning = false
     private var lastStatusUpdate = Date.distantPast
+    /// Last item the runner reported working on. The 1s status refresh reads the DURABLE queue (which
+    /// has no notion of "current item"), so without caching it the liveness line would blink out
+    /// every refresh. The runner's in-memory mirror is the only source of the in-flight name, so we
+    /// stash it here and fold it into `currentQueueProgress()`. Cleared when a pass ends.
+    private var lastRunnerItemName: String?
 
     public init(
         configuration: Configuration,
@@ -468,6 +473,9 @@ public final class PhotoLibraryBackupController {
     // MARK: - Status mirror (throttled, phase changes immediate)
 
     private func applyRunnerProgress(_ snapshot: BackupSyncProgress) {
+        // Capture the in-flight name unconditionally (even when the throttle below drops this update)
+        // so the periodic DB-truth refresh can keep showing a live "Working on <file>" line.
+        if let name = snapshot.currentItemName { lastRunnerItemName = name }
         let candidate = BackupStatus(progress: snapshot, isScanning: isScanning, isUserPaused: isUserPaused)
         guard candidate != status else { return }
         let now = Date()
@@ -496,6 +504,7 @@ public final class PhotoLibraryBackupController {
         if activeRunID == runID { activeRunID = nil }
         isSyncing = false
         isScanning = false
+        lastRunnerItemName = nil
         let shouldRestart = pendingSyncAfterStop && isEnabled && accessState.allowsBackup
         pendingSyncAfterStop = false
         refreshFromQueue()
@@ -530,7 +539,13 @@ public final class PhotoLibraryBackupController {
         guard let queueStore else { return BackupSyncProgress() }
         // isRunning reflects whether a pass is actually active, so the periodic status refresh never
         // misreads an active pass (between micro-batches) as ".waiting" ("Wartet auf Fortsetzung").
-        return BackupSyncProgress(summary: queueStore.summary(), isRunning: isSyncing)
+        // Fold in the runner's last in-flight name (only while a pass runs) so the DB-derived progress
+        // still carries a liveness signal; nil when idle so no stale name lingers.
+        return BackupSyncProgress(
+            summary: queueStore.summary(),
+            currentItemName: isSyncing ? lastRunnerItemName : nil,
+            isRunning: isSyncing
+        )
     }
 
     /// Non-secret debugging hint recorded on the lock (platform + pid); never load-bearing.
