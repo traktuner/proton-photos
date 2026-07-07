@@ -47,6 +47,18 @@ public final class PhotoLibraryChangeMonitor: NSObject, PHPhotoLibraryChangeObse
         }
     }
 
+    public func stopObserving() {
+        let shouldUnregister = lock.withLock {
+            onLibraryChange = nil
+            guard isObserving else { return false }
+            isObserving = false
+            return true
+        }
+        if shouldUnregister {
+            PHPhotoLibrary.shared().unregisterChangeObserver(self)
+        }
+    }
+
     public func photoLibraryDidChange(_ changeInstance: PHChange) {
         lock.withLock { onLibraryChange }?()
     }

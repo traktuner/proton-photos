@@ -77,6 +77,7 @@ public final class PhotoLibraryBackupController {
     private var changeDebounceTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
     private var activeRunID: String?
+    private var pendingSyncAfterStop = false
     private var isScanning = false
     private var lastStatusUpdate = Date.distantPast
 
@@ -172,13 +173,25 @@ public final class PhotoLibraryBackupController {
         // start so toggling backup off/on is a real recovery path, not a no-op.
         queueStore?.requeueFailed(updatedAt: Date())
         refreshFromQueue()
+        if isSyncing {
+            pendingSyncAfterStop = true
+            stopSync()
+            return
+        }
         syncNow()
     }
 
     public func disableBackup() {
-        stopSync()
         isEnabled = false
         defaults.set(false, forKey: Self.enabledDefaultsKey)
+        pendingSyncAfterStop = false
+        changeDebounceTask?.cancel()
+        changeDebounceTask = nil
+        monitor.stopObserving()
+        stopSync()
+        if !isSyncing {
+            refreshFromQueue()
+        }
     }
 
     public func refreshAccessState() {
@@ -379,7 +392,10 @@ public final class PhotoLibraryBackupController {
         if activeRunID == runID { activeRunID = nil }
         isSyncing = false
         isScanning = false
+        let shouldRestart = pendingSyncAfterStop && isEnabled && accessState.allowsBackup
+        pendingSyncAfterStop = false
         refreshFromQueue()
+        if shouldRestart { syncNow() }
     }
 
     private func reportSyncMessage(_ message: String) {

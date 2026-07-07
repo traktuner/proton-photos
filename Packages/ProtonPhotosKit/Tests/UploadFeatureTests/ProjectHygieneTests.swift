@@ -354,6 +354,12 @@ final class ProjectHygieneTests: XCTestCase {
                        "execution-lock failure must be fail-closed, not best-effort")
         XCTAssertTrue(controller.contains("changes.changedIdentifiers + changes.deletedIdentifiers"),
                       "targeted PhotoKit changes must include deletes so the catalog cannot stay stale")
+        XCTAssertTrue(controller.contains("pendingSyncAfterStop = true"),
+                      "re-enabling after disabling during a stop must schedule a fresh pass instead of inheriting pause")
+        XCTAssertTrue(controller.contains("monitor.stopObserving()"),
+                      "disabling photo backup must tear down live change observation")
+        XCTAssertTrue(controller.contains("if shouldRestart { syncNow() }"),
+                      "the queued re-enable pass must run after the previous stop fully settles")
 
         let runner = try String(
             contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/UploadCore/Backup/BackupSyncRunner.swift"),
