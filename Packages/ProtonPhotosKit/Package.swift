@@ -58,7 +58,9 @@ let package = Package(
         .library(name: "UploadFeature", targets: ["UploadFeature"]),
         .library(name: "PhotoLibraryBackupAdapter", targets: ["PhotoLibraryBackupAdapter"]),
         // Library map: MapKit (native Apple Maps) view over the shared encrypted location index.
-        // Platform UI layer - macOS now; an iOS/iPad UIKit variant reuses the same MediaLocationCore.
+        // MapCore: platform-neutral annotation type shared by macOS MapFeature and iOS MapUIKitAdapter
+        // (MKAnnotation/CLLocationCoordinate2D are identical on both platforms — no duplication).
+        .library(name: "MapCore", targets: ["MapCore"]),
         .library(name: "MapUIKitAdapter", targets: ["MapUIKitAdapter"]),
         .library(name: "MapFeature", targets: ["MapFeature"]),
     ],
@@ -177,7 +179,9 @@ let package = Package(
         .target(name: "PhotoLibraryBackupAdapter", dependencies: ["UploadCore", "PhotosCore", "AlbumSyncCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "UploadFeatureTests", dependencies: ["UploadCore", "PhotosCore", "PhotoLibraryBackupAdapter"], swiftSettings: disableDynamicActorIsolation),
         // Map: UIKit/AppKit MapKit views + clustering over PhotoLocationIndex (MediaLocationCore).
-        .target(name: "MapUIKitAdapter", dependencies: ["PhotosCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
-        .target(name: "MapFeature", dependencies: ["PhotosCore", "MediaLocationCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
+        // MapCore: platform-neutral MKAnnotation conformer shared by both adapters (no duplication).
+        .target(name: "MapCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MapUIKitAdapter", dependencies: ["PhotosCore", "MediaLocationCore", "MapCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MapFeature", dependencies: ["PhotosCore", "MediaLocationCore", "MapCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
     ]
 )

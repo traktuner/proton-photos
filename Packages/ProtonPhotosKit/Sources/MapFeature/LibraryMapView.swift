@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import AppKit
+import MapCore
 import PhotosCore
 import MediaLocationCore
 
@@ -66,7 +67,8 @@ public struct LibraryMapView: NSViewRepresentable {
         private var lastBoundingBox: GeoBoundingBox?
         private let visibleCoordinatePolicy = PhotoLocationVisibleCoordinatePolicy(
             marginMultiplier: 1.6,
-            maxCoordinates: 3000
+            maxCells: 400,
+            cellDivisor: 12
         )
 
         init(index: PhotoLocationIndex,
@@ -110,7 +112,7 @@ public struct LibraryMapView: NSViewRepresentable {
             didFrame = true
         }
 
-        /// Region-based loading: keep only the annotations whose photos are in the visible rect (+ margin),
+        /// Region-based loading: keep only the annotations whose cells are in the visible rect (+ margin),
         /// so the map never holds more than the on-screen subset. MapKit clusters that subset.
         private func reloadVisible() {
             guard let map else { return }
@@ -127,15 +129,17 @@ public struct LibraryMapView: NSViewRepresentable {
             // lastBoundingBox when the index contents change, so crawl additions still re-query.
             if lastBoundingBox == box { return }
             lastBoundingBox = box
-            let capped = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
-            let wanted = Set(capped.map(\.uid))
+            // Grid cells instead of raw coordinates: each cell represents one pin and carries the
+            // true count of underlying photos (memberCount).
+            let cells = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
+            let wanted = Set(cells.map(\.uid))
 
             let stale = map.annotations.compactMap { $0 as? PhotoMapAnnotation }.filter { !wanted.contains($0.uid) }
             if !stale.isEmpty {
                 map.removeAnnotations(stale)
                 shownUIDs.subtract(stale.map(\.uid))
             }
-            let fresh = capped.filter { !shownUIDs.contains($0.uid) }
+            let fresh = cells.filter { !shownUIDs.contains($0.uid) }
             if !fresh.isEmpty {
                 map.addAnnotations(fresh.map(PhotoMapAnnotation.init))
                 shownUIDs.formUnion(fresh.map(\.uid))
@@ -161,7 +165,12 @@ public struct LibraryMapView: NSViewRepresentable {
                     withIdentifier: MKMapViewDefaultClusterAnnotationViewReuseIdentifier, for: annotation) as! PhotoClusterAnnotationView
                 let hero = cluster.memberAnnotations.first as? PhotoMapAnnotation   // v1: first member (best/cover later)
                 let image = hero.flatMap { thumbnail($0.uid) }
-                view.configure(thumbnail: image, count: cluster.memberAnnotations.count)
+                // Sum each cell's memberCount so the badge shows every underlying photo the cluster
+                // represents — not just the number of cell pins MapKit chose to show.
+                let totalCount = cluster.memberAnnotations
+                    .compactMap { $0 as? PhotoMapAnnotation }
+                    .reduce(0) { $0 + $1.memberCount }
+                view.configure(thumbnail: image, count: totalCount)
                 if image == nil, let hero {
                     requestThumbnailIfNeeded(hero.uid)
                 }
@@ -217,8 +226,13 @@ public struct LibraryMapView: NSViewRepresentable {
                 guard cluster.memberAnnotations.contains(where: { ($0 as? PhotoMapAnnotation)?.uid == uid }),
                       let view = map.view(for: cluster) as? PhotoClusterAnnotationView,
                       let hero = cluster.memberAnnotations.first as? PhotoMapAnnotation else { continue }
+                // Recompute the total count from memberCount (not memberAnnotations.count) so the badge
+                // stays correct after a thumbnail refresh.
+                let totalCount = cluster.memberAnnotations
+                    .compactMap { $0 as? PhotoMapAnnotation }
+                    .reduce(0) { $0 + $1.memberCount }
                 view.configure(thumbnail: thumbnail(hero.uid) ?? (hero.uid == uid ? image : nil),
-                               count: cluster.memberAnnotations.count)
+                               count: totalCount)
             }
         }
     }

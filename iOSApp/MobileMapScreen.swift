@@ -120,12 +120,12 @@ private struct MobileLibraryMap: UIViewRepresentable {
     let onSelectCluster: ([PhotoUID], CLLocationCoordinate2D) -> Void
 
     func makeUIView(context: Context) -> UIKitLibraryMapHostView {
-        // NOTE: maxCoordinates=3000 is the original value. We have NOT changed it blindly—a fix cap
-        // would silently drop photos and corrupt cluster counts. Instead the perf fixes go into the
-        // host (cancellation, O(1) diffing) and the index layer (aggregation). See MAP_PERF_NOTES.
+        // Aggregation: each grid cell becomes one pin carrying the true photo count, so MKMapView
+        // never manages thousands of individual views. maxCells caps the pin count (not the photo
+        // count); cellDivisor controls grid granularity. See MAP_PERF_NOTES.
         UIKitLibraryMapHostView(
             index: index,
-            visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1.6, maxCoordinates: 3000),
+            visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1.6, maxCells: 400, cellDivisor: 12),
             thumbnail: thumbnail,
             loadThumbnail: loadThumbnail,
             onSelectPhoto: onSelectPhoto,
