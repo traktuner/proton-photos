@@ -143,9 +143,15 @@ struct MobileSettingsScreen: View {
 
     private func libraryStatusRow(title: String, detail: String?) -> some View {
         HStack(spacing: 10) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(ProtonColor.primary)
+            // A system indeterminate ProgressView stops animating (and renders blank) when this Form
+            // row is reused after leaving and re-entering Settings - the text stayed, the spinner
+            // vanished. The custom rotating glyph restarts reliably on every re-appear (onChange
+            // initial:true), matching the backup row's activity treatment.
+            Image(systemName: "arrow.trianglehead.2.clockwise")
+                .font(.footnote)
+                .foregroundStyle(ProtonColor.primary)
+                .frame(width: 18)
+                .spinsWhileActive(true, period: 1.7)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).foregroundStyle(ProtonColor.textNorm)
                 if let detail {
@@ -169,7 +175,7 @@ struct MobileSettingsScreen: View {
                 Image(systemName: status.isActive ? "arrow.trianglehead.2.clockwise" : "checkmark.shield")
                     .foregroundStyle(status.isActive ? ProtonColor.primary : ProtonColor.textWeak)
                     .frame(width: 18)
-                    .spinsWhileActive(status.isActive)
+                    .spinsWhileActive(status.isActive, period: 1.7)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         Text(status.localizedTitle)
@@ -437,7 +443,7 @@ private struct MobilePhotoBackupRows: View {
         case .activity:
             Image(systemName: "arrow.trianglehead.2.clockwise")
                 .foregroundStyle(ProtonColor.primary)
-                .spinsWhileActive(true)
+                .spinsWhileActive(true, period: 1.7)
         case .attention:
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)

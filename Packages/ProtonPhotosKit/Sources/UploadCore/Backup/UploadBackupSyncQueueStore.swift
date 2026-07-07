@@ -88,7 +88,7 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
                        state, attempts, last_error, updated_at
                 FROM backup_sync_queue
                 WHERE state IN ('discovered', 'queuedForUpload')
-                ORDER BY updated_at ASC
+                ORDER BY revision_us DESC, updated_at ASC
                 LIMIT ?;
                 """,
                 -1, &stmt, nil
@@ -119,7 +119,7 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
                 FROM backup_sync_queue
                 WHERE state IN ('discovered', 'queuedForUpload')
                   AND updated_at <= ?
-                ORDER BY updated_at ASC
+                ORDER BY revision_us DESC, updated_at ASC
                 LIMIT ?;
                 """,
                 -1, &selectStmt, nil
@@ -194,7 +194,7 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
                        state, attempts, last_error, updated_at
                 FROM backup_sync_queue
                 WHERE state = ? AND updated_at < ?
-                ORDER BY updated_at ASC
+                ORDER BY revision_us DESC, updated_at ASC
                 LIMIT ?;
                 """,
                 -1, &stmt, nil
@@ -371,6 +371,8 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
         );
         CREATE INDEX IF NOT EXISTS backup_sync_queue_runnable_idx
           ON backup_sync_queue(state, updated_at);
+        CREATE INDEX IF NOT EXISTS backup_sync_queue_priority_idx
+          ON backup_sync_queue(state, revision_us DESC);
         CREATE INDEX IF NOT EXISTS backup_sync_queue_source_idx
           ON backup_sync_queue(source_kind, source_id, resource);
         """

@@ -114,6 +114,31 @@ final class UploadBackupSyncQueueTests: XCTestCase {
         XCTAssertEqual(store.summary().uploaded, 1)
     }
 
+    func testRunnableWorkDrainsNewestPhotoFirstRegardlessOfEnqueueTime() throws {
+        let url = tempDir.appendingPathComponent(UploadBackupSyncQueueManifestStore.databaseFileName)
+        let store = try XCTUnwrap(UploadBackupSyncQueueManifestStore(url: url))
+        // A large old backlog enqueued long ago, then a brand-new photo enqueued just now: the new
+        // photo has the LATEST asset date (revision) but the LATEST updated_at. It must still drain
+        // first, so a freshly taken photo is protected ahead of the backlog.
+        let oldBacklog = UploadBackupSyncQueueEntry(
+            source: source("backlog"), revision: revision(100),
+            originalFilename: "backlog.heic", byteCount: 1,
+            state: .discovered, updatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let justTaken = UploadBackupSyncQueueEntry(
+            source: source("fresh"), revision: revision(9_999),
+            originalFilename: "fresh.heic", byteCount: 1,
+            state: .discovered, updatedAt: Date(timeIntervalSince1970: 9_000_000)
+        )
+        store.upsert(oldBacklog)
+        store.upsert(justTaken)
+
+        XCTAssertEqual(store.nextRunnable(limit: 2).map(\.source.identifier), ["fresh", "backlog"],
+                       "newest photo (highest revision) drains first, even though it was enqueued last")
+        let claimed = store.claimRunnable(limit: 1, claimedAt: Date(timeIntervalSince1970: 9_000_001))
+        XCTAssertEqual(claimed.map(\.source.identifier), ["fresh"], "claim also prioritizes the newest photo")
+    }
+
     func testSQLiteQueueUpdatesStateWithoutRewritingDescriptor() throws {
         let url = tempDir.appendingPathComponent(UploadBackupSyncQueueManifestStore.databaseFileName)
         let store = try XCTUnwrap(UploadBackupSyncQueueManifestStore(url: url))
@@ -199,7 +224,9 @@ final class UploadBackupSyncQueueTests: XCTestCase {
 
         let firstClaim = store.claimRunnable(limit: 2, claimedAt: now)
 
-        XCTAssertEqual(firstClaim.map(\.source.identifier), ["old", "ready"])
+        // Newest photo first among the eligible (future-backoff row excluded until its updated_at):
+        // ready (revision 20) before old (revision 10).
+        XCTAssertEqual(firstClaim.map(\.source.identifier), ["ready", "old"])
         XCTAssertEqual(store.entry(for: old.source, revision: old.revision)?.state, .checking)
         XCTAssertEqual(store.entry(for: ready.source, revision: ready.revision)?.state, .checking)
         XCTAssertEqual(store.entry(for: future.source, revision: future.revision)?.state, .discovered)
