@@ -484,6 +484,12 @@ final class CoreArchitectureGateTests: XCTestCase {
         for file in coreFiles {
             let source = try String(contentsOf: file, encoding: .utf8)
             let code = stripCommentsAndStringLiterals(from: source)
+            if file.lastPathComponent == "TopFrostBar.swift" {
+                for required in ["UIVisualEffectView", "NSVisualEffectView", "blendingMode = .withinWindow"] where !source.contains(required) {
+                    violations.append("DesignSystemCore/TopFrostBar.swift: missing shared native frost bridge marker \(required)")
+                }
+                continue
+            }
             // The mark itself is shared; only the genuinely-AppKit veil surface must stay out of core.
             for token in ["NSViewRepresentable", "NSVisualEffectView", "NSView", "FrostedGlassBackground"] where contains(token, in: code) {
                 violations.append("DesignSystemCore/\(file.lastPathComponent): AppKit launch-veil symbol leaked into shared UI core (\(token))")
@@ -1763,8 +1769,10 @@ final class CoreArchitectureGateTests: XCTestCase {
                 "#if canImport(UIKit)",
                 "public final class UIKitLibraryMapHostView: UIView",
                 "PhotoLocationVisibleCoordinatePolicy",
-                "PhotoLocationViewport(",
-                "index.coordinates(in: viewport, policy: visibleCoordinatePolicy)",
+                "PhotoMapAnnotationLoader",
+                "loader.refreshIfChanged(revision: index.revision)",
+                "loader.reloadVisible()",
+                "loader.annotation(for: uid)",
                 "UIEdgeInsets(",
                 "MKMapView",
                 "UIImage?",
@@ -2102,7 +2110,9 @@ final class CoreArchitectureGateTests: XCTestCase {
             "userHasScrolledTimeline",
             "isApplyingProgrammaticScroll",
             "applyInitialViewportPlacementIfNeeded(contentSize:",
-            "scrollView.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)",
+            "let targetY: CGFloat",
+            "initialViewportOpensAtNewest ? maxContentOffsetY : -safeAreaInsets.top",
+            "scrollView.setContentOffset(CGPoint(x: 0, y: targetY), animated: false)",
             "newestFirst(",
         ] where !source.contains(required) {
             violations.append("TimelineUIKitFeature/UIKitTimelineGridHost.swift: missing \(required)")

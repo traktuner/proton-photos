@@ -3,6 +3,7 @@ import GridCore
 import PhotosCore
 import SwiftUI
 import TimelineUIKitFeature
+import UIKit
 
 /// The main photos tab. The Metal grid mounts as soon as items and the feed exist; loading, empty and error
 /// states stay as overlays driven by the shared `LibraryLoadState`.
@@ -23,6 +24,9 @@ struct MobileTimelineScreen: View {
     @State private var showTrashConfirm = false
     @State private var actionError: MobileSelectionError?
     @State private var networkMonitor = NetworkMonitor.shared
+    /// Frosted-bar height, read from the key window ONCE (init + onAppear) and cached — never read live
+    /// during body evaluation, which cycles the layout under the safe-area-ignoring overlay.
+    @State private var topFrostHeight: CGFloat = mobileTopBarFrostHeight()
 
     /// True while any selection action is running, so the other toolbar buttons disable together.
     private var selectionBusy: Bool { isExporting }
@@ -168,11 +172,16 @@ struct MobileTimelineScreen: View {
                     onToggleSelection: toggleSelection,
                     onDragSelectionChanged: applyDragSelection
                 )
-                .ignoresSafeArea(edges: .bottom)
+                // Full-bleed under the inline nav bar so the native iOS 26 Liquid Glass bar floats over
+                // the scrolling thumbnails (the grid host already insets its content by safeAreaInsets.top
+                // so the first row still rests below the bar). Matches the map and the macOS grid.
+                .ignoresSafeArea()
             }
 
             overlay
         }
+        .overlay(alignment: .top) { TopFrostBar(height: topFrostHeight) }
+        .onAppear { topFrostHeight = mobileTopBarFrostHeight() }
     }
 
     @ViewBuilder private var overlay: some View {
@@ -281,4 +290,19 @@ struct MobilePartialShare: Identifiable {
     let id = UUID()
     let urls: [URL]
     let failed: Int
+}
+
+/// A frosted-glass strip pinned behind the (inline) navigation bar.
+///
+/// Height of the frosted top bar on iOS: the status-bar / Dynamic Island inset (from the key window) plus
+/// the standard inline navigation-bar height, so the shared `TopFrostBar` reliably covers the title area on
+/// every device without depending on a SwiftUI geometry read that a full-bleed, safe-area-ignoring parent
+/// would report as zero. (macOS passes its own toolbar inset; only the height source is per-platform.)
+func mobileTopBarFrostHeight() -> CGFloat {
+    let topSafeArea = UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .flatMap(\.windows)
+        .first(where: \.isKeyWindow)?
+        .safeAreaInsets.top ?? 47
+    return topSafeArea + 44
 }

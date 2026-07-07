@@ -14,6 +14,8 @@ struct MobileMapScreen: View {
     @Environment(MobileViewerRouter.self) private var viewerRouter
     @State private var networkMonitor = NetworkMonitor.shared
     @State private var clusterPresentation: MobileMapClusterPresentation?
+    /// Cached frosted-bar height (read once, never live during body — see MobileTimelineScreen).
+    @State private var topFrostHeight: CGFloat = mobileTopBarFrostHeight()
 
     var body: some View {
         NavigationStack {
@@ -69,10 +71,16 @@ struct MobileMapScreen: View {
                             clusterPresentation = MobileMapClusterPresentation(uids: uids, coordinate: coordinate)
                         }
                     )
-                    .ignoresSafeArea(edges: .bottom)
+                    // Full-bleed under the (inline) navigation bar so the native iOS 26 Liquid Glass bar
+                    // floats over the map, mirroring the macOS map. The bar is a thin translucent inline
+                    // title; the map pans freely underneath it.
+                    .ignoresSafeArea()
                 }
             }
+            .overlay(alignment: .top) { TopFrostBar(height: topFrostHeight) }
+            .onAppear { topFrostHeight = mobileTopBarFrostHeight() }
             .navigationTitle(String(localized: "tab.map"))
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $clusterPresentation) { presentation in
                 MobileMapClusterSeriesScreen(uids: presentation.uids, coordinate: presentation.coordinate)
             }

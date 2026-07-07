@@ -4,6 +4,7 @@ import CoreLocation
 import UniformTypeIdentifiers
 import PhotosCore
 import DesignSystem
+import DesignSystemCore
 import MediaCache
 import GridCore
 import TimelineCore
@@ -146,7 +147,7 @@ struct MainView: View {
                 .ignoresSafeArea(.container, edges: [.top, .leading])   // MTKView renders full-width under the floating sidebar
                 .overlay(alignment: .top) {
                     if viewerModel == nil {
-                        GridTopFrost(height: topBarInset + 12)
+                        TopFrostBar(height: topBarInset + 12)
                             .opacity(gridLiveResizeActive ? 0 : 1)
                             .animation(.easeInOut(duration: 0.12), value: gridLiveResizeActive)
                     }
@@ -1608,57 +1609,6 @@ struct MainView: View {
 
 }
 
-
-/// Apple-Photos-style top-bar frost over the grid: a public within-window `NSVisualEffectView` (which DOES
-/// blur the Metal grid behind it, unlike the native toolbar glass, which can't sample a `CAMetalLayer`),
-/// masked to a vertical gradient - strongest frost at the very top, fading to fully clear below the toolbar
-/// band. It never covers the sidebar (it is an overlay on the detail), never paints a flat opaque strip, and
-/// never blocks pointer/scroll events. When the grid scrolls, the photos show through the fading edge.
-private struct GridTopFrost: View {
-    /// Total band height - the toolbar inset plus the fade region below it.
-    let height: CGFloat
-
-    var body: some View {
-        // A LIGHT, UNIFORM frost across the toolbar band (no gradient) - held at full strength over the
-        // toolbar height, with only a soft fade at the very bottom edge so it doesn't read as a hard strip.
-        // Lighter overall (reduced opacity) so the photos show through as a subtle frosted contrast.
-        WithinWindowBlur(material: .headerView)
-            .frame(height: max(48, height))
-            .mask(
-                LinearGradient(
-                    stops: [
-                        .init(color: .black, location: 0.00),   // uniform frost…
-                        .init(color: .black, location: 0.80),   // …held across the toolbar
-                        .init(color: .clear, location: 1.00),   // soft bottom edge only
-                    ],
-                    startPoint: .top, endPoint: .bottom
-                )
-            )
-            .opacity(0.5)                                        // lighter - a subtle frost, not a dark band
-            .frame(maxWidth: .infinity, alignment: .top)
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
-    }
-}
-
-/// Minimal public-AppKit bridge: a within-window vibrancy view whose material adapts to the content (and to
-/// active/inactive window state) on its own. Used only as the frosted material for `GridTopFrost`; the
-/// gradient shape is applied by SwiftUI's `.mask` so there is no AppKit coordinate-flip to reason about.
-private struct WithinWindowBlur: NSViewRepresentable {
-    var material: NSVisualEffectView.Material = .headerView
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.blendingMode = .withinWindow    // sample + blur the photos rendered behind it in this window
-        view.material = material
-        view.state = .followsWindowActiveState   // system-driven active/inactive vividness
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.material = material
-    }
-}
 
 /// Collapsible left sidebar - a native macOS sidebar `List` (Liquid-Glass vibrant material, native
 /// selection): Proton smart filters (tags) on top, user albums below.

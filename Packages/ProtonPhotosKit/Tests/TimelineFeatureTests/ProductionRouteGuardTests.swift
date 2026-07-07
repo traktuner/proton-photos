@@ -254,10 +254,13 @@ struct ProductionRouteGuardTests {
         #expect(!app.contains(".preferredColorScheme(.dark)"), "the app must not globally lock native Liquid Glass to dark mode")
 
         let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
-        #expect(mainView.contains("GridTopFrost("), "Metal-backed grid needs the measured within-window frost bridge")
-        #expect(mainView.contains("NSVisualEffectView()"), "toolbar frost must use public AppKit material, not painted rectangles")
-        #expect(mainView.contains("view.blendingMode = .withinWindow"), "frost must sample the Metal grid inside the window")
-        #expect(mainView.contains("view.state = .followsWindowActiveState"), "active/inactive toolbar vividness must remain system-driven")
+        #expect(mainView.contains("TopFrostBar("), "Metal-backed grid needs the shared within-window frost bar")
+        // The within-window frost bridge now lives in the cross-platform DesignSystemCore component shared
+        // with iOS, not inline in MainView.
+        let frost = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/DesignSystemCore/TopFrostBar.swift"), encoding: .utf8)
+        #expect(frost.contains("NSVisualEffectView()"), "toolbar frost must use public AppKit material, not painted rectangles")
+        #expect(frost.contains("blendingMode = .withinWindow"), "frost must sample the Metal grid inside the window")
+        #expect(frost.contains("state = .followsWindowActiveState"), "active/inactive toolbar vividness must remain system-driven")
         #expect(mainView.contains(".searchable(text: $searchText"), "search must remain a native toolbar search field")
         #expect(mainView.contains(".confirmationDialog(trashConfirmationTitle"), "destructive trash actions need a native confirmation dialog")
         #expect(!mainView.contains(".toolbarBackground("), "custom toolbar backgrounds box the sidebar and fight Liquid Glass")

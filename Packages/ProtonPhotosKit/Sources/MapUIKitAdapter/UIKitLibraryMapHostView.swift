@@ -14,20 +14,12 @@ public final class UIKitLibraryMapHostView: UIView {
     private var loadThumbnail: (PhotoUID) async -> UIImage?
     private var onSelectPhoto: (PhotoUID) -> Void
     private var onSelectCluster: (([PhotoUID], CLLocationCoordinate2D) -> Void)?
-    private var shownUIDs = Set<PhotoUID>()
-    /// UID → annotation, so `applyLoadedThumbnail` doesn't have to scan all mapView.annotations to
-    /// find one UID (it was O(n) per loaded thumbnail — with 400 annotations during a pinch that
-    /// is a real cost on the main thread). Rebuilt only when annotations are added/removed.
-    private var annotationByUID: [PhotoUID: PhotoMapAnnotation] = [:]
-    /// In-flight async thumbnail loads keyed by UID, so a region change can CANCEL stale loads for
-    /// annotations that have been removed — otherwise every pinch-zoom in a dense region spawns hundreds
-    /// of orphan tasks that all race to set thumbnails on views that no longer exist.
+    /// In-flight async thumbnail loads keyed by UID. The loader tells us (via its `onRemoved` callback)
+    /// which to cancel when their annotations leave the viewport — otherwise every pinch-zoom in a dense
+    /// region leaves orphan tasks racing to set thumbnails on recycled views.
     private var thumbnailLoadTasks: [PhotoUID: Task<Void, Never>] = [:]
-    private var lastRevision = Int.min
-    private var didFrame = false
-    /// Last queried bounding box, so a sub-pixel `regionDidChange` (or a `revision` bump that didn't
-    /// move the box) doesn't re-filter, re-diff, and cancel/re-spawn thumbnail loads for nothing.
-    private var lastBoundingBox: GeoBoundingBox?
+    /// Shared engine (MapCore): framing, off-main aggregation, diff, generation guard, add/remove.
+    private var loader: PhotoMapAnnotationLoader!
 
     public init(
         index: PhotoLocationIndex,
@@ -44,16 +36,18 @@ public final class UIKitLibraryMapHostView: UIView {
         self.onSelectPhoto = onSelectPhoto
         self.onSelectCluster = onSelectCluster
         super.init(frame: .zero)
+        self.loader = PhotoMapAnnotationLoader(
+            index: index,
+            policy: visibleCoordinatePolicy,
+            onRemoved: { [weak self] uids in
+                guard let self else { return }
+                for uid in uids { self.thumbnailLoadTasks.removeValue(forKey: uid)?.cancel() }
+            }
+        )
         configureMap()
-        // Keep framing synchronous (cheap, ~25 ms) so the map opens already centered on the dense core
-        // instead of visibly jumping after it appears.
-        frameToDenseCoreIfNeeded()
-        // Defer the first pin aggregation OFF the synchronous construction path: filtering + binning
-        // thousands of coordinates is the dominant cost and was what made the tab transition hang.
-        // Running it in the next runloop tick lets MKMapView present its surface immediately; the pins
-        // populate a beat later. `reloadVisible` is coalesced by `lastBoundingBox`, so if the map's
-        // on-screen `regionDidChange` fires first, this deferred pass is a cheap no-op.
-        DispatchQueue.main.async { [weak self] in self?.reloadVisible() }
+        // The loader frames synchronously (centres on the dense core before first paint) and defers the
+        // first aggregation to the next runloop tick, so the map tab opens instantly and the pins follow.
+        loader.attach(mapView)
     }
 
     @available(*, unavailable)
@@ -88,13 +82,7 @@ public final class UIKitLibraryMapHostView: UIView {
     }
 
     public func refreshIfChanged() {
-        guard index.revision != lastRevision else { return }
-        lastRevision = index.revision
-        // The index contents changed (crawl added coordinates): the cached bounding box is no longer
-        // a valid reason to skip re-querying, even if the map region itself didn't move.
-        lastBoundingBox = nil
-        frameToDenseCoreIfNeeded()
-        reloadVisible()
+        loader.refreshIfChanged(revision: index.revision)
     }
 
     private func configureMap() {
@@ -117,80 +105,6 @@ public final class UIKitLibraryMapHostView: UIView {
         ])
     }
 
-    private func frameToDenseCoreIfNeeded() {
-        guard !didFrame, !index.coordinates.isEmpty else { return }
-        // Frame where most of the photos are, not the bounds of every coordinate: one photo from a
-        // trip abroad shouldn't drag the center out into the ocean.
-        guard let box = PhotoLocationFraming.denseBoundingBox(for: index.coordinates) else { return }
-        let rect = mapRect(for: box)
-        guard !rect.isNull else { return }
-        mapView.setVisibleMapRect(
-            rect,
-            edgePadding: UIEdgeInsets(top: 80, left: 80, bottom: 80, right: 80),
-            animated: false
-        )
-        didFrame = true
-    }
-
-    private func mapRect(for box: GeoBoundingBox) -> MKMapRect {
-        let a = MKMapPoint(CLLocationCoordinate2D(latitude: box.minLatitude, longitude: box.minLongitude))
-        let b = MKMapPoint(CLLocationCoordinate2D(latitude: box.maxLatitude, longitude: box.maxLongitude))
-        return MKMapRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
-    }
-
-    private func reloadVisible() {
-        let region = mapView.region
-        let viewport = PhotoLocationViewport(
-            centerLatitude: region.center.latitude,
-            centerLongitude: region.center.longitude,
-            latitudeDelta: region.span.latitudeDelta,
-            longitudeDelta: region.span.longitudeDelta
-        )
-        guard let box = visibleCoordinatePolicy.boundingBox(for: viewport) else { return }
-        // Coalesce: if the queried box hasn't changed since the last pass, the result set is
-        // identical (same index, same box → same `cells`), so the diff would be a no-op.
-        // Skipping here avoids cancelling and re-spawning in-flight thumbnail loads on MKMapView's
-        // sub-pixel `regionDidChange` jitter. `refreshIfChanged` invalidates the cache when the
-        // index contents change, so a crawl adding photos still re-queries.
-        if lastBoundingBox == box { return }
-        lastBoundingBox = box
-        // Grid cells instead of raw coordinates: each cell represents one pin and carries the true
-        // count of underlying photos (memberCount). A dense neighborhood of 5k photos collapses to a
-        // few dozen cells, letting MapKit manage only a handful of annotation views.
-        let cells = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
-        let wanted = Set(cells.map(\.uid))
-
-        // Diff against the SHOWN set (not the mapView's full annotation array): iterating
-        // `mapView.annotations` is O(n) and walks every MKClusterAnnotation too, which on a
-        // 400-pin viewport during a pinch is enough to drop frames. The shown-UID set is the
-        // authoritative tracker of what THIS host added.
-        let toRemove = shownUIDs.subtracting(wanted)
-        if !toRemove.isEmpty {
-            let staleAnnotations = toRemove.compactMap { annotationByUID[$0] }
-            if !staleAnnotations.isEmpty {
-                mapView.removeAnnotations(staleAnnotations)
-                for uid in toRemove { annotationByUID.removeValue(forKey: uid) }
-                shownUIDs.subtract(toRemove)
-            }
-            // Cancel any in-flight thumbnail loads for the freshly-removed annotations so they
-            // don't keep running (and then try to find a recycled view) after the pinch.
-            for uid in toRemove {
-                if let task = thumbnailLoadTasks.removeValue(forKey: uid) {
-                    task.cancel()
-                }
-            }
-        }
-
-        let fresh = cells.filter { !shownUIDs.contains($0.uid) }
-        if !fresh.isEmpty {
-            let newAnnotations = fresh.map(PhotoMapAnnotation.init)
-            for (i, coord) in fresh.enumerated() { annotationByUID[coord.uid] = newAnnotations[i] }
-            mapView.addAnnotations(newAnnotations)
-            shownUIDs.formUnion(fresh.map(\.uid))
-        }
-
-    }
-
     private func boundingRect(of coords: [CLLocationCoordinate2D]) -> MKMapRect {
         coords.reduce(MKMapRect.null) { result, coordinate in
             let point = MKMapPoint(coordinate)
@@ -201,7 +115,7 @@ public final class UIKitLibraryMapHostView: UIView {
 
 extension UIKitLibraryMapHostView: MKMapViewDelegate {
     public func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-        reloadVisible()
+        loader.reloadVisible()
     }
 
     public func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
@@ -295,8 +209,8 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
     }
 
     private func applyLoadedThumbnail(_ image: UIImage, for uid: PhotoUID) {
-        // Single-shot lookup via the index — O(1) instead of scanning all annotations.
-        if let annotation = annotationByUID[uid],
+        // Single-shot lookup via the loader — O(1) instead of scanning all annotations.
+        if let annotation = loader.annotation(for: uid),
            let view = mapView.view(for: annotation) as? UIKitPhotoAnnotationView {
             view.setThumbnail(image)
         }

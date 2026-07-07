@@ -64,20 +64,9 @@ public struct LibraryMapView: NSViewRepresentable {
         var onSelectPhoto: (PhotoUID) -> Void
         var onSelectCluster: ([PhotoUID], CLLocationCoordinate2D) -> Void
         private weak var map: MKMapView?
-        private var shownUIDs = Set<PhotoUID>()
-        private var annotationByUID: [PhotoUID: PhotoMapAnnotation] = [:]
         private var thumbnailLoadTasks: [PhotoUID: Task<Void, Never>] = [:]
-        private var lastRevision = Int.min
-        private var didFrame = false
-        /// Last queried bounding box, so a sub-pixel `regionDidChange` (or a `revision` bump that
-        /// didn't move the box) doesn't re-filter and re-diff for nothing.
-        private var lastBoundingBox: GeoBoundingBox?
-        private let visibleCoordinatePolicy = PhotoLocationVisibleCoordinatePolicy(
-            marginMultiplier: 1.6,
-            maxCells: 400,
-            cellDivisor: 12,
-            minCellMeters: 80
-        )
+        /// Shared engine (MapCore): framing, off-main aggregation, diff, generation guard, add/remove.
+        private var loader: PhotoMapAnnotationLoader!
 
         init(index: PhotoLocationIndex,
              thumbnail: @escaping (PhotoUID) -> NSImage?,
@@ -89,92 +78,36 @@ public struct LibraryMapView: NSViewRepresentable {
             self.loadThumbnail = loadThumbnail
             self.onSelectPhoto = onSelectPhoto
             self.onSelectCluster = onSelectCluster
+            super.init()
+            self.loader = PhotoMapAnnotationLoader(
+                index: index,
+                policy: PhotoLocationVisibleCoordinatePolicy(
+                    marginMultiplier: 1.6, maxCells: 400, cellDivisor: 12, minCellMeters: 80
+                ),
+                onRemoved: { [weak self] uids in
+                    guard let self else { return }
+                    for uid in uids { self.thumbnailLoadTasks.removeValue(forKey: uid)?.cancel() }
+                }
+            )
         }
 
         deinit {
-            for (_, task) in thumbnailLoadTasks {
-                task.cancel()
-            }
+            for (_, task) in thumbnailLoadTasks { task.cancel() }
         }
 
         func attach(_ map: MKMapView) {
             self.map = map
-            frameToDenseCoreIfNeeded()
-            reloadVisible()
+            loader.attach(map)
         }
 
         func refreshIfChanged(revision: Int) {
-            guard revision != lastRevision else { return }
-            lastRevision = revision
-            // Index contents changed (crawl added coordinates): invalidate the bounding-box cache so
-            // we re-query even if the map region didn't move.
-            lastBoundingBox = nil
-            frameToDenseCoreIfNeeded()
-            reloadVisible()
-        }
-
-        /// Land the user where most of their photos are (once, when the first coordinates arrive).
-        /// Frames the dense core, not the bounds of every coordinate, so a single photo from a trip
-        /// abroad doesn't drag the center out into the ocean. Re-runs until there is data so the very
-        /// first crawl batch frames it.
-        private func frameToDenseCoreIfNeeded() {
-            guard !didFrame, let map, !index.coordinates.isEmpty else { return }
-            guard let box = PhotoLocationFraming.denseBoundingBox(for: index.coordinates) else { return }
-            let a = MKMapPoint(CLLocationCoordinate2D(latitude: box.minLatitude, longitude: box.minLongitude))
-            let b = MKMapPoint(CLLocationCoordinate2D(latitude: box.maxLatitude, longitude: box.maxLongitude))
-            let rect = MKMapRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
-            guard !rect.isNull else { return }
-            map.setVisibleMapRect(rect, edgePadding: NSEdgeInsets(top: 80, left: 80, bottom: 80, right: 80), animated: false)
-            didFrame = true
-        }
-
-        /// Region-based loading: keep only the annotations whose cells are in the visible rect (+ margin),
-        /// so the map never holds more than the on-screen subset. MapKit clusters that subset.
-        private func reloadVisible() {
-            guard let map else { return }
-            let r = map.region
-            let viewport = PhotoLocationViewport(
-                centerLatitude: r.center.latitude,
-                centerLongitude: r.center.longitude,
-                latitudeDelta: r.span.latitudeDelta,
-                longitudeDelta: r.span.longitudeDelta
-            )
-            guard let box = visibleCoordinatePolicy.boundingBox(for: viewport) else { return }
-            // Coalesce: same box → same result set → diff would be a no-op. Skip to avoid churning
-            // annotations on MKMapView's sub-pixel regionDidChange jitter. refreshIfChanged clears
-            // lastBoundingBox when the index contents change, so crawl additions still re-query.
-            if lastBoundingBox == box { return }
-            lastBoundingBox = box
-            // Grid cells instead of raw coordinates: each cell represents one pin and carries the
-            // true count of underlying photos (memberCount).
-            let cells = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
-            let wanted = Set(cells.map(\.uid))
-
-            let stale = map.annotations.compactMap { $0 as? PhotoMapAnnotation }.filter { !wanted.contains($0.uid) }
-            if !stale.isEmpty {
-                map.removeAnnotations(stale)
-                let staleUIDs = Set(stale.map(\.uid))
-                shownUIDs.subtract(staleUIDs)
-                for uid in staleUIDs {
-                    annotationByUID.removeValue(forKey: uid)
-                    thumbnailLoadTasks.removeValue(forKey: uid)?.cancel()
-                }
-            }
-            let fresh = cells.filter { !shownUIDs.contains($0.uid) }
-            if !fresh.isEmpty {
-                let annotations = fresh.map(PhotoMapAnnotation.init)
-                for (index, cell) in fresh.enumerated() {
-                    annotationByUID[cell.uid] = annotations[index]
-                }
-                map.addAnnotations(annotations)
-                shownUIDs.formUnion(fresh.map(\.uid))
-            }
+            loader.refreshIfChanged(revision: revision)
         }
 
         // MARK: MKMapViewDelegate
 
         public func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
-            reloadVisible()
+            loader.reloadVisible()
         }
 
         public func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
@@ -240,7 +173,7 @@ public struct LibraryMapView: NSViewRepresentable {
         private func applyLoadedThumbnail(_ image: NSImage, for uid: PhotoUID) {
             guard let map else { return }
 
-            if let annotation = annotationByUID[uid],
+            if let annotation = loader.annotation(for: uid),
                let view = map.view(for: annotation) as? PhotoAnnotationView {
                 view.setThumbnail(image)
             }

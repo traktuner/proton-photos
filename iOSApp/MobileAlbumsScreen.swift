@@ -48,6 +48,7 @@ struct MobileCollectionsScreen: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle(String(localized: "tab.collections"))
+            .navigationBarTitleDisplayMode(.inline)
             .task(id: model.backend == nil) { await loadAlbums() }
             .refreshable { await loadAlbums() }
         }
