@@ -54,14 +54,25 @@ final class BackupStatusTests: XCTestCase {
         XCTAssertEqual(status.currentItemName, "IMG_0042.HEIC")
     }
 
-    func testUploadingOnlyWhileBytesMove() {
+    func testUploadingOnlyWhenUploadsDominateNotAStrayByteMovement() {
         let checkingOnly = BackupStatus(
             progress: progress(total: 5, waiting: 4, checking: 1, isRunning: true), isScanning: false
         )
         XCTAssertEqual(checkingOnly.phase, .checking)
 
+        // A stray upload while most of the library is still UNEXAMINED must stay "checking" — this is
+        // the first-reconcile case where ~everything turns out already backed up, and presenting it as
+        // "Sichert neue Objekte" (uploading new objects) is the misleading status the user reported.
+        let strayUploadDuringCheck = BackupStatus(
+            progress: progress(total: 100, waiting: 90, uploading: 1, uploaded: 1, isRunning: true),
+            isScanning: false
+        )
+        XCTAssertEqual(strayUploadDuringCheck.phase, .checking,
+                       "one upload among a large unexamined backlog is still 'checking', not 'uploading'")
+
+        // Once nothing is left to examine and bytes are moving, it is genuinely uploading.
         let uploadingNow = BackupStatus(
-            progress: progress(total: 5, waiting: 3, uploading: 1, uploaded: 1, isRunning: true),
+            progress: progress(total: 5, waiting: 0, uploading: 1, uploaded: 4, isRunning: true),
             isScanning: false
         )
         XCTAssertEqual(uploadingNow.phase, .uploading)

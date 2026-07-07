@@ -86,9 +86,16 @@ public struct BackupStatus: Sendable, Equatable {
         fractionCompleted = progress.total > 0 ? progress.fraction : nil
 
         if progress.isRunning {
+            // `waiting` lumps not-yet-examined `discovered` rows with confirmed `queuedForUpload`
+            // ones; the unexamined part is `waiting - uploadQueued`. During a first pass over an
+            // already-backed-up library almost everything is being CHECKED (and turns out already
+            // backed up), while a stray item or two upload — claiming "uploading" there is the
+            // misleading "Sichert neue Objekte" the user sees. Only call it uploading once confirmed
+            // new work actually outweighs the still-unexamined backlog; otherwise it's checking.
+            let unexamined = max(0, progress.waiting - progress.uploadQueued)
             if progress.isPausedByPolicy {
                 phase = .paused
-            } else if progress.uploading > 0 {
+            } else if progress.uploading > 0 && (progress.uploadQueued + progress.uploading) >= unexamined {
                 phase = .uploading
             } else {
                 phase = .checking
