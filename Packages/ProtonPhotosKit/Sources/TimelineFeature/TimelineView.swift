@@ -26,12 +26,14 @@ public struct TimelineView: View {
     private let gridProfile: GridLevelProfile
     private let gridProfileResolver: TimelineGridProfileResolver?
     private let gridFillOrder: GridFillOrder
+    private let initialViewportPlacement: TimelineInitialViewportPlacement
 
     public init(
         model: TimelineViewModel,
         level: Binding<Int>? = nil,
         gridProfile: GridLevelProfile = TimelineGridProfiles.productionDefaultProfile,
         gridFillOrder: GridFillOrder = .newestBottomTrailing,
+        initialViewportPlacement: TimelineInitialViewportPlacement = .automatic,
         proxy: GridProxy<PhotoUID>? = nil,
         routeScrollGeneration: Int = 0,
         routeInitialScrollAnchor: GridScrollAnchor<PhotoUID>? = nil,
@@ -48,6 +50,7 @@ public struct TimelineView: View {
         _level = level ?? .constant(gridProfile.defaultLevel)
         self.gridProfile = gridProfile
         self.gridFillOrder = gridFillOrder
+        self.initialViewportPlacement = initialViewportPlacement
         let productionConfig = TimelineGridProfileConfiguration.production
         self.gridProfileResolver = gridProfile == productionConfig.defaultProfile ? productionConfig.resolver : nil
         self.proxy = proxy
@@ -116,6 +119,7 @@ public struct TimelineView: View {
                             gridProfile: gridProfile,
                             gridProfileResolver: gridProfileResolver,
                             gridFillOrder: gridFillOrder,
+                            initialViewportPlacement: initialViewportPlacement,
                             onOpen: onOpen,
                             proxy: proxy,
                             selectionMode: selectionMode,

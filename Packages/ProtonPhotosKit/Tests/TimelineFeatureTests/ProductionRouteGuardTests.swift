@@ -396,6 +396,9 @@ struct ProductionRouteGuardTests {
         #expect(productionText.contains("var routeScrollGeneration: Int = 0"))
         #expect(productionText.contains("appliedRouteScrollGeneration"))
         #expect(productionText.contains("proxy.scrollToFlatIndex"))
+        #expect(productionText.contains("var initialViewportPlacement: TimelineInitialViewportPlacement = .automatic"))
+        #expect(productionText.contains("case .newest:"))
+        #expect(productionText.contains("case .oldest:"))
         // The route data-source switch installs the route's initial-viewport policy ALONGSIDE the new data,
         // gated on a pending route generation (else `.preserve` - incremental updates never re-place).
         #expect(productionText.contains("initialViewport: routeChangePending ? routeInitialViewport : .preserve"))

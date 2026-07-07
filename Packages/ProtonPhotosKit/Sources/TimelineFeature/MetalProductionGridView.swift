@@ -52,6 +52,7 @@ struct MetalProductionGridView: NSViewRepresentable {
     let gridProfile: GridLevelProfile
     let gridProfileResolver: TimelineGridProfileResolver?
     var gridFillOrder: GridFillOrder = .newestBottomTrailing
+    var initialViewportPlacement: TimelineInitialViewportPlacement = .automatic
     let onOpen: (PhotoItem, [PhotoItem]) -> Void
     var proxy: GridProxy<PhotoUID>?
     var selectionMode: Bool = false
@@ -202,8 +203,17 @@ struct MetalProductionGridView: NSViewRepresentable {
     /// The host initial-viewport policy for the current route: restore a remembered photo anchor, or open at
     /// the newest end when there is none (first visit / launch).
     private var routeInitialViewport: GridInitialViewport {
-        routeInitialScrollAnchor.map { .restore($0) }
-            ?? (gridFillOrder == .newestBottomTrailing ? .newest : .oldest)
+        if let anchor = routeInitialScrollAnchor {
+            return .restore(anchor)
+        }
+        switch initialViewportPlacement {
+        case .automatic:
+            return gridFillOrder == .newestBottomTrailing ? .newest : .oldest
+        case .newest:
+            return .newest
+        case .oldest:
+            return .oldest
+        }
     }
 
     private func wireProxy(host: MetalGridScrollHost, levelBinding: Binding<Int>) {

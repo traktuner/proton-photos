@@ -6,6 +6,7 @@ import PhotosCore
 import DesignSystem
 import MediaCache
 import GridCore
+import TimelineCore
 import TimelineFeature
 import PhotoViewerFeature
 import UploadCore
@@ -282,6 +283,7 @@ struct MainView: View {
                 TimelineView(model: mapClusterModel,
                              level: $level,
                              gridFillOrder: .topLeading,
+                             initialViewportPlacement: .newest,
                              proxy: gridProxy,
                              routeScrollGeneration: mapClusterRouteGeneration,
                              routeInitialScrollAnchor: nil,
@@ -297,6 +299,8 @@ struct MainView: View {
                 .padding(.leading, leadingObstructionInset)
                 .animation(.easeInOut(duration: 0.3), value: leadingObstructionInset)
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
+                .environment(\.gridLeadingEventInset, leadingObstructionInset)
+                .environment(\.gridTopBarInset, topBarInset)
                 .transition(.opacity)
             }
 
@@ -568,6 +572,7 @@ struct MainView: View {
     private func showMapCluster(uids: [PhotoUID], coordinate: CLLocationCoordinate2D) {
         let uniqueUIDs = uniquePhotoUIDs(uids)
         let items = timelineModel.allLibraryItems(matching: uniqueUIDs)
+            .sorted(by: TimelineOrder.areInIncreasingOrder)
         guard !items.isEmpty else { return }
         selectionMode = false
         selectedUIDs = []

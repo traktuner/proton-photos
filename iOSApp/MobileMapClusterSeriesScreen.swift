@@ -4,6 +4,7 @@ import GridCore
 import MapUIKitAdapter
 import PhotosCore
 import SwiftUI
+import TimelineCore
 import TimelineUIKitFeature
 
 /// Pushed when a map cluster is tapped. Lists every member photo in the shared UIKit timeline grid, with the
@@ -26,7 +27,9 @@ struct MobileMapClusterSeriesScreen: View {
 
     private var selectionBusy: Bool { isExporting }
 
-    private var clusterItems: [PhotoItem] { model.selectedItems(Set(uids)) }
+    private var clusterItems: [PhotoItem] {
+        model.selectedItems(Set(uids)).sorted(by: TimelineOrder.areInIncreasingOrder)
+    }
 
     var body: some View {
         content
@@ -130,6 +133,8 @@ struct MobileMapClusterSeriesScreen: View {
                 UIKitTimelineGrid(
                     items: clusterItems,
                     thumbnailFeed: feed,
+                    fillOrder: .topLeading,
+                    initialViewportPlacement: .newest,
                     selectionMode: selectionMode,
                     selectedUIDs: selected,
                     isActive: true,

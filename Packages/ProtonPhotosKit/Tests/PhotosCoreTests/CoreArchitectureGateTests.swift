@@ -2097,10 +2097,11 @@ final class CoreArchitectureGateTests: XCTestCase {
             "MetalGridRenderer",
             "MetalGridDrawableTarget(layer:",
             "UIKitTimelineMetalCapability.supportsTimelineGrid(device: device)",
-            "needsInitialNewestViewport",
+            "TimelineInitialViewportPlacement",
+            "needsInitialViewportPlacement",
             "userHasScrolledTimeline",
             "isApplyingProgrammaticScroll",
-            "applyInitialNewestViewportIfNeeded(contentSize:",
+            "applyInitialViewportPlacementIfNeeded(contentSize:",
             "scrollView.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)",
             "newestFirst(",
         ] where !source.contains(required) {

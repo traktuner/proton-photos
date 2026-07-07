@@ -23,6 +23,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
     private let thumbnailFeed: UIKitThumbnailFeed
     private let level: Int?
     private let fillOrder: GridFillOrder
+    private let initialViewportPlacement: TimelineInitialViewportPlacement
     private let displayMode: TileContentDisplayMode
     private let selectionMode: Bool
     private let selectedUIDs: Set<PhotoUID>
@@ -45,6 +46,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         thumbnailFeed: UIKitThumbnailFeed,
         level: Int? = nil,
         fillOrder: GridFillOrder = .newestBottomTrailing,
+        initialViewportPlacement: TimelineInitialViewportPlacement = .automatic,
         displayMode: TileContentDisplayMode = .squareFillCrop,
         selectionMode: Bool = false,
         selectedUIDs: Set<PhotoUID> = [],
@@ -59,6 +61,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         self.thumbnailFeed = thumbnailFeed
         self.level = level
         self.fillOrder = fillOrder
+        self.initialViewportPlacement = initialViewportPlacement
         self.displayMode = displayMode
         self.selectionMode = selectionMode
         self.selectedUIDs = selectedUIDs
@@ -91,7 +94,8 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         view.onOpenPhoto = onOpenPhoto
         view.onToggleSelection = onToggleSelection
         view.onDragSelectionChanged = onDragSelectionChanged
-        view.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, fillOrder: fillOrder, displayMode: displayMode,
+        view.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, fillOrder: fillOrder,
+                       initialViewportPlacement: initialViewportPlacement, displayMode: displayMode,
                        selectionMode: selectionMode, selectedUIDs: selectedUIDs)
         view.setActive(isActive)
         return view
@@ -103,7 +107,8 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
         uiView.onOpenPhoto = onOpenPhoto
         uiView.onToggleSelection = onToggleSelection
         uiView.onDragSelectionChanged = onDragSelectionChanged
-        uiView.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, fillOrder: fillOrder, displayMode: displayMode,
+        uiView.configure(items: items, thumbnailFeed: thumbnailFeed, level: level, fillOrder: fillOrder,
+                         initialViewportPlacement: initialViewportPlacement, displayMode: displayMode,
                          selectionMode: selectionMode, selectedUIDs: selectedUIDs)
         uiView.setActive(isActive)
         // Retap of the active Fotos tab bumped the signal → scroll to the newest photos. Diffed against the
@@ -248,7 +253,8 @@ public final class UIKitTimelineGridHostView: UIView {
     private var cachedEngineItemCount = -1
     private var cachedEngineProfileID: String?
     private var cachedEngineFillOrder: GridFillOrder = .newestBottomTrailing
-    private var needsInitialNewestViewport = true
+    private var initialViewportPlacement: TimelineInitialViewportPlacement = .automatic
+    private var needsInitialViewportPlacement = true
     var userHasScrolledTimeline = false
     var isApplyingProgrammaticScroll = false
     /// One-shot per content set: fires once the first fully-populated on-screen frame is drawn (every visible
@@ -303,6 +309,7 @@ public final class UIKitTimelineGridHostView: UIView {
         thumbnailFeed: UIKitThumbnailFeed,
         level: Int? = nil,
         fillOrder: GridFillOrder = .newestBottomTrailing,
+        initialViewportPlacement: TimelineInitialViewportPlacement = .automatic,
         displayMode: TileContentDisplayMode = .squareFillCrop,
         selectionMode: Bool = false,
         selectedUIDs: Set<PhotoUID> = []
@@ -323,13 +330,18 @@ public final class UIKitTimelineGridHostView: UIView {
             self.items = items
             self.itemUIDs = newUIDs
         }
-        let shouldOpenAtNewest = uidsChanged && !itemUIDs.isEmpty && !userHasScrolledTimeline
+        let shouldPlaceInitialViewport = uidsChanged && !itemUIDs.isEmpty && !userHasScrolledTimeline
         self.thumbnailFeed = thumbnailFeed
         if fillOrder != self.fillOrder {
             self.fillOrder = fillOrder
             committedPhase = nil
             cachedEngine = nil
-            needsInitialNewestViewport = true
+            needsInitialViewportPlacement = true
+            userHasScrolledTimeline = false
+        }
+        if initialViewportPlacement != self.initialViewportPlacement {
+            self.initialViewportPlacement = initialViewportPlacement
+            needsInitialViewportPlacement = true
             userHasScrolledTimeline = false
         }
         // Subscribe to the feed's arrival wake ONCE per feed instance (a new session/route builds a new feed):
@@ -365,10 +377,10 @@ public final class UIKitTimelineGridHostView: UIView {
                 // A new content set must report its own first drawn frame.
                 firstContentReported = false
             }
-            if shouldOpenAtNewest {
-                needsInitialNewestViewport = true
+            if shouldPlaceInitialViewport {
+                needsInitialViewportPlacement = true
             } else if itemUIDs.isEmpty {
-                needsInitialNewestViewport = true
+                needsInitialViewportPlacement = true
                 userHasScrolledTimeline = false
             }
         }
@@ -538,21 +550,32 @@ public final class UIKitTimelineGridHostView: UIView {
         let size = resolvedContentSize()
         scrollView.contentSize = size
         contentView.frame = CGRect(origin: .zero, size: size)
-        applyInitialNewestViewportIfNeeded(contentSize: size)
+        applyInitialViewportPlacementIfNeeded(contentSize: size)
     }
 
-    private func applyInitialNewestViewportIfNeeded(contentSize: CGSize) {
-        guard needsInitialNewestViewport,
+    private func applyInitialViewportPlacementIfNeeded(contentSize: CGSize) {
+        guard needsInitialViewportPlacement,
               bounds.width > 0,
               bounds.height > 0,
               !itemUIDs.isEmpty
         else { return }
 
-        let bottomY = fillOrder == .newestBottomTrailing ? maxContentOffsetY : 0
+        let bottomY = initialViewportOpensAtNewest ? maxContentOffsetY : 0
         isApplyingProgrammaticScroll = true
         scrollView.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)
         isApplyingProgrammaticScroll = false
-        needsInitialNewestViewport = false
+        needsInitialViewportPlacement = false
+    }
+
+    private var initialViewportOpensAtNewest: Bool {
+        switch initialViewportPlacement {
+        case .automatic:
+            return fillOrder == .newestBottomTrailing
+        case .newest:
+            return true
+        case .oldest:
+            return false
+        }
     }
 
     /// Scrolls the timeline to the newest photos — the bottom-anchored final row — for the "retap the active
