@@ -263,6 +263,8 @@ private struct MobileAlbumPickerSheet: View {
                     Text(String(localized: "settings.albumsync_picker_selected \(draft.count)"))
                         .font(.footnote.monospacedDigit())
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()   // the .status pill constrains width; keep the full text ("3 Alben"), not "3 Al…"
                 }
             }
         }
