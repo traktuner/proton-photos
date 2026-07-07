@@ -592,6 +592,27 @@ struct ThumbnailFeedCoreTests {
         #expect(await loader.requestCount() == 0)
     }
 
+    @Test func diskHitOnlyCrawlPersistsCheckpointForRelaunch() async throws {
+        // When a whole crawl is already on disk, no network batch runs. The checkpoint still must advance to
+        // the end, otherwise the next app launch reports the full library as pending previews and counts down
+        // through a redundant disk scan.
+        let uids = (0 ..< 12).map { Self.uid("disk-checkpoint-\($0)") }
+        let cache = Self.cache("disk-checkpoint")
+        for uid in uids { cache.storeToDisk(Self.pngData(width: 8, height: 8), for: uid) }
+
+        let firstFeed = ThumbnailFeedCore(cache: cache, loader: RecordingLoader(), configuration: Self.configuration())
+        await firstFeed.startPrefetch(uids)
+        try await Self.waitUntil { await firstFeed.prefetchStatus().currentQueueLength == 0 }
+        #expect(await firstFeed.prefetchStatus().diskHit >= uids.count)
+        await firstFeed.stopPrefetch()
+
+        let relaunchedFeed = ThumbnailFeedCore(cache: cache, loader: RecordingLoader(), configuration: Self.configuration())
+        await relaunchedFeed.startPrefetch(uids)
+        let relaunched = await relaunchedFeed.prefetchStatus()
+        #expect(relaunched.currentQueueLength == 0)
+        await relaunchedFeed.stopPrefetch()
+    }
+
     @Test func prefetchStatusReportsIncrementalDiskCoverage() async throws {
         let cached = (0 ..< 2).map { Self.uid("coverage-cached-\($0)") }
         let missing = Self.uid("coverage-missing")

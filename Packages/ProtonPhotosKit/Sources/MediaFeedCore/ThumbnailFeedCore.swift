@@ -66,6 +66,7 @@ public actor ThumbnailFeedCore {
     private var priorityByUID: [PhotoUID: ThumbnailPriority] = [:]
     private var sequential: [PhotoUID] = []
     private var sequentialIndex = 0
+    private var lastPersistedSequentialIndex = 0
     private var workersRunning = false
     private var workerTask: Task<Void, Never>?
     private var interactionActive = false
@@ -427,6 +428,7 @@ public actor ThumbnailFeedCore {
         checkpointKey = Self.checkpointKey(for: uids)
         sequentialIndex = checkpointKey.flatMap { UserDefaults.standard.object(forKey: $0) as? Int } ?? 0
         sequentialIndex = min(max(sequentialIndex, 0), sequential.count)
+        lastPersistedSequentialIndex = sequentialIndex
         diskPresence.beginTracking(uids)
         unfetchable.removeAll()   // a fresh crawl retries backend-refused items exactly once
         lastRepassPercent = -1.0
@@ -656,9 +658,7 @@ public actor ThumbnailFeedCore {
                     targetConcurrency = min(configuration.downloadConcurrencyLimit, targetConcurrency + 1)
                 }
             }
-            if let checkpointKey, sequentialIndex > 0 {
-                UserDefaults.standard.set(sequentialIndex, forKey: checkpointKey)
-            }
+            persistSequentialCheckpointIfNeeded()
             // Arrival wake: bytes just landed on disk. If a viewport is (recently) live, tell the host so it
             // re-warms the still-missing visible cells (disk→RAM) and redraws — closing the "black until the
             // user scrolls a nudge further" gap, since the crawl worker only stores to disk and never decodes.
@@ -747,6 +747,7 @@ public actor ThumbnailFeedCore {
         guard !interactionActive, !prefetchPaused, prefetchEnabled, !recentVisibleDemand(now: now), !backingOff else { return out }
 
         var scannedThisCall = 0
+        let startIndex = sequentialIndex
         while out.count < configuration.batchSize,
               sequentialIndex < sequential.count,
               scannedThisCall < configuration.sequentialScanLimit {
@@ -765,7 +766,18 @@ public actor ThumbnailFeedCore {
                 prefetchDiskHit += 1
             }
         }
+        if sequentialIndex > startIndex {
+            persistSequentialCheckpointIfNeeded(force: sequentialIndex >= sequential.count)
+        }
         return out
+    }
+
+    private func persistSequentialCheckpointIfNeeded(force: Bool = false) {
+        guard let checkpointKey, sequentialIndex > 0 else { return }
+        let stride = max(1, configuration.sequentialScanLimit)
+        guard force || sequentialIndex >= sequential.count || sequentialIndex - lastPersistedSequentialIndex >= stride else { return }
+        UserDefaults.standard.set(sequentialIndex, forKey: checkpointKey)
+        lastPersistedSequentialIndex = sequentialIndex
     }
 
     /// Whether a viewport has demanded thumbnails within the quiet window. `nonisolated` (reads the lock-guarded
