@@ -1,4 +1,5 @@
 import Foundation
+import PhotosCore
 
 /// The one universal pre-upload pipeline: manifest-cached hashing → Proton name/content identity →
 /// batched remote duplicate lookup → `UploadDuplicateDecisionPolicy`. `UploadManager` drives it for
@@ -82,14 +83,24 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
 
         // Content identity - reuse the persisted SHA-1 only while name/size/mtime are unchanged;
         // when unsure, rehash (streamed, cancellable).
+        #if DEBUG
+        let _tSha = Date(); var _shaRan = false
+        #endif
         let sha1Digest: Data
         if let cached, cached.isValid(for: descriptor),
            let digest = UploadContentSHA1.digest(fromHex: cached.sha1Hex) {
             sha1Digest = digest
         } else {
-            sha1Digest = try await hasher.sha1(of: descriptor)
+            sha1Digest = try await hasher.sha1(of: descriptor)   // reads the temp file + hashes
+            #if DEBUG
+            _shaRan = true
+            #endif
         }
         let sha1Hex = UploadContentSHA1.hexString(digest: sha1Digest)
+        #if DEBUG
+        let _shaMs = Date().timeIntervalSince(_tSha) * 1000
+        let _tHmac = Date(); var _hmacRan = false
+        #endif
 
         // Proton-keyed hashes - reused only when the key epoch also matches.
         let nameHash: String
@@ -98,9 +109,22 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
             nameHash = cached.nameHash
             contentHash = cached.contentHash
         } else {
-            nameHash = try await checker.nameHash(forCorrectedName: corrected)
-            contentHash = try await checker.contentHash(forSHA1Hex: sha1Hex)
+            nameHash = try await checker.nameHash(forCorrectedName: corrected)         // local HMAC
+            contentHash = try await checker.contentHash(forSHA1Hex: sha1Hex)           // local HMAC
+            #if DEBUG
+            _hmacRan = true
+            #endif
         }
+        #if DEBUG
+        // [BackupPerf] per-item local identity cost. Steps 2-4: sha1 = read temp + hash; hmac = the two
+        // Proton HMACs. "cached" means the manifest already had it (no work). Grep the device console.
+        PhotoDiagnostics.shared.emit("BackupPerf", [
+            "step": "identity",
+            "file": descriptor.filename,
+            "sha1_ms": _shaRan ? String(format: "%.0f", _shaMs) : "cached",
+            "hmac_ms": _hmacRan ? String(format: "%.2f", Date().timeIntervalSince(_tHmac) * 1000) : "cached",
+        ])
+        #endif
         let identity = UploadIdentity(
             correctedName: corrected, nameHash: nameHash,
             sha1Hex: sha1Hex, sha1Digest: sha1Digest, contentHash: contentHash
@@ -375,7 +399,16 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
         let checker = self.checker
         let generation = cacheGeneration
         let task = Task { () -> [String: [RemotePhotoDuplicate]] in
-            let items = try await checker.findDuplicates(nameHashes: nameHashes)
+            #if DEBUG
+            let _t = Date()
+            #endif
+            let items = try await checker.findDuplicates(nameHashes: nameHashes)   // step 5: the ONE network call
+            #if DEBUG
+            PhotoDiagnostics.shared.emit("BackupPerf", [
+                "step": "dupLookup", "batch": String(nameHashes.count),
+                "ms": String(format: "%.0f", Date().timeIntervalSince(_t) * 1000),
+            ])
+            #endif
             // Every requested hash gets an entry - [] distinguishes "server says free" from
             // "never asked" in the cache.
             var grouped = Dictionary(uniqueKeysWithValues: nameHashes.map { ($0, [RemotePhotoDuplicate]()) })

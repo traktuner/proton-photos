@@ -1,5 +1,6 @@
 import Foundation
 import Photos
+import PhotosCore
 import UploadCore
 
 /// Rematerializes a photo-library queue entry: exports the asset's CURRENT original resources
@@ -125,14 +126,18 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
 
         final class WriteBox: @unchecked Sendable {
             var error: Error?
+            var bytes: Int64 = 0
         }
         let box = WriteBox()
+        #if DEBUG
+        let _tRead = Date()
+        #endif
 
         do {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 PHAssetResourceManager.default().requestData(for: resource, options: options) { data in
                     guard box.error == nil else { return }
-                    do { try handle.write(contentsOf: data) } catch { box.error = error }
+                    do { try handle.write(contentsOf: data); box.bytes += Int64(data.count) } catch { box.error = error }
                 } completionHandler: { error in
                     try? handle.close()
                     if let error {
@@ -150,6 +155,18 @@ public struct PhotoLibraryResourceResolver: BackupResourceResolving {
         }
         let finalURL = try tempStore.commit(partialURL)
         exported.append(finalURL)
+        #if DEBUG
+        // [BackupPerf] step 1: rematerialize the original from PhotoKit onto disk. read throughput.
+        let _sec = Date().timeIntervalSince(_tRead)
+        let _mb = Double(box.bytes) / 1_048_576
+        PhotoDiagnostics.shared.emit("BackupPerf", [
+            "step": "read",
+            "file": uploadFilename,
+            "mb": String(format: "%.1f", _mb),
+            "ms": String(format: "%.0f", _sec * 1000),
+            "mb_s": _sec > 0.001 ? String(format: "%.0f", _mb / _sec) : "-",
+        ])
+        #endif
         return finalURL
     }
 
