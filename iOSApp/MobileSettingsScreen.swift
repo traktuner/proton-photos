@@ -101,7 +101,9 @@ struct MobileSettingsScreen: View {
                 )
             } else if libraryModel.isBackgroundLoading {
                 libraryStatusRow(
-                    title: String(localized: "settings.library_still_loading"),
+                    title: String(localized: libraryModel.previewLoadStatus.isVerified
+                        ? "settings.library_still_loading"
+                        : "settings.library_previews_checking"),
                     detail: previewLoadingDetail
                 )
             }
@@ -133,6 +135,7 @@ struct MobileSettingsScreen: View {
     }
 
     private var previewLoadingDetail: String? {
+        guard libraryModel.previewLoadStatus.isVerified else { return nil }
         let remaining = libraryModel.previewLoadStatus.remaining
         guard remaining > 0 else { return nil }
         return String(localized: "settings.previews_remaining \(remaining)")

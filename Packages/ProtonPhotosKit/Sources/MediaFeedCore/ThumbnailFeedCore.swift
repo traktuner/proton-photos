@@ -471,6 +471,7 @@ public actor ThumbnailFeedCore {
         public let paused: Bool
         public let diskThumbnailCoverageFraction: Double
         public let diskThumbnailTotal: Int
+        public let diskCoverageVerified: Bool
         public let currentQueueLength: Int
         public let downloadsInFlight: Int
         public let decodesInFlight: Int
@@ -513,6 +514,7 @@ public actor ThumbnailFeedCore {
             paused: prefetchPaused || interactionActive,
             diskThumbnailCoverageFraction: coverage.percent,
             diskThumbnailTotal: coverage.total,
+            diskCoverageVerified: coverageSettled,
             currentQueueLength: priority.count + max(0, sequential.count - sequentialIndex),
             downloadsInFlight: downloadInFlight,
             decodesInFlight: decodeInFlight,

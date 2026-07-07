@@ -1927,6 +1927,23 @@
         }
       }
     },
+    "settings.library_previews_checking": {
+      "extractionState": "manual",
+      "localizations": {
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vorschauen werden geprüft …"
+          }
+        },
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking previews…"
+          }
+        }
+      }
+    },
     "settings.upload_check_idle_help": {
       "extractionState": "manual",
       "localizations": {

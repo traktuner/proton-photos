@@ -603,13 +603,16 @@ struct ThumbnailFeedCoreTests {
         let firstFeed = ThumbnailFeedCore(cache: cache, loader: RecordingLoader(), configuration: Self.configuration())
         await firstFeed.startPrefetch(uids)
         try await Self.waitUntil { await firstFeed.prefetchStatus().currentQueueLength == 0 }
+        try await Self.waitUntil { await firstFeed.prefetchStatus().diskCoverageVerified }
         #expect(await firstFeed.prefetchStatus().diskHit >= uids.count)
         await firstFeed.stopPrefetch()
 
         let relaunchedFeed = ThumbnailFeedCore(cache: cache, loader: RecordingLoader(), configuration: Self.configuration())
         await relaunchedFeed.startPrefetch(uids)
+        try await Self.waitUntil { await relaunchedFeed.prefetchStatus().diskCoverageVerified }
         let relaunched = await relaunchedFeed.prefetchStatus()
         #expect(relaunched.currentQueueLength == 0)
+        #expect(relaunched.diskFileCount == uids.count)
         await relaunchedFeed.stopPrefetch()
     }
 

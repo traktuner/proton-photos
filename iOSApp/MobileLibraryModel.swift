@@ -17,6 +17,7 @@ struct MobilePreviewLoadStatus: Equatable {
     var unavailable = 0
     var queueDepth = 0
     var activeJobs = 0
+    var isVerified = false
 
     init() {}
 
@@ -26,6 +27,7 @@ struct MobilePreviewLoadStatus: Equatable {
         unavailable = status.unfetchableCount
         queueDepth = status.currentQueueLength
         activeJobs = status.activeJobs
+        isVerified = status.diskCoverageVerified
     }
 
     var remaining: Int {
