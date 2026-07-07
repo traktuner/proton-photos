@@ -25,7 +25,7 @@ public struct PhotoLocationViewport: Sendable, Equatable {
 public struct PhotoLocationVisibleCoordinatePolicy: Sendable, Equatable {
     public let marginMultiplier: Double
     /// Maximum number of AGGREGATED pins returned per query. Each pin represents one grid cell and
-    /// may stand in for dozens of photos, so this caps what MKMapView has to render — not the number
+    /// may stand in for dozens of photos, so this caps what MKMapView has to render - not the number
     /// of underlying photos. A dense neighborhood of 5k photos at the same block collapses to one cell.
     public let maxCells: Int
     /// How many grid cells fit across the viewport's span. Higher → finer cells (more, smaller pins);

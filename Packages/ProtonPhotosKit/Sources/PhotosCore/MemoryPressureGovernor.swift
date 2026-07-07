@@ -145,7 +145,7 @@ public final class MemoryPressureGovernor {
         let resolved = MemoryBudgetPolicy.tier(for: conditions)
         guard resolved != tier else { return }
         tier = resolved
-        // One `[MemBudget]` line per tier CHANGE (never per signal) — the "did the pressure valve fire?"
+        // One `[MemBudget]` line per tier CHANGE (never per signal) - the "did the pressure valve fire?"
         // trace. Platform adapters may add their own richer line (headroom, scaled ceilings) on top.
         PhotoDiagnostics.shared.emit("MemBudget", [
             "tier": String(describing: resolved),

@@ -13,11 +13,11 @@ import AppKit
 /// (`NSVisualEffectView`/`UIVisualEffectView`) blurs sibling layers including the Metal one. The soft-bottom
 /// fade and the frost intensity are applied INSIDE the platform view (a `CAGradientLayer` mask + view
 /// alpha), not via SwiftUI `.mask`/`.opacity`. Height is supplied by the caller as a STABLE value (never
-/// read live from the key window during body evaluation — that is what previously cycled).
+/// read live from the key window during body evaluation - that is what previously cycled).
 public struct TopFrostBar: View {
     /// Total band height: the top safe-area / toolbar inset plus a little fade room below it.
     private let height: CGFloat
-    /// 0…1 — dials the frost from barely-there to full, so it stays a subtle band rather than a dark strip.
+    /// 0…1 - dials the frost from barely-there to full, so it stays a subtle band rather than a dark strip.
     private let intensity: CGFloat
 
     public init(height: CGFloat, intensity: CGFloat = 0.6) {

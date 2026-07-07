@@ -11,7 +11,7 @@ import CoreGraphics
 
 package enum GridTransitionScheduler {
 
-    // ── host-owned click q(t): C1 trapezoidal velocity (matches V3.4–V3.6) ──
+    // ── host-owned click q(t): C1 trapezoidal velocity (matches V3.4-V3.6) ──
     package static func clickQ(_ t: Double, durationSeconds d: Double, rampFraction: Double) -> Double {
         let r = rampFraction * d
         let vpk = 1.0 / (d - r)

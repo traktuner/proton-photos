@@ -24,7 +24,7 @@ struct MobileTimelineScreen: View {
     @State private var showTrashConfirm = false
     @State private var actionError: MobileSelectionError?
     @State private var networkMonitor = NetworkMonitor.shared
-    /// Frosted-bar height, read from the key window ONCE (init + onAppear) and cached — never read live
+    /// Frosted-bar height, read from the key window ONCE (init + onAppear) and cached - never read live
     /// during body evaluation, which cycles the layout under the safe-area-ignoring overlay.
     @State private var topFrostHeight: CGFloat = mobileTopBarFrostHeightDefault
 
@@ -215,7 +215,7 @@ struct MobileTimelineScreen: View {
         if selected.contains(item.uid) { selected.remove(item.uid) } else { selected.insert(item.uid) }
     }
 
-    /// Commit the result of a finger-drag selection — called ONCE when the drag ends, so a drag never rebuilds
+    /// Commit the result of a finger-drag selection - called ONCE when the drag ends, so a drag never rebuilds
     /// the screen per frame (the grid host paints the in-progress selection itself).
     private func applyDragSelection(_ uids: Set<PhotoUID>) {
         selected = uids
@@ -232,10 +232,10 @@ struct MobileTimelineScreen: View {
             )
             isExporting = false
             if result.urls.isEmpty {
-                // Nothing could be prepared — surface the failure, never a silent no-op.
+                // Nothing could be prepared - surface the failure, never a silent no-op.
                 actionError = MobileSelectionError(message: String(localized: "selection.share_failed"))
             } else if result.failed > 0 {
-                // Some originals couldn't be downloaded — be honest about the partial share before proceeding,
+                // Some originals couldn't be downloaded - be honest about the partial share before proceeding,
                 // rather than silently dropping them.
                 partialShare = MobilePartialShare(urls: result.urls, failed: result.failed)
             } else {
@@ -261,7 +261,7 @@ struct MobileTimelineScreen: View {
     }
 }
 
-/// Identifiable payload for the viewer sheet — the full item list plus the tapped index, so the viewer can page.
+/// Identifiable payload for the viewer sheet - the full item list plus the tapped index, so the viewer can page.
 struct MobileViewerPresentation: Identifiable {
     let id = UUID()
     let index: Int
@@ -269,8 +269,8 @@ struct MobileViewerPresentation: Identifiable {
 }
 
 /// App-wide viewer presentation state, owned ABOVE the size-class-adaptive shell. The shell swaps its whole
-/// subtree when `horizontalSizeClass` flips (TabView ↔ NavigationSplitView) — e.g. simply ROTATING a
-/// Max-size iPhone (portrait compact → landscape regular) — which destroys every screen's `@State`, so a
+/// subtree when `horizontalSizeClass` flips (TabView ↔ NavigationSplitView) - e.g. simply ROTATING a
+/// Max-size iPhone (portrait compact → landscape regular) - which destroys every screen's `@State`, so a
 /// viewer presented from screen-local state was dismissed by the rotation itself. Screens write
 /// `presentation`; the single `fullScreenCover` lives in `MobileMainTabView`, OUTSIDE the swap, so the open
 /// viewer survives rotation and just re-lays-out.

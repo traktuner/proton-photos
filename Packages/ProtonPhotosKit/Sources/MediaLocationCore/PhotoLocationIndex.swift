@@ -5,7 +5,7 @@ import PhotosCore
 /// The whole library's GPS coordinates, held in RAM for instant map queries.
 ///
 /// Loaded once (decrypted) from `PhotoLocationStore` and then filled in live by `LocationCrawl`. At
-/// ~40–60 bytes per photo, 20k photos is ~1 MB, so keeping the entire library resident is trivial and
+/// ~40-60 bytes per photo, 20k photos is ~1 MB, so keeping the entire library resident is trivial and
 /// makes region queries an in-memory filter (microseconds) - no per-view decode. The decrypted
 /// coordinates exist ONLY here in RAM; on disk they are always AES-GCM encrypted.
 ///

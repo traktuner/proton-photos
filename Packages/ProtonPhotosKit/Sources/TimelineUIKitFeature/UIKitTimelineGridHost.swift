@@ -74,7 +74,7 @@ public struct UIKitTimelineGrid: UIViewRepresentable {
     }
 
     /// Remembers the last applied scroll-to-latest signal, so the representable acts only on a real change
-    /// (SwiftUI's update-diffing idiom) — never re-scrolling on an unrelated update pass.
+    /// (SwiftUI's update-diffing idiom) - never re-scrolling on an unrelated update pass.
     public final class Coordinator {
         var lastScrollToLatestSignal: Int
 
@@ -192,23 +192,23 @@ public final class UIKitTimelineGridHostView: UIView {
     private var dragActive = false
     /// The item index the drag started on (the range's fixed end).
     private var dragAnchorIndex: Int?
-    /// Whether the drag ADDS to (true) or REMOVES from (false) the selection — decided from the anchor cell's
+    /// Whether the drag ADDS to (true) or REMOVES from (false) the selection - decided from the anchor cell's
     /// membership at drag start, the iOS Photos convention.
     private var dragSelecting = true
     /// The selection the drag started from; every move recomputes the swept range against THIS base, so pulling
     /// the finger back reverts the cells it left.
     private var dragBaseSelection: Set<PhotoUID> = []
     /// The live, in-progress selection. While non-nil it drives the selection decorations INSTEAD of
-    /// `selectedUIDs`, so a drag redraws by re-rendering the Metal grid — never by pushing state through SwiftUI
+    /// `selectedUIDs`, so a drag redraws by re-rendering the Metal grid - never by pushing state through SwiftUI
     /// every frame (which would rebuild the hosting screen's body per move).
     private var dragLiveSelection: Set<PhotoUID>?
     /// The last item index resolved under the finger; kept when the finger is momentarily in an inter-row gap so
     /// the swept range never collapses mid-drag.
     private var dragCurrentIndex: Int?
     /// The finger's last position in viewport space, so an auto-scroll tick (finger stationary, content moving)
-    /// re-resolves the item under it against the new content offset — no skipped rows.
+    /// re-resolves the item under it against the new content offset - no skipped rows.
     private var dragLastViewportPoint: CGPoint = .zero
-    /// Dedicated driver for the edge auto-scroll ramp — SEPARATE from the render `displayLink` (whose driver
+    /// Dedicated driver for the edge auto-scroll ramp - SEPARATE from the render `displayLink` (whose driver
     /// stops itself on re-start), so auto-scrolling the selection never stops the render loop.
     private let autoScrollLink = UIKitTimelineDisplayLinkDriver()
     private var autoScrollLastTimestamp: CFTimeInterval = 0
@@ -218,7 +218,7 @@ public final class UIKitTimelineGridHostView: UIView {
     var warmTask: Task<Void, Never>?
     var lastWarmIDs: [PhotoUID] = []
     /// Scroll-direction-biased prefetch (shared `GridScrollAheadPolicy`): the user's last vertical travel
-    /// direction, learned from finger scrolls only (`nil` until the first real scroll — no direction, no
+    /// direction, learned from finger scrolls only (`nil` until the first real scroll - no direction, no
     /// ahead-warm). Reset when the content set changes.
     var scrollDirectionDown: Bool?
     private var lastScrollY: CGFloat = 0
@@ -245,8 +245,8 @@ public final class UIKitTimelineGridHostView: UIView {
     private weak var wiredFeed: UIKitThumbnailFeed?
     /// Cached grid profile + engine so a plain finger-scroll frame reuses them instead of reconstructing a
     /// `SquareTileGridEngine` (+ its section arrays) and re-resolving the profile every vsync. The profile is a
-    /// pure function of the layout size; the engine of (item count, profile) — both change only on
-    /// configure / resize, never mid-scroll — so this removes the per-frame allocation churn.
+    /// pure function of the layout size; the engine of (item count, profile) - both change only on
+    /// configure / resize, never mid-scroll - so this removes the per-frame allocation churn.
     private var cachedProfile: GridLevelProfile?
     private var cachedProfileLayoutSize: CGSize = .zero
     private var cachedEngine: SquareTileGridEngine?
@@ -262,7 +262,7 @@ public final class UIKitTimelineGridHostView: UIView {
     private var firstContentReported = false
 
     /// Coalesces every invalidation (scroll deltas, new items, layout, arrived thumbnails) into at most ONE
-    /// render per display-link tick. Rendering directly from scroll events acquires a drawable per touch delta —
+    /// render per display-link tick. Rendering directly from scroll events acquires a drawable per touch delta -
     /// the 3-deep CAMetalLayer pool exhausts within a frame and `nextDrawable()` then blocks the main thread,
     /// which is exactly the scroll stutter this replaces. The pump also retries after a failed present, so a
     /// transiently unavailable drawable (fresh mount, tab re-attach) can never strand a black grid until the
@@ -272,7 +272,7 @@ public final class UIKitTimelineGridHostView: UIView {
 
     public private(set) var isMetal3Capable = false
 
-    /// Called on the main actor the first time every visible cell is drawn for the current content — the shell's
+    /// Called on the main actor the first time every visible cell is drawn for the current content - the shell's
     /// signal that the launch/loading UI can lift onto a real grid (never blank cells). One-shot per content set.
     public var onFirstContentReady: (() -> Void)?
 
@@ -284,7 +284,7 @@ public final class UIKitTimelineGridHostView: UIView {
     public var onToggleSelection: ((PhotoItem) -> Void)?
 
     /// Called on the main actor when a finger-drag selection COMMITS (the gesture ends), with the resulting UID
-    /// set. The shell writes it to its selection state ONCE per drag — never per frame — so a drag never triggers
+    /// set. The shell writes it to its selection state ONCE per drag - never per frame - so a drag never triggers
     /// a per-frame SwiftUI rebuild.
     public var onDragSelectionChanged: ((Set<PhotoUID>) -> Void)?
 
@@ -317,7 +317,7 @@ public final class UIKitTimelineGridHostView: UIView {
         self.selectionMode = selectionMode
         self.selectedUIDs = selectedUIDs
         // SwiftUI re-runs configure on EVERY update pass of the hosting screen (selection taps, sheet/cover
-        // presentation, load-state flips), almost always re-passing the same snapshot array — Array's `==`
+        // presentation, load-state flips), almost always re-passing the same snapshot array - Array's `==`
         // then short-circuits on storage identity, skipping the per-pass UID re-map. Full CONTENT equality
         // (not UID equality) is the skip test on purpose: items can be re-published with stable UIDs but
         // enriched metadata (tags, burst members), and those passes must fall through to refresh `items`.
@@ -417,7 +417,7 @@ public final class UIKitTimelineGridHostView: UIView {
 
     /// Tab/surface activation from the SwiftUI host. An inactive grid must not keep the display link alive
     /// doing render + warm work that competes with the menus/transitions on screen. This is the platform
-    /// plumbing for the shared `GridFramePump` active gate — Core decides "should the loop run", UIKit
+    /// plumbing for the shared `GridFramePump` active gate - Core decides "should the loop run", UIKit
     /// supplies the lifecycle event. Only acts on a real transition (the pump reports it), so a steady
     /// stream of identical `updateUIView` calls is free.
     public func setActive(_ active: Bool) {
@@ -434,7 +434,7 @@ public final class UIKitTimelineGridHostView: UIView {
             warmInFlight: warmInFlight, aheadWarmInFlight: aheadWarmInFlight, items: items.count)
     }
 
-    /// Stop the render loop and drop all in-flight warm work — used both when the view leaves its window and
+    /// Stop the render loop and drop all in-flight warm work - used both when the view leaves its window and
     /// when the tab deactivates. Visible cache/textures stay resident, so returning redraws immediately.
     private func suspendRenderLoop() {
         displayLink.stop()
@@ -477,7 +477,7 @@ public final class UIKitTimelineGridHostView: UIView {
 
         // Tap-to-open and pinch-to-change-density ride on the scroll surface so they coexist with the pan/scroll
         // gesture. The tap requires no movement (never fights a scroll); the pinch drives an engine-owned
-        // `GridZoomTransaction` through shared GridCore geometry — no bespoke iOS layout math.
+        // `GridZoomTransaction` through shared GridCore geometry - no bespoke iOS layout math.
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         tap.delegate = self
         scrollView.addGestureRecognizer(tap)
@@ -518,7 +518,7 @@ public final class UIKitTimelineGridHostView: UIView {
         textureCache = cache
         // Register the GPU texture cache with the shared memory governor (identity-keyed: a rebuilt cache
         // replaces the previous registration). On pressure the cache sheds offscreen residency but never
-        // the visible pinned set, so what is on screen stays drawable — mirroring the macOS coordinator.
+        // the visible pinned set, so what is on screen stays drawable - mirroring the macOS coordinator.
         if let cache {
             UIKitMemoryPressureCoordinator.shared.attach(cache, key: "gridTextureCache") { [weak cache] tier in
                 cache?.setResidencyPressureScale(tier.budgetScale)
@@ -529,7 +529,7 @@ public final class UIKitTimelineGridHostView: UIView {
     /// Keeps the LAST row of content clear of the bottom bar / home indicator: the scroll surface extends
     /// under the (translucent) bar for the full-bleed look, but the content range ends above it, so fully
     /// scrolled to the newest photo every thumbnail of the final row stays visible and tappable. Safe-area
-    /// driven — tab bar, home indicator, orientation and iPad sidebar layouts all flow through the same inset.
+    /// driven - tab bar, home indicator, orientation and iPad sidebar layouts all flow through the same inset.
     /// ALSO adds a TOP inset equal to safeAreaInsets.top so the first row rests below the navigation bar
     /// instead of being covered by it.
     private func applyContentInsets() {
@@ -560,7 +560,7 @@ public final class UIKitTimelineGridHostView: UIView {
               !itemUIDs.isEmpty
         else { return }
 
-        // When the content fits within one screen (few photos — e.g. a small map cluster), there is no
+        // When the content fits within one screen (few photos - e.g. a small map cluster), there is no
         // real scroll room: `resolvedContentSize` floors the height to `bounds.height + 1`, so
         // `maxContentOffsetY` is a ~1pt phantom that would scroll the first row UP under the navigation
         // bar. Rest at `-safeAreaInsets.top` instead so the first row sits just below the bar. Only when
@@ -589,7 +589,7 @@ public final class UIKitTimelineGridHostView: UIView {
         }
     }
 
-    /// Scrolls the timeline to the newest photos — the bottom-anchored final row — for the "retap the active
+    /// Scrolls the timeline to the newest photos - the bottom-anchored final row - for the "retap the active
     /// Fotos tab" gesture. A pure `contentOffset` move that reuses the SAME bottom math as the initial newest
     /// viewport: it touches neither the density level, the selection, nor the item set, so it can never reload
     /// or reset the grid. Bracketed by `isApplyingProgrammaticScroll` (matching every other programmatic
@@ -621,7 +621,7 @@ public final class UIKitTimelineGridHostView: UIView {
 
     /// True while the user is actively scrolling, decelerating, or pinching. The shared soft→sharp upgrade path
     /// is gated OFF during interaction (so it never churns uploads and drops frames mid-gesture) and back ON once
-    /// the grid settles — the mobile-appropriate scheduling of the SAME shared composer upgrade, not a fork.
+    /// the grid settles - the mobile-appropriate scheduling of the SAME shared composer upgrade, not a fork.
     private var isInteracting: Bool {
         scrollView.isTracking || scrollView.isDragging || scrollView.isDecelerating || pinchStartLevel != nil
             || zoomTransaction != nil || commitBridgeTransaction != nil
@@ -691,11 +691,11 @@ public final class UIKitTimelineGridHostView: UIView {
         let keepTicking: Bool
         switch outcome {
         case .skippedNoSurface:
-            // Nothing drawable yet (zero bounds / no cache) — the event that changes that (layout,
+            // Nothing drawable yet (zero bounds / no cache) - the event that changes that (layout,
             // configure) re-requests a render, so don't spin.
             keepTicking = framePump.completeTick(presented: true, hasPendingWork: false)
         case .noDrawable:
-            // Transient drawable starvation — retry next tick so content can never strand off-screen.
+            // Transient drawable starvation - retry next tick so content can never strand off-screen.
             keepTicking = framePump.completeTick(presented: false, hasPendingWork: false)
         case let .drawn(hasPendingWork):
             keepTicking = framePump.completeTick(presented: true, hasPendingWork: hasPendingWork)
@@ -1055,7 +1055,7 @@ public final class UIKitTimelineGridHostView: UIView {
                 DispatchQueue.main.async { onFirstContentReady() }
             }
         }
-        // Warm the still-missing visible tiles (reliability) AND the composer's warm list, which — when settled —
+        // Warm the still-missing visible tiles (reliability) AND the composer's warm list, which - when settled -
         // adds the sources of undersized resident textures whose RAM decode was evicted, so the upgrade can
         // re-decode and sharpen instead of the loop spinning on a pending upgrade it can never satisfy. Mirrors
         // the macOS host, which warms `result.warm`.
@@ -1063,16 +1063,16 @@ public final class UIKitTimelineGridHostView: UIView {
         // Keep ticking ONLY for work the render loop can actually make progress on this vsync: a visible tile
         // already decoded in RAM but held back by the per-frame upload budget (`uploadPending`), a soft→sharp
         // upgrade in flight, or a warm pass running. A visible tile that is still missing with NO RAM image is
-        // waiting on the network/disk crawl — the feed's arrival wake (`handleImagesAvailable`) re-arms the loop
+        // waiting on the network/disk crawl - the feed's arrival wake (`handleImagesAvailable`) re-arms the loop
         // when its bytes land, so we idle through that wait instead of spinning full frames the whole time.
         // RAM-decoded but not yet GPU-resident (the `ramHitGpuMissing` diagnostic): these tiles can fill on
-        // the very next frames within the upload budget — a persistent count means upload-budget starvation.
+        // the very next frames within the upload budget - a persistent count means upload-budget starvation.
         let ramReadyMissing = missingVisible.reduce(into: 0) { count, uid in
             if feed?.memoryCGImage(for: uid) != nil { count += 1 }
         }
         let uploadPending = ramReadyMissing > 0
         // Residency saturation means neither a deferred upload nor a deferred upgrade can make progress until the
-        // streaming window changes (scroll/zoom, which re-arm on their own), so both are gated on it — matching
+        // streaming window changes (scroll/zoom, which re-arm on their own), so both are gated on it - matching
         // the macOS coordinator and avoiding a spin on placeholders that cannot fill this frame.
         let canMakeProgress = !textureCache.residencySaturatedThisFrame
         let hasPendingWork = forcePendingWork
@@ -1171,7 +1171,7 @@ public final class UIKitTimelineGridHostView: UIView {
     }
 
     /// Resolve the item index under a content-space point, clamping to the first/last item when the point is
-    /// above/below all content and holding the previous index for an inter-row gap — so the swept RANGE never
+    /// above/below all content and holding the previous index for an inter-row gap - so the swept RANGE never
     /// develops holes as the finger moves or the grid auto-scrolls.
     private func resolveDragIndex(contentPoint: CGPoint) {
         guard let ctx = currentGridContext() else { return }
@@ -1184,7 +1184,7 @@ public final class UIKitTimelineGridHostView: UIView {
         } else if contentPoint.y >= scrollView.contentSize.height {
             dragCurrentIndex = max(0, itemUIDs.count - 1)
         }
-        // else: finger in a gap / a short final row's trailing empty cells — keep the last resolved index.
+        // else: finger in a gap / a short final row's trailing empty cells - keep the last resolved index.
     }
 
     private func applyDragSelection() {
@@ -1222,7 +1222,7 @@ public final class UIKitTimelineGridHostView: UIView {
         guard velocity != 0 else { stopAutoScroll(); return }
         let currentY = scrollView.contentOffset.y
         let newY = min(max(currentY + velocity * CGFloat(dt), 0), maxContentOffsetY)
-        // Already pinned to the top/bottom edge — the clamp produced no movement, so there is nothing left to
+        // Already pinned to the top/bottom edge - the clamp produced no movement, so there is nothing left to
         // reveal or select. Stop the ramp so neither the auto-scroll link nor the render loop spins at full
         // frame rate doing no-op work at the boundary (a finger held in the band with the grid already at its
         // limit). A later finger move re-enters updateAutoScroll and restarts the link if progress is again
@@ -1262,7 +1262,7 @@ public final class UIKitTimelineGridHostView: UIView {
         onDragSelectionChanged?(committed)
     }
 
-    /// Abandon an in-progress drag without committing — used when the surface suspends (tab switch / off-window)
+    /// Abandon an in-progress drag without committing - used when the surface suspends (tab switch / off-window)
     /// mid-drag, where the long-press recognizer may not deliver a `.cancelled`. Restores scrolling and reverts
     /// the live overlay to the base selection.
     private func cancelDragSelectIfActive() {
@@ -1276,7 +1276,7 @@ public final class UIKitTimelineGridHostView: UIView {
         requestRender()
     }
 
-    /// The shared grid decorations for the current frame — always built, mirroring the macOS coordinator, so a
+    /// The shared grid decorations for the current frame - always built, mirroring the macOS coordinator, so a
     /// video badge shows during normal browsing and the checkmark badge shows in selection mode (the composer
     /// makes the two mutually exclusive in the bottom-right corner, and the selection outline is drawn only for
     /// selected cells). The Proton primary (0x6D4AFF) is injected as neutral SIMD/glyph data at this adapter
@@ -1318,7 +1318,7 @@ extension UIKitTimelineGridHostView: UIScrollViewDelegate {
             if abs(dy) > 1 { scrollDirectionDown = dy > 0 }
         }
         lastScrollY = scrollView.contentOffset.y
-        // Scroll deltas arrive faster than vsync — mark dirty only; the display link draws exactly once
+        // Scroll deltas arrive faster than vsync - mark dirty only; the display link draws exactly once
         // per frame with whatever offset is current by then.
         perf.noteScrollEvent()
         requestRender()
@@ -1341,7 +1341,7 @@ extension UIKitTimelineGridHostView: UIScrollViewDelegate {
 }
 
 extension UIKitTimelineGridHostView: UIGestureRecognizerDelegate {
-    /// Let tap / pinch coexist with the scroll view's own pan (and each other) — a two-finger pinch and a
+    /// Let tap / pinch coexist with the scroll view's own pan (and each other) - a two-finger pinch and a
     /// one-finger scroll never contend, and a tap requires no movement. The drag-select long press also begins
     /// alongside the scroll pan (both must track the touch so the press can mature); it disables scrolling itself
     /// once it begins, so the two never move the grid at the same time.

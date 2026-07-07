@@ -136,7 +136,7 @@ import PhotosCore
         #expect(cache.texture(for: a).width == 32)
 
         // Settled at a larger cap but the RAM source was EVICTED (hasImage:false): the composer cannot upgrade in
-        // place, so it must request the source in `warm` and signal a pending upgrade — the host then re-warms and
+        // place, so it must request the source in `warm` and signal a pending upgrade - the host then re-warms and
         // keeps ticking until it sharpens, never a permanent low-res and never a silent forever-spin.
         let settled = MetalGridFrameComposer.stream(
             cache: cache, visibleIDs: [a], overscanIDs: [],

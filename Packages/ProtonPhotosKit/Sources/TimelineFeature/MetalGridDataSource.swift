@@ -110,7 +110,7 @@ final class RealMetalGridDataSource: MetalGridDataSource {
         guard !uids.isEmpty else { return }
         // Tell the feed a viewport is live BEFORE the heavier `warmDecoded` is enqueued. `noteVisibleDemand`
         // is `nonisolated` (a lock-guarded write), so it records demand SYNCHRONOUSLY without queuing behind
-        // the crawl on the serial feed actor — the crawl reads it `nonisolated` and backs its scan off at once,
+        // the crawl on the serial feed actor - the crawl reads it `nonisolated` and backs its scan off at once,
         // yielding the actor to this decode instead of starving it on a cold start.
         feed.noteVisibleDemand()
         // Latest viewport wins without restarting the current viewport from item zero on every display-link
@@ -160,7 +160,7 @@ final class RealMetalGridDataSource: MetalGridDataSource {
         // The FIRST batch of a fresh data source is the opening viewport. Enqueue its true disk-misses at
         // `.visibleNow` so they jump the background crawl immediately, instead of sitting at
         // `.zoomAnchorAndFocusRow` until the ~120 ms viewport-settle upgrade (`scheduleSettleCheck`). Disk
-        // hits still decode straight from disk and never touch the network. One-shot per data source — a new
+        // hits still decode straight from disk and never touch the network. One-shot per data source - a new
         // route/library builds a new `RealMetalGridDataSource`, so steady-state scrolling is unchanged.
         let priority: ThumbnailPriority = didFirstVisiblePass ? .zoomAnchorAndFocusRow : .visibleNow
         let firstPass = !didFirstVisiblePass

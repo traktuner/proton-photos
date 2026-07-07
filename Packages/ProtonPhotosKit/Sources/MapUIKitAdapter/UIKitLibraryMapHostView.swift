@@ -15,7 +15,7 @@ public final class UIKitLibraryMapHostView: UIView {
     private var onSelectPhoto: (PhotoUID) -> Void
     private var onSelectCluster: (([PhotoUID], CLLocationCoordinate2D) -> Void)?
     /// In-flight async thumbnail loads keyed by UID. The loader tells us (via its `onRemoved` callback)
-    /// which to cancel when their annotations leave the viewport — otherwise every pinch-zoom in a dense
+    /// which to cancel when their annotations leave the viewport - otherwise every pinch-zoom in a dense
     /// region leaves orphan tasks racing to set thumbnails on recycled views.
     private var thumbnailLoadTasks: [PhotoUID: Task<Void, Never>] = [:]
     /// Shared engine (MapCore): framing, off-main aggregation, diff, generation guard, add/remove.
@@ -75,8 +75,8 @@ public final class UIKitLibraryMapHostView: UIView {
         self.onSelectCluster = onSelectCluster
         // Only update the stored closures. Do NOT force a full re-query/re-aggregate here: SwiftUI calls
         // this on every `updateUIView` (each state change re-passes value-identical closures), and the
-        // aggregate over thousands of coordinates is the dominant cost on the main thread — re-running it
-        // per update is what made opening the Map tab take ~1–2 s. Content changes flow through
+        // aggregate over thousands of coordinates is the dominant cost on the main thread - re-running it
+        // per update is what made opening the Map tab take ~1-2 s. Content changes flow through
         // `refreshIfChanged` (revision-gated) and map moves through `regionDidChangeAnimated`; a newly
         // available thumbnail closure is picked up lazily by the next `viewFor`/thumbnail request.
     }
@@ -127,7 +127,7 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
             let hero = cluster.memberAnnotations.first as? PhotoMapAnnotation
             let image = hero.flatMap { thumbnail($0.uid) }
             // Sum each cell's memberCount so the badge shows every underlying photo the cluster
-            // represents — not just the number of cell pins MapKit chose to show.
+            // represents - not just the number of cell pins MapKit chose to show.
             let totalCount = cluster.memberAnnotations
                 .compactMap { $0 as? PhotoMapAnnotation }
                 .reduce(0) { $0 + $1.memberCount }
@@ -197,10 +197,10 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
         let task = Task { @MainActor [weak self] in
             let image = await loadThumbnail(uid)
             guard let self else { return }
-            // Remove the task entry first — the load is done, the slot is free for a future re-request.
+            // Remove the task entry first - the load is done, the slot is free for a future re-request.
             self.thumbnailLoadTasks.removeValue(forKey: uid)
             // If the task was cancelled (annotation removed during a region change), don't bother
-            // looking for the view — it's gone.
+            // looking for the view - it's gone.
             if Task.isCancelled { return }
             guard let image else { return }
             self.applyLoadedThumbnail(image, for: uid)
@@ -209,7 +209,7 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
     }
 
     private func applyLoadedThumbnail(_ image: UIImage, for uid: PhotoUID) {
-        // Single-shot lookup via the loader — O(1) instead of scanning all annotations.
+        // Single-shot lookup via the loader - O(1) instead of scanning all annotations.
         if let annotation = loader.annotation(for: uid),
            let view = mapView.view(for: annotation) as? UIKitPhotoAnnotationView {
             view.setThumbnail(image)

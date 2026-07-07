@@ -10,7 +10,7 @@ import Testing
 struct UIKitGridTextureQualityPolicyTests {
 
     @Test func denseLevelUploadsStaySmallUnderTheRaisedCaps() {
-        // A dense-overview tile (~31 pt on a 3× iPhone) must resolve far below the absolute cap —
+        // A dense-overview tile (~31 pt on a 3× iPhone) must resolve far below the absolute cap -
         // the cap raise may not touch dense-scroll upload cost.
         let dense = GridTextureUploadSizing.uploadPixels(
             slotSidePoints: 31, backingScale: 3, headroom: 1.15, floor: 64,
@@ -22,7 +22,7 @@ struct UIKitGridTextureQualityPolicyTests {
 
     @Test func largestCompactTilesCanRequestSharpPixels() {
         // The largest L0 tile a compact surface produces (~133 pt at 3×) must no longer clamp to the old
-        // 224/288 ceilings — it should reach its native supersampled size within the new cap.
+        // 224/288 ceilings - it should reach its native supersampled size within the new cap.
         let sparse = GridTextureUploadSizing.uploadPixels(
             slotSidePoints: 133, backingScale: 3, headroom: 1.15, floor: 64,
             cap: UIKitMetalGridTexturePolicies.compact.maxTexturePixels

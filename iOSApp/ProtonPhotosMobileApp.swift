@@ -161,7 +161,7 @@ private struct MobileMainTabView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(MobileLibraryModel.self) private var libraryModel
     @State private var selection: MobileTab = .photos
-    /// Viewer presentation lives HERE — above the size-class branch — because the `if` below swaps the whole
+    /// Viewer presentation lives HERE - above the size-class branch - because the `if` below swaps the whole
     /// shell subtree on rotation (e.g. Max iPhone portrait↔landscape), destroying every screen's `@State`.
     /// A cover presented from inside the swapped subtree was dismissed by the rotation itself.
     @State private var viewerRouter = MobileViewerRouter()
@@ -195,7 +195,7 @@ private struct MobilePhoneTabShell: View {
 
     /// A custom selection binding so retapping the ALREADY-active Photos tab is observable: a retap routes the
     /// same value through the setter (which `.onChange(of:)` cannot see, since the value doesn't change). We
-    /// only bump a scroll signal — the route, library, grid level and selection are all left untouched.
+    /// only bump a scroll signal - the route, library, grid level and selection are all left untouched.
     private var tabSelection: Binding<MobileTab> {
         Binding {
             selection
@@ -317,7 +317,7 @@ private struct MobileUnsupportedDeviceView: View {
     }
 }
 
-/// Metal 3 capability gate (a genuine hardware capability check, not a platform fork — the simulator reports
+/// Metal 3 capability gate (a genuine hardware capability check, not a platform fork - the simulator reports
 /// capable via `UIKitTimelineMetalCapability`).
 enum MobileMetal3Runtime {
     struct Status {

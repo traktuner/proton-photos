@@ -6,17 +6,17 @@ import PhotosCore
 import UIKit
 
 /// iOS/iPadOS adapter that drives the Core `MemoryPressureGovernor` from platform event SOURCES and wires
-/// the app's cache owners in as responders — the mobile half of the governor, mirroring the macOS
+/// the app's cache owners in as responders - the mobile half of the governor, mirroring the macOS
 /// `AppMemoryPressureCoordinator` exactly in responsibility: Core owns the mechanism and the
 /// (pressure, thermal) → tier policy; this file supplies the UIKit events and identity-keyed attachments.
 ///
 /// Event sources:
-/// - `DispatchSource.makeMemoryPressureSource` — warning/critical AND the `.normal` recovery event, so
+/// - `DispatchSource.makeMemoryPressureSource` - warning/critical AND the `.normal` recovery event, so
 ///   budgets grow back once the system relaxes (UIKit's memory warning has no "ended" signal of its own).
-/// - `UIApplication.didReceiveMemoryWarningNotification` — latched to `.critical` (purge-now semantics),
+/// - `UIApplication.didReceiveMemoryWarningNotification` - latched to `.critical` (purge-now semantics),
 ///   decaying after a grace interval unless the dispatch source reports recovery earlier.
-/// - `ProcessInfo.thermalStateDidChangeNotification` — thermal tiering, same mapping as macOS.
-/// - Background/foreground — a backgrounded app sheds to the `.reduced` tier proactively (Apple reclaims
+/// - `ProcessInfo.thermalStateDidChangeNotification` - thermal tiering, same mapping as macOS.
+/// - Background/foreground - a backgrounded app sheds to the `.reduced` tier proactively (Apple reclaims
 ///   backgrounded apps first).
 @MainActor
 public final class UIKitMemoryPressureCoordinator {
@@ -40,7 +40,7 @@ public final class UIKitMemoryPressureCoordinator {
 
     private init() {}
 
-    /// Install the platform event sources (idempotent — safe to call on every session (re)build) and the
+    /// Install the platform event sources (idempotent - safe to call on every session (re)build) and the
     /// tier-change `[MemBudget]` log line with live headroom + scaled budget ceilings.
     public func install() {
         guard !sourcesInstalled else { return }

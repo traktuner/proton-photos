@@ -316,18 +316,18 @@ public struct SquareTileGridEngine: Equatable, Sendable {
 
     /// THE content-mode policy (single source of truth, used by the coordinator AND tests): the user's
     /// preferred mode where the level supports it, else the forced `squareFillCrop` (the only mode the dense
-    /// overview levels L4–L5 offer). Pure - it reads only the level's `supportedContentModes`.
+    /// overview levels L4-L5 offer). Pure - it reads only the level's `supportedContentModes`.
     public func effectiveContentMode(preferred: TileContentDisplayMode, level: Int) -> TileContentDisplayMode {
         metrics(level: level).supportedContentModes.contains(preferred) ? preferred : .squareFillCrop
     }
 
-    /// Whether the aspect/square toggle is meaningful at a level (both modes supported → the normal levels L0–L3).
+    /// Whether the aspect/square toggle is meaningful at a level (both modes supported → the normal levels L0-L3).
     public func contentModeToggleAvailable(level: Int) -> Bool { metrics(level: level).supportedContentModes.count > 1 }
 
     /// The SIX Apple-like zoom levels, keyed by density (nominalColumns) - the canonical spec (video + the
-    /// user-confirmed macOS-Photos ladder ~3/5/7/9/20+/30+). L0–L3 are normal photo levels (both content modes
+    /// user-confirmed macOS-Photos ladder ~3/5/7/9/20+/30+). L0-L3 are normal photo levels (both content modes
     /// supported; default `aspectFitInsideSquare` = media preserves aspect INSIDE the square slot, the observed
-    /// Apple "All Photos" look - toggleable to squareFillCrop); L4–L5 are dense square overviews (squareFillCrop
+    /// Apple "All Photos" look - toggleable to squareFillCrop); L4-L5 are dense square overviews (squareFillCrop
     /// only, month/year labels). The SLOTS are always square. FIXED-COLUMNS, WIDTH-FILLING: each level HOLDS its
     /// `nominalColumns` and the square slot is sized to FILL the width - so a width change SCALES the tile (same
     /// columns, larger tile when wider), never a gutter and never a column reflow. Transition kinds are a stored

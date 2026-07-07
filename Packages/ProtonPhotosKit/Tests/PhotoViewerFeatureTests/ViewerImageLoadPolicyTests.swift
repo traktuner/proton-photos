@@ -36,7 +36,7 @@ final class ViewerImageLoadPolicyTests: XCTestCase {
 
     func testLoadWindowIsCurrentPageOnly() {
         XCTAssertTrue(ViewerImageLoadPolicy.shouldLoadDisplay(distanceFromCurrent: 0))
-        // Neighbours (swipe-preview pages) do NOT load their display image — no fetch/decode fan-out.
+        // Neighbours (swipe-preview pages) do NOT load their display image - no fetch/decode fan-out.
         XCTAssertFalse(ViewerImageLoadPolicy.shouldLoadDisplay(distanceFromCurrent: 1))
         XCTAssertFalse(ViewerImageLoadPolicy.shouldLoadDisplay(distanceFromCurrent: 3))
         XCTAssertEqual(ViewerImageLoadPolicy.loadNeighborRadius, 0)

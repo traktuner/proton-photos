@@ -5,7 +5,7 @@ import XCTest
 final class GridPinchDensityPolicyTests: XCTestCase {
 
     func testSmallPinchProducesNoStep() {
-        // Below the √2 commit point nothing happens — resting fingers and micro-motions are stable.
+        // Below the √2 commit point nothing happens - resting fingers and micro-motions are stable.
         for scale: CGFloat in [1.0, 1.1, 1.25, 1.35, 0.85, 0.75] {
             XCTAssertEqual(GridPinchDensityPolicy.levelSteps(pinchScale: scale), 0, "scale \(scale)")
         }
@@ -35,7 +35,7 @@ final class GridPinchDensityPolicyTests: XCTestCase {
     }
 
     func testFullLadderNeedsAnExtremeGesture() {
-        // Crossing 4 steps needs > 11× finger scale — a physical near-impossibility in one gesture,
+        // Crossing 4 steps needs > 11× finger scale - a physical near-impossibility in one gesture,
         // so a single ordinary pinch can never fly through every grid level again.
         XCTAssertLessThan(GridPinchDensityPolicy.levelSteps(pinchScale: 8.0), 4)
     }

@@ -25,8 +25,8 @@ struct MainView: View {
     @State private var mapClusterModel: TimelineViewModel
     @State private var viewerModel: PhotoViewerModel?
     @State private var level: Int = 3          // 0 = most zoomed in (largest, ~3 cols) … 5 = densest overview
-    // Aspect/square thumbnail toggle preference (normal levels L0–L3). Pushed to the grid coordinator; the
-    // overview levels (L4–L5) force squareFillCrop regardless. Toggling changes content fit ONLY, never layout.
+    // Aspect/square thumbnail toggle preference (normal levels L0-L3). Pushed to the grid coordinator; the
+    // overview levels (L4-L5) force squareFillCrop regardless. Toggling changes content fit ONLY, never layout.
     // Initial default = aspectFitInsideSquare (matches the coordinator's default).
     @State private var gridContentMode: TileContentDisplayMode = .aspectFitInsideSquare
 
@@ -1313,7 +1313,7 @@ struct MainView: View {
 
     /// Apple-Photos-style aspect/square thumbnail toggle. Switches `gridContentMode` between
     /// aspectFitInsideSquare and squareFillCrop and pushes it to the grid coordinator - content fit ONLY, the
-    /// square slot geometry never changes. Disabled on the dense overview levels (L4–L5, square-only). The
+    /// square slot geometry never changes. Disabled on the dense overview levels (L4-L5, square-only). The
     /// glyph is an SF Symbol (or an in-app vector fallback) resolved by `AspectSquareToggleModel`; no raster.
     private var aspectSquareToggleButton: some View {
         Button {
@@ -1599,7 +1599,7 @@ struct MainView: View {
 
     nonisolated private static func defaultExtension(_ item: PhotoItem, metadata: PhotoMetadata?) -> String {
         // Shared resolver: real Proton filename → trustworthy MIME → timeline mediaType fallback.
-        // (No `header:` here — the suggested name is chosen before the download begins; macOS's
+        // (No `header:` here - the suggested name is chosen before the download begins; macOS's
         // primary name source remains `metadata.filename`, so this is behaviour-preserving.)
         OriginalFileNaming.resolvedExtension(
             filename: metadata?.filename, mimeType: metadata?.mimeType, header: nil,

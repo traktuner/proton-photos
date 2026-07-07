@@ -21,7 +21,7 @@ public enum LocationProbeResult: Equatable, Sendable {
 /// throttle and checks `shouldYield` before each fetch, backing off while the grid actively demands
 /// thumbnails. `shouldYield` must reflect *live* demand only (see
 /// `ThumbnailFeedCore.hasVisibleThumbnailPressure`) - keying it to "any thumbnail work pending" parks the
-/// crawl until a whole 20k-photo library finishes crawling, which is exactly the bug this shipped with.
+/// crawl until a whole 20k-photo library finishes crawling.
 /// It is resumable: re-running only fills the gaps (uids already in the index are skipped).
 /// Platform-agnostic (Foundation).
 public actor LocationCrawl {

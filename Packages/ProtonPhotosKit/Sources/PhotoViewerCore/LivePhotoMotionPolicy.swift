@@ -1,6 +1,6 @@
 import PhotosCore
 
-/// Pure, platform-neutral policy for Live Photo motion playback — the single source of truth for *when* a
+/// Pure, platform-neutral policy for Live Photo motion playback - the single source of truth for *when* a
 /// motion clip is preloaded and how long to wait for its (local, encrypted-cached) player to become ready.
 /// Shared by the macOS and iOS viewers so the rule can never drift between platforms.
 public enum LivePhotoMotionPolicy {

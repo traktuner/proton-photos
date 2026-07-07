@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Platform hosts previously did `sections.flatMap(\.items).sorted(by: TimelineOrder.areInIncreasingOrder)`
 /// inline on the main actor, then paid a second O(n) `firstIndex(of:)`/`filter` on every open/share/trash.
-/// This type does the flatten+sort ONCE (off the main actor — it is pure and `Sendable`, so a caller builds
+/// This type does the flatten+sort ONCE (off the main actor - it is pure and `Sendable`, so a caller builds
 /// it in a detached task and publishes only the finished value), and answers open/share lookups in O(1)/
 /// O(k log k) from the prebuilt index instead of rescanning the whole library.
 ///
@@ -16,7 +16,7 @@ public struct TimelineSnapshot: Sendable {
     /// uid → position in `items`. First occurrence wins if a uid somehow appears twice.
     private let indexByUID: [PhotoUID: Int]
 
-    /// The empty snapshot (no items) — the initial state before any timeline has loaded.
+    /// The empty snapshot (no items) - the initial state before any timeline has loaded.
     public init() {
         items = []
         indexByUID = [:]
@@ -48,7 +48,7 @@ public struct TimelineSnapshot: Sendable {
     /// The item for `uid`, or nil. O(1).
     public func item(for uid: PhotoUID) -> PhotoItem? { indexByUID[uid].map { items[$0] } }
 
-    /// The items whose uid is in `uids`, in timeline order — for share/export of a selection. O(k log k) in
+    /// The items whose uid is in `uids`, in timeline order - for share/export of a selection. O(k log k) in
     /// the selection size, never an O(n) scan of the whole library.
     public func items(withUIDs uids: Set<PhotoUID>) -> [PhotoItem] {
         uids.compactMap { indexByUID[$0] }.sorted().map { items[$0] }
@@ -63,7 +63,7 @@ public struct TimelineSnapshot: Sendable {
 }
 
 extension TimelineSnapshot: Equatable {
-    /// Equal when the ordered items match — the index is a pure function of them, so it is not compared
+    /// Equal when the ordered items match - the index is a pure function of them, so it is not compared
     /// (avoids walking a large dictionary).
     public static func == (lhs: TimelineSnapshot, rhs: TimelineSnapshot) -> Bool {
         lhs.items == rhs.items

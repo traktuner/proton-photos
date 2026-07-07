@@ -14,7 +14,7 @@ import UploadCore
 struct MobileSettingsScreen: View {
     @EnvironmentObject private var sessionModel: MobileSessionModel
     /// `@Environment` over the `@Observable` model: Settings reads only `loadState`/`isBackgroundLoading`, so
-    /// it is NOT re-rendered when a large timeline `snapshot` is published — the core menu-smoothness fix.
+    /// it is NOT re-rendered when a large timeline `snapshot` is published - the core menu-smoothness fix.
     @Environment(MobileLibraryModel.self) private var libraryModel
     /// Shared Proton account info populated by the backend's account-data cache.
     @State private var account = AccountInfo.shared

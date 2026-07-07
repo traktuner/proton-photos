@@ -1,11 +1,11 @@
 import Foundation
 
-/// Cost-bounded platform-image wrapper cache with coordinated memory-pressure semantics — the ONE
+/// Cost-bounded platform-image wrapper cache with coordinated memory-pressure semantics - the ONE
 /// implementation of the "`NSCache` of `UIImage`/`NSImage` wrappers over the decoded core tier" that the
 /// AppKit and UIKit feed adapters (and the iOS viewer display cache) previously each hand-rolled.
 ///
 /// Generic over the wrapped object so the pressure/purge behavior is unit-testable on every platform with a
-/// plain dummy class — no UIKit/AppKit needed. Wrappers are always rebuildable (from the decoded tier or a
+/// plain dummy class - no UIKit/AppKit needed. Wrappers are always rebuildable (from the decoded tier or a
 /// re-decode), so nothing is ever lost by scaling or purging this cache.
 public final class WrapperImageCache<Image: AnyObject>: @unchecked Sendable {
     private let cache = NSCache<NSString, Image>()
@@ -48,7 +48,7 @@ public final class WrapperImageCache<Image: AnyObject>: @unchecked Sendable {
         cache.totalCostLimit = max(1, bytes)
     }
 
-    /// Purge everything EXCEPT the given key — the viewer's "drop non-visible pages, keep the on-screen one"
+    /// Purge everything EXCEPT the given key - the viewer's "drop non-visible pages, keep the on-screen one"
     /// purge. `NSCache` cannot enumerate, so the kept entry is snapshotted and re-inserted after the wipe.
     public func purge(keeping key: NSString?, keptCost: Int = 0) {
         let kept = key.flatMap { cache.object(forKey: $0) }
@@ -58,7 +58,7 @@ public final class WrapperImageCache<Image: AnyObject>: @unchecked Sendable {
         }
     }
 
-    /// The cost limit currently in force (nominal × the last pressure scale) — for tests and diagnostics.
+    /// The cost limit currently in force (nominal × the last pressure scale) - for tests and diagnostics.
     public var currentCostLimitBytes: Int {
         cache.totalCostLimit
     }

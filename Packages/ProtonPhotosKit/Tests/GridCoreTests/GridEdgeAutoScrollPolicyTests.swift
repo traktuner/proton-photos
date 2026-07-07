@@ -3,7 +3,7 @@ import Testing
 @testable import GridCore
 
 /// Locks the drag-select edge auto-scroll ramp: a middle dead zone, linear ramp inside each edge band, and a
-/// clamp to ±maxSpeed at/over the edges — the behavior that lets a drag-selection run past the visible rows
+/// clamp to ±maxSpeed at/over the edges - the behavior that lets a drag-selection run past the visible rows
 /// without gaps.
 @Suite struct GridEdgeAutoScrollPolicyTests {
     private let height: CGFloat = 800

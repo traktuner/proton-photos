@@ -8,11 +8,11 @@ import TimelineUIKitAdapter
 import UIKit
 
 /// The grid host's decode/warm pipeline: the feed's arrival wake, the visible warm pass, and the
-/// direction-biased scroll-ahead prefetch — all strictly subordinate to the render loop in
+/// direction-biased scroll-ahead prefetch - all strictly subordinate to the render loop in
 /// `UIKitTimelineGridHost.swift`, which schedules them from settled frames only.
 extension UIKitTimelineGridHostView {
     /// Arrival wake from the shared feed (a background download landed thumbnails on disk while this viewport is
-    /// live). Re-warm the still-missing visible cells (decoding the new bytes disk→RAM) and redraw — this is what
+    /// live). Re-warm the still-missing visible cells (decoding the new bytes disk→RAM) and redraw - this is what
     /// lets the render loop legitimately idle through a network wait instead of spinning, since an arrival always
     /// re-arms it. One-hop to the main actor; the pump coalesces the redraw to at most one frame.
     func handleImagesAvailable() {
@@ -38,12 +38,12 @@ extension UIKitTimelineGridHostView {
     }
 
     /// Pre-decode the rows just beyond the streamed window in the user's travel direction, disk→RAM, at
-    /// `.nearViewportScrollAhead` priority — the shared `GridScrollAheadPolicy` range over this host's flat
+    /// `.nearViewportScrollAhead` priority - the shared `GridScrollAheadPolicy` range over this host's flat
     /// UID order. Strictly subordinate to visible work: it runs only on settled frames with NO visible warm
     /// pass in flight, decodes in small chunks, and aborts between chunks the moment a visible pass starts.
-    /// RAM-neutral by design — it fills the EXISTING decoded budget ahead of need; no cache grows.
+    /// RAM-neutral by design - it fills the EXISTING decoded budget ahead of need; no cache grows.
     func scheduleScrollAheadWarmIfIdle(plan: GridFramePlan) {
-        // Never pre-warm ahead for an inactive/hidden grid — that would decode disk→RAM off-screen while the
+        // Never pre-warm ahead for an inactive/hidden grid - that would decode disk→RAM off-screen while the
         // user is in another tab/menu. (renderNow only runs when active, so this is defense-in-depth.)
         guard framePump.isActive else { return }
         guard let thumbnailFeed, let down = scrollDirectionDown, !itemUIDs.isEmpty else { return }
@@ -97,7 +97,7 @@ extension UIKitTimelineGridHostView {
     ///
     /// The gate is `warmInFlight`, NOT exact-set equality: a pass is re-issued whenever the missing set changed OR
     /// `warmNeedsRepass` was raised (a feed arrival / demand move). That is what fixes "black until the user
-    /// scrolls a nudge further" — under a STATIC viewport, a tile whose bytes land on disk (via the crawl worker,
+    /// scrolls a nudge further" - under a STATIC viewport, a tile whose bytes land on disk (via the crawl worker,
     /// which only stores to disk) is re-warmed on the next pass and decoded into the RAM tier the renderer reads,
     /// instead of being permanently deduped away because the visible set never changed. On completion it redraws;
     /// if cells are still missing the next frame re-invokes this, so the fill continues to convergence.

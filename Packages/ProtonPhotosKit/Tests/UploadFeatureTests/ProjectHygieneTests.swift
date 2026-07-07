@@ -193,8 +193,8 @@ final class ProjectHygieneTests: XCTestCase {
             "feature screens must be routed through one shared mobile route surface"
         )
         XCTAssertTrue(
-            // Prefix match (no closing paren) so the shared screen may take extra pass-through inputs — e.g.
-            // the Fotos-tab-retap `scrollToLatestSignal` — without forking the iPad route to a different screen.
+            // Prefix match (no closing paren) so the shared screen may take extra pass-through inputs - e.g.
+            // the Fotos-tab-retap `scrollToLatestSignal` - without forking the iPad route to a different screen.
             mobileApp.contains("MobileTimelineScreen(isActive: isPhotosActive") &&
             mobileApp.contains("MobileCollectionsScreen()") &&
             mobileApp.contains("MobileMapScreen()") &&

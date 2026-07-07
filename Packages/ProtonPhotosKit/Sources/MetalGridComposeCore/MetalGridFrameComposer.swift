@@ -69,7 +69,7 @@ package enum MetalGridFrameComposer {
     /// intervals without this module importing the host's diagnostics.
     /// `needsSharperSource` reports a RAM image that EXISTS but was decoded materially below the current
     /// effective pixels, so the warm pass can re-decode it sharper for the in-place texture upgrade. The
-    /// default (never) matches a feed whose decodes always land at the platform cap — macOS today.
+    /// default (never) matches a feed whose decodes always land at the platform cap - macOS today.
     @MainActor
     package static func stream<ID: Hashable & Sendable>(
         cache: MetalGridTextureCache<ID>,

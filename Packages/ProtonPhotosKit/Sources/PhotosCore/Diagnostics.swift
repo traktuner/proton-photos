@@ -16,7 +16,7 @@ public enum ThumbnailPriority: Int, CaseIterable, Codable, Sendable, Comparable 
 
 public struct ThumbnailRequest: Hashable, Codable, Sendable {
     public let uid: PhotoUID
-    /// Requested decode/upload pixel side. `0` (the default) means "no size opinion — use the feed's
+    /// Requested decode/upload pixel side. `0` (the default) means "no size opinion - use the feed's
     /// configured target". A positive value can only RAISE the decode above that target (level-aware
     /// hosts ask big for big tiles); it never shrinks the shared RAM image below it.
     public let pixelSize: Int

@@ -37,7 +37,7 @@ final class PhotoAnnotationView: MKAnnotationView {
         imageLayer.contentsGravity = .resizeAspectFill
         layer!.addSublayer(imageLayer)
 
-        // Count badge — a single aggregated cell can stand for many photos (memberCount), so it needs
+        // Count badge - a single aggregated cell can stand for many photos (memberCount), so it needs
         // the same "N photos here" pill the cluster view has. Hidden for a cell of exactly one photo.
         countBackground.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
         countBackground.cornerRadius = 8
@@ -89,7 +89,7 @@ final class PhotoAnnotationView: MKAnnotationView {
 }
 
 /// A cluster of photos - the hero thumbnail with a count pill (e.g. "52"), like Apple Photos. The hero is
-/// the first member for now (a best/cover heuristic can replace `heroUID` later).
+/// currently the first member; a cover heuristic can replace `heroUID` later.
 final class PhotoClusterAnnotationView: MKAnnotationView {
     private let imageLayer = CALayer()
     private let countLabel = NSTextField(labelWithString: "")

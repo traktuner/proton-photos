@@ -1,9 +1,9 @@
-/// The center label a selection action bar shows for a given number of selected items — the shared,
+/// The center label a selection action bar shows for a given number of selected items - the shared,
 /// platform-neutral policy so macOS, iOS, and any future surface phrase selection state identically.
 ///
 /// It is a pure decision over the count only; the platform localizes the two text cases at its own edge
 /// (the strings live in each app's String Catalog). The `hidden` case exists because a single selected item
-/// needs no count ("1 selected" is noise) — the item's own selected decoration already says it.
+/// needs no count ("1 selected" is noise) - the item's own selected decoration already says it.
 public enum SelectionCenterLabel: Equatable, Sendable {
     /// Nothing selected yet → prompt the user to pick items (e.g. "Select items").
     case prompt

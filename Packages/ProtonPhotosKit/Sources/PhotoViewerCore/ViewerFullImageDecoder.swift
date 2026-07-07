@@ -11,8 +11,8 @@ public enum ViewerFullImageDecoder {
     /// bakes EXIF orientation.
     ///
     /// - Parameter maxPixelSize: when non-nil, the longest side is capped at `min(maxPixelSize, originalLongest)`
-    ///   — the memory-bounded viewer DISPLAY decode (screen-sized), so a huge original never decodes into a giant
-    ///   image just because a page appeared. When nil (the default), the original pixel dimensions are preserved —
+    ///   - the memory-bounded viewer DISPLAY decode (screen-sized), so a huge original never decodes into a giant
+    ///   image just because a page appeared. When nil (the default), the original pixel dimensions are preserved -
     ///   the full-quality path used for zoom/export.
     public static func decodeCGImage(_ data: Data, maxPixelSize: Int? = nil) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }

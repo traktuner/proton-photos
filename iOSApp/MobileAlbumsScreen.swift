@@ -4,8 +4,8 @@ import SwiftUI
 import TimelineUIKitFeature
 
 /// The Collections tab: a generic, extensible hub over the shared `PhotoFilter` routes. It lists the
-/// smart-filter categories that are backed by REAL backend capabilities (Favorites, Videos, Live Photos —
-/// server-side `PhotoTag` filters), the user's Albums (`PhotoLibraryProvider.albums()`), and Trash — each
+/// smart-filter categories that are backed by REAL backend capabilities (Favorites, Videos, Live Photos -
+/// server-side `PhotoTag` filters), the user's Albums (`PhotoLibraryProvider.albums()`), and Trash - each
 /// opening the same shared timeline grid filtered to that route. Adding a category is a new row, not a new
 /// screen: everything flows through `PhotoFilter` + `backend.timeline(filter:)`.
 ///
@@ -144,7 +144,7 @@ private struct MobileAlbumRow: View {
 }
 
 /// The shared timeline grid, filtered to ANY `PhotoFilter` route (smart tag, album, or trash), with the same
-/// tap-to-open viewer as the main timeline. One screen serves every collection — the route is the only input.
+/// tap-to-open viewer as the main timeline. One screen serves every collection - the route is the only input.
 private struct MobileFilterGridScreen: View {
     @Environment(MobileLibraryModel.self) private var model
     let title: String

@@ -9,7 +9,7 @@ import CoreGraphics
 /// motion, never a snap. It carries NO grid layout model: it only eases one scalar (the Y scroll) between two
 /// engine-derived values, and ends EXACTLY at `toY` (the canonical settled scroll).
 public enum GridScrollRebase {
-    /// Bridge length - within the 120–180 ms spec.
+    /// Bridge length - within the 120-180 ms spec.
     public static let duration: CFTimeInterval = 0.15
     /// Minimum scroll delta (px) worth animating; below this the clamp is imperceptible, so commit instantly.
     public static let minPx: CGFloat = 1.5

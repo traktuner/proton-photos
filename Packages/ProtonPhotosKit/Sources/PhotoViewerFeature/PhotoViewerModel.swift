@@ -38,7 +38,7 @@ public final class PhotoViewerModel {
 
     // MARK: Live Photo motion clip
     /// The paired Live Photo motion clip's shared controller (single AVPlayer + play/stop state). The same
-    /// controller drives the iOS viewer, so motion behavior — E2EE preload, instant playback, crossfade — is not
+    /// controller drives the iOS viewer, so motion behavior - E2EE preload, instant playback, crossfade - is not
     /// forked per platform. See `LivePhotoMotionController`.
     public let motion = LivePhotoMotionController()
     /// The motion clip's player once fully preloaded, else nil (still loading / not a Live Photo / disabled).
@@ -186,7 +186,7 @@ public final class PhotoViewerModel {
 
     // MARK: - Live Photo motion playback
 
-    /// Plays the paired motion clip (with sound) — both the LIVE-badge HOVER and the FORCE-CLICK call this. All
+    /// Plays the paired motion clip (with sound) - both the LIVE-badge HOVER and the FORCE-CLICK call this. All
     /// the E2EE-safe preload/playback logic lives in the shared `LivePhotoMotionController`.
     public func playMotion() { motion.play() }
 
@@ -296,7 +296,7 @@ public final class PhotoViewerModel {
         isLoadingOriginal = false
         if showInfo { loadMetadata() }   // keep the open panel in sync when navigating
         resolvePlaceName(for: item)      // top-bar POI headline (debounced; skips photos flicked past)
-        // Preload the Live Photo motion clip so hover/force-click plays instantly — only while `item` stays current.
+        // Preload the Live Photo motion clip so hover/force-click plays instantly - only while `item` stays current.
         motion.prepare(for: item, streamer: streamer) { [weak self] in self?.isDisplaying(item) ?? false }
 
         // Instant: if we already have the sharp original cached, show it - no spinner, no network.

@@ -34,7 +34,7 @@ final class UIKitPhotoAnnotationView: MKAnnotationView {
         imageLayer.contentsGravity = .resizeAspectFill
         layer.addSublayer(imageLayer)
 
-        // Count badge — a single aggregated cell can stand for many photos (memberCount), so it needs
+        // Count badge - a single aggregated cell can stand for many photos (memberCount), so it needs
         // the same "N photos here" pill the cluster view has. Hidden for a cell of exactly one photo.
         countBackground.backgroundColor = UIColor.black.withAlphaComponent(0.55).cgColor
         countBackground.cornerRadius = 8

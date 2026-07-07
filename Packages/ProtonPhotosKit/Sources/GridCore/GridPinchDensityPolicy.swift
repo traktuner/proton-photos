@@ -9,7 +9,7 @@ import CoreGraphics
 ///
 /// Tuning: one step per 2× of finger scale, committed at the geometric midpoint (√2 ≈ 1.41×). A casual
 /// small pinch (< ~1.4×) therefore changes nothing, a deliberate pinch moves exactly one level, and only
-/// a full-range gesture crosses several — the previous 1.4×-per-step mapping stepped at ~1.18×, which let
+/// a full-range gesture crosses several - the previous 1.4×-per-step mapping stepped at ~1.18×, which let
 /// one ordinary pinch run through the entire ladder.
 public enum GridPinchDensityPolicy {
     /// Finger-scale ratio worth one density step.
@@ -35,7 +35,7 @@ public enum GridPinchDensityPolicy {
     }
 
     /// AppKit trackpad tuning: `NSEvent.magnification` accumulates ADDITIVELY (a running sum of per-event
-    /// deltas, not a scale factor), so the macOS host maps it linearly — this much accumulated magnification
+    /// deltas, not a scale factor), so the macOS host maps it linearly - this much accumulated magnification
     /// is worth one density step. Lives beside the UIKit scale tuning so the two platform curves cannot
     /// drift apart unseen.
     public static let magnificationPerLevel: CGFloat = 0.42

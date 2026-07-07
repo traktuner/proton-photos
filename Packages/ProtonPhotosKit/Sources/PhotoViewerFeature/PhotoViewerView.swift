@@ -135,7 +135,7 @@ public struct PhotoViewerView: View {
 
     /// The DISPLAYED photo rect (aspect-fit area, magnification/pan-transformed), reported live by the zoom
     /// scroll view. Frames the Live Photo motion overlay so a zoomed-in still plays its motion at the SAME
-    /// zoom/position — not as an unzoomed clip floating on top.
+    /// zoom/position - not as an unzoomed clip floating on top.
     @State private var livePhotoFrame: CGRect?
 
     public init(model: PhotoViewerModel,
@@ -266,7 +266,7 @@ public struct PhotoViewerView: View {
                                   onForceClickEnded: { model.stopMotion() },   // release → stop, crossfade to still
                                   onPhotoFrameChanged: { livePhotoFrame = $0 })
                 // Framed to the DISPLAYED photo rect (magnification/pan-transformed), so a zoomed-in Live Photo
-                // plays its motion at the same zoom/position as the still — never an unzoomed clip on top.
+                // plays its motion at the same zoom/position as the still - never an unzoomed clip on top.
                 if model.current.isLivePhoto, let motion = model.motionPlayer {
                     if let pf = livePhotoFrame {
                         MotionPlayerLayerView(player: motion)

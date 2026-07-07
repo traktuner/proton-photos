@@ -9,7 +9,7 @@ import AppKit
 #endif
 
 /// The platform-neutral engine that keeps an `MKMapView`'s photo annotations in sync with the visible
-/// region — framing, off-main aggregation, coalescing, the generation guard, and the add/remove diff.
+/// region - framing, off-main aggregation, coalescing, the generation guard, and the add/remove diff.
 ///
 /// This is the logic that was previously duplicated verbatim in the iOS (`UIKitLibraryMapHostView`) and
 /// macOS (`LibraryMapView.Coordinator`) hosts. `MKMapView`, `MKAnnotation`, `MKMapRect` and
@@ -72,7 +72,7 @@ public final class PhotoMapAnnotationLoader {
         reloadVisible()
     }
 
-    /// The annotation currently shown for `uid`, if any — the host uses this to apply a loaded thumbnail
+    /// The annotation currently shown for `uid`, if any - the host uses this to apply a loaded thumbnail
     /// without scanning `mapView.annotations`.
     public func annotation(for uid: PhotoUID) -> PhotoMapAnnotation? { annotationByUID[uid] }
 

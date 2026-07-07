@@ -6,7 +6,7 @@ import QuartzCore
 // MARK: - Low-noise render diagnostics
 
 /// One-second aggregation window for the render loop, logged at `.notice` so a plain `log stream` capture (no
-/// `--level debug`) separates render/upload/upgrade/warm work — one concise line per second WHILE the loop runs,
+/// `--level debug`) separates render/upload/upgrade/warm work - one concise line per second WHILE the loop runs,
 /// silent when idle. It answers the perf questions directly: how many input events were coalesced into how many
 /// draws, whether drawable acquisition ever failed, and what the streaming pipeline did (uploads / deferrals /
 /// in-place quality upgrades / residency).
@@ -31,7 +31,7 @@ struct RenderPerfWindow {
     private var saturatedDraws = 0
     /// Last frame's RAM-decoded-but-not-GPU-resident visible count (`ramHitGpuMissing`).
     private var lastRamHitGpuMiss = 0
-    /// Timestamp of the previous tick, and how many inter-tick gaps this window exceeded ~2 frames (33 ms) —
+    /// Timestamp of the previous tick, and how many inter-tick gaps this window exceeded ~2 frames (33 ms) -
     /// a cheap proxy for a visible render-loop hitch. Reset to 0 when the loop stops so a resume after an
     /// idle stretch is never counted as one giant gap.
     private var lastTickAt: CFTimeInterval = 0
@@ -42,7 +42,7 @@ struct RenderPerfWindow {
         scrollEvents += 1
     }
 
-    /// The loop stopped (idle or suspended) — forget the last tick time so the next run's first gap is not
+    /// The loop stopped (idle or suspended) - forget the last tick time so the next run's first gap is not
     /// measured against a stale timestamp.
     mutating func noteLoopStopped() {
         lastTickAt = 0

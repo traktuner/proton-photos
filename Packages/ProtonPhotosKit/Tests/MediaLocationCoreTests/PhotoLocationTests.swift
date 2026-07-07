@@ -180,7 +180,7 @@ private func tempDir() -> URL {
 
     /// Regression for the map-churn bug: sub-pixel viewport jitter must not change which cells exist
     /// or which photos each cell holds. The aggregation bins by integer cell indices, so a fractional
-    /// shift of the center keeps the same cells (just possibly re-keyed, but still bounded) — the
+    /// shift of the center keeps the same cells (just possibly re-keyed, but still bounded) - the
     /// member sets per cell must stay identical.
     @Test func viewportPolicyCellsAreStableAcrossSmallViewportJitter() {
         let index = PhotoLocationIndex()
@@ -217,7 +217,7 @@ private func tempDir() -> URL {
 
     @Test func aggregationPreservesEveryPhotoAcrossCells() {
         let index = PhotoLocationIndex()
-        // 20 photos spread so each cell gets ~2 members — none should be dropped.
+        // 20 photos spread so each cell gets ~2 members - none should be dropped.
         var coords: [PhotoCoordinate] = []
         for i in 0..<20 {
             coords.append(coord("p\(i)", 47.0 + Double(i % 4) * 0.01, 13.0 + Double(i / 4) * 0.01))

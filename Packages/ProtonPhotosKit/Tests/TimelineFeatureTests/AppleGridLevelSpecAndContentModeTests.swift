@@ -35,7 +35,7 @@ import TimelineCore
         return ""
     }
 
-    // MARK: - Level specs (1–8)
+    // MARK: - Level specs (1-8)
 
     // 1
     @Test func sixAppleGridLevelsExist() {
@@ -168,7 +168,7 @@ import TimelineCore
         }
     }
 
-    // MARK: - Content fitting (9–16)
+    // MARK: - Content fitting (9-16)
 
     private func slot() -> CGRect { CGRect(x: 120, y: 240, width: 180, height: 180) }   // a square slot
 
@@ -253,7 +253,7 @@ import TimelineCore
         #expect(abs((s.height) - (s.width)) < eps, "the slot itself is square regardless of media aspect")
     }
 
-    // MARK: - Toggle (17–21)
+    // MARK: - Toggle (17-21)
 
     // 17
     @Test func aspectSquareToggleAvailableOnlyForLevels0To3() {
@@ -305,7 +305,7 @@ import TimelineCore
         #expect(e.effectiveContentMode(preferred: preferred, level: 2) == .aspectFitInsideSquare) // back → restored
     }
 
-    // MARK: - Toolbar / UI (22–25)
+    // MARK: - Toolbar / UI (22-25)
 
     private func mainViewSource() -> String { readSource("App/Views/MainView.swift") }
 
@@ -349,7 +349,7 @@ import TimelineCore
         #expect(!mv.contains("Image(\"") || !mv.contains("PhotosAppIcon"), "no asset-catalog/raster icon for the toggle")
     }
 
-    // MARK: - Production invariants (26–30)
+    // MARK: - Production invariants (26-30)
 
     // 26
     @Test func noAspectRowOuterLayout() {
@@ -398,7 +398,7 @@ import TimelineCore
         #expect(source("TileContentFitter.swift").contains("contentRect"))
     }
 
-    // MARK: - Cursor / zoom regression (31–33)
+    // MARK: - Cursor / zoom regression (31-33)
 
     private func itemUnderCursor(_ e: SquareTileGridEngine, vp: CGPoint, level: Int, phase: Int?, scrollY: CGFloat) -> Int? {
         e.hitTest(contentPoint: CGPoint(x: vp.x, y: vp.y + scrollY), level: level, width: width, columnPhase: phase)?.index

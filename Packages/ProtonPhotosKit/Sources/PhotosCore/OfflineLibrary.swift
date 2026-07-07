@@ -27,7 +27,7 @@ public enum AppSettingsDefault {
     public static let offlineLibraryEnabled = true
     /// Bounded by default (no surprise unbounded disk growth).
     public static let offlineOriginalsCapUnlimited = false
-    /// Default originals-cache cap: 5 GB (~1000–1500 originals). Respects "no bloat" while keeping recents instant.
+    /// Default originals-cache cap: 5 GB (~1000-1500 originals). Respects "no bloat" while keeping recents instant.
     public static let offlineOriginalsCapGB = 5.0
 }
 

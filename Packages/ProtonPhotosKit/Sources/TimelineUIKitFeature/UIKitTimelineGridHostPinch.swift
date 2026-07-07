@@ -8,7 +8,7 @@ import UIKit
 
 /// Live pinch zoom for the iOS grid host: the engine-owned `GridZoomTransaction`, the shared
 /// lattice / reflow / overview-dissolve routing, and the release/settle/commit paths. Gesture and
-/// presentation state only — the render loop in `UIKitTimelineGridHost.swift` draws whatever state
+/// presentation state only - the render loop in `UIKitTimelineGridHost.swift` draws whatever state
 /// this machine leaves behind.
 extension UIKitTimelineGridHostView {
     @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {

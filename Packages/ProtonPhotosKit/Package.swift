@@ -59,7 +59,7 @@ let package = Package(
         .library(name: "PhotoLibraryBackupAdapter", targets: ["PhotoLibraryBackupAdapter"]),
         // Library map: MapKit (native Apple Maps) view over the shared encrypted location index.
         // MapCore: platform-neutral annotation type shared by macOS MapFeature and iOS MapUIKitAdapter
-        // (MKAnnotation/CLLocationCoordinate2D are identical on both platforms — no duplication).
+        // (MKAnnotation/CLLocationCoordinate2D are identical on both platforms - no duplication).
         .library(name: "MapCore", targets: ["MapCore"]),
         .library(name: "MapUIKitAdapter", targets: ["MapUIKitAdapter"]),
         .library(name: "MapFeature", targets: ["MapFeature"]),

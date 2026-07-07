@@ -1,4 +1,4 @@
-/// Scroll-direction-biased prefetch range — the shared calculation behind "warm the NEXT viewport in the
+/// Scroll-direction-biased prefetch range - the shared calculation behind "warm the NEXT viewport in the
 /// direction the user is travelling" on the settled grid.
 ///
 /// The streamed slot window (viewport + overscan) covers `coveredIndexRange`; this policy answers which

@@ -2,7 +2,7 @@ import Testing
 @testable import GridCore
 
 /// Locks the pure iOS drag-select range policy: a contiguous sweep (no holes) that adds to or removes from a
-/// base selection, reverts cells the finger leaves, and clamps out-of-range indices — the behavior that keeps
+/// base selection, reverts cells the finger leaves, and clamps out-of-range indices - the behavior that keeps
 /// finger-drag + edge auto-scroll selection gap-free.
 @Suite struct GridDragRangeSelectionTests {
     private let ids = Array(0 ..< 10)

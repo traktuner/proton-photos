@@ -54,7 +54,7 @@ import GridCore
     }
 
     // ZoomVisibleNeighborhoodDoesNotJumpTest - the visible index window stays centred on the anchor; it must
-    // not become a disjoint range (e.g. 0–50 → 80–95).
+    // not become a disjoint range (e.g. 0-50 → 80-95).
     @Test func zoomVisibleNeighborhoodDoesNotJump() {
         let e = engine()
         let L = 2, S = midScroll(e, level: 2)

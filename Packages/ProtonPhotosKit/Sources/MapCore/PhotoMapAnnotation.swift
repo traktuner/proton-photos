@@ -2,7 +2,7 @@ import Foundation
 import MapKit
 import PhotosCore
 
-/// One map pin backed by an `AggregatedCoordinate` — a grid cell that may represent several photos.
+/// One map pin backed by an `AggregatedCoordinate` - a grid cell that may represent several photos.
 ///
 /// Shared by the macOS (`MapFeature`) and iOS/iPadOS (`MapUIKitAdapter`) map UIs because
 /// `MKAnnotation`/`CLLocationCoordinate2D` are identical on both platforms. There is no per-platform
@@ -12,7 +12,7 @@ import PhotosCore
 /// the cluster view sums `memberCount` across its member annotations so the badge reflects every
 /// underlying photo, not just the count of cell pins MapKit happened to show.
 final public class PhotoMapAnnotation: NSObject, MKAnnotation {
-    /// Hero photo of the cell — the one whose thumbnail decorates the pin. Also the stable identity
+    /// Hero photo of the cell - the one whose thumbnail decorates the pin. Also the stable identity
     /// used by the map host's diff set (`shownUIDs`).
     public let uid: PhotoUID
     /// Every photo collapsed into this cell. Used to drive the cluster-series screen (lists every

@@ -5,7 +5,7 @@ import CoreGraphics
 /// When the user holds a thumbnail and drags toward the top or bottom of the grid, the grid must scroll
 /// automatically so the selection can extend past the visible rows. This is the shared, pure calculation
 /// behind that behavior: given the finger's Y in viewport space, it returns a signed scroll velocity
-/// (points/second) — zero in the middle "dead zone", ramping linearly to `maxSpeed` as the finger enters the
+/// (points/second) - zero in the middle "dead zone", ramping linearly to `maxSpeed` as the finger enters the
 /// edge band, and clamped at `maxSpeed` once the finger reaches (or passes) the very edge.
 ///
 /// Sign convention matches content-offset space: NEGATIVE scrolls toward the top (older photos), POSITIVE

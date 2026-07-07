@@ -25,7 +25,7 @@ struct MobileLibraryLoadingView: View {
 
     @ViewBuilder private var scrim: some View {
         if case .loadingContent = state {
-            // The grid (black + the popping thumbnails) is already building underneath — show it
+            // The grid (black + the popping thumbnails) is already building underneath - show it
             // through directly. No material scrim: a translucent gray veil over black is exactly the
             // gray flash we must not have.
             Color.clear
@@ -35,7 +35,7 @@ struct MobileLibraryLoadingView: View {
     }
 }
 
-/// Shown only when the library truly holds no photos — the one case where a blank grid is acceptable.
+/// Shown only when the library truly holds no photos - the one case where a blank grid is acceptable.
 struct MobileEmptyLibraryView: View {
     var body: some View {
         ContentUnavailableView {

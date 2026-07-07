@@ -239,7 +239,7 @@ public actor ThumbnailFeedCore {
 
     private nonisolated let clock: @Sendable () -> Date
     /// Last visible-demand timestamp. Held in a `nonisolated`, lock-guarded box (not actor state) SO THAT
-    /// `noteVisibleDemand` can record demand WITHOUT queuing behind the crawl on the serial actor — the crawl
+    /// `noteVisibleDemand` can record demand WITHOUT queuing behind the crawl on the serial actor - the crawl
     /// workers read it `nonisolated` too, so they back off the instant a viewport goes live even while one of
     /// them is mid-scan. If this were actor state the demand signal would starve on the same queue as the
     /// `warmDecoded` it is meant to unblock (the cold-start bug).
@@ -247,7 +247,7 @@ public actor ThumbnailFeedCore {
     private var crawlBackoffUntil: Date?
 
     /// Fired (on the feed actor) after a background download batch lands thumbnails on disk while a viewport is
-    /// live — the "images available" arrival signal a grid host subscribes to so it re-warms the still-missing
+    /// live - the "images available" arrival signal a grid host subscribes to so it re-warms the still-missing
     /// visible cells (decoding the just-arrived bytes disk→RAM) and redraws, WITHOUT needing a scroll nudge.
     /// This is the platform-neutral analogue of the macOS `MetalGridDataSource.onImagesAvailable` wake: the
     /// crawl worker stores network arrivals to disk only, so without this signal a host that has gone idle (or
@@ -274,7 +274,7 @@ public actor ThumbnailFeedCore {
 
     /// Subscribe to the "images available" arrival wake (see `onImagesAvailable`). The callback fires on the feed
     /// actor whenever a background download batch delivers thumbnails to disk while a viewport is recently live;
-    /// the host hops to its own actor and redraws / re-warms. Idempotent — set once per feed lifetime.
+    /// the host hops to its own actor and redraws / re-warms. Idempotent - set once per feed lifetime.
     public func setOnImagesAvailable(_ callback: (@Sendable () -> Void)?) {
         onImagesAvailable = callback
     }
@@ -323,7 +323,7 @@ public actor ThumbnailFeedCore {
         decoded.image(for: uid)
     }
 
-    /// True when the RAM tier holds this UID but at a decode cap materially below `pixels` — i.e. a warm
+    /// True when the RAM tier holds this UID but at a decode cap materially below `pixels` - i.e. a warm
     /// at `pixels` would actually produce a sharper image. False when the entry is absent (that is the
     /// ordinary missing-tile path) or already adequate, so a settled render loop that keys retry work on
     /// this can never spin on a source-limited image.
@@ -384,11 +384,11 @@ public actor ThumbnailFeedCore {
         return clock().timeIntervalSince(last) < within
     }
 
-    /// Records that a viewport is live WITHOUT enqueuing or decoding anything — a single lock-guarded clock
+    /// Records that a viewport is live WITHOUT enqueuing or decoding anything - a single lock-guarded clock
     /// write, `nonisolated` so it never queues on the serial actor. The per-frame warm path calls this the
     /// instant the first visible cells are known, so the background crawl's `recentDemand` gate (`takeBatch` /
     /// the end-of-list coverage re-scan) backs its filesystem scanning off immediately and yields the actor to
-    /// the visible decode — instead of the crawl only learning of demand once `warmDecoded` itself reaches the
+    /// the visible decode - instead of the crawl only learning of demand once `warmDecoded` itself reaches the
     /// actor, the very call the crawl is starving on a cold start.
     public nonisolated func noteVisibleDemand() {
         lastDemand.set(clock())
@@ -425,7 +425,7 @@ public actor ThumbnailFeedCore {
         for request in targets {
             // Size-aware skip: "already decoded" only counts when the cached entry's decode cap is adequate
             // for THIS request (shared `ThumbnailDecodeUpgradePolicy` hysteresis). A materially larger ask
-            // re-decodes the same UID sharper, in place — this is what lets a zoomed-in grid level sharpen
+            // re-decodes the same UID sharper, in place - this is what lets a zoomed-in grid level sharpen
             // tiles that were first decoded for a denser level.
             let pixels = effectiveDecodePixels(for: request)
             if decoded.hasAdequateEntry(for: request.uid, requestedPixels: Int(pixels)) {
@@ -700,7 +700,7 @@ public actor ThumbnailFeedCore {
                 if priority.isEmpty && sequentialIndex >= sequential.count {
                     // Coverage already verified for this crawl → nothing left to do.
                     if coverageSettled { return }
-                    // Never re-scan while a viewport is actively warming (recent visible demand) — it would
+                    // Never re-scan while a viewport is actively warming (recent visible demand) - it would
                     // compete for the serial actor with the visible decode that demand represents. Idle; the
                     // scan resumes once demand quiets.
                     if recentVisibleDemand() {
@@ -798,7 +798,7 @@ public actor ThumbnailFeedCore {
             }
             persistSequentialCheckpointIfNeeded()
             // Arrival wake: bytes just landed on disk. If a viewport is (recently) live, tell the host so it
-            // re-warms the still-missing visible cells (disk→RAM) and redraws — closing the "black until the
+            // re-warms the still-missing visible cells (disk→RAM) and redraws - closing the "black until the
             // user scrolls a nudge further" gap, since the crawl worker only stores to disk and never decodes.
             if completed > 0, hostArrivalWakeIsLive(now: clock()) {
                 onImagesAvailable?()
@@ -949,7 +949,7 @@ public actor ThumbnailFeedCore {
     private static let coverageScanChunk = 512
 
     /// Advances the end-of-crawl disk-coverage re-scan by ONE bounded chunk of disk checks, returning the
-    /// refreshed coverage ONLY when a full pass just completed (else `nil` — "call again"). Bounded so it can
+    /// refreshed coverage ONLY when a full pass just completed (else `nil` - "call again"). Bounded so it can
     /// never hold the serial actor for an O(library) scan, and it bails to `nil` the instant a viewport goes
     /// live, so it can never starve a visible warm decode. Workers share `coverageScanCursor`, so together they
     /// complete one pass in bounded steps; no single worker runs a full scan.
@@ -1001,7 +1001,7 @@ public actor ThumbnailFeedCore {
         coverageRefreshStarts += 1
         emitCoverage("refreshStart", scanned: 0, coverage: diskPresence.coverage(), startedAt: startedAt, reason: "-")
         // Known-state fast path: if the incremental tracker already reports (near) complete coverage from this
-        // session's crawling, settle WITHOUT a full `cache.has` sweep — it would be redundant background I/O.
+        // session's crawling, settle WITHOUT a full `cache.has` sweep - it would be redundant background I/O.
         // The tracker only counts UIDs it has POSITIVELY seen present, so this can never falsely report "warm"
         // from incomplete knowledge; a real scan runs only when knowledge is incomplete (e.g. a checkpoint
         // resume left early items unscanned) and might reveal missing items to re-crawl.
@@ -1123,7 +1123,7 @@ public actor ThumbnailFeedCore {
 #if DEBUG
 extension ThumbnailFeedCore {
     /// Test seam (DEBUG only): seed the crawl's sequential list and run exactly ONE end-of-crawl coverage-scan
-    /// step, returning how many `cache.has` stats it performed. Proves the re-scan is incremental — one
+    /// step, returning how many `cache.has` stats it performed. Proves the re-scan is incremental - one
     /// actor-held step can never scan the whole library (the cold-start starvation risk this guards against).
     func coverageScanStepStatCountForTesting(seeding uids: [PhotoUID]) -> Int {
         sequential = uids
@@ -1136,7 +1136,7 @@ extension ThumbnailFeedCore {
     }
 
     /// Test seam (DEBUG only): how many end-of-crawl coverage refreshes have actually STARTED this crawl.
-    /// Proves single-flight — one refresh per drain, not one per worker.
+    /// Proves single-flight - one refresh per drain, not one per worker.
     func coverageRefreshStartCountForTesting() -> Int { coverageRefreshStarts }
 
     /// Test seam (DEBUG only): how many coverage refreshes ran a real chunked `cache.has` sweep (vs. settling
@@ -1146,7 +1146,7 @@ extension ThumbnailFeedCore {
 #endif
 
 /// Cost-bounded, `PhotoUID`-keyed decoded-thumbnail RAM tier (replaces `NSCache<NSString, …>`). The hot
-/// render read path (`ThumbnailFeedCore.memoryDecoded`) no longer builds an `NSString` key per lookup — it
+/// render read path (`ThumbnailFeedCore.memoryDecoded`) no longer builds an `NSString` key per lookup - it
 /// hashes the `PhotoUID` directly (stable identity; NO index/string re-keying, so no wrong-thumbnail risk).
 /// Byte-costed by `DecodedThumbnail.decodedCostBytes`, O(1) move-to-front LRU eviction, and one internal
 /// lock so the nonisolated render reads, the feed actor's stores, and the memory governor all touch it
@@ -1157,7 +1157,7 @@ final class DecodedThumbnailCache: @unchecked Sendable {
         let uid: PhotoUID
         var image: DecodedThumbnail
         var cost: Int
-        /// The pixel cap this entry was decoded under (NOT the achieved image size — a source-limited
+        /// The pixel cap this entry was decoded under (NOT the achieved image size - a source-limited
         /// image records the cap it was given, so repeating the same ask never re-decodes).
         var decodePixelCap: Int
         var prev: Node?
@@ -1193,7 +1193,7 @@ final class DecodedThumbnailCache: @unchecked Sendable {
     }
 
     /// True when an entry exists AND its decode cap is adequate for `requestedPixels` (shared
-    /// `ThumbnailDecodeUpgradePolicy` hysteresis) — the size-aware "already decoded" test.
+    /// `ThumbnailDecodeUpgradePolicy` hysteresis) - the size-aware "already decoded" test.
     func hasAdequateEntry(for uid: PhotoUID, requestedPixels: Int) -> Bool {
         lock.lock(); defer { lock.unlock() }
         guard let node = map[uid] else { return false }
