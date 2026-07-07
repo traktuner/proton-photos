@@ -53,6 +53,7 @@ struct MainView: View {
     @State private var searchDebounceTask: Task<Void, Never>?
     // Shared-element zoom transition (photo ↔ its grid cell).
     @State private var gridProxy = GridProxy<PhotoUID>()
+    @State private var mapClusterGridProxy = GridProxy<PhotoUID>()
     @State private var veilTimeout: Task<Void, Never>?
     @State private var zoom: ZoomTransition?
     // Real height of the native window toolbar (its top safe-area inset). The viewer lays its media out
@@ -285,7 +286,7 @@ struct MainView: View {
                              level: $level,
                              gridFillOrder: .topLeading,
                              initialViewportPlacement: .newest,
-                             proxy: gridProxy,
+                             proxy: mapClusterGridProxy,
                              routeScrollGeneration: mapClusterRouteGeneration,
                              routeInitialScrollAnchor: nil,
                              searchText: committedSearchText,
@@ -295,7 +296,7 @@ struct MainView: View {
                              favoriteUIDs: favorites,
                              isOffline: !networkMonitor.isOnline,
                              onSelectionChange: { selectedUIDs = $0 }) { item, items in
-                    openPhoto(item, items)
+                    openPhoto(item, items, proxy: mapClusterGridProxy)
                 }
                 .padding(.leading, leadingObstructionInset)
                 .animation(.easeInOut(duration: 0.3), value: leadingObstructionInset)
@@ -602,9 +603,14 @@ struct MainView: View {
         return uids.filter { seen.insert($0).inserted }
     }
 
-    private func openPhoto(_ item: PhotoItem, _ items: [PhotoItem]) {
+    private var activeGridProxy: GridProxy<PhotoUID> {
+        mapClusterPresentation == nil ? gridProxy : mapClusterGridProxy
+    }
+
+    private func openPhoto(_ item: PhotoItem, _ items: [PhotoItem], proxy: GridProxy<PhotoUID>? = nil) {
         // Need the cell's on-screen frame and a thumbnail to fly; otherwise just open directly.
-        guard let cell = gridProxy.windowFrameForItem?(item.uid), let img = feed.memoryImage(for: item.uid) else {
+        let sourceProxy = proxy ?? activeGridProxy
+        guard let cell = sourceProxy.windowFrameForItem?(item.uid), let img = feed.memoryImage(for: item.uid) else {
             viewerModel = makeViewer(item, items)
             logViewerToolbar(mode: "viewer")
             return
@@ -679,8 +685,14 @@ struct MainView: View {
     }
 
     private func viewerReturnTarget(for vm: PhotoViewerModel) -> (item: PhotoItem, cell: CGRect)? {
+        let preferredProxy = activeGridProxy
         for item in vm.gridReturnCandidates {
-            if let cell = gridProxy.windowFrameForItem?(item.uid) { return (item, cell) }
+            if let cell = preferredProxy.windowFrameForItem?(item.uid) { return (item, cell) }
+        }
+        if mapClusterPresentation != nil {
+            for item in vm.gridReturnCandidates {
+                if let cell = gridProxy.windowFrameForItem?(item.uid) { return (item, cell) }
+            }
         }
         return nil
     }
@@ -1279,14 +1291,14 @@ struct MainView: View {
             ToolbarSpacer(.fixed, placement: .primaryAction)
             ToolbarItemGroup(placement: .primaryAction) {
                 ControlGroup {
-                    Button { gridProxy.zoomOut?() } label: {
+                    Button { activeGridProxy.zoomOut?() } label: {
                         Label("toolbar.smaller_thumbnails", systemImage: "minus")
                             .labelStyle(.iconOnly)
                     }
                         .help("toolbar.smaller_thumbnails")
                         .disabled(level >= 5)
                         .accessibilityLabel("toolbar.smaller_thumbnails")
-                    Button { gridProxy.zoomIn?() } label: {
+                    Button { activeGridProxy.zoomIn?() } label: {
                         Label("toolbar.larger_thumbnails", systemImage: "plus")
                             .labelStyle(.iconOnly)
                     }
@@ -1306,7 +1318,7 @@ struct MainView: View {
     private var aspectSquareToggleButton: some View {
         Button {
             gridContentMode = AspectSquareToggleModel.toggled(gridContentMode)
-            gridProxy.setContentMode?(gridContentMode)
+            activeGridProxy.setContentMode?(gridContentMode)
         } label: {
             Image(nsImage: AspectSquareToggleModel.image(for: gridContentMode))
         }

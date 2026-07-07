@@ -15,7 +15,7 @@ struct MobileMapScreen: View {
     @State private var networkMonitor = NetworkMonitor.shared
     @State private var clusterPresentation: MobileMapClusterPresentation?
     /// Cached frosted-bar height (read once, never live during body — see MobileTimelineScreen).
-    @State private var topFrostHeight: CGFloat = mobileTopBarFrostHeight()
+    @State private var topFrostHeight: CGFloat = mobileTopBarFrostHeightDefault
 
     var body: some View {
         NavigationStack {

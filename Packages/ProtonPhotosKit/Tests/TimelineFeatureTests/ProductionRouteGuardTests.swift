@@ -163,6 +163,27 @@ struct ProductionRouteGuardTests {
         }
     }
 
+    @Test func mapClusterViewerUsesClusterGridContext() throws {
+        let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
+        #expect(mainView.contains("@State private var mapClusterGridProxy = GridProxy<PhotoUID>()"),
+                "map cluster grid needs its own proxy so viewer open/close animations anchor to the tapped cluster cell")
+        #expect(mainView.contains("proxy: mapClusterGridProxy"))
+        #expect(mainView.contains("openPhoto(item, items, proxy: mapClusterGridProxy)"))
+        #expect(mainView.contains("private var activeGridProxy: GridProxy<PhotoUID>"))
+        #expect(mainView.contains("let preferredProxy = activeGridProxy"))
+        #expect(mainView.contains("activeGridProxy.zoomOut?()"))
+        #expect(mainView.contains("activeGridProxy.zoomIn?()"))
+        #expect(mainView.contains("activeGridProxy.setContentMode?(gridContentMode)"))
+
+        let mobileCluster = try String(contentsOf: Self.repoRoot.appendingPathComponent("iOSApp/MobileMapClusterSeriesScreen.swift"), encoding: .utf8)
+        let openBody = try Self.body(of: mobileCluster, from: "private func open(_ item: PhotoItem) {", to: "    private func toggleSelectionMode()")
+        #expect(openBody.contains("let items = clusterItems"),
+                "iOS cluster viewer navigation must use the cluster's own ordered item list")
+        #expect(openBody.contains("MobileViewerPresentation(index: index, items: items)"))
+        #expect(!openBody.contains("model.items"),
+                "opening a cluster item against the full library breaks the cluster viewer context")
+    }
+
     @Test func viewerOriginalsCacheIsReadBeforeNetworkAndPurgedBySettings() throws {
         let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
         #expect(mainView.contains("originalsCache: offline.originalsCache"))

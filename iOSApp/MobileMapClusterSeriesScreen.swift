@@ -154,8 +154,9 @@ struct MobileMapClusterSeriesScreen: View {
     }
 
     private func open(_ item: PhotoItem) {
-        guard let index = model.index(of: item.uid) else { return }
-        viewerRouter.presentation = MobileViewerPresentation(index: index, items: model.items)
+        let items = clusterItems
+        guard let index = items.firstIndex(where: { $0.uid == item.uid }) else { return }
+        viewerRouter.presentation = MobileViewerPresentation(index: index, items: items)
     }
 
     private func toggleSelectionMode() {

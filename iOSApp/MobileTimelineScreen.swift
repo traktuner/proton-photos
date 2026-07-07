@@ -26,7 +26,7 @@ struct MobileTimelineScreen: View {
     @State private var networkMonitor = NetworkMonitor.shared
     /// Frosted-bar height, read from the key window ONCE (init + onAppear) and cached — never read live
     /// during body evaluation, which cycles the layout under the safe-area-ignoring overlay.
-    @State private var topFrostHeight: CGFloat = mobileTopBarFrostHeight()
+    @State private var topFrostHeight: CGFloat = mobileTopBarFrostHeightDefault
 
     /// True while any selection action is running, so the other toolbar buttons disable together.
     private var selectionBusy: Bool { isExporting }
@@ -298,6 +298,11 @@ struct MobilePartialShare: Identifiable {
 /// the standard inline navigation-bar height, so the shared `TopFrostBar` reliably covers the title area on
 /// every device without depending on a SwiftUI geometry read that a full-bleed, safe-area-ignoring parent
 /// would report as zero. (macOS passes its own toolbar inset; only the height source is per-platform.)
+/// Constant `@State` seed. The real safe-area height is read from the key window in `.onAppear`;
+/// doing that during view initialization can trigger a SwiftUI layout cycle under full-bleed overlays.
+/// 91 = 47 (typical status bar) + 44 (navigation bar), matching `mobileTopBarFrostHeight()`'s fallback.
+let mobileTopBarFrostHeightDefault: CGFloat = 91
+
 func mobileTopBarFrostHeight() -> CGFloat {
     let topSafeArea = UIApplication.shared.connectedScenes
         .compactMap { $0 as? UIWindowScene }
