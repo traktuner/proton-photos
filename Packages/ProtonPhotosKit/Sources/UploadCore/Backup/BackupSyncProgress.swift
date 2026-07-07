@@ -35,6 +35,13 @@ public struct BackupSyncProgress: Sendable, Equatable {
     /// when that specific file is actually being uploaded, not merely checked. nil when nothing is
     /// mid-transfer.
     public var currentUploadingName: String?
+    /// Byte transfer progress (0…1) of `currentUploadingName`, or nil when unknown. This is the honest
+    /// "it is moving" signal for a large video whose item-count barely advances: a 465 MB upload sits
+    /// on one item for minutes, so a rising percentage is the only proof of life.
+    public var currentUploadingFraction: Double?
+    /// Size in bytes of `currentUploadingName`, so the UI can explain WHY a single item lingers
+    /// ("465 MB"). nil when unknown.
+    public var currentUploadingByteCount: Int?
     /// True while a runner pass is draining the queue.
     public var isRunning = false
     /// True while the throttle policy holds the running pass at zero concurrency
@@ -66,7 +73,7 @@ public struct BackupSyncProgress: Sendable, Equatable {
     }
 
     /// Seeds the queue-derived counters from a summary; live fields stay as set by the runner.
-    public init(summary: UploadBackupSyncQueueSummary, currentItemName: String? = nil, currentUploadingName: String? = nil, isRunning: Bool = false) {
+    public init(summary: UploadBackupSyncQueueSummary, currentItemName: String? = nil, currentUploadingName: String? = nil, currentUploadingFraction: Double? = nil, currentUploadingByteCount: Int? = nil, isRunning: Bool = false) {
         self.init()
         total = summary.total
         waiting = summary.waiting
@@ -82,6 +89,8 @@ public struct BackupSyncProgress: Sendable, Equatable {
         paused = summary.paused
         self.currentItemName = currentItemName
         self.currentUploadingName = currentUploadingName
+        self.currentUploadingFraction = currentUploadingFraction
+        self.currentUploadingByteCount = currentUploadingByteCount
         self.isRunning = isRunning
     }
 }

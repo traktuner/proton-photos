@@ -90,6 +90,11 @@ public actor BackupSyncRunner {
     /// Names of items whose BYTES are moving right now (the `.uploading` step only) - drives the
     /// honest "wird gesichert: X" line, kept apart from `inFlightNames` (which also covers checking).
     private var uploadingNames: [String: String] = [:]
+    /// Last upload fraction emitted per item, so the byte-progress callback only pushes a status
+    /// update on a meaningful change (≥1%) instead of on every chunk - keeps the UI live without
+    /// flooding the actor.
+    private var lastEmittedUploadFraction: [String: Double] = [:]
+    private var uploadingByteCounts: [String: Int] = [:]
 
     private var progress = BackupSyncProgress()
     private var onProgress: (@Sendable (BackupSyncProgress) -> Void)?
@@ -426,13 +431,23 @@ public actor BackupSyncRunner {
         // can prove a specific file is being backed up (not just checked). emitProgress right away so
         // the change is visible immediately, not only at the next settle.
         uploadingNames[key] = entry.originalFilename
+        uploadingByteCounts[key] = Int(resolved.descriptor.fileSize)
         progress.currentUploadingName = entry.originalFilename
+        progress.currentUploadingByteCount = Int(resolved.descriptor.fileSize)
+        progress.currentUploadingFraction = 0
+        lastEmittedUploadFraction[key] = 0
         emitProgress()
         defer {
             inFlightTokens[key] = nil
             uploadingNames[key] = nil
+            uploadingByteCounts[key] = nil
+            lastEmittedUploadFraction[key] = nil
             if progress.currentUploadingName == entry.originalFilename {
+                // Hand the live slot to another in-flight upload if there is one, else clear it.
                 progress.currentUploadingName = uploadingNames.values.first
+                let nextKey = uploadingNames.first(where: { $0.value == progress.currentUploadingName })?.key
+                progress.currentUploadingByteCount = nextKey.flatMap { uploadingByteCounts[$0] }
+                progress.currentUploadingFraction = nextKey.flatMap { lastEmittedUploadFraction[$0] }
             }
         }
 
@@ -453,8 +468,12 @@ public actor BackupSyncRunner {
         #if DEBUG
         let _tUpload = Date()
         #endif
+        let uploadName = entry.originalFilename
         do {
-            uid = try await uploader.upload(request) { _ in }
+            uid = try await uploader.upload(request) { [weak self] itemProgress in
+                guard itemProgress.phase == .uploading else { return }
+                Task { await self?.reportUploadProgress(key: key, name: uploadName, fraction: itemProgress.fraction) }
+            }
         } catch {
             // Settle the pipeline's same-content claim (identical items may be waiting on this
             // upload) and drop the cached remote view - the server may have committed the
@@ -777,6 +796,20 @@ public actor BackupSyncRunner {
 
     private func emitProgress() {
         onProgress?(progress)
+    }
+
+    /// Byte-progress from an in-flight upload. Only forwarded when this item is still the one being
+    /// shown and the fraction advanced by at least 1% (or completed), so a large video reads as a
+    /// rising percentage rather than a frozen count. Ignores stale callbacks after the item settled.
+    private func reportUploadProgress(key: String, name: String, fraction: Double) {
+        guard uploadingNames[key] == name else { return }   // item already settled/switched away
+        let last = lastEmittedUploadFraction[key] ?? 0
+        guard fraction >= 1 || fraction - last >= 0.01 else { return }
+        lastEmittedUploadFraction[key] = fraction
+        progress.currentUploadingName = name
+        progress.currentUploadingByteCount = uploadingByteCounts[key]
+        progress.currentUploadingFraction = fraction
+        emitProgress()
     }
 
     /// Errors that reflect a temporary lack of disk space rather than a bad item. These are

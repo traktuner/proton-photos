@@ -79,6 +79,10 @@ public struct BackupStatusPresentation: Sendable, Equatable {
     /// True when `liveItemName` is a file whose bytes are actually moving (the `.uploading` step), so
     /// the line reads "wird gesichert: X"; false means it is only being checked ("Aktuell: X").
     public var liveItemIsUploading: Bool
+    /// Byte progress (0…1) and size of the uploading item, so the line can read
+    /// "Wird gesichert: IMG_5560.MOV — 43 % (465 MB)" and prove a big video is moving.
+    public var liveItemFraction: Double?
+    public var liveItemByteCount: Int?
 
     public init(
         headlineKey: String,
@@ -88,7 +92,9 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         isActive: Bool,
         accessory: Accessory,
         liveItemName: String? = nil,
-        liveItemIsUploading: Bool = false
+        liveItemIsUploading: Bool = false,
+        liveItemFraction: Double? = nil,
+        liveItemByteCount: Int? = nil
     ) {
         self.headlineKey = headlineKey
         self.detailKey = detailKey
@@ -98,6 +104,8 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         self.accessory = accessory
         self.liveItemName = liveItemName
         self.liveItemIsUploading = liveItemIsUploading
+        self.liveItemFraction = liveItemFraction
+        self.liveItemByteCount = liveItemByteCount
     }
 
     // MARK: - Mapping from the shared status
@@ -116,14 +124,16 @@ public struct BackupStatusPresentation: Sendable, Equatable {
             self.init(headlineKey: Self.activeHeadline, detailKey: "backup.status_checking_detail",
                       count: Self.countOfTotal("backup.detail_checked", value: status.checked, total: status.totalConsidered),
                       progressFraction: status.fractionCompleted, isActive: true, accessory: .activity,
-                      liveItemName: live.name, liveItemIsUploading: live.isUploading)
+                      liveItemName: live.name, liveItemIsUploading: live.isUploading,
+                      liveItemFraction: live.fraction, liveItemByteCount: live.byteCount)
 
         case .uploading:
             let live = Self.liveItem(status)
             self.init(headlineKey: Self.activeHeadline, detailKey: "backup.status_uploading_detail",
                       count: Self.countOfTotal("backup.detail_backed_up", value: status.backedUp, total: status.totalConsidered),
                       progressFraction: status.fractionCompleted, isActive: true, accessory: .activity,
-                      liveItemName: live.name, liveItemIsUploading: live.isUploading)
+                      liveItemName: live.name, liveItemIsUploading: live.isUploading,
+                      liveItemFraction: live.fraction, liveItemByteCount: live.byteCount)
 
         case .paused:
             self.init(headlineKey: "backup.phase_paused", detailKey: nil,
@@ -163,11 +173,12 @@ public struct BackupStatusPresentation: Sendable, Equatable {
 
     /// Prefer the file actually pushing bytes (so the line can honestly say "wird gesichert"); fall
     /// back to whatever is merely being checked.
-    private static func liveItem(_ status: BackupStatus) -> (name: String?, isUploading: Bool) {
+    private static func liveItem(_ status: BackupStatus)
+        -> (name: String?, isUploading: Bool, fraction: Double?, byteCount: Int?) {
         if let uploading = status.uploadingItemName, !uploading.isEmpty {
-            return (uploading, true)
+            return (uploading, true, status.uploadingFraction, status.uploadingByteCount)
         }
-        return (status.currentItemName, false)
+        return (status.currentItemName, false, nil, nil)
     }
 
     // MARK: - Localized accessors (finite key sets; no dynamic-key lookups)
@@ -200,8 +211,18 @@ public struct BackupStatusPresentation: Sendable, Equatable {
     /// "still moving" from "stuck" when the settled count is momentarily flat.
     public var localizedLiveItem: String? {
         guard let name = liveItemName, !name.isEmpty else { return nil }
-        return liveItemIsUploading
-            ? L10n.string("backup.status_backing_up_item \(name)")
-            : L10n.string("backup.status_working_on \(name)")
+        guard liveItemIsUploading else { return L10n.string("backup.status_working_on \(name)") }
+        // "Wird gesichert: IMG_5560.MOV — 43 % · 465 MB": localized base + locale-neutral numeric
+        // suffix. Percentage and size are the proof a large upload is moving while the count sits still.
+        var line = L10n.string("backup.status_backing_up_item \(name)")
+        var extras: [String] = []
+        if let fraction = liveItemFraction, fraction > 0 {
+            extras.append("\(Int((fraction * 100).rounded())) %")
+        }
+        if let bytes = liveItemByteCount, bytes > 0 {
+            extras.append(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))
+        }
+        if !extras.isEmpty { line += " — " + extras.joined(separator: " · ") }
+        return line
     }
 }

@@ -164,6 +164,19 @@ final class BackupStatusPresentationTests: XCTestCase {
         }
     }
 
+    func testUploadingLiveLineShowsPercentAndSizeForLargeVideo() {
+        var p = progress(total: 100, uploading: 1, isRunning: true)
+        p.currentUploadingName = "IMG_5560.MOV"
+        p.currentUploadingFraction = 0.43
+        p.currentUploadingByteCount = 465 * 1_000_000
+        let pres = BackupStatusPresentation(status(p))
+        XCTAssertEqual(pres.liveItemFraction, 0.43)
+        let line = try? XCTUnwrap(pres.localizedLiveItem)
+        XCTAssertEqual(line?.contains("IMG_5560.MOV"), true)
+        XCTAssertEqual(line?.contains("43 %"), true, "a moving percentage proves the big upload is alive")
+        XCTAssertEqual(line?.contains("MB"), true, "size explains why one item lingers")
+    }
+
     func testUploadingFilePrefersBackingUpWordingOverCheckingFile() {
         // A file is genuinely pushing bytes while another is merely being checked: the "wird
         // gesichert" name must win, so the user sees the actual upload proven.
