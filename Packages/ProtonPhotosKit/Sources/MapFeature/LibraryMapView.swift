@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import AppKit
+import MapCore
 import PhotosCore
 import MediaLocationCore
 
@@ -16,15 +17,18 @@ public struct LibraryMapView: NSViewRepresentable {
     private let thumbnail: (PhotoUID) -> NSImage?
     private let loadThumbnail: (PhotoUID) async -> NSImage?
     private let onSelectPhoto: (PhotoUID) -> Void
+    private let onSelectCluster: ([PhotoUID], CLLocationCoordinate2D) -> Void
 
     public init(index: PhotoLocationIndex,
                 thumbnail: @escaping (PhotoUID) -> NSImage?,
                 loadThumbnail: @escaping (PhotoUID) async -> NSImage?,
-                onSelectPhoto: @escaping (PhotoUID) -> Void) {
+                onSelectPhoto: @escaping (PhotoUID) -> Void,
+                onSelectCluster: @escaping ([PhotoUID], CLLocationCoordinate2D) -> Void = { _, _ in }) {
         self.index = index
         self.thumbnail = thumbnail
         self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
+        self.onSelectCluster = onSelectCluster
     }
 
     public func makeNSView(context: Context) -> MKMapView {
@@ -43,11 +47,13 @@ public struct LibraryMapView: NSViewRepresentable {
         context.coordinator.thumbnail = thumbnail
         context.coordinator.loadThumbnail = loadThumbnail
         context.coordinator.onSelectPhoto = onSelectPhoto
+        context.coordinator.onSelectCluster = onSelectCluster
         context.coordinator.refreshIfChanged(revision: index.revision)
     }
 
     public func makeCoordinator() -> Coordinator {
-        Coordinator(index: index, thumbnail: thumbnail, loadThumbnail: loadThumbnail, onSelectPhoto: onSelectPhoto)
+        Coordinator(index: index, thumbnail: thumbnail, loadThumbnail: loadThumbnail,
+                    onSelectPhoto: onSelectPhoto, onSelectCluster: onSelectCluster)
     }
 
     @MainActor
@@ -56,9 +62,11 @@ public struct LibraryMapView: NSViewRepresentable {
         var thumbnail: (PhotoUID) -> NSImage?
         var loadThumbnail: (PhotoUID) async -> NSImage?
         var onSelectPhoto: (PhotoUID) -> Void
+        var onSelectCluster: ([PhotoUID], CLLocationCoordinate2D) -> Void
         private weak var map: MKMapView?
         private var shownUIDs = Set<PhotoUID>()
-        private var thumbnailLoadsInFlight = Set<PhotoUID>()
+        private var annotationByUID: [PhotoUID: PhotoMapAnnotation] = [:]
+        private var thumbnailLoadTasks: [PhotoUID: Task<Void, Never>] = [:]
         private var lastRevision = Int.min
         private var didFrame = false
         /// Last queried bounding box, so a sub-pixel `regionDidChange` (or a `revision` bump that
@@ -66,17 +74,27 @@ public struct LibraryMapView: NSViewRepresentable {
         private var lastBoundingBox: GeoBoundingBox?
         private let visibleCoordinatePolicy = PhotoLocationVisibleCoordinatePolicy(
             marginMultiplier: 1.6,
-            maxCoordinates: 3000
+            maxCells: 400,
+            cellDivisor: 12,
+            minCellMeters: 80
         )
 
         init(index: PhotoLocationIndex,
              thumbnail: @escaping (PhotoUID) -> NSImage?,
              loadThumbnail: @escaping (PhotoUID) async -> NSImage?,
-             onSelectPhoto: @escaping (PhotoUID) -> Void) {
+             onSelectPhoto: @escaping (PhotoUID) -> Void,
+             onSelectCluster: @escaping ([PhotoUID], CLLocationCoordinate2D) -> Void) {
             self.index = index
             self.thumbnail = thumbnail
             self.loadThumbnail = loadThumbnail
             self.onSelectPhoto = onSelectPhoto
+            self.onSelectCluster = onSelectCluster
+        }
+
+        deinit {
+            for (_, task) in thumbnailLoadTasks {
+                task.cancel()
+            }
         }
 
         func attach(_ map: MKMapView) {
@@ -110,7 +128,7 @@ public struct LibraryMapView: NSViewRepresentable {
             didFrame = true
         }
 
-        /// Region-based loading: keep only the annotations whose photos are in the visible rect (+ margin),
+        /// Region-based loading: keep only the annotations whose cells are in the visible rect (+ margin),
         /// so the map never holds more than the on-screen subset. MapKit clusters that subset.
         private func reloadVisible() {
             guard let map else { return }
@@ -127,25 +145,29 @@ public struct LibraryMapView: NSViewRepresentable {
             // lastBoundingBox when the index contents change, so crawl additions still re-query.
             if lastBoundingBox == box { return }
             lastBoundingBox = box
-            let capped = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
-            let wanted = Set(capped.map(\.uid))
+            // Grid cells instead of raw coordinates: each cell represents one pin and carries the
+            // true count of underlying photos (memberCount).
+            let cells = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
+            let wanted = Set(cells.map(\.uid))
 
             let stale = map.annotations.compactMap { $0 as? PhotoMapAnnotation }.filter { !wanted.contains($0.uid) }
             if !stale.isEmpty {
                 map.removeAnnotations(stale)
-                shownUIDs.subtract(stale.map(\.uid))
+                let staleUIDs = Set(stale.map(\.uid))
+                shownUIDs.subtract(staleUIDs)
+                for uid in staleUIDs {
+                    annotationByUID.removeValue(forKey: uid)
+                    thumbnailLoadTasks.removeValue(forKey: uid)?.cancel()
+                }
             }
-            let fresh = capped.filter { !shownUIDs.contains($0.uid) }
+            let fresh = cells.filter { !shownUIDs.contains($0.uid) }
             if !fresh.isEmpty {
-                map.addAnnotations(fresh.map(PhotoMapAnnotation.init))
+                let annotations = fresh.map(PhotoMapAnnotation.init)
+                for (index, cell) in fresh.enumerated() {
+                    annotationByUID[cell.uid] = annotations[index]
+                }
+                map.addAnnotations(annotations)
                 shownUIDs.formUnion(fresh.map(\.uid))
-            }
-        }
-
-        private func boundingRect(of coords: [CLLocationCoordinate2D]) -> MKMapRect {
-            coords.reduce(MKMapRect.null) { acc, c in
-                let p = MKMapPoint(c)
-                return acc.union(MKMapRect(x: p.x, y: p.y, width: 0, height: 0))
             }
         }
 
@@ -161,7 +183,12 @@ public struct LibraryMapView: NSViewRepresentable {
                     withIdentifier: MKMapViewDefaultClusterAnnotationViewReuseIdentifier, for: annotation) as! PhotoClusterAnnotationView
                 let hero = cluster.memberAnnotations.first as? PhotoMapAnnotation   // v1: first member (best/cover later)
                 let image = hero.flatMap { thumbnail($0.uid) }
-                view.configure(thumbnail: image, count: cluster.memberAnnotations.count)
+                // Sum each cell's memberCount so the badge shows every underlying photo the cluster
+                // represents — not just the number of cell pins MapKit chose to show.
+                let totalCount = cluster.memberAnnotations
+                    .compactMap { $0 as? PhotoMapAnnotation }
+                    .reduce(0) { $0 + $1.memberCount }
+                view.configure(thumbnail: image, count: totalCount)
                 if image == nil, let hero {
                     requestThumbnailIfNeeded(hero.uid)
                 }
@@ -171,6 +198,9 @@ public struct LibraryMapView: NSViewRepresentable {
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: PhotoAnnotationView.reuseID, for: annotation) as! PhotoAnnotationView
             let image = thumbnail(photo.uid)
             view.setThumbnail(image)
+            // A single cell can aggregate many photos (the minCellMeters floor merges a same-place
+            // burst); show its true count so a multi-photo pin doesn't masquerade as a single picture.
+            view.setCount(photo.memberCount)
             if image == nil {
                 requestThumbnailIfNeeded(photo.uid)
             }
@@ -179,25 +209,29 @@ public struct LibraryMapView: NSViewRepresentable {
 
         public func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
             if let cluster = view.annotation as? MKClusterAnnotation {
-                let rect = boundingRect(of: cluster.memberAnnotations.map(\.coordinate))
-                if !rect.isNull {
-                    mapView.setVisibleMapRect(rect, edgePadding: NSEdgeInsets(top: 120, left: 120, bottom: 120, right: 120), animated: true)
-                }
+                let uids = cluster.memberAnnotations
+                    .compactMap { ($0 as? PhotoMapAnnotation)?.memberUIDs }
+                    .flatMap { $0 }
+                onSelectCluster(Self.unique(uids), cluster.coordinate)
                 mapView.deselectAnnotation(view.annotation, animated: false)
             } else if let photo = view.annotation as? PhotoMapAnnotation {
-                onSelectPhoto(photo.uid)
+                if photo.memberUIDs.count == 1 {
+                    onSelectPhoto(photo.uid)
+                } else {
+                    onSelectCluster(photo.memberUIDs, photo.coordinate)
+                }
                 mapView.deselectAnnotation(view.annotation, animated: false)
             }
         }
 
         private func requestThumbnailIfNeeded(_ uid: PhotoUID) {
-            guard !thumbnailLoadsInFlight.contains(uid) else { return }
-            thumbnailLoadsInFlight.insert(uid)
+            guard thumbnailLoadTasks[uid] == nil else { return }
             let loadThumbnail = loadThumbnail
-            Task { @MainActor [weak self] in
+            thumbnailLoadTasks[uid] = Task { @MainActor [weak self] in
                 let image = await loadThumbnail(uid)
                 guard let self else { return }
-                self.thumbnailLoadsInFlight.remove(uid)
+                self.thumbnailLoadTasks.removeValue(forKey: uid)
+                if Task.isCancelled { return }
                 guard let image else { return }
                 self.applyLoadedThumbnail(image, for: uid)
             }
@@ -206,9 +240,7 @@ public struct LibraryMapView: NSViewRepresentable {
         private func applyLoadedThumbnail(_ image: NSImage, for uid: PhotoUID) {
             guard let map else { return }
 
-            if let annotation = map.annotations
-                .compactMap({ $0 as? PhotoMapAnnotation })
-                .first(where: { $0.uid == uid }),
+            if let annotation = annotationByUID[uid],
                let view = map.view(for: annotation) as? PhotoAnnotationView {
                 view.setThumbnail(image)
             }
@@ -217,9 +249,19 @@ public struct LibraryMapView: NSViewRepresentable {
                 guard cluster.memberAnnotations.contains(where: { ($0 as? PhotoMapAnnotation)?.uid == uid }),
                       let view = map.view(for: cluster) as? PhotoClusterAnnotationView,
                       let hero = cluster.memberAnnotations.first as? PhotoMapAnnotation else { continue }
+                // Recompute the total count from memberCount (not memberAnnotations.count) so the badge
+                // stays correct after a thumbnail refresh.
+                let totalCount = cluster.memberAnnotations
+                    .compactMap { $0 as? PhotoMapAnnotation }
+                    .reduce(0) { $0 + $1.memberCount }
                 view.configure(thumbnail: thumbnail(hero.uid) ?? (hero.uid == uid ? image : nil),
-                               count: cluster.memberAnnotations.count)
+                               count: totalCount)
             }
+        }
+
+        private static func unique(_ uids: [PhotoUID]) -> [PhotoUID] {
+            var seen = Set<PhotoUID>()
+            return uids.filter { seen.insert($0).inserted }
         }
     }
 }

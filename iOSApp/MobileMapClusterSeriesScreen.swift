@@ -1,7 +1,7 @@
 import CoreLocation
 import DesignSystemCore
 import GridCore
-import PhotoViewerCore
+import MapUIKitAdapter
 import PhotosCore
 import SwiftUI
 import TimelineUIKitFeature
@@ -205,7 +205,10 @@ struct MobileMapClusterSeriesScreen: View {
     }
 
     private func resolvePlaceName() async {
-        let name = await PlaceNameResolver.shared.placeName(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let name = await NativePlaceNameResolver.shared.placeName(
+            latitude: coordinate.latitude,
+            longitude: coordinate.longitude
+        )
         placeName = name
     }
 }

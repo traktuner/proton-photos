@@ -24,11 +24,24 @@ public struct PhotoLocationViewport: Sendable, Equatable {
 
 public struct PhotoLocationVisibleCoordinatePolicy: Sendable, Equatable {
     public let marginMultiplier: Double
-    public let maxCoordinates: Int
+    /// Maximum number of AGGREGATED pins returned per query. Each pin represents one grid cell and
+    /// may stand in for dozens of photos, so this caps what MKMapView has to render — not the number
+    /// of underlying photos. A dense neighborhood of 5k photos at the same block collapses to one cell.
+    public let maxCells: Int
+    /// How many grid cells fit across the viewport's span. Higher → finer cells (more, smaller pins);
+    /// lower → coarser cells (fewer, larger pins). Tuned so a typical city view produces a few hundred
+    /// cells at most, letting MapKit's built-in clustering do the final visual merge.
+    public let cellDivisor: Double
+    /// Lower bound on a grid cell's edge length, in meters. Photos closer than this always share a
+    /// cell (one pin) regardless of zoom, so a dense same-place burst (e.g. many photos at home) never
+    /// scatters into overlapping pins when zooming in. 0 disables the floor (pure viewport-relative).
+    public let minCellMeters: Double
 
-    public init(marginMultiplier: Double, maxCoordinates: Int) {
+    public init(marginMultiplier: Double, maxCells: Int, cellDivisor: Double, minCellMeters: Double = 0) {
         self.marginMultiplier = marginMultiplier
-        self.maxCoordinates = maxCoordinates
+        self.maxCells = maxCells
+        self.cellDivisor = cellDivisor
+        self.minCellMeters = minCellMeters
     }
 
     public func boundingBox(for viewport: PhotoLocationViewport) -> GeoBoundingBox? {
@@ -44,38 +57,21 @@ public struct PhotoLocationVisibleCoordinatePolicy: Sendable, Equatable {
         )
     }
 
-    public func visibleCoordinates(
+    /// Filter to the visible box, then bin into grid cells so MKMapView gets one pin per cell (each
+    /// carrying the true photo count) instead of one pin per photo.
+    public func aggregatedCoordinates(
         from coordinates: [PhotoCoordinate],
         in viewport: PhotoLocationViewport
-    ) -> [PhotoCoordinate] {
-        guard maxCoordinates > 0, let box = boundingBox(for: viewport) else { return [] }
-
+    ) -> [AggregatedCoordinate] {
+        guard maxCells > 0, let box = boundingBox(for: viewport) else { return [] }
         let visible = coordinates.filter { box.contains(latitude: $0.latitude, longitude: $0.longitude) }
-        guard visible.count > maxCoordinates else { return visible }
-        // Stable selection when capped: pick the N closest to the viewport center so a tiny box
-        // jitter at the margin doesn't swap thousands of results and cause massive diff churn.
-        // Plain euclidean squared distance on lat/lon — only a comparison key, not a real distance,
-        // so we keep MediaLocationCore free of any platform location type.
-        let centerLat = viewport.centerLatitude
-        let centerLon = viewport.centerLongitude
-        return Array(visible
-            .sorted { lhs, rhs in
-                let dl = distSq(lhs, centerLat, centerLon)
-                let dr = distSq(rhs, centerLat, centerLon)
-                if dl != dr { return dl < dr }
-                // Tie on distance: break deterministically so selection is stable across runs and
-                // toolchains (Swift's sorted(by:) stability is not guaranteed). Compare the uid's
-                // (volumeID, nodeID) tuple lexicographically — cheaper and separator-safe vs. a
-                // string key, since PhotoUID isn't Comparable.
-                return (lhs.uid.volumeID, lhs.uid.nodeID) < (rhs.uid.volumeID, rhs.uid.nodeID)
-            }
-            .prefix(maxCoordinates))
-    }
-
-    private func distSq(_ coord: PhotoCoordinate, _ centerLat: Double, _ centerLon: Double) -> Double {
-        let dLat = coord.latitude - centerLat
-        let dLon = coord.longitude - centerLon
-        return dLat * dLat + dLon * dLon
+        return PhotoLocationAggregation.aggregate(
+            visible,
+            in: viewport,
+            cellDivisor: cellDivisor,
+            maxCells: maxCells,
+            minCellMeters: minCellMeters
+        )
     }
 }
 
@@ -83,7 +79,7 @@ public extension PhotoLocationIndex {
     func coordinates(
         in viewport: PhotoLocationViewport,
         policy: PhotoLocationVisibleCoordinatePolicy
-    ) -> [PhotoCoordinate] {
-        policy.visibleCoordinates(from: coordinates, in: viewport)
+    ) -> [AggregatedCoordinate] {
+        policy.aggregatedCoordinates(from: coordinates, in: viewport)
     }
 }

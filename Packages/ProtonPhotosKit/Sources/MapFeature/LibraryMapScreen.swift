@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreLocation
 import PhotosCore
 import MediaLocationCore
 
@@ -13,19 +14,23 @@ public struct LibraryMapScreen: View {
     private let thumbnail: (PhotoUID) -> NSImage?
     private let loadThumbnail: (PhotoUID) async -> NSImage?
     private let onSelectPhoto: (PhotoUID) -> Void
+    private let onSelectCluster: ([PhotoUID], CLLocationCoordinate2D) -> Void
 
     public init(index: PhotoLocationIndex,
                 thumbnail: @escaping (PhotoUID) -> NSImage?,
                 loadThumbnail: @escaping (PhotoUID) async -> NSImage?,
-                onSelectPhoto: @escaping (PhotoUID) -> Void) {
+                onSelectPhoto: @escaping (PhotoUID) -> Void,
+                onSelectCluster: @escaping ([PhotoUID], CLLocationCoordinate2D) -> Void = { _, _ in }) {
         self.index = index
         self.thumbnail = thumbnail
         self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
+        self.onSelectCluster = onSelectCluster
     }
 
     public var body: some View {
         let _ = index.revision   // observe → re-render (→ updateNSView) as the crawl adds coordinates
-        LibraryMapView(index: index, thumbnail: thumbnail, loadThumbnail: loadThumbnail, onSelectPhoto: onSelectPhoto)
+        LibraryMapView(index: index, thumbnail: thumbnail, loadThumbnail: loadThumbnail,
+                       onSelectPhoto: onSelectPhoto, onSelectCluster: onSelectCluster)
     }
 }

@@ -641,6 +641,23 @@
         }
       }
     },
+    "map.cluster_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Places"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ort"
+          }
+        }
+      }
+    },
     "map.scanning_title": {
       "extractionState": "manual",
       "localizations": {

@@ -12,10 +12,19 @@ final class UIKitPhotoAnnotationView: MKAnnotationView {
     static let reuseID = "UIKitPhotoAnnotation"
 
     private let imageLayer = CALayer()
+    private let countLabel = UILabel()
+    private let countBackground = CALayer()
 
     override init(annotation: MKAnnotation?, reuseIdentifier: String?) {
         super.init(annotation: annotation, reuseIdentifier: reuseIdentifier)
         clusteringIdentifier = "photo"
+        // MKAnnotationView defaults to displayPriority .required, and MapKit NEVER clusters
+        // required-priority annotations (they are always shown). Without this, every photo pin
+        // stays visible and overlaps instead of collapsing into a count badge. .defaultLow lets
+        // MapKit merge overlapping pins; .circle matches the cluster view's collision shape so the
+        // merge decision uses the same footprint.
+        displayPriority = .defaultLow
+        collisionMode = .circle
         frame = CGRect(x: 0, y: 0, width: UIKitMapBadgeStyle.size, height: UIKitMapBadgeStyle.size)
         centerOffset = CGPoint(x: 0, y: -UIKitMapBadgeStyle.size / 2)
         configureContainer(layer)
@@ -24,6 +33,19 @@ final class UIKitPhotoAnnotationView: MKAnnotationView {
         imageLayer.masksToBounds = true
         imageLayer.contentsGravity = .resizeAspectFill
         layer.addSublayer(imageLayer)
+
+        // Count badge — a single aggregated cell can stand for many photos (memberCount), so it needs
+        // the same "N photos here" pill the cluster view has. Hidden for a cell of exactly one photo.
+        countBackground.backgroundColor = UIColor.black.withAlphaComponent(0.55).cgColor
+        countBackground.cornerRadius = 8
+        countBackground.isHidden = true
+        layer.addSublayer(countBackground)
+
+        countLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        countLabel.textColor = .white
+        countLabel.backgroundColor = .clear
+        countLabel.isHidden = true
+        addSubview(countLabel)
     }
 
     required init?(coder: NSCoder) {
@@ -34,6 +56,37 @@ final class UIKitPhotoAnnotationView: MKAnnotationView {
         imageLayer.contentsScale = image?.scale ?? currentDisplayScale
         imageLayer.contents = image?.cgImage
         imageLayer.backgroundColor = image == nil ? UIColor.secondaryLabel.cgColor : nil
+    }
+
+    /// Show a "N" pill when the cell aggregates more than one photo; hide it for a single photo so a
+    /// lone pin still reads as one picture.
+    func setCount(_ count: Int) {
+        guard count > 1 else {
+            countLabel.isHidden = true
+            countBackground.isHidden = true
+            return
+        }
+        countLabel.isHidden = false
+        countBackground.isHidden = false
+        countLabel.text = "\(count)"
+        countLabel.sizeToFit()
+
+        let pad: CGFloat = 6
+        let width = countLabel.frame.width + pad * 2
+        let height = countLabel.frame.height + 2
+        let y = bounds.height - UIKitMapBadgeStyle.border - height - 1
+        countLabel.frame = CGRect(
+            x: UIKitMapBadgeStyle.border + pad + 1,
+            y: y + 1,
+            width: countLabel.frame.width,
+            height: countLabel.frame.height
+        )
+        countBackground.frame = CGRect(
+            x: UIKitMapBadgeStyle.border + 1,
+            y: y,
+            width: width,
+            height: height
+        )
     }
 
     private func configureContainer(_ layer: CALayer) {

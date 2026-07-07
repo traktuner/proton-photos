@@ -94,7 +94,7 @@ private func tempDir() -> URL {
     }
 
     @Test func viewportPolicyMatchesVisibleMapRectMarginFormula() {
-        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1.6, maxCoordinates: 3000)
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1.6, maxCells: 400, cellDivisor: 12)
         let viewport = PhotoLocationViewport(
             centerLatitude: 47.5,
             centerLongitude: 13.0,
@@ -111,34 +111,63 @@ private func tempDir() -> URL {
         ))
     }
 
-    @Test func viewportPolicyFiltersAndCapsByDistanceToCenter() {
+    @Test func viewportPolicyBinsNearbyCoordinatesIntoOneCell() {
         let index = PhotoLocationIndex()
+        // Three photos close enough to fall into the same grid cell, plus one far away.
         index.merge([
-            coord("a", 47.8, 13.0),
-            coord("b", 47.7, 13.1),
-            coord("outside", 10.0, 10.0),
-            coord("c", 47.6, 13.2),
+            coord("a", 47.700, 13.000),
+            coord("b", 47.701, 13.001),
+            coord("c", 47.702, 13.002),
+            coord("far", 48.000, 14.000),
         ])
-        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1, maxCoordinates: 2)
+        // Large cellDivisor with a tight viewport ensures the three near photos share a cell, while
+        // the far one lands in its own. Margin 1 keeps the box tight so `far` is excluded entirely.
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1, maxCells: 100, cellDivisor: 6)
         let viewport = PhotoLocationViewport(
-            centerLatitude: 47.7,
-            centerLongitude: 13.1,
-            latitudeDelta: 0.5,
-            longitudeDelta: 0.5
+            centerLatitude: 47.701,
+            centerLongitude: 13.001,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01
         )
 
-        let hits = index.coordinates(in: viewport, policy: policy)
-        // When capped, the N closest to the viewport center win — NOT the first N in insertion order.
-        // b is at the exact center (dist 0); a and c tie at equal distance, broken deterministically
-        // by the (volumeID, nodeID) tuple tiebreaker: ("v","a") < ("v","c") → a precedes c.
-        // With maxCoordinates=2 → [b, a].
-        #expect(hits.map(\.uid) == [uid("b"), uid("a")])
+        let cells = index.coordinates(in: viewport, policy: policy)
+        // One cell aggregates the three near photos; `far` is outside the box.
+        #expect(cells.count == 1, "expected one cell; got \(cells.count)")
+        #expect(cells[0].count == 3, "expected 3 members in the cell; got \(cells[0].count)")
+    }
+
+    @Test func minCellMetersFloorCollapsesSamePlaceBurstEvenWhenZoomedIn() {
+        let index = PhotoLocationIndex()
+        // A burst at essentially one spot, spread by ~30 m of GPS noise (0.0003° lat ≈ 33 m).
+        index.merge([
+            coord("a", 47.70000, 13.00000),
+            coord("b", 47.70030, 13.00040),
+            coord("c", 47.69975, 13.00020),
+        ])
+        // A tightly zoomed-in viewport (~110 m tall): with cellDivisor 12 the raw cell is ~9 m, so
+        // without a floor these three scatter into separate cells (the reported bug). A 80 m floor
+        // forces them into one.
+        let viewport = PhotoLocationViewport(
+            centerLatitude: 47.70000,
+            centerLongitude: 13.00000,
+            latitudeDelta: 0.001,
+            longitudeDelta: 0.001
+        )
+
+        let noFloor = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 2, maxCells: 400, cellDivisor: 12)
+        #expect(index.coordinates(in: viewport, policy: noFloor).count > 1,
+                "control: without a floor the burst should scatter into multiple cells")
+
+        let floored = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 2, maxCells: 400, cellDivisor: 12, minCellMeters: 80)
+        let cells = index.coordinates(in: viewport, policy: floored)
+        #expect(cells.count == 1, "expected one cell with the 80 m floor; got \(cells.count)")
+        #expect(cells.first?.count == 3, "the single cell must carry all 3 photos; got \(cells.first?.count ?? -1)")
     }
 
     @Test func viewportPolicyRejectsInvalidInputsWithoutLeakingAllCoordinates() {
         let index = PhotoLocationIndex()
         index.merge([coord("a", 47.8, 13.0)])
-        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: .infinity, maxCoordinates: 3000)
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: .infinity, maxCells: 400, cellDivisor: 12)
         let viewport = PhotoLocationViewport(
             centerLatitude: 47.7,
             centerLongitude: 13.1,
@@ -149,49 +178,85 @@ private func tempDir() -> URL {
         #expect(index.coordinates(in: viewport, policy: policy).isEmpty)
     }
 
-    /// Regression for the map-churn bug: when the viewport holds more photos than `maxCoordinates`,
-    /// a sub-pixel jitter of the map region must not swap which N photos win the cap. Before the fix,
-    /// `prefix(maxCoordinates)` picked by insertion order, so a tiny box-edge change re-selected a
-    /// different subset and caused the host to remove/re-add ~2000 annotations and cancel/re-spawn
-    /// their thumbnail loads on every jitter. Distance-to-center selection keeps the N closest
-    /// stable as the box edges wobble.
-    @Test func viewportPolicyCapsAreStableAcrossSmallViewportJitter() {
+    /// Regression for the map-churn bug: sub-pixel viewport jitter must not change which cells exist
+    /// or which photos each cell holds. The aggregation bins by integer cell indices, so a fractional
+    /// shift of the center keeps the same cells (just possibly re-keyed, but still bounded) — the
+    /// member sets per cell must stay identical.
+    @Test func viewportPolicyCellsAreStableAcrossSmallViewportJitter() {
         let index = PhotoLocationIndex()
-        // 6 photos at increasing distances from the cluster center, spaced widely enough that a
-        // sub-pixel center jitter cannot flip which one sits at the cap boundary (5th vs 6th).
-        // Photos ordered in insertion order OPPOSITE to distance, so the OLD prefix-based behavior
-        // would have picked the wrong 5 — this also asserts distance selection is in effect.
         let center = (lat: 47.7045, lon: 13.1045)
+        // Spread photos across a few distinct cells so aggregation is meaningful.
         index.merge([
-            coord("far1",   center.lat + 0.05, center.lon + 0.05), // insertion 0, but FARTHEST
-            coord("far2",   center.lat + 0.04, center.lon + 0.04),
-            coord("mid1",   center.lat + 0.002, center.lon + 0.002),
-            coord("near3",  center.lat + 0.0015, center.lon + 0.0015),
-            coord("near2",  center.lat + 0.001, center.lon + 0.001),
-            coord("near1",  center.lat, center.lon),               // insertion 5, CLOSEST
+            coord("a", center.lat,       center.lon),
+            coord("b", center.lat + 0.01, center.lon),
+            coord("c", center.lat + 0.02, center.lon),
+            coord("d", center.lat,       center.lon + 0.01),
+            coord("e", center.lat,       center.lon + 0.02),
         ])
-        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 2.0, maxCoordinates: 5)
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 2.0, maxCells: 10, cellDivisor: 10)
 
-        // Box radius = delta * marginMultiplier = 0.03 * 2.0 = 0.06 ≥ 0.05, so all 6 photos are
-        // inside both viewports — cap binds, isolation is purely about deterministic selection.
         let viewportA = PhotoLocationViewport(
             centerLatitude: center.lat, centerLongitude: center.lon,
             latitudeDelta: 0.03, longitudeDelta: 0.03
         )
         let viewportB = PhotoLocationViewport(
-            // Sub-pixel jitter: same region scale, fractionally shifted center. All 6 photos
-            // remain inside both boxes (membership unchanged), so the only variable is which 5
-            // win the cap — and distance selection must keep them stable.
             centerLatitude: center.lat + 0.0000001, centerLongitude: center.lon + 0.0000001,
             latitudeDelta: 0.03, longitudeDelta: 0.03
         )
 
-        let hitsA = index.coordinates(in: viewportA, policy: policy).map(\.uid)
-        let hitsB = index.coordinates(in: viewportB, policy: policy).map(\.uid)
-        #expect(hitsA.count == 5, "expected cap to bind; got \(hitsA.count)")
-        #expect(hitsA == hitsB, "capped selection must be stable across sub-pixel viewport jitter")
-        // The farthest photo (far1) is the one dropped, NOT the last-inserted one.
-        #expect(!hitsA.contains(uid("far1")), "distance selection drops the farthest, not the last-inserted")
+        let cellsA = index.coordinates(in: viewportA, policy: policy)
+        let cellsB = index.coordinates(in: viewportB, policy: policy)
+        // Same set of heroes (cell identities are stable) and same total photo count.
+        #expect(Set(cellsA.map(\.uid)) == Set(cellsB.map(\.uid)),
+               "cell heroes must be stable across sub-pixel jitter")
+        let totalA = cellsA.reduce(0) { $0 + $1.count }
+        let totalB = cellsB.reduce(0) { $0 + $1.count }
+        #expect(totalA == totalB, "total photo coverage must be stable")
+        #expect(totalA == 5, "all five photos must be represented")
+    }
+
+    @Test func aggregationPreservesEveryPhotoAcrossCells() {
+        let index = PhotoLocationIndex()
+        // 20 photos spread so each cell gets ~2 members — none should be dropped.
+        var coords: [PhotoCoordinate] = []
+        for i in 0..<20 {
+            coords.append(coord("p\(i)", 47.0 + Double(i % 4) * 0.01, 13.0 + Double(i / 4) * 0.01))
+        }
+        index.merge(coords)
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 2.0, maxCells: 50, cellDivisor: 10)
+        let viewport = PhotoLocationViewport(
+            centerLatitude: 47.015, centerLongitude: 13.015,
+            latitudeDelta: 0.05, longitudeDelta: 0.05
+        )
+        let cells = index.coordinates(in: viewport, policy: policy)
+        let totalMembers = cells.reduce(0) { $0 + $1.count }
+        #expect(totalMembers == 20, "every photo must be accounted for; got \(totalMembers)")
+    }
+
+    @Test func capKeepsTheDensestCellEvenWhenItIsFarFromCenter() {
+        let index = PhotoLocationIndex()
+        var coords: [PhotoCoordinate] = []
+        // Many sparse single-photo cells clustered near the viewport center.
+        for i in 0..<40 {
+            coords.append(coord("near\(i)", 47.500 + Double(i) * 0.001, 13.500))
+        }
+        // One very dense place far from center (the "home with 2000 photos" case, scaled down): 50
+        // photos within one cell, off to the side.
+        for i in 0..<50 {
+            coords.append(coord("home\(i)", 47.600 + Double(i) * 0.00001, 13.700))
+        }
+        index.merge(coords)
+        // A tight cap that MUST drop cells: with count-blind nearest-center pruning the dense far cell
+        // would be dropped; the count-first policy must keep it.
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 5, maxCells: 10, cellDivisor: 50)
+        let viewport = PhotoLocationViewport(
+            centerLatitude: 47.500, centerLongitude: 13.500,
+            latitudeDelta: 0.05, longitudeDelta: 0.05
+        )
+        let cells = index.coordinates(in: viewport, policy: policy)
+        #expect(cells.count == 10, "cap must be applied; got \(cells.count)")
+        let densest = cells.map(\.count).max() ?? 0
+        #expect(densest >= 50, "the densest cell (the far 50-photo home) must survive the cap; got \(densest)")
     }
 }
 

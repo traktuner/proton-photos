@@ -58,6 +58,7 @@ public final class PhotoViewerModel {
     private let media: FullMediaProvider
     private let streamer: VideoStreamProvider?
     private let metadataProvider: PhotoMetadataProvider?
+    private let placeNameResolver: (any PlaceNameResolving)?
     private let burstProvider: BurstGroupProvider?
     private let previewCache: ThumbnailCache?
     /// Encrypted disk cache for full-resolution ORIGINALS (offline library). Read before any download so a cached
@@ -81,6 +82,7 @@ public final class PhotoViewerModel {
 
     public init(items: [PhotoItem], index: Int, feed: ThumbnailFeed, media: FullMediaProvider,
                 streamer: VideoStreamProvider? = nil, metadataProvider: PhotoMetadataProvider? = nil,
+                placeNameResolver: (any PlaceNameResolving)? = nil,
                 burstProvider: BurstGroupProvider? = nil,
                 previewCache: ThumbnailCache? = nil, originalsCache: ThumbnailCache? = nil,
                 cacheOriginals: Bool = false, originalsCapBytes: Int64? = nil) {
@@ -90,6 +92,7 @@ public final class PhotoViewerModel {
         self.media = media
         self.streamer = streamer
         self.metadataProvider = metadataProvider
+        self.placeNameResolver = placeNameResolver
         self.burstProvider = burstProvider
         self.previewCache = previewCache
         self.originalsCache = originalsCache
@@ -120,11 +123,11 @@ public final class PhotoViewerModel {
 
     /// Resolves the GPS → place-name headline for `item`. Debounced so rapid arrow navigation doesn't
     /// fire a metadata fetch + geocode for every photo flicked past; reuses already-loaded metadata when
-    /// the info panel is open. Geocoded names are cached per coordinate in `PlaceNameResolver`.
+    /// the info panel is open. Geocoding is injected by the app/platform layer.
     private func resolvePlaceName(for item: PhotoItem) {
         placeTask?.cancel()
         placeName = nil
-        guard let metadataProvider else { return }
+        guard let metadataProvider, let placeNameResolver else { return }
         placeTask = Task { [metadataProvider] in
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled, self.isDisplaying(item) else { return }
@@ -136,7 +139,7 @@ public final class PhotoViewerModel {
             }
             guard !Task.isCancelled, self.isDisplaying(item),
                   let meta, meta.hasLocation, let lat = meta.latitude, let lon = meta.longitude else { return }
-            let name = await PlaceNameResolver.shared.placeName(latitude: lat, longitude: lon)
+            let name = await placeNameResolver.placeName(latitude: lat, longitude: lon)
             guard !Task.isCancelled, self.isDisplaying(item) else { return }
             self.placeName = name
         }

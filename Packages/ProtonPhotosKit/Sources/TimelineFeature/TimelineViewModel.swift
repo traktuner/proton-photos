@@ -230,7 +230,35 @@ public final class TimelineViewModel {
     }
 
     public func load() async {
+        guard filter.hasTimeline else { return }
         await loadAll(force: false)
+    }
+
+    /// Shows a caller-provided, already-resolved item set in the existing timeline grid without asking the
+    /// backend for a server-side filter. Used by map cluster/member pins: the map owns which UIDs are grouped,
+    /// while the grid, selection, export, trash, viewer, and thumbnail prefetch remain the normal timeline path.
+    public func showTransientItems(_ items: [PhotoItem], sectionID: String) async {
+        filter = .map
+        let sections = items.isEmpty
+            ? []
+            : [TimelineSection(id: sectionID, date: items.first?.captureTime ?? .distantPast, title: "", items: items)]
+        allItems = items
+        state = items.isEmpty ? .empty : .loaded(sections)
+        await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
+    }
+
+    /// Resolves map UID lists against the last known whole-library snapshot. This keeps Map taps independent
+    /// of the sidebar route that happened to be visible underneath the map.
+    public func allLibraryItems(matching uids: [PhotoUID]) -> [PhotoItem] {
+        let source = allRouteSnapshot?.flatMap(\.items) ?? allItems
+        let byUID = Dictionary(source.map { ($0.uid, $0) }, uniquingKeysWith: { first, _ in first })
+        return uids.compactMap { byUID[$0] }
+    }
+
+    /// Viewer paging for Map taps should use the whole-library snapshot when available, not whichever filtered
+    /// timeline happened to be underneath the Map overlay.
+    public var wholeLibraryItemsForViewer: [PhotoItem] {
+        allRouteSnapshot?.flatMap(\.items) ?? allItems
     }
 
     /// Manual user-triggered reload of the currently visible library/filter.

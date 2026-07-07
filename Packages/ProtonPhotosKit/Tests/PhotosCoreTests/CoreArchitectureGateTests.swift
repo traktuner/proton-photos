@@ -1731,7 +1731,6 @@ final class CoreArchitectureGateTests: XCTestCase {
         let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
         let adapterRoot = sourcesRoot.appendingPathComponent("MapUIKitAdapter")
         let hostFile = adapterRoot.appendingPathComponent("UIKitLibraryMapHostView.swift")
-        let annotationFile = adapterRoot.appendingPathComponent("UIKitPhotoMapAnnotation.swift")
         let viewsFile = adapterRoot.appendingPathComponent("UIKitPhotoAnnotationViews.swift")
         var violations: [String] = []
 
@@ -1741,20 +1740,20 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if let targetLine = manifestLine(forTarget: "MapUIKitAdapter", in: manifest) {
             let dependencies = Set(dependencies(inTargetLine: targetLine))
-            if dependencies != ["PhotosCore", "MediaLocationCore"] {
-                violations.append("MapUIKitAdapter: dependencies \(dependencies.sorted()) != [MediaLocationCore, PhotosCore]")
+            if dependencies != ["PhotosCore", "MediaLocationCore", "MapCore"] {
+                violations.append("MapUIKitAdapter: dependencies \(dependencies.sorted()) != [MapCore, MediaLocationCore, PhotosCore]")
             }
         } else {
             violations.append("MapUIKitAdapter: missing Package.swift target declaration")
         }
 
-        for file in [hostFile, annotationFile, viewsFile] where !FileManager.default.fileExists(atPath: file.path) {
+        for file in [hostFile, viewsFile] where !FileManager.default.fileExists(atPath: file.path) {
             violations.append("MapUIKitAdapter/\(file.lastPathComponent): missing UIKit map adapter file")
         }
 
         if FileManager.default.fileExists(atPath: hostFile.path) {
             let imports = try importedModules(in: hostFile)
-            let expectedImports: Set<String> = ["MapKit", "MediaLocationCore", "PhotosCore", "UIKit"]
+            let expectedImports: Set<String> = ["MapKit", "MapCore", "MediaLocationCore", "PhotosCore", "UIKit"]
             if imports != expectedImports {
                 violations.append("MapUIKitAdapter/UIKitLibraryMapHostView.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
             }
@@ -1770,25 +1769,10 @@ final class CoreArchitectureGateTests: XCTestCase {
                 "MKMapView",
                 "UIImage?",
                 "UIKitPhotoAnnotationView",
-                "UIKitPhotoClusterAnnotationView"
+                "UIKitPhotoClusterAnnotationView",
+                "PhotoMapAnnotation"
             ] where !source.contains(symbol) {
                 violations.append("MapUIKitAdapter/UIKitLibraryMapHostView.swift: missing \(symbol)")
-            }
-        }
-
-        if FileManager.default.fileExists(atPath: annotationFile.path) {
-            let imports = try importedModules(in: annotationFile)
-            let expectedImports: Set<String> = ["Foundation", "MapKit", "MediaLocationCore", "PhotosCore"]
-            if imports != expectedImports {
-                violations.append("MapUIKitAdapter/UIKitPhotoMapAnnotation.swift: imports \(imports.sorted()) != \(expectedImports.sorted())")
-            }
-            let source = try String(contentsOf: annotationFile, encoding: .utf8)
-            for symbol in [
-                "final class UIKitPhotoMapAnnotation: NSObject, MKAnnotation",
-                "let uid: PhotoUID",
-                "init(_ coordinate: PhotoCoordinate)"
-            ] where !source.contains(symbol) {
-                violations.append("MapUIKitAdapter/UIKitPhotoMapAnnotation.swift: missing \(symbol)")
             }
         }
 
@@ -1830,6 +1814,7 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             iOS/iPadOS map UI may own UIKit/MapKit views and UIImage annotation badges, but location indexing
             and viewport filtering must stay in MediaLocationCore. It must not import the macOS MapFeature.
+            The shared MKAnnotation type lives in MapCore (platform-neutral).
             """
         )
     }

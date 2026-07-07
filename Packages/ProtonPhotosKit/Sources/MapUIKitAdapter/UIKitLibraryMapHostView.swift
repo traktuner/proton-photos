@@ -1,16 +1,12 @@
 #if canImport(UIKit)
 import MapKit
+import MapCore
 import MediaLocationCore
-import os
 import PhotosCore
 import UIKit
 
 @MainActor
 public final class UIKitLibraryMapHostView: UIView {
-    /// Logger for measuring the cost of region changes and annotation updates, so the cap choice
-    /// can be driven by measured density instead of guesses.
-    private static let perfLog = OSLog(subsystem: "ch.protonmail.photos", category: "MapPerf")
-
     private let mapView = MKMapView()
     private let index: PhotoLocationIndex
     private let visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy
@@ -22,7 +18,7 @@ public final class UIKitLibraryMapHostView: UIView {
     /// UID → annotation, so `applyLoadedThumbnail` doesn't have to scan all mapView.annotations to
     /// find one UID (it was O(n) per loaded thumbnail — with 400 annotations during a pinch that
     /// is a real cost on the main thread). Rebuilt only when annotations are added/removed.
-    private var annotationByUID: [PhotoUID: UIKitPhotoMapAnnotation] = [:]
+    private var annotationByUID: [PhotoUID: PhotoMapAnnotation] = [:]
     /// In-flight async thumbnail loads keyed by UID, so a region change can CANCEL stale loads for
     /// annotations that have been removed — otherwise every pinch-zoom in a dense region spawns hundreds
     /// of orphan tasks that all race to set thumbnails on views that no longer exist.
@@ -49,8 +45,15 @@ public final class UIKitLibraryMapHostView: UIView {
         self.onSelectCluster = onSelectCluster
         super.init(frame: .zero)
         configureMap()
+        // Keep framing synchronous (cheap, ~25 ms) so the map opens already centered on the dense core
+        // instead of visibly jumping after it appears.
         frameToDenseCoreIfNeeded()
-        reloadVisible()
+        // Defer the first pin aggregation OFF the synchronous construction path: filtering + binning
+        // thousands of coordinates is the dominant cost and was what made the tab transition hang.
+        // Running it in the next runloop tick lets MKMapView present its surface immediately; the pins
+        // populate a beat later. `reloadVisible` is coalesced by `lastBoundingBox`, so if the map's
+        // on-screen `regionDidChange` fires first, this deferred pass is a cheap no-op.
+        DispatchQueue.main.async { [weak self] in self?.reloadVisible() }
     }
 
     @available(*, unavailable)
@@ -76,10 +79,12 @@ public final class UIKitLibraryMapHostView: UIView {
         self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
         self.onSelectCluster = onSelectCluster
-        // Callbacks changed; force a re-pass so any thumbnail-dequeuing re-resolves against the
-        // new closures (annotations themselves don't move, but the cache would otherwise skip).
-        lastBoundingBox = nil
-        reloadVisible()
+        // Only update the stored closures. Do NOT force a full re-query/re-aggregate here: SwiftUI calls
+        // this on every `updateUIView` (each state change re-passes value-identical closures), and the
+        // aggregate over thousands of coordinates is the dominant cost on the main thread — re-running it
+        // per update is what made opening the Map tab take ~1–2 s. Content changes flow through
+        // `refreshIfChanged` (revision-gated) and map moves through `regionDidChangeAnimated`; a newly
+        // available thumbnail closure is picked up lazily by the next `viewFor`/thumbnail request.
     }
 
     public func refreshIfChanged() {
@@ -143,14 +148,17 @@ public final class UIKitLibraryMapHostView: UIView {
         )
         guard let box = visibleCoordinatePolicy.boundingBox(for: viewport) else { return }
         // Coalesce: if the queried box hasn't changed since the last pass, the result set is
-        // identical (same index, same box → same `visible`), so the diff would be a no-op.
+        // identical (same index, same box → same `cells`), so the diff would be a no-op.
         // Skipping here avoids cancelling and re-spawning in-flight thumbnail loads on MKMapView's
         // sub-pixel `regionDidChange` jitter. `refreshIfChanged` invalidates the cache when the
         // index contents change, so a crawl adding photos still re-queries.
         if lastBoundingBox == box { return }
         lastBoundingBox = box
-        let visible = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
-        let wanted = Set(visible.map(\.uid))
+        // Grid cells instead of raw coordinates: each cell represents one pin and carries the true
+        // count of underlying photos (memberCount). A dense neighborhood of 5k photos collapses to a
+        // few dozen cells, letting MapKit manage only a handful of annotation views.
+        let cells = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
+        let wanted = Set(cells.map(\.uid))
 
         // Diff against the SHOWN set (not the mapView's full annotation array): iterating
         // `mapView.annotations` is O(n) and walks every MKClusterAnnotation too, which on a
@@ -173,19 +181,14 @@ public final class UIKitLibraryMapHostView: UIView {
             }
         }
 
-        let fresh = visible.filter { !shownUIDs.contains($0.uid) }
+        let fresh = cells.filter { !shownUIDs.contains($0.uid) }
         if !fresh.isEmpty {
-            let newAnnotations = fresh.map(UIKitPhotoMapAnnotation.init)
+            let newAnnotations = fresh.map(PhotoMapAnnotation.init)
             for (i, coord) in fresh.enumerated() { annotationByUID[coord.uid] = newAnnotations[i] }
             mapView.addAnnotations(newAnnotations)
             shownUIDs.formUnion(fresh.map(\.uid))
         }
 
-        // Perf logging: log the actual annotation density to measure where the bottleneck really is.
-        // This helps decide if we need index-layer aggregation vs. just efficient diffing/cancellation.
-        os_log("reloadVisible: visible=%{public}d wanted=%{public}d shown=%{public}d toRemove=%{public}d fresh=%{public}d thumbTasks=%{public}d",
-               log: Self.perfLog, type: .debug,
-               visible.count, wanted.count, shownUIDs.count, toRemove.count, fresh.count, thumbnailLoadTasks.count)
     }
 
     private func boundingRect(of coords: [CLLocationCoordinate2D]) -> MKMapRect {
@@ -207,22 +210,30 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
                 withIdentifier: MKMapViewDefaultClusterAnnotationViewReuseIdentifier,
                 for: annotation
             ) as! UIKitPhotoClusterAnnotationView
-            let hero = cluster.memberAnnotations.first as? UIKitPhotoMapAnnotation
+            let hero = cluster.memberAnnotations.first as? PhotoMapAnnotation
             let image = hero.flatMap { thumbnail($0.uid) }
-            view.configure(thumbnail: image, count: cluster.memberAnnotations.count)
+            // Sum each cell's memberCount so the badge shows every underlying photo the cluster
+            // represents — not just the number of cell pins MapKit chose to show.
+            let totalCount = cluster.memberAnnotations
+                .compactMap { $0 as? PhotoMapAnnotation }
+                .reduce(0) { $0 + $1.memberCount }
+            view.configure(thumbnail: image, count: totalCount)
             if image == nil, let hero {
                 requestThumbnailIfNeeded(hero.uid)
             }
             return view
         }
 
-        guard let photo = annotation as? UIKitPhotoMapAnnotation else { return nil }
+        guard let photo = annotation as? PhotoMapAnnotation else { return nil }
         let view = mapView.dequeueReusableAnnotationView(
             withIdentifier: UIKitPhotoAnnotationView.reuseID,
             for: annotation
         ) as! UIKitPhotoAnnotationView
         let image = thumbnail(photo.uid)
         view.setThumbnail(image)
+        // A single cell can aggregate many photos (the 80 m floor merges a same-place burst); show its
+        // true count so a 30-photo pin doesn't masquerade as a single picture.
+        view.setCount(photo.memberCount)
         if image == nil {
             requestThumbnailIfNeeded(photo.uid)
         }
@@ -232,7 +243,11 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
     public func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
         if let cluster = view.annotation as? MKClusterAnnotation {
             if let handler = onSelectCluster {
-                let uids = cluster.memberAnnotations.compactMap { ($0 as? UIKitPhotoMapAnnotation)?.uid }
+                // Flatten every cell's memberUIDs so the cluster-series screen lists all underlying
+                // photos, not just the hero of each cell.
+                let uids = cluster.memberAnnotations
+                    .compactMap { ($0 as? PhotoMapAnnotation)?.memberUIDs }
+                    .flatMap { $0 }
                 handler(uids, cluster.coordinate)
             } else {
                 let rect = boundingRect(of: cluster.memberAnnotations.map(\.coordinate))
@@ -245,8 +260,16 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
                 }
             }
             mapView.deselectAnnotation(view.annotation, animated: false)
-        } else if let photo = view.annotation as? UIKitPhotoMapAnnotation {
-            onSelectPhoto(photo.uid)
+        } else if let photo = view.annotation as? PhotoMapAnnotation {
+            // A single-cell tap: if the cell represents one photo, open it directly; if it bundles
+            // several, present them as a cluster series so the user can pick.
+            if photo.memberUIDs.count == 1 {
+                onSelectPhoto(photo.uid)
+            } else if let handler = onSelectCluster {
+                handler(photo.memberUIDs, photo.coordinate)
+            } else {
+                onSelectPhoto(photo.uid)
+            }
             mapView.deselectAnnotation(view.annotation, animated: false)
         }
     }
@@ -278,14 +301,19 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
             view.setThumbnail(image)
         }
 
-        // Updating cluster thumbnails still requires scanning clusters, but with maxCoordinates=400
-        // that's a tractable cost (the worst-case was 3000 × pinch, which was the real killer).
+        // Updating cluster thumbnails still requires scanning clusters, but with aggregation the
+        // pin count is a few hundred at most (not 3000), so this is a tractable cost.
         for cluster in mapView.annotations.compactMap({ $0 as? MKClusterAnnotation }) {
-            guard cluster.memberAnnotations.contains(where: { ($0 as? UIKitPhotoMapAnnotation)?.uid == uid }),
+            guard cluster.memberAnnotations.contains(where: { ($0 as? PhotoMapAnnotation)?.uid == uid }),
                   let view = mapView.view(for: cluster) as? UIKitPhotoClusterAnnotationView,
-                  let hero = cluster.memberAnnotations.first as? UIKitPhotoMapAnnotation else { continue }
+                  let hero = cluster.memberAnnotations.first as? PhotoMapAnnotation else { continue }
+            // Recompute the total count from memberCount (not memberAnnotations.count) so the badge
+            // stays correct after a thumbnail refresh.
+            let totalCount = cluster.memberAnnotations
+                .compactMap { $0 as? PhotoMapAnnotation }
+                .reduce(0) { $0 + $1.memberCount }
             view.configure(thumbnail: thumbnail(hero.uid) ?? (hero.uid == uid ? image : nil),
-                           count: cluster.memberAnnotations.count)
+                           count: totalCount)
         }
     }
 }
