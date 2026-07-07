@@ -11,6 +11,8 @@ public final class PhotoLibraryCatalogManifestStore: PhotoLibraryCatalogStore, @
 
     private static let schemaVersion = 1
     private static let completedFullScanKey = "completed_full_scan"
+    private static let fullScanEpochStartKey = "full_scan_epoch_start"
+    private static let fullScanCursorKey = "full_scan_cursor"
     private var db: OpaquePointer?
     private let lock = NSLock()
     private let encoder = JSONEncoder()
@@ -144,9 +146,37 @@ public final class PhotoLibraryCatalogManifestStore: PhotoLibraryCatalogStore, @
         lock.withLock { readInfoValue(Self.completedFullScanKey) == 1 }
     }
 
-    /// Called only after the full scan and its catalog writes finished without throwing/canceling.
-    public func markFullScanCompleted() {
-        lock.withLock { writeInfoValue(Self.completedFullScanKey, 1) }
+    public func fullScanProgress() -> PhotoLibraryFullScanProgress? {
+        lock.withLock {
+            guard let bits = readInfoValue64(Self.fullScanEpochStartKey) else { return nil }
+            let epochStart = Date(timeIntervalSince1970: Double(bitPattern: UInt64(bitPattern: bits)))
+            let cursor = Int(readInfoValue64(Self.fullScanCursorKey) ?? 0)
+            return PhotoLibraryFullScanProgress(epochStart: epochStart, cursor: max(0, cursor))
+        }
+    }
+
+    public func recordFullScanProgress(_ progress: PhotoLibraryFullScanProgress) {
+        lock.withLock {
+            writeInfoValue64(Self.fullScanEpochStartKey, Int64(bitPattern: progress.epochStart.timeIntervalSince1970.bitPattern))
+            writeInfoValue64(Self.fullScanCursorKey, Int64(progress.cursor))
+        }
+    }
+
+    /// Marks the full scan complete and clears the in-progress epoch. Called by the sync driver only
+    /// when a scan actually reaches the end of the library (across however many resumed runs).
+    public func completeFullScan() {
+        lock.withLock {
+            writeInfoValue(Self.completedFullScanKey, 1)
+            deleteInfoValue(Self.fullScanEpochStartKey)
+            deleteInfoValue(Self.fullScanCursorKey)
+        }
+    }
+
+    public func clearFullScanResumePoint() {
+        lock.withLock {
+            deleteInfoValue(Self.fullScanEpochStartKey)
+            deleteInfoValue(Self.fullScanCursorKey)
+        }
     }
 
     // MARK: - Read/write helpers (must be called under `lock`)
@@ -267,6 +297,40 @@ public final class PhotoLibraryCatalogManifestStore: PhotoLibraryCatalogStore, @
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, key)
         sqlite3_bind_int(stmt, 2, Int32(value))
+        _ = sqlite3_step(stmt)
+    }
+
+    // 64-bit info values (the `value` column is INTEGER = 64-bit in SQLite). Used for the resumable
+    // full-scan cursor and for the epoch-start instant stored as the exact bit pattern of its Double.
+    private func readInfoValue64(_ key: String) -> Int64? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT value FROM photo_catalog_info WHERE key=?;", -1, &stmt, nil) == SQLITE_OK else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, key)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return sqlite3_column_int64(stmt, 0)
+    }
+
+    private func writeInfoValue64(_ key: String, _ value: Int64) {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "INSERT INTO photo_catalog_info(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value;",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, key)
+        sqlite3_bind_int64(stmt, 2, value)
+        _ = sqlite3_step(stmt)
+    }
+
+    private func deleteInfoValue(_ key: String) {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "DELETE FROM photo_catalog_info WHERE key=?;", -1, &stmt, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, key)
         _ = sqlite3_step(stmt)
     }
 

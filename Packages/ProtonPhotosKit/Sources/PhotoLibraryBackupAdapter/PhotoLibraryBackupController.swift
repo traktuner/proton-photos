@@ -260,17 +260,25 @@ public final class PhotoLibraryBackupController {
         activeRunID = runID
 
         isSyncing = true
-        isScanning = true
+        isScanning = false
         lastMessage = nil
-        status = BackupStatus(progress: currentQueueProgress(), isScanning: true)
+        status = BackupStatus(progress: currentQueueProgress(), isScanning: false)
         startHeartbeat(runID: runID)
 
         // The task inherits the main actor, but all heavy phases (`scan`, `runUntilDrained`) are
         // awaits onto other actors/off-actor structs - the main thread stays free for UI.
         syncTask = Task { [weak self, monitor, tempStore, engine, runner, catalogStore] in
-            // Incremental first: persistent change history tells us exactly which assets moved.
-            // A missing/expired token falls back to the full catalog scan, which the persistent
-            // catalog keeps cheap by re-checking only new/changed assets.
+            // The INDEX (scan) and the RECONCILE (drain → upload) run as two INDEPENDENT loops, not
+            // one serial pass. The reconcile loop runs CONCURRENTLY with the scan and starts by
+            // draining whatever is already runnable — so a large backlog from an earlier pass uploads
+            // immediately, and newly-scanned assets upload the moment they are enqueued. A slow,
+            // interrupted, or resuming scan can therefore NEVER block uploads. Only the reconcile loop
+            // drives the runner (the two never overlap); the queue store they share is transaction-safe.
+            // This is the structural guarantee that "a backup must not block itself".
+            let scanDone = BackupScanSignal()
+            async let reconcile: Void = Self.reconcileWhileScanning(runner: runner, scanDone: scanDone)
+
+            self?.beginScanPhase()
             let preparedChanges = monitor.prepareChanges()
             do {
                 try await self?.runScanPass(engine: engine, catalogStore: catalogStore, changes: preparedChanges.changes)
@@ -279,9 +287,30 @@ public final class PhotoLibraryBackupController {
                 self?.reportSyncMessage((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
             }
             self?.finishScanPhase()
-            _ = await runner.runUntilDrained()
-            tempStore.sweep()    // every export is re-derivable; nothing to keep between passes
+
+            await scanDone.markDone()
+            await reconcile             // drains the tail enqueued during the scan, then returns
+            tempStore.sweep()           // every export is re-derivable; nothing to keep between passes
             self?.finishSync(runID: runID)
+        }
+    }
+
+    /// The reconcile loop: repeatedly drains runnable queue rows to the backend until the index scan
+    /// has signalled completion AND nothing runnable remains. Runs concurrently with the scan, so a
+    /// slow or resuming scan never delays uploads. Static + the heavy work is on the runner actor, so
+    /// it never touches the main thread and does not depend on the controller's lifetime.
+    private static func reconcileWhileScanning(runner: BackupSyncRunner, scanDone: BackupScanSignal) async {
+        while !Task.isCancelled {
+            await runner.runUntilDrained()
+            if await scanDone.isDone() {
+                // The scan may have enqueued rows between our last claim and its done-signal; one more
+                // drain guarantees they upload before we return.
+                await runner.runUntilDrained()
+                return
+            }
+            // Yield the CPU and let the scan enqueue more before the next drain (no hot empty spin).
+            // A cancelled sleep drops straight out via the loop condition — no busy loop on stop.
+            try? await Task.sleep(nanoseconds: 250_000_000)
         }
     }
 
@@ -302,14 +331,28 @@ public final class PhotoLibraryBackupController {
                 }
             )
             let needsFullScan = changes.requiresFullRescan || !catalogStore.hasCompletedFullScan()
-            if needsFullScan {
-                _ = try await sync.run(engine: engine, identifiers: nil)
-                catalogStore.markFullScanCompleted()
-            } else {
+
+            // Fast-path recently added/changed assets FIRST, every pass — even mid-backfill. A photo
+            // saved by another app (e.g. a WhatsApp image) or edited WHILE the initial full scan is
+            // still running must not wait for that scan to finish: the change token names it, so
+            // enqueue it now and let the concurrent reconcile upload it. Skipped only when the token is
+            // untrusted (requiresFullRescan) — then its id list is unreliable and the full scan covers it.
+            if !changes.requiresFullRescan {
                 let targeted = Array(Set(changes.changedIdentifiers + changes.deletedIdentifiers))
                 if !targeted.isEmpty {
                     _ = try await sync.run(engine: engine, identifiers: targeted)
                 }
+            }
+
+            if needsFullScan {
+                // A lost/expired token means we can no longer trust an in-progress epoch's frontier to
+                // have covered every change, so re-observe the whole library from the start. Otherwise
+                // resume: the full scan is resumable and marks itself complete only when it reaches the
+                // library's end (across however many interrupted runs), so it never restarts needlessly.
+                if changes.requiresFullRescan {
+                    catalogStore.clearFullScanResumePoint()
+                }
+                _ = try await sync.run(engine: engine, identifiers: nil)
             }
             return
         }
@@ -326,6 +369,10 @@ public final class PhotoLibraryBackupController {
     }
 
     public func stopSync() {
+        // Cancel the pass so BOTH the scan and the concurrent reconcile loop wind down (a loop that
+        // kept calling runUntilDrained would otherwise reset the runner's stop flag on its next call
+        // and never actually stop). runner.stop() additionally aborts any in-flight upload promptly.
+        syncTask?.cancel()
         guard let runner else { return }
         Task { await runner.stop() }
     }
@@ -381,6 +428,11 @@ public final class PhotoLibraryBackupController {
         status = candidate
     }
 
+    private func beginScanPhase() {
+        isScanning = true
+        status = BackupStatus(progress: currentQueueProgress(), isScanning: true)
+    }
+
     private func finishScanPhase() {
         isScanning = false
     }
@@ -432,4 +484,13 @@ public final class PhotoLibraryBackupController {
         return true
         #endif
     }
+}
+
+/// One-shot completion flag shared between the index scan and the concurrent reconcile loop: the scan
+/// sets it when it finishes (or gives up) so the reconcile loop knows to make one final drain pass and
+/// stop, instead of polling forever.
+actor BackupScanSignal {
+    private var done = false
+    func markDone() { done = true }
+    func isDone() -> Bool { done }
 }

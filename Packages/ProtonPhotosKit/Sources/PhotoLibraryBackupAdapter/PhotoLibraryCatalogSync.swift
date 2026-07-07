@@ -7,9 +7,17 @@ import UploadCore
 /// runs deterministically off-device.
 public protocol PhotoLibraryAssetEnumerator: Sendable {
     /// `identifiers == nil` enumerates the whole library newest-first; otherwise it fetches exactly
-    /// those identifiers. Each yielded chunk is at most `chunkSize` assets so transient PhotoKit
-    /// objects and catalog writes stay bounded on 20k+ libraries.
-    func infoChunks(identifiers: [String]?, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error>
+    /// those identifiers. `startOffset` skips that many assets from the newest-first start so an
+    /// interrupted full scan can RESUME instead of restarting (ignored for a targeted fetch). Each
+    /// yielded chunk is at most `chunkSize` assets so transient PhotoKit objects and catalog writes
+    /// stay bounded on 20k+ libraries.
+    func infoChunks(identifiers: [String]?, startOffset: Int, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error>
+}
+
+public extension PhotoLibraryAssetEnumerator {
+    func infoChunks(identifiers: [String]?, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
+        infoChunks(identifiers: identifiers, startOffset: 0, chunkSize: chunkSize)
+    }
 }
 
 /// Production enumerator over `PHAsset`. Metadata-only: `PHAssetResource.assetResources(for:)` is
@@ -17,7 +25,7 @@ public protocol PhotoLibraryAssetEnumerator: Sendable {
 public struct PhotoKitAssetEnumerator: PhotoLibraryAssetEnumerator {
     public init() {}
 
-    public func infoChunks(identifiers: [String]?, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
+    public func infoChunks(identifiers: [String]?, startOffset: Int, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
         let chunkSize = max(1, chunkSize)
         return AsyncThrowingStream { continuation in
             let task = Task.detached(priority: .utility) {
@@ -31,7 +39,10 @@ public struct PhotoKitAssetEnumerator: PhotoLibraryAssetEnumerator {
                 }
 
                 let total = fetchResult.count
-                var index = 0
+                // Resume point: skip assets already observed by an earlier run of this scan epoch.
+                // Clamped so a shrunk library (deletions since the cursor was saved) can't index past
+                // the end — it just yields nothing and the epoch completes.
+                var index = min(max(0, startOffset), total)
                 while index < total {
                     if Task.isCancelled {
                         continuation.finish(throwing: CancellationError())
@@ -90,46 +101,80 @@ public struct PhotoLibraryCatalogSync: Sendable {
         self.onProgress = onProgress
     }
 
-    /// `identifiers == nil` = full library scan (mark-and-sweep removals); otherwise a targeted
-    /// incremental scan (missing requested ids are marked removed). Returns the final tally.
+    /// `identifiers == nil` = full library scan (resumable, mark-and-sweep removals); otherwise a
+    /// targeted incremental scan (missing requested ids are marked removed). Returns the final tally.
     @discardableResult
     public func run(engine: any UploadBackupCandidateEnqueueing, identifiers: [String]? = nil) async throws -> PhotoLibraryCatalogProgress {
         let observedAt = now()
         var progress = PhotoLibraryCatalogProgress()
-        // Only a targeted scan needs the seen set (to diff against the requested ids); a full scan
-        // detects removals via the last-seen sweep, so it keeps no per-asset set in memory.
-        var seenForTargeted: Set<String>? = identifiers == nil ? nil : []
 
-        for try await chunk in enumerator.infoChunks(identifiers: identifiers, chunkSize: chunkSize) {
-            try Task.checkCancellation()
-            let entries = chunk.map { PhotoLibraryCatalogMapper.entry(for: $0, observedAt: observedAt) }
-            for (info, entry) in zip(chunk, entries) {
-                progress.scanned += 1
-                if seenForTargeted != nil { seenForTargeted!.insert(info.localIdentifier) }
-                let change = store.classify(entry)
-                switch change {
-                case .inserted: progress.discovered += 1
-                case .changed: progress.changed += 1
-                case .unchanged: continue
-                }
-                // Durable queue row BEFORE the catalog is advanced for this chunk.
-                if let candidate = PhotoBackupAssetPlanner.candidate(for: info) {
-                    await engine.enqueue(candidate)
-                }
-            }
-            store.upsertBatch(entries)
-            onProgress?(progress)
-        }
-
+        // --- Targeted (change-token) scan: fetch exactly the requested ids; mark the missing removed. ---
         if let identifiers {
-            let missing = Set(identifiers).subtracting(seenForTargeted ?? [])
+            var seen: Set<String>? = []
+            for try await chunk in enumerator.infoChunks(identifiers: identifiers, startOffset: 0, chunkSize: chunkSize) {
+                try Task.checkCancellation()
+                await ingest(chunk, observedAt: observedAt, engine: engine, progress: &progress, seen: &seen)
+            }
+            let missing = Set(identifiers).subtracting(seen ?? [])
             if !missing.isEmpty {
                 progress.removed += store.markRemoved(Array(missing), removedAt: observedAt)
             }
-        } else {
-            progress.removed += store.sweepRemoved(notSeenAfter: observedAt, removedAt: observedAt)
+            onProgress?(progress)
+            return progress
         }
+
+        // --- Full library scan: RESUMABLE across interruptions. ---
+        // A full scan of a large library rarely finishes in one foreground/BG window. Resume the
+        // in-progress epoch (continue from its cursor) or start a fresh one. Crucially the removal
+        // sweep uses the EPOCH START as its cutoff — never this single run's clock — so assets
+        // observed by an EARLIER run of the same epoch are not falsely swept as removed when a later
+        // run finally reaches the end. Enumeration is newest-first; a resumed run skips `cursor`
+        // already-observed assets.
+        let resume = store.fullScanProgress()
+        let epochStart = resume?.epochStart ?? observedAt
+        var cursor = resume?.cursor ?? 0
+        if resume == nil {
+            store.recordFullScanProgress(PhotoLibraryFullScanProgress(epochStart: epochStart, cursor: 0))
+        }
+        var noSeen: Set<String>?
+        for try await chunk in enumerator.infoChunks(identifiers: nil, startOffset: cursor, chunkSize: chunkSize) {
+            try Task.checkCancellation()
+            await ingest(chunk, observedAt: observedAt, engine: engine, progress: &progress, seen: &noSeen)
+            cursor += chunk.count
+            // Persist the frontier: an interruption after this chunk resumes here, not at zero.
+            store.recordFullScanProgress(PhotoLibraryFullScanProgress(epochStart: epochStart, cursor: cursor))
+        }
+
+        // The enumeration ran to the end (across however many resumed runs) → the epoch is complete.
+        progress.removed += store.sweepRemoved(notSeenAfter: epochStart, removedAt: observedAt)
+        store.completeFullScan()
         onProgress?(progress)
         return progress
+    }
+
+    /// Classifies + enqueues one chunk, then durably advances the catalog. Queue rows are written
+    /// BEFORE the catalog (`upsertBatch`) so a crash re-yields the asset rather than stranding it.
+    private func ingest(
+        _ chunk: [PhotoBackupAssetInfo],
+        observedAt: Date,
+        engine: any UploadBackupCandidateEnqueueing,
+        progress: inout PhotoLibraryCatalogProgress,
+        seen: inout Set<String>?
+    ) async {
+        let entries = chunk.map { PhotoLibraryCatalogMapper.entry(for: $0, observedAt: observedAt) }
+        for (info, entry) in zip(chunk, entries) {
+            progress.scanned += 1
+            if seen != nil { seen!.insert(info.localIdentifier) }
+            switch store.classify(entry) {
+            case .inserted: progress.discovered += 1
+            case .changed: progress.changed += 1
+            case .unchanged: continue
+            }
+            if let candidate = PhotoBackupAssetPlanner.candidate(for: info) {
+                await engine.enqueue(candidate)
+            }
+        }
+        store.upsertBatch(entries)
+        onProgress?(progress)
     }
 }

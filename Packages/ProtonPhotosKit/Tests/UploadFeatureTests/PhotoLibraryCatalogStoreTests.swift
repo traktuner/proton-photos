@@ -167,7 +167,7 @@ final class PhotoLibraryCatalogStoreTests: XCTestCase {
         do {
             let store = try XCTUnwrap(PhotoLibraryCatalogManifestStore(url: url))
             XCTAssertFalse(store.hasCompletedFullScan())
-            store.markFullScanCompleted()
+            store.completeFullScan()
             XCTAssertTrue(store.hasCompletedFullScan())
             store.close()
         }
@@ -397,7 +397,7 @@ final class PhotoLibraryCatalogStoreTests: XCTestCase {
             self.thenThrow = thenThrow
         }
 
-        func infoChunks(identifiers: [String]?, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
+        func infoChunks(identifiers: [String]?, startOffset: Int, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
             let chunks = chunks
             let error = thenThrow
             return AsyncThrowingStream { continuation in
@@ -418,15 +418,16 @@ final class PhotoLibraryCatalogStoreTests: XCTestCase {
 
         init(infos: [PhotoBackupAssetInfo]) { _infos = infos }
 
-        func infoChunks(identifiers: [String]?, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
+        func infoChunks(identifiers: [String]?, startOffset: Int, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
             let all = infos
-            let selected: [PhotoBackupAssetInfo]
+            let filtered: [PhotoBackupAssetInfo]
             if let identifiers {
                 let wanted = Set(identifiers)
-                selected = all.filter { wanted.contains($0.localIdentifier) }
+                filtered = all.filter { wanted.contains($0.localIdentifier) }
             } else {
-                selected = all
+                filtered = all
             }
+            let selected = Array(filtered.dropFirst(max(0, startOffset)))   // resume point
             return AsyncThrowingStream { continuation in
                 var index = 0
                 while index < selected.count {

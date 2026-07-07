@@ -171,4 +171,35 @@ public protocol PhotoLibraryCatalogStore: Sendable {
     func sweepRemoved(notSeenAfter cutoff: Date, removedAt: Date) -> Int
     func snapshot() -> PhotoLibraryCatalogSnapshot
     func count() -> Int
+
+    // MARK: Resumable full-scan state
+    /// True once a full-library scan has completed at least once. An incremental (change-token) scan
+    /// is only trusted after this — a token can exist before our own catalog knows the whole library.
+    func hasCompletedFullScan() -> Bool
+    /// The in-progress full-scan epoch, or nil if none is underway (the next full scan starts fresh).
+    /// A full scan of a large library rarely finishes in one foreground/BG window; persisting this lets
+    /// an interrupted scan RESUME from `cursor` instead of restarting, so it converges instead of
+    /// looping forever and never marking itself complete.
+    func fullScanProgress() -> PhotoLibraryFullScanProgress?
+    /// Persists mid-scan progress so a resumed scan continues within the SAME epoch.
+    func recordFullScanProgress(_ progress: PhotoLibraryFullScanProgress)
+    /// Marks the current full scan complete and clears the in-progress epoch.
+    func completeFullScan()
+    /// Discards any in-progress epoch's resume point so the next full scan starts fresh from the
+    /// beginning (used when a lost change token means the frontier can no longer be trusted).
+    func clearFullScanResumePoint()
+}
+
+/// Persisted progress of a resumable full-library scan (see `PhotoLibraryCatalogSync`).
+public struct PhotoLibraryFullScanProgress: Sendable, Equatable {
+    /// Start of the current scan epoch. The completion sweep uses THIS instant as its cutoff — never a
+    /// single run's clock — so assets observed by an EARLIER run of the same epoch are not falsely
+    /// swept as removed when a later run finishes the epoch.
+    public var epochStart: Date
+    /// How many assets, counted from the enumeration start, have already been observed this epoch.
+    public var cursor: Int
+    public init(epochStart: Date, cursor: Int) {
+        self.epochStart = epochStart
+        self.cursor = cursor
+    }
 }

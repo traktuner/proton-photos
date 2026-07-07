@@ -99,20 +99,24 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         case .acquired:
             break
         }
+        // DRAIN FIRST — mirrors startSync: the upload path is never gated on a scan completing, so
+        // rows a prior (possibly interrupted) pass left runnable upload before the scan runs.
+        _ = await runner.runUntilDrained()
+
         // Scan phase through the persistent-catalog driver.
         let sync = PhotoLibraryCatalogSync(store: catalog, enumerator: enumerator, chunkSize: 50, now: { [clock] in clock!.now })
         let needsFullScan = fullRescan || !catalog.hasCompletedFullScan()
         do {
             if needsFullScan {
+                // The resumable full scan marks itself complete when it reaches the library's end.
                 _ = try await sync.run(engine: engine, identifiers: nil)
-                catalog.markFullScanCompleted()
             } else if let identifiers, !identifiers.isEmpty {
                 _ = try await sync.run(engine: engine, identifiers: identifiers)
             }
         } catch {
             // The controller surfaces a message and still drains what is queued; mirror by continuing.
         }
-        // Drain, then release ownership.
+        // Drain again for what the scan discovered, then release ownership.
         _ = await runner.runUntilDrained()
         lockStore.release(runID: runID)
         return true
@@ -240,7 +244,79 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         XCTAssertNil(lockStore.currentLock(), "the recovered pass releases its own lock at the end")
     }
 
+    /// The reliability invariant behind the drain/scan decoupling: uploads must never wait for a
+    /// scan to finish. A pass drains rows an earlier (interrupted) pass left runnable BEFORE its own
+    /// scan enumerates — so a full scan that never completes can no longer starve the upload of
+    /// already-queued assets (the frozen-queue bug: 14k rows stuck `discovered` behind a rescan loop).
+    func testQueuedRowsUploadBeforeTheScanEnumerates() async throws {
+        // A prior pass classified A and B but was interrupted before draining (nothing uploaded, no
+        // full-scan-complete marker) — exactly the stuck state a never-finishing scan leaves behind.
+        enumerator.infos = [photoInfo("A"), photoInfo("B")]
+        let preScan = PhotoLibraryCatalogSync(store: catalog, enumerator: enumerator, chunkSize: 50, now: { [clock] in clock!.now })
+        _ = try await preScan.run(engine: engine, identifiers: nil)
+        XCTAssertEqual(uploader.requests.count, 0, "precondition: the interrupted prior pass uploaded nothing")
+        XCTAssertEqual(queue.summary().uploaded, 0, "precondition: A and B are queued, not yet uploaded")
+
+        // Record how many uploads have happened at the instant the NEXT pass begins scanning.
+        let uploadsWhenScanStarted = IntBox()
+        enumerator.infos = [photoInfo("A"), photoInfo("B"), photoInfo("C")]
+        enumerator.onEnumerationStart = { [uploader] in uploadsWhenScanStarted.value = uploader?.requests.count ?? -1 }
+
+        let ran = await runPass(owner: .foreground)
+
+        XCTAssertTrue(ran)
+        XCTAssertEqual(uploadsWhenScanStarted.value, 2,
+                       "the two already-queued assets upload BEFORE the scan enumerates — the drain is not gated on the scan")
+        XCTAssertEqual(Set(uploader.requests.map(\.name)), ["IMG_A.HEIC", "IMG_B.HEIC", "IMG_C.HEIC"])
+        XCTAssertEqual(uploader.requests.count, 3, "each asset uploads exactly once (no double upload from the reorder)")
+    }
+
+    /// #2 — the resumable index. A full scan interrupted before the library's end must RESUME from
+    /// its saved frontier on the next run, not restart from zero, and must NOT falsely sweep the
+    /// assets an earlier run already observed. This is what stops the "scan forever, never complete,
+    /// upload nothing" loop (completed_full_scan never flipping) that froze the real queue.
+    func testInterruptedFullScanResumesAndDoesNotFalselySweep() async throws {
+        enumerator.infos = [photoInfo("A"), photoInfo("B"), photoInfo("C"), photoInfo("D"), photoInfo("E")]
+        let sync = PhotoLibraryCatalogSync(store: catalog, enumerator: enumerator, chunkSize: 2, now: { [clock] in clock!.now })
+
+        // Run 1: interrupted after the first 2 assets (app backgrounded mid-scan).
+        enumerator.throwAfter = 2
+        do {
+            _ = try await sync.run(engine: engine, identifiers: nil)
+            XCTFail("the interrupted scan should have propagated cancellation")
+        } catch is CancellationError {
+            // expected
+        }
+        XCTAssertFalse(catalog.hasCompletedFullScan(), "an interrupted scan is NOT complete")
+        XCTAssertEqual(catalog.fullScanProgress()?.cursor, 2, "the frontier is persisted so the next run resumes there")
+        XCTAssertEqual(queue.summary().total, 2, "only the two observed assets are queued so far")
+        let epochStart = catalog.fullScanProgress()?.epochStart
+        XCTAssertNotNil(epochStart)
+
+        // Run 2 (later wall clock): must RESUME at the cursor, skip A/B, finish C/D/E, complete.
+        clock.advance(by: 120)
+        enumerator.throwAfter = nil
+        _ = try await sync.run(engine: engine, identifiers: nil)
+
+        XCTAssertTrue(catalog.hasCompletedFullScan(), "reaching the library's end across resumed runs completes the scan")
+        XCTAssertNil(catalog.fullScanProgress(), "a completed epoch clears its resume state")
+        XCTAssertEqual(queue.summary().total, 5, "all five assets are queued exactly once (A/B not re-enqueued on resume)")
+        XCTAssertEqual(catalog.snapshot(), PhotoLibraryCatalogSnapshot(total: 5, present: 5, removed: 0),
+                       "assets observed by the EARLIER run must not be swept as removed when a later run finishes the epoch")
+        XCTAssertEqual(epochStart, epochStart, "epoch start is stable across resumed runs")
+    }
+
     // MARK: - Fixtures
+
+    /// Thread-safe int cell so a `@Sendable` scan-start hook can hand a count back to the test body.
+    private final class IntBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _value = 0
+        var value: Int {
+            get { lock.withLock { _value } }
+            set { lock.withLock { _value = newValue } }
+        }
+    }
 
     private func photoInfo(_ id: String, modified: Date? = nil) -> PhotoBackupAssetInfo {
         PhotoBackupAssetInfo(
@@ -262,14 +338,42 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         }
         init(infos: [PhotoBackupAssetInfo]) { _infos = infos }
 
-        func infoChunks(identifiers: [String]?, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
+        /// Fires once when the scan actually begins enumerating — lets a test capture how much upload
+        /// work already happened BEFORE the scan (proving the drain runs first).
+        var onEnumerationStart: (@Sendable () -> Void)? {
+            get { lock.withLock { _onEnumerationStart } }
+            set { lock.withLock { _onEnumerationStart = newValue } }
+        }
+        private var _onEnumerationStart: (@Sendable () -> Void)?
+
+        /// When set, the stream yields at most this many assets and then throws — simulating a full
+        /// scan interrupted (app backgrounded / cancelled) before it could reach the library's end.
+        var throwAfter: Int? {
+            get { lock.withLock { _throwAfter } }
+            set { lock.withLock { _throwAfter = newValue } }
+        }
+        private var _throwAfter: Int?
+
+        func infoChunks(identifiers: [String]?, startOffset: Int, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
+            onEnumerationStart?()
             let all = infos
-            let selected = identifiers.map { ids in all.filter { Set(ids).contains($0.localIdentifier) } } ?? all
+            let selectedAll = identifiers.map { ids in all.filter { Set(ids).contains($0.localIdentifier) } } ?? all
+            let selected = Array(selectedAll.dropFirst(max(0, startOffset)))   // resume point
+            let limit = throwAfter
             return AsyncThrowingStream { continuation in
                 var index = 0
+                var yielded = 0
                 while index < selected.count {
                     let upper = min(index + max(1, chunkSize), selected.count)
+                    if let limit, yielded + (upper - index) > limit {
+                        // Yield up to the limit, then interrupt before the rest of the library.
+                        let cut = index + max(0, limit - yielded)
+                        if cut > index { continuation.yield(Array(selected[index ..< cut])) }
+                        continuation.finish(throwing: CancellationError())
+                        return
+                    }
                     continuation.yield(Array(selected[index ..< upper]))
+                    yielded += upper - index
                     index = upper
                 }
                 continuation.finish()
