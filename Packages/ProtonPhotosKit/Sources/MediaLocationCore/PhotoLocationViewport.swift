@@ -32,11 +32,16 @@ public struct PhotoLocationVisibleCoordinatePolicy: Sendable, Equatable {
     /// lower → coarser cells (fewer, larger pins). Tuned so a typical city view produces a few hundred
     /// cells at most, letting MapKit's built-in clustering do the final visual merge.
     public let cellDivisor: Double
+    /// Lower bound on a grid cell's edge length, in meters. Photos closer than this always share a
+    /// cell (one pin) regardless of zoom, so a dense same-place burst (e.g. many photos at home) never
+    /// scatters into overlapping pins when zooming in. 0 disables the floor (pure viewport-relative).
+    public let minCellMeters: Double
 
-    public init(marginMultiplier: Double, maxCells: Int, cellDivisor: Double) {
+    public init(marginMultiplier: Double, maxCells: Int, cellDivisor: Double, minCellMeters: Double = 0) {
         self.marginMultiplier = marginMultiplier
         self.maxCells = maxCells
         self.cellDivisor = cellDivisor
+        self.minCellMeters = minCellMeters
     }
 
     public func boundingBox(for viewport: PhotoLocationViewport) -> GeoBoundingBox? {
@@ -64,7 +69,8 @@ public struct PhotoLocationVisibleCoordinatePolicy: Sendable, Equatable {
             visible,
             in: viewport,
             cellDivisor: cellDivisor,
-            maxCells: maxCells
+            maxCells: maxCells,
+            minCellMeters: minCellMeters
         )
     }
 }

@@ -69,10 +69,15 @@ struct MobileMapScreen: View {
                             clusterPresentation = MobileMapClusterPresentation(uids: uids, coordinate: coordinate)
                         }
                     )
-                    .ignoresSafeArea(edges: .bottom)
+                    // Full-bleed under the (inline) navigation bar so the native iOS 26 Liquid Glass bar
+                    // floats over the map, mirroring the macOS map. The bar is a thin translucent inline
+                    // title; the map pans freely underneath it.
+                    .ignoresSafeArea()
                 }
             }
+            .overlay(alignment: .top) { TopBarFrost() }
             .navigationTitle(String(localized: "tab.map"))
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $clusterPresentation) { presentation in
                 MobileMapClusterSeriesScreen(uids: presentation.uids, coordinate: presentation.coordinate)
             }
@@ -123,9 +128,9 @@ private struct MobileLibraryMap: UIViewRepresentable {
         // Aggregation: each grid cell becomes one pin carrying the true photo count, so MKMapView
         // never manages thousands of individual views. maxCells caps the pin count (not the photo
         // count); cellDivisor controls grid granularity. See MAP_PERF_NOTES.
-        UIKitLibraryMapHostView(
+        return UIKitLibraryMapHostView(
             index: index,
-            visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1.6, maxCells: 400, cellDivisor: 12),
+            visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 1.6, maxCells: 400, cellDivisor: 12, minCellMeters: 80),
             thumbnail: thumbnail,
             loadThumbnail: loadThumbnail,
             onSelectPhoto: onSelectPhoto,

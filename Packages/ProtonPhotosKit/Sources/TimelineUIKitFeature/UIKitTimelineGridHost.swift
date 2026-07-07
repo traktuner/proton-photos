@@ -548,9 +548,20 @@ public final class UIKitTimelineGridHostView: UIView {
               !itemUIDs.isEmpty
         else { return }
 
-        let bottomY = fillOrder == .newestBottomTrailing ? maxContentOffsetY : 0
+        // When the content fits within one screen (few photos — e.g. a small map cluster), there is no
+        // real scroll room: `resolvedContentSize` floors the height to `bounds.height + 1`, so
+        // `maxContentOffsetY` is a ~1pt phantom that would scroll the first row UP under the navigation
+        // bar. Rest at `-safeAreaInsets.top` instead so the first row sits just below the bar. Only when
+        // the content genuinely overflows do we scroll to the newest (bottom) row.
+        let fitsOnScreen = contentSize.height <= bounds.height + 1
+        let targetY: CGFloat
+        if fitsOnScreen {
+            targetY = -safeAreaInsets.top
+        } else {
+            targetY = fillOrder == .newestBottomTrailing ? maxContentOffsetY : -safeAreaInsets.top
+        }
         isApplyingProgrammaticScroll = true
-        scrollView.setContentOffset(CGPoint(x: 0, y: bottomY), animated: false)
+        scrollView.setContentOffset(CGPoint(x: 0, y: targetY), animated: false)
         isApplyingProgrammaticScroll = false
         needsInitialNewestViewport = false
     }

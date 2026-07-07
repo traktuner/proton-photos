@@ -136,6 +136,34 @@ private func tempDir() -> URL {
         #expect(cells[0].count == 3, "expected 3 members in the cell; got \(cells[0].count)")
     }
 
+    @Test func minCellMetersFloorCollapsesSamePlaceBurstEvenWhenZoomedIn() {
+        let index = PhotoLocationIndex()
+        // A burst at essentially one spot, spread by ~30 m of GPS noise (0.0003° lat ≈ 33 m).
+        index.merge([
+            coord("a", 47.70000, 13.00000),
+            coord("b", 47.70030, 13.00040),
+            coord("c", 47.69975, 13.00020),
+        ])
+        // A tightly zoomed-in viewport (~110 m tall): with cellDivisor 12 the raw cell is ~9 m, so
+        // without a floor these three scatter into separate cells (the reported bug). A 80 m floor
+        // forces them into one.
+        let viewport = PhotoLocationViewport(
+            centerLatitude: 47.70000,
+            centerLongitude: 13.00000,
+            latitudeDelta: 0.001,
+            longitudeDelta: 0.001
+        )
+
+        let noFloor = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 2, maxCells: 400, cellDivisor: 12)
+        #expect(index.coordinates(in: viewport, policy: noFloor).count > 1,
+                "control: without a floor the burst should scatter into multiple cells")
+
+        let floored = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 2, maxCells: 400, cellDivisor: 12, minCellMeters: 80)
+        let cells = index.coordinates(in: viewport, policy: floored)
+        #expect(cells.count == 1, "expected one cell with the 80 m floor; got \(cells.count)")
+        #expect(cells.first?.count == 3, "the single cell must carry all 3 photos; got \(cells.first?.count ?? -1)")
+    }
+
     @Test func viewportPolicyRejectsInvalidInputsWithoutLeakingAllCoordinates() {
         let index = PhotoLocationIndex()
         index.merge([coord("a", 47.8, 13.0)])
@@ -203,6 +231,32 @@ private func tempDir() -> URL {
         let cells = index.coordinates(in: viewport, policy: policy)
         let totalMembers = cells.reduce(0) { $0 + $1.count }
         #expect(totalMembers == 20, "every photo must be accounted for; got \(totalMembers)")
+    }
+
+    @Test func capKeepsTheDensestCellEvenWhenItIsFarFromCenter() {
+        let index = PhotoLocationIndex()
+        var coords: [PhotoCoordinate] = []
+        // Many sparse single-photo cells clustered near the viewport center.
+        for i in 0..<40 {
+            coords.append(coord("near\(i)", 47.500 + Double(i) * 0.001, 13.500))
+        }
+        // One very dense place far from center (the "home with 2000 photos" case, scaled down): 50
+        // photos within one cell, off to the side.
+        for i in 0..<50 {
+            coords.append(coord("home\(i)", 47.600 + Double(i) * 0.00001, 13.700))
+        }
+        index.merge(coords)
+        // A tight cap that MUST drop cells: with count-blind nearest-center pruning the dense far cell
+        // would be dropped; the count-first policy must keep it.
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 5, maxCells: 10, cellDivisor: 50)
+        let viewport = PhotoLocationViewport(
+            centerLatitude: 47.500, centerLongitude: 13.500,
+            latitudeDelta: 0.05, longitudeDelta: 0.05
+        )
+        let cells = index.coordinates(in: viewport, policy: policy)
+        #expect(cells.count == 10, "cap must be applied; got \(cells.count)")
+        let densest = cells.map(\.count).max() ?? 0
+        #expect(densest >= 50, "the densest cell (the far 50-photo home) must survive the cap; got \(densest)")
     }
 }
 

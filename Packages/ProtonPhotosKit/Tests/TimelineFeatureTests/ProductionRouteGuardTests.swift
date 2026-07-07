@@ -280,6 +280,24 @@ struct ProductionRouteGuardTests {
         #expect(!uploadQueue.contains(".background(.regularMaterial)"), "popover content must not stack a second material over native popover glass")
     }
 
+    @Test func liquidGlassAvailabilityStaysCentralized() {
+        let roots = [Self.repoRoot.appendingPathComponent("App"),
+                     Self.repoRoot.appendingPathComponent("iOSApp"),
+                     Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources")]
+        var scanned = 0
+        for root in roots {
+            for file in swiftFiles(under: root) {
+                scanned += 1
+                guard file.lastPathComponent != "AdaptiveGlass.swift" else { continue }
+                let text = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+                for token in [".glassEffect", ".buttonStyle(.glass"] {
+                    #expect(!text.contains(token), "\(token) must stay behind DesignSystemCore/AdaptiveGlass.swift: \(file.path)")
+                }
+            }
+        }
+        #expect(scanned > 0, "Guard scanned no files - repoRoot path is wrong: \(Self.repoRoot.path)")
+    }
+
     @Test func albumsSidebarAndEmptyRoutesStayExplicit() throws {
         let mainView = try String(contentsOf: Self.repoRoot.appendingPathComponent("App/Views/MainView.swift"), encoding: .utf8)
         let sidebar = try Self.body(of: mainView, from: "private struct SidebarView: View", to: ".scrollContentBackground(.hidden)")

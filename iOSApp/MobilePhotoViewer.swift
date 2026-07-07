@@ -98,7 +98,7 @@ struct MobilePhotoViewer: View {
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(10)
-                        .background(.ultraThinMaterial, in: Circle())
+                        .protonGlass(in: Circle())
                 }
                 .accessibilityLabel(String(localized: "viewer.close_a11y"))
 
@@ -998,6 +998,6 @@ private struct MobileLiveBadge: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        .background(.ultraThinMaterial, in: Capsule())
+        .protonGlass(in: Capsule())
     }
 }

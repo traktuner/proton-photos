@@ -35,6 +35,7 @@ struct MobileSettingsScreen: View {
                 brandFooter
             }
             .navigationTitle(String(localized: "tab.settings"))
+            .navigationBarTitleDisplayMode(.inline)
             .task { await refreshCacheSize() }
             .task(id: libraryModel.isBackgroundLoading) {
                 await refreshCacheSizeWhilePreviewsLoad()

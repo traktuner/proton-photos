@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreLocation
 import UniformTypeIdentifiers
 import PhotosCore
 import DesignSystem
@@ -19,6 +20,7 @@ struct MainView: View {
     @Bindable var uploadCoordinator: UploadCoordinator
 
     @State private var timelineModel: TimelineViewModel
+    @State private var mapClusterModel: TimelineViewModel
     @State private var viewerModel: PhotoViewerModel?
     @State private var level: Int = 3          // 0 = most zoomed in (largest, ~3 cols) … 5 = densest overview
     // Aspect/square thumbnail toggle preference (normal levels L0–L3). Pushed to the grid coordinator; the
@@ -33,6 +35,8 @@ struct MainView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility   // native sidebar show/hide
     @State private var albums: [PhotoAlbum] = []
     @State private var selection: PhotoFilter = .all
+    @State private var mapClusterPresentation: MapClusterPresentation?
+    @State private var mapClusterRouteGeneration = 0
     @State private var routeScrollGeneration = 0
     /// Per-route scroll-position memory: leaving a route stores a layout-invariant photo anchor here; returning
     /// re-pins it (so the route reopens exactly where the user was, even across zoom/resize). `nil` for a route
@@ -109,6 +113,7 @@ struct MainView: View {
         let feed = ThumbnailFeed(cache: OfflineLibraryManager.shared.cache, loader: backend, dimensions: dimensions)
         self.feed = feed
         _timelineModel = State(initialValue: TimelineViewModel(repository: backend, feed: feed, library: backend))
+        _mapClusterModel = State(initialValue: TimelineViewModel(repository: backend, feed: feed, library: backend))
         let sidebarVisible = SidebarPersistence.resolvedVisible()
         let width = SidebarPersistence.resolvedWidth()
         _sidebarOpen = State(initialValue: sidebarVisible)
@@ -185,6 +190,9 @@ struct MainView: View {
             }
             .onChange(of: librarySettled) { _, _ in evaluateVeilLift() }
             .onChange(of: selection) { oldValue, newValue in
+                if newValue != .map {
+                    mapClusterPresentation = nil
+                }
                 // Switching sidebar route while a photo/video is open: close the viewer INSTANTLY so the new tab's
                 // grid (or Map) just shows. No zoom-back-to-cell - the photo's cell usually isn't in the new
                 // route, and the expectation is simply "tab switches, photo closes."
@@ -262,11 +270,34 @@ struct MainView: View {
                 LibraryMapScreen(index: OfflineLibraryManager.shared.locationIndex,
                                  thumbnail: { feed.memoryImage(for: $0) },
                                  loadThumbnail: { await feed.cachedImage(for: $0) },
-                                 onSelectPhoto: { openPhotoByUID($0) })
+                                 onSelectPhoto: { openPhotoByUID($0) },
+                                 onSelectCluster: { uids, coordinate in showMapCluster(uids: uids, coordinate: coordinate) })
                     .overlay { mapEmptyStateOverlay }
                     .padding(.leading, leadingObstructionInset)
                     .animation(.easeInOut(duration: 0.3), value: leadingObstructionInset)
                     .ignoresSafeArea()
+            }
+
+            if selection == .map, mapClusterPresentation != nil {
+                TimelineView(model: mapClusterModel,
+                             level: $level,
+                             gridFillOrder: .topLeading,
+                             proxy: gridProxy,
+                             routeScrollGeneration: mapClusterRouteGeneration,
+                             routeInitialScrollAnchor: nil,
+                             searchText: committedSearchText,
+                             selectionMode: selectionMode,
+                             media: backend,
+                             metadataProvider: backend,
+                             favoriteUIDs: favorites,
+                             isOffline: !networkMonitor.isOnline,
+                             onSelectionChange: { selectedUIDs = $0 }) { item, items in
+                    openPhoto(item, items)
+                }
+                .padding(.leading, leadingObstructionInset)
+                .animation(.easeInOut(duration: 0.3), value: leadingObstructionInset)
+                .ignoresSafeArea(.container, edges: [.top, .bottom])
+                .transition(.opacity)
             }
 
             // Hidden while a NON-interactive zoom (open/close spring) animates - the overlay stands in. During an
@@ -450,7 +481,7 @@ struct MainView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .glassEffect(in: Capsule())   // native Liquid Glass (was .ultraThinMaterial)
+        .protonGlass(in: Capsule())
     }
 
     @ViewBuilder private var uploadRefreshBanner: some View {
@@ -471,7 +502,7 @@ struct MainView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
-                .glassEffect(in: Capsule())   // native Liquid Glass (was .regularMaterial)
+                .protonGlass(in: Capsule())
                 .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
                 .padding(.bottom, 20)
             }
@@ -480,6 +511,12 @@ struct MainView: View {
     }
 
     // MARK: - Zoom transition
+
+    private struct MapClusterPresentation {
+        let title: String
+        let coordinate: CLLocationCoordinate2D
+        let count: Int
+    }
 
     private struct ZoomTransition: Equatable {
         let item: PhotoItem
@@ -523,8 +560,40 @@ struct MainView: View {
     /// Open the viewer for a photo identified only by uid (a Map pin tap). Looks it up in the currently loaded
     /// library list and opens directly (no cell-zoom - the grid cell is behind the map / may be off-screen).
     private func openPhotoByUID(_ uid: PhotoUID) {
-        guard let item = timelineModel.allItems.first(where: { $0.uid == uid }) else { return }
-        openPhoto(item, timelineModel.allItems)
+        let items = timelineModel.wholeLibraryItemsForViewer
+        guard let item = items.first(where: { $0.uid == uid }) else { return }
+        openPhoto(item, items)
+    }
+
+    private func showMapCluster(uids: [PhotoUID], coordinate: CLLocationCoordinate2D) {
+        let uniqueUIDs = uniquePhotoUIDs(uids)
+        let items = timelineModel.allLibraryItems(matching: uniqueUIDs)
+        guard !items.isEmpty else { return }
+        selectionMode = false
+        selectedUIDs = []
+        viewerModel = nil
+        zoom = nil
+        mapClusterPresentation = MapClusterPresentation(
+            title: String(localized: "map.cluster_title"),
+            coordinate: coordinate,
+            count: items.count
+        )
+        routeInitialScrollAnchor = nil
+        mapClusterRouteGeneration += 1
+        Task {
+            await mapClusterModel.showTransientItems(items, sectionID: "map-cluster-\(mapClusterRouteGeneration)")
+        }
+    }
+
+    private func closeMapCluster() {
+        selectionMode = false
+        selectedUIDs = []
+        mapClusterPresentation = nil
+    }
+
+    private func uniquePhotoUIDs(_ uids: [PhotoUID]) -> [PhotoUID] {
+        var seen = Set<PhotoUID>()
+        return uids.filter { seen.insert($0).inserted }
     }
 
     private func openPhoto(_ item: PhotoItem, _ items: [PhotoItem]) {
@@ -676,12 +745,15 @@ struct MainView: View {
     }
 
     private var title: String {
+        if selection == .map, let mapClusterPresentation {
+            return mapClusterPresentation.title
+        }
         switch selection {
-        case .all: String(localized: "library.title")
-        case .tag(let t): t.title
-        case .album(_, let name): name
-        case .trash: String(localized: "sidebar.recently_deleted")
-        case .map: "Map"
+        case .all: return String(localized: "library.title")
+        case .tag(let t): return t.title
+        case .album(_, let name): return name
+        case .trash: return String(localized: "sidebar.recently_deleted")
+        case .map: return "Map"
         }
     }
 
@@ -977,7 +1049,10 @@ struct MainView: View {
         }
     }
 
-    private var selectedItems: [PhotoItem] { timelineModel.allItems.filter { selectedUIDs.contains($0.uid) } }
+    private var selectedItems: [PhotoItem] {
+        let source = mapClusterPresentation == nil ? timelineModel.allItems : mapClusterModel.allItems
+        return source.filter { selectedUIDs.contains($0.uid) }
+    }
 
     private func scheduleSearchCommit(_ value: String) {
         searchDebounceTask?.cancel()
@@ -1037,7 +1112,7 @@ struct MainView: View {
     ///
     /// Deliberately the SAME control as `exportProgressIndicator` (the download progress) - a determinate
     /// `.circular` `ProgressView` at `.controlSize(.regular)` - so the two read identically and the pill sizes
-    /// itself the same proven way. No glyph, no label. No manual `.glassEffect`: the toolbar glass is system-owned.
+    /// itself the same proven way. No glyph, no label. The toolbar owns its own glass.
     private var libraryPreparePill: some View {
         let pct = Int(OfflineLibraryManager.shared.cachePreparePercent.rounded())
         // Wrapped in a Button so it gets the SAME round, padded toolbar pill as the aspect-toggle button (a bare
@@ -1078,9 +1153,7 @@ struct MainView: View {
                 .fixedSize()
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-                // No manual `.glassEffect` here: this is a `.principal` toolbar item and the system toolbar OWNS
-                // the Liquid-Glass background. A manual Capsule glass rendered a DOUBLE pill (inner manual capsule
-                // inside the outer system pill). The system supplies the single glass background.
+                // The system toolbar supplies the single glass background for the principal item.
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -1124,6 +1197,14 @@ struct MainView: View {
                 .accessibilityLabel("toolbar.move_to_trash")
             }
         } else {
+            if selection == .map, mapClusterPresentation != nil {
+                ToolbarItem(placement: .navigation) {
+                    Button { closeMapCluster() } label: {
+                        Label("toolbar.back", systemImage: "chevron.left")
+                    }
+                    .help("toolbar.back_to_library")
+                }
+            }
             // The sidebar toggle is the NATIVE NavigationSplitView one (it returns automatically + moves with the
             // sidebar). The ⌥⌘S command still posts `.protonPhotosToggleSidebar` → `toggleSidebar()`.
             // No explicit "select mode": click / ⌘-click / ⇧-click / drag-marquee select directly, double

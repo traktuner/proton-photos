@@ -1998,7 +1998,7 @@ final class CoreArchitectureGateTests: XCTestCase {
                 "public static func supportsTimelineGrid(device: MTLDevice) -> Bool",
                 "#if targetEnvironment(simulator)",
                 "true",
-                "device.supportsFamily(.apple7)"
+                "device.supportsFamily(.metal3)"
             ] where !source.contains(symbol) {
                 violations.append("TimelineUIKitAdapter/UIKitTimelineMetalCapability.swift: missing \(symbol)")
             }

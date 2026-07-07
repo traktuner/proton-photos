@@ -2,16 +2,11 @@
 import MapKit
 import MapCore
 import MediaLocationCore
-import os
 import PhotosCore
 import UIKit
 
 @MainActor
 public final class UIKitLibraryMapHostView: UIView {
-    /// Logger for measuring the cost of region changes and annotation updates, so the cap choice
-    /// can be driven by measured density instead of guesses.
-    private static let perfLog = OSLog(subsystem: "ch.protonmail.photos", category: "MapPerf")
-
     private let mapView = MKMapView()
     private let index: PhotoLocationIndex
     private let visibleCoordinatePolicy: PhotoLocationVisibleCoordinatePolicy
@@ -33,6 +28,10 @@ public final class UIKitLibraryMapHostView: UIView {
     /// Last queried bounding box, so a sub-pixel `regionDidChange` (or a `revision` bump that didn't
     /// move the box) doesn't re-filter, re-diff, and cancel/re-spawn thumbnail loads for nothing.
     private var lastBoundingBox: GeoBoundingBox?
+    /// Monotonic id per `reloadVisible` pass. The aggregation runs off the main thread; a result that
+    /// returns after a newer pass has started is stale (it describes an old viewport) and is dropped.
+    private var reloadGeneration = 0
+    private var reloadTask: Task<Void, Never>?
 
     public init(
         index: PhotoLocationIndex,
@@ -50,8 +49,15 @@ public final class UIKitLibraryMapHostView: UIView {
         self.onSelectCluster = onSelectCluster
         super.init(frame: .zero)
         configureMap()
+        // Keep framing synchronous (cheap, ~25 ms) so the map opens already centered on the dense core
+        // instead of visibly jumping after it appears.
         frameToDenseCoreIfNeeded()
-        reloadVisible()
+        // Defer the first pin aggregation OFF the synchronous construction path: filtering + binning
+        // thousands of coordinates is the dominant cost and was what made the tab transition hang.
+        // Running it in the next runloop tick lets MKMapView present its surface immediately; the pins
+        // populate a beat later. `reloadVisible` is coalesced by `lastBoundingBox`, so if the map's
+        // on-screen `regionDidChange` fires first, this deferred pass is a cheap no-op.
+        DispatchQueue.main.async { [weak self] in self?.reloadVisible() }
     }
 
     @available(*, unavailable)
@@ -65,6 +71,7 @@ public final class UIKitLibraryMapHostView: UIView {
         for (_, task) in thumbnailLoadTasks {
             task.cancel()
         }
+        reloadTask?.cancel()
     }
 
     public func configure(
@@ -77,10 +84,12 @@ public final class UIKitLibraryMapHostView: UIView {
         self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
         self.onSelectCluster = onSelectCluster
-        // Callbacks changed; force a re-pass so any thumbnail-dequeuing re-resolves against the
-        // new closures (annotations themselves don't move, but the cache would otherwise skip).
-        lastBoundingBox = nil
-        reloadVisible()
+        // Only update the stored closures. Do NOT force a full re-query/re-aggregate here: SwiftUI calls
+        // this on every `updateUIView` (each state change re-passes value-identical closures), and the
+        // aggregate over thousands of coordinates is the dominant cost on the main thread — re-running it
+        // per update is what made opening the Map tab take ~1–2 s. Content changes flow through
+        // `refreshIfChanged` (revision-gated) and map moves through `regionDidChangeAnimated`; a newly
+        // available thumbnail closure is picked up lazily by the next `viewFor`/thumbnail request.
     }
 
     public func refreshIfChanged() {
@@ -150,10 +159,29 @@ public final class UIKitLibraryMapHostView: UIView {
         // index contents change, so a crawl adding photos still re-queries.
         if lastBoundingBox == box { return }
         lastBoundingBox = box
-        // Grid cells instead of raw coordinates: each cell represents one pin and carries the true
-        // count of underlying photos (memberCount). A dense neighborhood of 5k photos collapses to a
-        // few dozen cells, letting MapKit manage only a handful of annotation views.
-        let cells = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
+        // Aggregate OFF the main thread: filtering thousands of coordinates + grid binning is the
+        // dominant cost and must never block the tab transition or a scroll/pinch. Snapshot the
+        // value-type, Sendable coordinates on the main actor (cheap, copy-on-write), bin them on a
+        // background task, then apply only the handful of resulting annotations back on the main actor.
+        // The generation counter drops stale results so a fast pan/pinch (many overlapping requests)
+        // only ever applies the newest viewport's pins.
+        let coords = index.coordinates
+        let policy = visibleCoordinatePolicy
+        reloadGeneration &+= 1
+        let generation = reloadGeneration
+        reloadTask?.cancel()
+        reloadTask = Task { [weak self] in
+            let cells = await Task.detached(priority: .userInitiated) {
+                policy.aggregatedCoordinates(from: coords, in: viewport)
+            }.value
+            guard !Task.isCancelled, let self, generation == self.reloadGeneration else { return }
+            self.applyCells(cells)
+        }
+    }
+
+    /// Diff the freshly aggregated cells against what is on screen and add/remove the delta. Runs on the
+    /// main actor (mutates `mapView`); the expensive aggregation already happened off-main in `reloadVisible`.
+    private func applyCells(_ cells: [AggregatedCoordinate]) {
         let wanted = Set(cells.map(\.uid))
 
         // Diff against the SHOWN set (not the mapView's full annotation array): iterating
@@ -185,10 +213,6 @@ public final class UIKitLibraryMapHostView: UIView {
             shownUIDs.formUnion(fresh.map(\.uid))
         }
 
-        // Perf logging: log the cell count to verify the aggregation actually reduces pin density.
-        os_log("reloadVisible: cells=%{public}d wanted=%{public}d shown=%{public}d toRemove=%{public}d fresh=%{public}d thumbTasks=%{public}d",
-               log: Self.perfLog, type: .debug,
-               cells.count, wanted.count, shownUIDs.count, toRemove.count, fresh.count, thumbnailLoadTasks.count)
     }
 
     private func boundingRect(of coords: [CLLocationCoordinate2D]) -> MKMapRect {
@@ -231,6 +255,9 @@ extension UIKitLibraryMapHostView: MKMapViewDelegate {
         ) as! UIKitPhotoAnnotationView
         let image = thumbnail(photo.uid)
         view.setThumbnail(image)
+        // A single cell can aggregate many photos (the 80 m floor merges a same-place burst); show its
+        // true count so a 30-photo pin doesn't masquerade as a single picture.
+        view.setCount(photo.memberCount)
         if image == nil {
             requestThumbnailIfNeeded(photo.uid)
         }
