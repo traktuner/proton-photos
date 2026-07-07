@@ -450,6 +450,9 @@ public actor BackupSyncRunner {
         ).applying(identity: preflightResult.identity)
 
         let uid: PhotoUID
+        #if DEBUG
+        let _tUpload = Date()
+        #endif
         do {
             uid = try await uploader.upload(request) { _ in }
         } catch {
@@ -464,6 +467,19 @@ public actor BackupSyncRunner {
             }
             return
         }
+        #if DEBUG
+        // [BackupPerf] the ONE previously-unmeasured step: the actual bytes-to-Proton transfer. All
+        // local steps (read/identity/dupLookup) proved trivial, so this is where a slow pass is spent.
+        let _upMs = Date().timeIntervalSince(_tUpload) * 1000
+        let _upMB = Double(resolved.descriptor.fileSize) / 1_048_576
+        PhotoDiagnostics.shared.emit("BackupPerf", [
+            "step": "upload",
+            "file": resolved.descriptor.filename,
+            "mb": String(format: "%.1f", _upMB),
+            "ms": String(format: "%.0f", _upMs),
+            "mb_s": _upMs > 0 ? String(format: "%.1f", _upMB / (_upMs / 1000)) : "-",
+        ])
+        #endif
 
         // Durability order is the no-double-upload guarantee:
         // 1. identity manifest remembers the uploaded outcome (survives everything),
