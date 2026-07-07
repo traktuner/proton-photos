@@ -179,8 +179,9 @@ let package = Package(
         .target(name: "PhotoLibraryBackupAdapter", dependencies: ["UploadCore", "PhotosCore", "AlbumSyncCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "UploadFeatureTests", dependencies: ["UploadCore", "PhotosCore", "PhotoLibraryBackupAdapter"], swiftSettings: disableDynamicActorIsolation),
         // Map: UIKit/AppKit MapKit views + clustering over PhotoLocationIndex (MediaLocationCore).
-        // MapCore: platform-neutral MKAnnotation conformer shared by both adapters (no duplication).
-        .target(name: "MapCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        // MapCore: platform-neutral MKAnnotation conformer + the shared annotation-loading engine
+        // (framing, off-main aggregation, diff, generation guard) used by both map adapters.
+        .target(name: "MapCore", dependencies: ["PhotosCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MapUIKitAdapter", dependencies: ["PhotosCore", "MediaLocationCore", "MapCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MapFeature", dependencies: ["PhotosCore", "MediaLocationCore", "MapCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
     ]

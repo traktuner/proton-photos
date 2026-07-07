@@ -24,6 +24,9 @@ struct MobileTimelineScreen: View {
     @State private var showTrashConfirm = false
     @State private var actionError: MobileSelectionError?
     @State private var networkMonitor = NetworkMonitor.shared
+    /// Frosted-bar height, read from the key window ONCE (init + onAppear) and cached — never read live
+    /// during body evaluation, which cycles the layout under the safe-area-ignoring overlay.
+    @State private var topFrostHeight: CGFloat = mobileTopBarFrostHeight()
 
     /// True while any selection action is running, so the other toolbar buttons disable together.
     private var selectionBusy: Bool { isExporting }
@@ -177,7 +180,8 @@ struct MobileTimelineScreen: View {
 
             overlay
         }
-        .overlay(alignment: .top) { TopBarFrost() }
+        .overlay(alignment: .top) { TopFrostBar(height: topFrostHeight) }
+        .onAppear { topFrostHeight = mobileTopBarFrostHeight() }
     }
 
     @ViewBuilder private var overlay: some View {
@@ -290,54 +294,15 @@ struct MobilePartialShare: Identifiable {
 
 /// A frosted-glass strip pinned behind the (inline) navigation bar.
 ///
-/// The Fotos grid and the map render full-bleed under the bar so the content reaches the screen top,
-/// but their hosts are custom UIKit/Metal views — not SwiftUI `ScrollView`s — so the automatic
-/// iOS 26 scroll-edge effect that would materialise the bar background never triggers, leaving the
-/// title unreadable over bright photos. This overlay restores a readable, translucent bar the same way
-/// the macOS grid does with `GridTopFrost`: a material that covers the status bar + nav bar and fades
-/// out into the content, so there is never a hard opaque edge.
-struct TopBarFrost: View {
-    var body: some View {
-        // A REAL UIKit UIVisualEffectView (systemChromeMaterial — the material bars use), not SwiftUI
-        // `Material`/`glassEffect`. SwiftUI's material/glass compositing can't sample the Metal (MTKView)
-        // grid backdrop — glassEffect renders opaque black, Material renders a flat dark scrim. A genuine
-        // UIVisualEffectView blurs sibling layers (incl. the CAMetalLayer) the way the native tab bar does.
-        BarBlur(style: .systemUltraThinMaterial, intensity: 0.55)
-            .frame(height: Self.barHeight)
-            .frame(maxWidth: .infinity)
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
-    }
-
-    /// Status bar / Dynamic Island inset (from the key window) plus the standard inline navigation-bar
-    /// height, so the strip reliably covers the title area on every device without depending on a
-    /// SwiftUI geometry read that a full-bleed, safe-area-ignoring parent would report as zero.
-    private static var barHeight: CGFloat {
-        let topSafeArea = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first(where: \.isKeyWindow)?
-            .safeAreaInsets.top ?? 47
-        return topSafeArea + 44
-    }
-}
-
-/// A real UIKit `UIVisualEffectView` bridged into SwiftUI. Unlike SwiftUI's `Material`/`glassEffect`,
-/// it blurs sibling layers below it — including the grid's `CAMetalLayer` — so it reads as a genuine
-/// frosted bar over the photos instead of a flat dark scrim.
-private struct BarBlur: UIViewRepresentable {
-    let style: UIBlurEffect.Style
-    /// 0…1 — dials the frost from barely-there to full material, so we can keep it "just lightly frosted".
-    var intensity: CGFloat = 1
-
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        let view = UIVisualEffectView(effect: UIBlurEffect(style: style))
-        view.alpha = intensity
-        return view
-    }
-
-    func updateUIView(_ view: UIVisualEffectView, context: Context) {
-        view.effect = UIBlurEffect(style: style)
-        view.alpha = intensity
-    }
+/// Height of the frosted top bar on iOS: the status-bar / Dynamic Island inset (from the key window) plus
+/// the standard inline navigation-bar height, so the shared `TopFrostBar` reliably covers the title area on
+/// every device without depending on a SwiftUI geometry read that a full-bleed, safe-area-ignoring parent
+/// would report as zero. (macOS passes its own toolbar inset; only the height source is per-platform.)
+func mobileTopBarFrostHeight() -> CGFloat {
+    let topSafeArea = UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .flatMap(\.windows)
+        .first(where: \.isKeyWindow)?
+        .safeAreaInsets.top ?? 47
+    return topSafeArea + 44
 }
