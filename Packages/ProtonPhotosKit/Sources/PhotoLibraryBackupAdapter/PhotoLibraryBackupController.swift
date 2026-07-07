@@ -76,6 +76,11 @@ public final class PhotoLibraryBackupController {
     private var syncTask: Task<Void, Never>?
     private var changeDebounceTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
+    /// Periodically refreshes the UI status from the durable queue summary while a pass runs. The
+    /// runner's emitted in-memory progress mirror only counts ITS OWN transitions; since scan and
+    /// reconcile now write the queue concurrently, that mirror can drift/freeze (the "stuck at 829"
+    /// counter). The queue summary is the single source of truth, so we poll it.
+    private var statusRefreshTask: Task<Void, Never>?
     private var activeRunID: String?
     private var pendingSyncAfterStop = false
     private var isScanning = false
@@ -264,6 +269,7 @@ public final class PhotoLibraryBackupController {
         lastMessage = nil
         status = BackupStatus(progress: currentQueueProgress(), isScanning: false)
         startHeartbeat(runID: runID)
+        startStatusRefresh()
 
         // The task inherits the main actor, but all heavy phases (`scan`, `runUntilDrained`) are
         // awaits onto other actors/off-actor structs - the main thread stays free for UI.
@@ -373,6 +379,7 @@ public final class PhotoLibraryBackupController {
         // kept calling runUntilDrained would otherwise reset the runner's stop flag on its next call
         // and never actually stop). runner.stop() additionally aborts any in-flight upload promptly.
         syncTask?.cancel()
+        statusRefreshTask?.cancel(); statusRefreshTask = nil
         guard let runner else { return }
         Task { await runner.stop() }
     }
@@ -390,6 +397,18 @@ public final class PhotoLibraryBackupController {
                 // naturally and the new owner drives the queue.
                 if !lockStore.heartbeat(runID: runID, phase: nil) { return }
                 _ = self
+            }
+        }
+    }
+
+    /// Keeps the visible counter honest from the DURABLE queue while a pass runs (see statusRefreshTask).
+    private func startStatusRefresh() {
+        statusRefreshTask?.cancel()
+        statusRefreshTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self, self.isSyncing, !Task.isCancelled else { return }
+                self.status = BackupStatus(progress: self.currentQueueProgress(), isScanning: self.isScanning)
             }
         }
     }
@@ -440,6 +459,8 @@ public final class PhotoLibraryBackupController {
     private func finishSync(runID: String) {
         heartbeatTask?.cancel()
         heartbeatTask = nil
+        statusRefreshTask?.cancel()
+        statusRefreshTask = nil
         lockStore?.release(runID: runID)
         if activeRunID == runID { activeRunID = nil }
         isSyncing = false
