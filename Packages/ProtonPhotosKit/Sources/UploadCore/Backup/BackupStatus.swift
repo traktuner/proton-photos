@@ -62,7 +62,7 @@ public struct BackupStatus: Sendable, Equatable {
 
     // MARK: - Derivation from the folder/asset backup queue
 
-    public init(progress: BackupSyncProgress, isScanning: Bool) {
+    public init(progress: BackupSyncProgress, isScanning: Bool, isUserPaused: Bool = false) {
         self.init()
         checked = progress.uploaded + progress.alreadyBackedUp + progress.skippedRemoteDeletions
             + progress.failed + progress.sourceMissing + progress.blocked + progress.uploadQueued
@@ -74,6 +74,14 @@ public struct BackupStatus: Sendable, Equatable {
         sourceMissing = progress.sourceMissing
         waitingRetry = progress.blocked
         currentItemName = progress.currentItemName
+
+        // An explicit user pause wins over everything: show "Pausiert", not "checking"/"waiting".
+        if isUserPaused {
+            phase = .paused
+            totalConsidered = progress.total
+            fractionCompleted = progress.total > 0 ? progress.fraction : nil
+            return
+        }
 
         if isScanning {
             phase = .scanning

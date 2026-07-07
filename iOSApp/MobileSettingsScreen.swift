@@ -385,8 +385,11 @@ private struct MobilePhotoBackupRows: View {
             // Scope the crossfade to the text column so it never fights the icon's continuous spin.
             .animation(.easeInOut(duration: 0.2), value: display)
 
-            if controller.isSyncing {
-                Button(String(localized: "settings.photos_backup_pause")) { controller.stopSync() }
+            if controller.isUserPaused {
+                Button(String(localized: "settings.photos_backup_resume", defaultValue: "Fortsetzen")) { controller.resumeBackup() }
+                    .font(.footnote)
+            } else if controller.isSyncing {
+                Button(String(localized: "settings.photos_backup_pause")) { controller.pauseBackup() }
                     .font(.footnote)
             } else {
                 Button(String(localized: "settings.photos_backup_sync_now")) { controller.retryFailedAndSync() }

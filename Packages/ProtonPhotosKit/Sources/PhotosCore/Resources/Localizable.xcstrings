@@ -95,8 +95,8 @@
     "backup.phase_waiting": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Waiting to continue" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Wartet auf Fortsetzung" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Resuming automatically" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Wird automatisch fortgesetzt" } }
       }
     },
     "backup.error_low_space": {

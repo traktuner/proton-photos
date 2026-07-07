@@ -37,6 +37,7 @@ public final class PhotoLibraryBackupController {
     }
 
     private static let enabledDefaultsKey = "photoBackup.enabled.v1"
+    private static let userPausedDefaultsKey = "photoBackup.userPaused.v1"
     static let queueDatabaseFileName = "photo-backup-sync-queue-v1.sqlite"
     static let stateDatabaseFileName = "photo-backup-state-v1.sqlite"
     static let catalogDatabaseFileName = "photo-library-catalog-v1.sqlite"
@@ -49,6 +50,9 @@ public final class PhotoLibraryBackupController {
 
     public private(set) var accessState: PhotoBackupAccessState
     public private(set) var isEnabled: Bool
+    /// Durable user "pause": no passes run and no auto-resume fires until the user resumes. Distinct
+    /// from a policy pause (thermal/battery, transient) and from `isEnabled` (the whole feature off).
+    public private(set) var isUserPaused: Bool
     public private(set) var status = BackupStatus()
     public private(set) var isSyncing = false
     public private(set) var lastMessage: String?
@@ -81,6 +85,10 @@ public final class PhotoLibraryBackupController {
     /// reconcile now write the queue concurrently, that mirror can drift/freeze (the "stuck at 829"
     /// counter). The queue summary is the single source of truth, so we poll it.
     private var statusRefreshTask: Task<Void, Never>?
+    /// Re-triggers a pass a short while after one ends with work still outstanding (e.g. items in
+    /// network backoff), so the backup CONTINUES on its own instead of sitting in "waiting" forever.
+    private var autoResumeTask: Task<Void, Never>?
+    private static let autoResumeDelay: TimeInterval = 45
     private var activeRunID: String?
     private var pendingSyncAfterStop = false
     private var isScanning = false
@@ -95,6 +103,7 @@ public final class PhotoLibraryBackupController {
         defaults = configuration.defaults
         accessState = PhotoLibraryAuthorization.currentState()
         isEnabled = configuration.defaults.bool(forKey: Self.enabledDefaultsKey)
+        isUserPaused = configuration.defaults.bool(forKey: Self.userPausedDefaultsKey)
         tempStore = BackupTempFileStore(directory: directory.appendingPathComponent("photo-backup-temp", isDirectory: true))
         monitor = PhotoLibraryChangeMonitor(tokenURL: directory.appendingPathComponent("photo-backup-change-token.v1"))
 
@@ -210,6 +219,26 @@ public final class PhotoLibraryBackupController {
         startSync(owner: .foreground)
     }
 
+    /// Durable user pause: stop the current pass AND suppress every automatic (re)start until the user
+    /// resumes. Persisted so it survives relaunch. This is what the Pause button does — unlike a bare
+    /// `stopSync()`, a change notification or the auto-resume can't quietly restart behind the user.
+    public func pauseBackup() {
+        guard !isUserPaused else { return }
+        isUserPaused = true
+        defaults.set(true, forKey: Self.userPausedDefaultsKey)
+        pendingSyncAfterStop = false
+        stopSync()
+        if !isSyncing { refreshFromQueue() }   // reflect "Pausiert" immediately
+    }
+
+    /// Clears the durable pause and immediately resumes (retrying anything parked as `.failed`).
+    public func resumeBackup() {
+        guard isUserPaused else { return }
+        isUserPaused = false
+        defaults.set(false, forKey: Self.userPausedDefaultsKey)
+        retryFailedAndSync()
+    }
+
     /// The manual "back up now" entry point. Unlike `syncNow()` (also used by automatic
     /// change-driven passes), this first requeues everything parked as `.failed`, so a user who
     /// sees "needs attention" and taps back-up-now actually retries those items instead of
@@ -234,7 +263,7 @@ public final class PhotoLibraryBackupController {
     /// draining: a crashed/expired owner's stale lock is reaped here, and a live lock held by a
     /// different run makes this call stand down instead of starting a second drainer.
     private func startSync(owner: BackupExecutionOwner) {
-        guard isEnabled, accessState.allowsBackup, !isSyncing, let engine, let runner else { return }
+        guard isEnabled, !isUserPaused, accessState.allowsBackup, !isSyncing, let engine, let runner else { return }
         guard let lockStore else {
             lastMessage = L10n.string("backup.error_execution_lock_unavailable")
             refreshFromQueue()
@@ -264,6 +293,7 @@ public final class PhotoLibraryBackupController {
         }
         activeRunID = runID
 
+        autoResumeTask?.cancel(); autoResumeTask = nil   // a pass is starting; the timer's job is done
         isSyncing = true
         isScanning = false
         lastMessage = nil
@@ -380,6 +410,7 @@ public final class PhotoLibraryBackupController {
         // and never actually stop). runner.stop() additionally aborts any in-flight upload promptly.
         syncTask?.cancel()
         statusRefreshTask?.cancel(); statusRefreshTask = nil
+        autoResumeTask?.cancel(); autoResumeTask = nil
         guard let runner else { return }
         Task { await runner.stop() }
     }
@@ -408,7 +439,7 @@ public final class PhotoLibraryBackupController {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard let self, self.isSyncing, !Task.isCancelled else { return }
-                self.status = BackupStatus(progress: self.currentQueueProgress(), isScanning: self.isScanning)
+                self.status = BackupStatus(progress: self.currentQueueProgress(), isScanning: self.isScanning, isUserPaused: self.isUserPaused)
             }
         }
     }
@@ -437,7 +468,7 @@ public final class PhotoLibraryBackupController {
     // MARK: - Status mirror (throttled, phase changes immediate)
 
     private func applyRunnerProgress(_ snapshot: BackupSyncProgress) {
-        let candidate = BackupStatus(progress: snapshot, isScanning: isScanning)
+        let candidate = BackupStatus(progress: snapshot, isScanning: isScanning, isUserPaused: isUserPaused)
         guard candidate != status else { return }
         let now = Date()
         if candidate.phase == status.phase, snapshot.isRunning, now.timeIntervalSince(lastStatusUpdate) < 0.15 {
@@ -449,7 +480,7 @@ public final class PhotoLibraryBackupController {
 
     private func beginScanPhase() {
         isScanning = true
-        status = BackupStatus(progress: currentQueueProgress(), isScanning: true)
+        status = BackupStatus(progress: currentQueueProgress(), isScanning: true, isUserPaused: isUserPaused)
     }
 
     private func finishScanPhase() {
@@ -468,7 +499,23 @@ public final class PhotoLibraryBackupController {
         let shouldRestart = pendingSyncAfterStop && isEnabled && accessState.allowsBackup
         pendingSyncAfterStop = false
         refreshFromQueue()
-        if shouldRestart { syncNow() }
+        if shouldRestart { syncNow() } else { scheduleAutoResumeIfOutstanding() }
+    }
+
+    /// After a pass ends, if backup is on, not user-paused, and work is still outstanding (typically
+    /// items parked in network backoff), schedule ONE delayed re-trigger so the backup continues on
+    /// its own. Idempotent (replaces any pending timer); cancelled the moment a pass starts or the
+    /// user pauses. This is why the queue never just sits at "Wartet auf Fortsetzung".
+    private func scheduleAutoResumeIfOutstanding() {
+        autoResumeTask?.cancel(); autoResumeTask = nil
+        guard isEnabled, !isUserPaused, accessState.allowsBackup, !isSyncing else { return }
+        let p = currentQueueProgress()
+        guard p.waiting + p.checking + p.uploading + p.blocked > 0 else { return }   // nothing left → don't loop
+        autoResumeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.autoResumeDelay * 1_000_000_000))
+            guard let self, !Task.isCancelled, self.isEnabled, !self.isUserPaused, !self.isSyncing else { return }
+            self.syncNow()
+        }
     }
 
     private func reportSyncMessage(_ message: String) {
@@ -476,12 +523,14 @@ public final class PhotoLibraryBackupController {
     }
 
     private func refreshFromQueue() {
-        status = BackupStatus(progress: currentQueueProgress(), isScanning: false)
+        status = BackupStatus(progress: currentQueueProgress(), isScanning: false, isUserPaused: isUserPaused)
     }
 
     private func currentQueueProgress() -> BackupSyncProgress {
         guard let queueStore else { return BackupSyncProgress() }
-        return BackupSyncProgress(summary: queueStore.summary())
+        // isRunning reflects whether a pass is actually active, so the periodic status refresh never
+        // misreads an active pass (between micro-batches) as ".waiting" ("Wartet auf Fortsetzung").
+        return BackupSyncProgress(summary: queueStore.summary(), isRunning: isSyncing)
     }
 
     /// Non-secret debugging hint recorded on the lock (platform + pid); never load-bearing.
