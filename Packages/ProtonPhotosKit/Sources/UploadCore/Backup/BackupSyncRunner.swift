@@ -152,6 +152,11 @@ public actor BackupSyncRunner {
         progress = BackupSyncProgress(summary: queue.summary(), isRunning: true)
         emitProgress()
 
+        // Warm the dedup pipeline's remote cache for the first batch so per-item resolves are cache
+        // hits (see primeRunnableLookahead). Re-warmed periodically as the queue drains.
+        await primeRunnableLookahead()
+        var wavesSincePrime = 0
+
         while !stopRequested {
             await requeueDueBlockedRows()
 
@@ -169,6 +174,14 @@ public actor BackupSyncRunner {
                 emitProgress()
             }
 
+            // Re-warm the dedup cache once the current lookahead is largely consumed. prime()
+            // invalidates the previous batch first, so we do this on a cadence (not every wave) to
+            // avoid dropping still-useful cached state mid-drain.
+            if wavesSincePrime >= Self.wavesPerPrime {
+                await primeRunnableLookahead()
+                wavesSincePrime = 0
+            }
+
             let wave = nextEligibleWave(limit: limit)
             if wave.isEmpty {
                 guard let wait = shortestPendingWait() else { break }
@@ -181,6 +194,7 @@ public actor BackupSyncRunner {
                     group.addTask { await self.process(entry) }
                 }
             }
+            wavesSincePrime += 1
 
             // A whole wave that could not reserve disk space means the volume is full, not busy.
             // Stop draining and leave the rows runnable: the next pass retries once space frees,
@@ -243,6 +257,39 @@ public actor BackupSyncRunner {
             // (and a cached "free" view could double-upload) - re-checks must see server truth.
             await identityResolver.invalidateCachedRemoteState()
         }
+    }
+
+    // MARK: - Dedup batch prewarm
+
+    /// How many runnable rows to prewarm per batch, and how many waves to run before re-warming.
+    /// `wavesPerPrime` is kept below `primeBatch / typical-wave` so the next batch is warmed before
+    /// the current one is exhausted.
+    private static let primeBatch = 400
+    private static let wavesPerPrime = 50
+    private static let primePlaceholderURL = URL(fileURLWithPath: "/dev/null")
+
+    /// Batch-prewarm the dedup pipeline's remote duplicate cache for the rows about to be processed,
+    /// so their per-item `resolve` is a cache hit instead of an individual server round-trip — the
+    /// dominant cost when reconciling a large already-backed-up library. Name-hash + source only (no
+    /// byte export), so it is cheap; worst case it warms nothing and the per-item path is unchanged.
+    private func primeRunnableLookahead() async {
+        let cutoff = now()
+        var peek = queue.entries(in: .discovered, updatedBefore: cutoff, limit: Self.primeBatch)
+        if peek.count < Self.primeBatch {
+            peek += queue.entries(in: .queuedForUpload, updatedBefore: cutoff, limit: Self.primeBatch - peek.count)
+        }
+        guard !peek.isEmpty else { return }
+        let descriptors = peek.map { entry in
+            UploadResourceDescriptor(
+                source: entry.source,
+                fileURL: Self.primePlaceholderURL,
+                filename: entry.originalFilename,
+                fileSize: entry.byteCount ?? 0,
+                modificationDate: entry.updatedAt,
+                mainResource: nil
+            )
+        }
+        await identityResolver.prime(descriptors)
     }
 
     // MARK: - Per-entry processing

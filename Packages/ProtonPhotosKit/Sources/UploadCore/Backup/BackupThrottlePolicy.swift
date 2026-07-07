@@ -43,13 +43,15 @@ public struct BackupThrottleInputs: Sendable, Equatable {
 /// One shared concurrency table for backup sync: inputs → how many items may be in flight.
 /// `0` means "pause until conditions improve" - the runner idles without failing anything.
 public struct BackupThrottlePolicy: Sendable, Equatable {
-    /// Concurrent items under unconstrained conditions. Conservative by design: backup runs
-    /// beside a live UI on old hardware; two in-flight items keep the pipe busy without
-    /// competing with the grid for I/O.
+    /// Concurrent items under unconstrained conditions. Backup is network/latency-bound (each item
+    /// makes server dedup round-trips), not CPU-bound, so several in flight raises throughput roughly
+    /// linearly; the workload governor still clamps this down under thermal pressure, Low Power Mode,
+    /// or a constrained network. Shared by every backup flow (photo library, folders, albums) on all
+    /// platforms so behaviour stays identical.
     public var baseConcurrency: Int
     public var governor: LibraryWorkloadGovernorPolicy
 
-    public init(baseConcurrency: Int = 2, governor: LibraryWorkloadGovernorPolicy = LibraryWorkloadGovernorPolicy()) {
+    public init(baseConcurrency: Int = 6, governor: LibraryWorkloadGovernorPolicy = LibraryWorkloadGovernorPolicy()) {
         self.baseConcurrency = max(1, baseConcurrency)
         self.governor = governor
     }
