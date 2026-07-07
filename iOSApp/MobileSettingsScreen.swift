@@ -307,6 +307,7 @@ struct MobileSettingsScreen: View {
 private struct MobilePhotoBackupRows: View {
     @State var controller: PhotoLibraryBackupController
     @State private var rowModel = BackupStatusRowModel()
+    @State private var showFailedList = false
 
     var body: some View {
         if !controller.isAvailable {
@@ -370,11 +371,18 @@ private struct MobilePhotoBackupRows: View {
                 }
 
                 if let attention = display.localizedAttention {
-                    Text(attention)
-                        .font(.caption)
+                    // Tappable: opens a plain-language list of exactly which files failed and why.
+                    Button { showFailedList = true } label: {
+                        HStack(spacing: 4) {
+                            Text(attention)
+                                .font(.caption)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Image(systemName: "chevron.right").font(.caption2)
+                        }
                         .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
                 }
 
                 progressSlot(display)
@@ -397,6 +405,9 @@ private struct MobilePhotoBackupRows: View {
         .onAppear { rowModel.ingest(controller.status) }
         .onChange(of: controller.status) { _, status in rowModel.ingest(status) }
         .onDisappear { rowModel.cancel() }
+        .sheet(isPresented: $showFailedList) {
+            MobileFailedBackupSheet(controller: controller)
+        }
 
         if controller.accessState == .limited {
             VStack(alignment: .leading, spacing: 6) {
@@ -459,6 +470,69 @@ private struct MobilePhotoBackupRows: View {
         var presenter = root
         while let presented = presenter.presentedViewController { presenter = presented }
         PHPhotoLibrary.shared().presentLimitedLibraryPicker(from: presenter)
+    }
+}
+
+/// Tapping "N nicht gesichert" opens this: a plain-language list of exactly which files failed and
+/// why. Deleted-from-device files are marked permanent (retrying can't help and no retry is offered
+/// for them); everything else can be retried here and is also auto-retried on the next app launch.
+private struct MobileFailedBackupSheet: View {
+    let controller: PhotoLibraryBackupController
+    @Environment(\.dismiss) private var dismiss
+    @State private var items: [BackupFailedItem] = []
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if items.isEmpty {
+                    ContentUnavailableView {
+                        Label(String(localized: "backup.failed_sheet_empty"), systemImage: "checkmark.shield")
+                    }
+                } else {
+                    List {
+                        Section {
+                            ForEach(items) { item in
+                                HStack(alignment: .top, spacing: 12) {
+                                    Image(systemName: item.isPermanent ? "trash.slash" : "arrow.clockwise.circle")
+                                        .foregroundStyle(item.isPermanent ? ProtonColor.textWeak : .orange)
+                                        .font(.body)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.filename)
+                                            .font(.subheadline)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                        Text(item.reason)
+                                            .font(.caption)
+                                            .foregroundStyle(ProtonColor.textWeak)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        } footer: {
+                            Text(String(localized: "backup.failed_sheet_footer"))
+                        }
+                    }
+                }
+            }
+            .navigationTitle(String(localized: "backup.failed_sheet_title"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(String(localized: "backup.failed_sheet_done")) { dismiss() }
+                }
+                if controller.hasRetryableFailures {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(String(localized: "backup.failed_sheet_retry")) {
+                            controller.retryFailedAndSync()
+                            dismiss()
+                        }
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .onAppear { items = controller.failedItems() }
     }
 }
 

@@ -227,6 +227,54 @@
         "de": { "stringUnit": { "state": "translated", "value": "%lld nicht gesichert" } }
       }
     },
+    "backup.fail_reason_generic": {
+      "extractionState": "manual",
+      "comment": "Fallback reason for a failed backup item when no specific error message was stored.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Backup failed" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Sicherung fehlgeschlagen" } }
+      }
+    },
+    "backup.failed_sheet_title": {
+      "extractionState": "manual",
+      "comment": "Title of the sheet listing items that could not be backed up.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not backed up" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Nicht gesichert" } }
+      }
+    },
+    "backup.failed_sheet_footer": {
+      "extractionState": "manual",
+      "comment": "Explainer under the failed-items list: deleted files can't be saved; the rest retry automatically.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Files deleted from this device can’t be backed up. The others are retried automatically each time you open the app — or tap Try again." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Vom Gerät gelöschte Dateien können nicht gesichert werden. Die übrigen werden bei jedem App-Start automatisch erneut versucht – oder tippe auf „Erneut versuchen“." } }
+      }
+    },
+    "backup.failed_sheet_retry": {
+      "extractionState": "manual",
+      "comment": "Button in the failed-items sheet that retries all retryable items now.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Try again" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Erneut versuchen" } }
+      }
+    },
+    "backup.failed_sheet_done": {
+      "extractionState": "manual",
+      "comment": "Dismiss button in the failed-items sheet.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Done" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Fertig" } }
+      }
+    },
+    "backup.failed_sheet_empty": {
+      "extractionState": "manual",
+      "comment": "Shown in the failed-items sheet when nothing is failing anymore.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Nothing needs attention." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Alles in Ordnung." } }
+      }
+    },
     "albumsync.phase_idle": {
       "extractionState": "manual",
       "comment": "Album sync status: nothing running yet for this album.",

@@ -264,6 +264,31 @@ public final class PhotoLibraryBackupController {
         syncNow()
     }
 
+    /// The items backup could not save, for the tappable "N nicht gesichert" detail list. Source-
+    /// missing items are permanent (the local file is gone, retrying cannot help); everything else is
+    /// retryable and is ALSO auto-retried on the next launch. `reason` is the already-localized stored
+    /// message, never a raw code. Permanent items are listed last.
+    public func failedItems(limit: Int = 200) -> [BackupFailedItem] {
+        guard let queueStore else { return [] }
+        let retryable = queueStore.entries(in: .failed, updatedBefore: .distantFuture, limit: limit)
+        let permanent = queueStore.entries(in: .sourceMissing, updatedBefore: .distantFuture, limit: limit)
+        return (retryable + permanent).map { entry in
+            BackupFailedItem(
+                id: "\(entry.source.kind.rawValue)/\(entry.source.identifier)/\(entry.source.resource.rawValue)#\(entry.revision.rawValue)",
+                filename: entry.originalFilename,
+                reason: (entry.lastError?.isEmpty == false) ? entry.lastError! : L10n.string("backup.fail_reason_generic"),
+                isPermanent: entry.state == .sourceMissing
+            )
+        }
+    }
+
+    /// True while at least one failed item can still be retried (i.e. it is not a permanently-gone
+    /// local file), so the detail sheet can offer "try again".
+    public var hasRetryableFailures: Bool {
+        guard let queueStore else { return false }
+        return !queueStore.entries(in: .failed, updatedBefore: .distantFuture, limit: 1).isEmpty
+    }
+
     /// One full catch-up pass for OS background windows (BGProcessingTask on iOS, background
     /// activity on macOS). Returns when the pass drains or is stopped by the expiration handler via
     /// `stopSync()` - every state transition is already checkpointed, so expiration simply resumes
