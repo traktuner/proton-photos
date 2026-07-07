@@ -17,6 +17,11 @@ public final class PhotoLibraryChangeMonitor: NSObject, PHPhotoLibraryChangeObse
         public var requiresFullRescan: Bool
     }
 
+    public struct PreparedChangeSet: @unchecked Sendable {
+        public let changes: ChangeSet
+        fileprivate let commitToken: PHPersistentChangeToken
+    }
+
     private let tokenURL: URL
     private let lock = NSLock()
     private var onLibraryChange: (@Sendable () -> Void)?
@@ -46,15 +51,17 @@ public final class PhotoLibraryChangeMonitor: NSObject, PHPhotoLibraryChangeObse
         lock.withLock { onLibraryChange }?()
     }
 
-    /// Changes since the stored token. Also advances the stored token to "now" - callers must
-    /// therefore always ACT on the returned set (scan the identifiers or run the full rescan).
-    public func consumeChanges() -> ChangeSet {
+    /// Changes since the stored token. This deliberately does NOT advance the stored token. Callers
+    /// must commit the returned value only after their durable scan/enqueue work succeeds.
+    public func prepareChanges() -> PreparedChangeSet {
         let library = PHPhotoLibrary.shared()
         let currentToken = library.currentChangeToken
-        defer { store(token: currentToken) }
 
         guard let previous = loadToken() else {
-            return ChangeSet(changedIdentifiers: [], deletedIdentifiers: [], requiresFullRescan: true)
+            return PreparedChangeSet(
+                changes: ChangeSet(changedIdentifiers: [], deletedIdentifiers: [], requiresFullRescan: true),
+                commitToken: currentToken
+            )
         }
         do {
             var changed: Set<String> = []
@@ -66,15 +73,26 @@ public final class PhotoLibraryChangeMonitor: NSObject, PHPhotoLibraryChangeObse
                 deleted.formUnion(details.deletedLocalIdentifiers)
             }
             changed.subtract(deleted)
-            return ChangeSet(
-                changedIdentifiers: Array(changed),
-                deletedIdentifiers: Array(deleted),
-                requiresFullRescan: false
+            return PreparedChangeSet(
+                changes: ChangeSet(
+                    changedIdentifiers: Array(changed),
+                    deletedIdentifiers: Array(deleted),
+                    requiresFullRescan: false
+                ),
+                commitToken: currentToken
             )
         } catch {
             // Token expired or history unavailable - full cheap rescan is the documented fallback.
-            return ChangeSet(changedIdentifiers: [], deletedIdentifiers: [], requiresFullRescan: true)
+            return PreparedChangeSet(
+                changes: ChangeSet(changedIdentifiers: [], deletedIdentifiers: [], requiresFullRescan: true),
+                commitToken: currentToken
+            )
         }
+    }
+
+    /// Advances the persistent token after the caller has durably handled the prepared changes.
+    public func commit(_ prepared: PreparedChangeSet) {
+        store(token: prepared.commitToken)
     }
 
     private func loadToken() -> PHPersistentChangeToken? {

@@ -190,6 +190,7 @@ final class OfflineLibraryManager {
         let index = locationIndex
         let store = locationStore
         let feed = self.feed
+        let governor = LibraryWorkloadGovernorPolicy()
         Task {
             // Give the thumbnail crawl a head start, then crawl GPS whenever the grid isn't actively
             // demanding on-screen thumbnails - so the Map crawl shares the rate-limit budget as P2 and
@@ -204,7 +205,13 @@ final class OfflineLibraryManager {
                 // P2: back off while the grid has LIVE visible demand (scrolling / queued visible-priority
                 // thumbnails). Deliberately NOT `hasPendingThumbnailWork()` - that includes the whole-library
                 // sequential fill and parked the Map behind a 20k-thumbnail crawl for hours.
-                shouldYield: { await feed?.hasVisibleThumbnailPressure() ?? false },
+                shouldYield: {
+                    let visibleDemand = await feed?.hasVisibleThumbnailPressure() ?? false
+                    return governor.budget(
+                        for: .backgroundLocationCrawl,
+                        signals: LibraryWorkloadSignals(hasVisibleMediaDemand: visibleDemand)
+                    ).shouldYield
+                },
                 log: { DebugLog.log($0) }
             )
         }

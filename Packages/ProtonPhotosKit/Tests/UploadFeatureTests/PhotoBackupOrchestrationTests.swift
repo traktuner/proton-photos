@@ -94,9 +94,9 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         // Gate: recovery precedes the drain; a live foreign lock makes us stand down.
         _ = lockStore.recoverStaleLocks(olderThan: clock.now.addingTimeInterval(-Self.lease))
         switch lockStore.acquire(owner: owner, runID: runID) {
-        case .busy:
+        case .busy, .unavailable:
             return false
-        case .acquired, .unavailable:
+        case .acquired:
             break
         }
         // Scan phase through the persistent-catalog driver.
@@ -162,16 +162,16 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         XCTAssertNil(lockStore.currentLock())
     }
 
-    func testTargetedChangeReChecksOnlyChangedAssetWithoutDuplicateUpload() async throws {
+    func testTargetedMetadataChangeUsesEditFingerprintWithoutDuplicateUpload() async throws {
         enumerator.infos = [photoInfo("A"), photoInfo("B")]
         await runPass(owner: .foreground)
         XCTAssertEqual(resolver.resolveCount(for: "A"), 1)
         XCTAssertEqual(resolver.resolveCount(for: "B"), 1)
         XCTAssertEqual(uploader.requests.count, 2)
 
-        // B's metadata changed (new modification date → new revision) but its bytes are identical.
-        // The targeted pass must re-enqueue ONLY B, and dedupe must recognise the identical content
-        // and NOT upload a duplicate.
+        // B's metadata changed (new modification date -> new revision) but its PhotoKit resource
+        // structure did not. The shared preflight can prove that locally via the edit fingerprint,
+        // so the targeted pass records the new revision without exporting, hashing, or uploading.
         let editedModDate = Date(timeIntervalSince1970: 1_700_090_000)
         enumerator.infos = [photoInfo("A"), photoInfo("B", modified: editedModDate)]
         resolver.setModified(editedModDate, for: "B")
@@ -180,8 +180,8 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
 
         XCTAssertTrue(ran)
         XCTAssertEqual(resolver.resolveCount(for: "A"), 1, "an unchanged asset is not re-resolved on a targeted pass")
-        XCTAssertEqual(resolver.resolveCount(for: "B"), 2, "only the changed asset is re-enqueued and re-checked")
-        XCTAssertEqual(uploader.requests.count, 2, "a metadata-only change re-checks but never re-uploads identical bytes")
+        XCTAssertEqual(resolver.resolveCount(for: "B"), 1, "metadata-only PhotoKit drift must stay cheap for unedited assets")
+        XCTAssertEqual(uploader.requests.count, 2, "a metadata-only change never re-uploads identical bytes")
     }
 
     func testRemovedAssetIsMarkedRemovedAndNeverUploaded() async throws {
@@ -197,6 +197,21 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         XCTAssertEqual(catalog.entry(for: "B")?.isRemoved, true, "the vanished asset is marked removed")
         XCTAssertEqual(resolver.resolveCount(for: "B"), 1, "a removed asset is never re-resolved")
         XCTAssertEqual(uploader.requests.count, 2, "removed assets are never uploaded; deletions are not mirrored")
+    }
+
+    func testTargetedDeletedIdentifierMarksCatalogRemovedWithoutFullScan() async throws {
+        enumerator.infos = [photoInfo("A"), photoInfo("B"), photoInfo("C")]
+        await runPass(owner: .foreground)
+        XCTAssertEqual(uploader.requests.count, 3)
+
+        enumerator.infos = [photoInfo("A"), photoInfo("C")]
+        let ran = await runPass(owner: .foreground, fullRescan: false, identifiers: ["B"])
+
+        XCTAssertTrue(ran)
+        XCTAssertEqual(catalog.entry(for: "B")?.isRemoved, true, "a PhotoKit deleted identifier is marked removed in the catalog")
+        XCTAssertEqual(catalog.entry(for: "A")?.isRemoved, false)
+        XCTAssertEqual(catalog.entry(for: "C")?.isRemoved, false)
+        XCTAssertEqual(uploader.requests.count, 3, "targeted deletion does not upload or re-resolve anything")
     }
 
     func testBackgroundStandsDownWhileForegroundOwnsLiveLock() async throws {

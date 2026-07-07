@@ -37,7 +37,7 @@ public enum UploadBackupSyncQueueState: String, Sendable, Codable, CaseIterable 
 
     public var isRunnable: Bool {
         switch self {
-        case .discovered, .checking, .hashing, .duplicateChecking, .queuedForUpload:
+        case .discovered, .queuedForUpload:
             return true
         default:
             return false
@@ -150,6 +150,11 @@ public protocol UploadBackupSyncQueueStore: Sendable {
     func upsert(_ entry: UploadBackupSyncQueueEntry)
     func entry(for source: UploadSourceIdentity, revision: UploadBackupRevision) -> UploadBackupSyncQueueEntry?
     func nextRunnable(limit: Int) -> [UploadBackupSyncQueueEntry]
+    /// Atomically reserves runnable rows for one runner. Returned entries keep their pre-claim
+    /// state so the runner can mirror progress accurately; the store has already moved them to an
+    /// active state, so another runner cannot take the same work. Crash recovery demotes these
+    /// active rows back to runnable via `requeueStaleActive`.
+    func claimRunnable(limit: Int, claimedAt: Date) -> [UploadBackupSyncQueueEntry]
     /// Rows currently in `state` whose `updatedAt` is older than `updatedBefore`, oldest first.
     /// The runner uses this to find parked `blockedByDraft` rows whose re-check backoff elapsed.
     func entries(in state: UploadBackupSyncQueueState, updatedBefore: Date, limit: Int) -> [UploadBackupSyncQueueEntry]

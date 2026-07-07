@@ -190,6 +190,11 @@ final class SpyQueueStore: UploadBackupSyncQueueStore, @unchecked Sendable {
 
     func nextRunnable(limit: Int) -> [UploadBackupSyncQueueEntry] { inner.nextRunnable(limit: limit) }
 
+    func claimRunnable(limit: Int, claimedAt: Date) -> [UploadBackupSyncQueueEntry] {
+        log.append("queue.claimRunnable")
+        return inner.claimRunnable(limit: limit, claimedAt: claimedAt)
+    }
+
     func entries(in state: UploadBackupSyncQueueState, updatedBefore: Date, limit: Int) -> [UploadBackupSyncQueueEntry] {
         inner.entries(in: state, updatedBefore: updatedBefore, limit: limit)
     }

@@ -333,6 +333,38 @@ final class ProjectHygieneTests: XCTestCase {
         XCTAssertTrue(mobileAlbums.contains("AlbumsReloadKey(backendReady: model.backend != nil, revision: model.albumCatalogRevision)"))
     }
 
+    func testPhotoBackupIdempotencyGuardsStayLoadBearing() throws {
+        let monitor = try String(
+            contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoLibraryBackupAdapter/PhotoLibraryChangeMonitor.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(monitor.contains("public func prepareChanges() -> PreparedChangeSet"))
+        XCTAssertTrue(monitor.contains("public func commit(_ prepared: PreparedChangeSet)"))
+        XCTAssertFalse(monitor.contains("func consumeChanges()"),
+                       "PhotoKit change tokens must never be consumed before scan/enqueue durability is proven")
+
+        let controller = try String(
+            contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoLibraryBackupAdapter/PhotoLibraryBackupController.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(controller.contains("let preparedChanges = monitor.prepareChanges()"))
+        XCTAssertTrue(controller.contains("monitor.commit(preparedChanges)"))
+        XCTAssertTrue(controller.contains("L10n.string(\"backup.error_execution_lock_unavailable\")"))
+        XCTAssertFalse(controller.contains("degrade to unlocked"),
+                       "execution-lock failure must be fail-closed, not best-effort")
+        XCTAssertTrue(controller.contains("changes.changedIdentifiers + changes.deletedIdentifiers"),
+                      "targeted PhotoKit changes must include deletes so the catalog cannot stay stale")
+
+        let runner = try String(
+            contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/UploadCore/Backup/BackupSyncRunner.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(runner.contains("queue.claimRunnable(limit: claimLimit"),
+                      "drainers must atomically reserve rows in Core before processing")
+        XCTAssertFalse(runner.contains("queue.nextRunnable(limit: configuration.batchSize)"),
+                       "the runner must not drain from a read-only runnable query")
+    }
+
     /// GPL-contamination guard: the Proton Drive iOS app (GPL-3.0) may be consulted as a
     /// BEHAVIORAL reference only. Its distinctive type/module names must never appear in our
     /// production sources - their presence would indicate copied code rather than clean-room work.

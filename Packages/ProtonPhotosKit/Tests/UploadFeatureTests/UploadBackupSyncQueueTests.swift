@@ -107,7 +107,7 @@ final class UploadBackupSyncQueueTests: XCTestCase {
         store.upsert(old)
 
         XCTAssertEqual(store.entry(for: old.source, revision: old.revision), old)
-        XCTAssertEqual(store.nextRunnable(limit: 2).map(\.source.identifier), ["old", "new"])
+        XCTAssertEqual(store.nextRunnable(limit: 2).map(\.source.identifier), ["old"])
         XCTAssertEqual(store.summary().total, 3)
         XCTAssertEqual(store.summary().waiting, 1)
         XCTAssertEqual(store.summary().active, 1)
@@ -170,6 +170,46 @@ final class UploadBackupSyncQueueTests: XCTestCase {
         XCTAssertTrue(store.entries(in: .sourceMissing, updatedBefore: .distantFuture, limit: 10).isEmpty)
     }
 
+    func testSQLiteQueueAtomicallyClaimsRunnableRowsAndSkipsFutureBackoff() throws {
+        let url = tempDir.appendingPathComponent(UploadBackupSyncQueueManifestStore.databaseFileName)
+        let store = try XCTUnwrap(UploadBackupSyncQueueManifestStore(url: url))
+        let now = Date(timeIntervalSince1970: 100)
+        let old = UploadBackupSyncQueueEntry(
+            source: source("old"),
+            revision: revision(10),
+            originalFilename: "old.heic",
+            state: .discovered,
+            updatedAt: Date(timeIntervalSince1970: 10)
+        )
+        let ready = UploadBackupSyncQueueEntry(
+            source: source("ready"),
+            revision: revision(20),
+            originalFilename: "ready.heic",
+            state: .queuedForUpload,
+            updatedAt: Date(timeIntervalSince1970: 20)
+        )
+        let future = UploadBackupSyncQueueEntry(
+            source: source("future"),
+            revision: revision(30),
+            originalFilename: "future.heic",
+            state: .discovered,
+            updatedAt: Date(timeIntervalSince1970: 200)
+        )
+        [future, ready, old].forEach(store.upsert)
+
+        let firstClaim = store.claimRunnable(limit: 2, claimedAt: now)
+
+        XCTAssertEqual(firstClaim.map(\.source.identifier), ["old", "ready"])
+        XCTAssertEqual(store.entry(for: old.source, revision: old.revision)?.state, .checking)
+        XCTAssertEqual(store.entry(for: ready.source, revision: ready.revision)?.state, .checking)
+        XCTAssertEqual(store.entry(for: future.source, revision: future.revision)?.state, .discovered)
+        XCTAssertTrue(store.claimRunnable(limit: 10, claimedAt: now).isEmpty,
+                      "claimed rows are active and future-backoff rows are not claimable yet")
+
+        let secondClaim = store.claimRunnable(limit: 10, claimedAt: Date(timeIntervalSince1970: 250))
+        XCTAssertEqual(secondClaim.map(\.source.identifier), ["future"])
+    }
+
     func testSQLiteQueueRequeuesStaleActiveStatesAfterCrash() throws {
         let url = tempDir.appendingPathComponent(UploadBackupSyncQueueManifestStore.databaseFileName)
         let store = try XCTUnwrap(UploadBackupSyncQueueManifestStore(url: url))
@@ -180,8 +220,8 @@ final class UploadBackupSyncQueueTests: XCTestCase {
 
         let staleStates: [(String, UploadBackupSyncQueueState, UploadBackupSyncQueueState)] = [
             ("checking", .checking, .discovered),
-            ("hashing", .hashing, .checking),
-            ("duplicate", .duplicateChecking, .hashing),
+            ("hashing", .hashing, .discovered),
+            ("duplicate", .duplicateChecking, .discovered),
             ("uploading", .uploading, .queuedForUpload),
             ("finalizing", .finalizing, .queuedForUpload),
         ]

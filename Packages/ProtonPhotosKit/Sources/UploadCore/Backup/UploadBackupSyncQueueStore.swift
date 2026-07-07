@@ -87,7 +87,7 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
                 SELECT source_kind, source_id, resource, revision_us, original_filename, byte_count,
                        state, attempts, last_error, updated_at
                 FROM backup_sync_queue
-                WHERE state IN ('discovered', 'checking', 'hashing', 'duplicateChecking', 'queuedForUpload')
+                WHERE state IN ('discovered', 'queuedForUpload')
                 ORDER BY updated_at ASC
                 LIMIT ?;
                 """,
@@ -102,6 +102,80 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
                 entries.append(row(stmt, source: source, revision: revision, offset: 4))
             }
             return entries
+        }
+    }
+
+    public func claimRunnable(limit: Int, claimedAt: Date) -> [UploadBackupSyncQueueEntry] {
+        let clampedLimit = max(1, limit)
+        return lock.withLock {
+            guard sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else { return [] }
+            var selected: [UploadBackupSyncQueueEntry] = []
+            var selectStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                """
+                SELECT source_kind, source_id, resource, revision_us, original_filename, byte_count,
+                       state, attempts, last_error, updated_at
+                FROM backup_sync_queue
+                WHERE state IN ('discovered', 'queuedForUpload')
+                  AND updated_at <= ?
+                ORDER BY updated_at ASC
+                LIMIT ?;
+                """,
+                -1, &selectStmt, nil
+            ) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return []
+            }
+            sqlite3_bind_double(selectStmt, 1, claimedAt.timeIntervalSince1970)
+            sqlite3_bind_int(selectStmt, 2, Int32(clampedLimit))
+            while sqlite3_step(selectStmt) == SQLITE_ROW {
+                guard let source = sourceFromColumns(selectStmt, kindColumn: 0, idColumn: 1, resourceColumn: 2) else { continue }
+                let revision = UploadBackupRevision(rawValue: sqlite3_column_int64(selectStmt, 3))
+                selected.append(row(selectStmt, source: source, revision: revision, offset: 4))
+            }
+            sqlite3_finalize(selectStmt)
+
+            guard !selected.isEmpty else {
+                sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+                return []
+            }
+
+            var updateStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                """
+                UPDATE backup_sync_queue
+                SET state='checking', updated_at=?
+                WHERE source_kind=? AND source_id=? AND resource=? AND revision_us=?
+                  AND state IN ('discovered', 'queuedForUpload');
+                """,
+                -1, &updateStmt, nil
+            ) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return []
+            }
+            defer { sqlite3_finalize(updateStmt) }
+
+            var claimed: [UploadBackupSyncQueueEntry] = []
+            for entry in selected {
+                sqlite3_reset(updateStmt)
+                sqlite3_clear_bindings(updateStmt)
+                sqlite3_bind_double(updateStmt, 1, claimedAt.timeIntervalSince1970)
+                bindText(updateStmt, 2, entry.source.kind.rawValue)
+                bindText(updateStmt, 3, entry.source.identifier)
+                bindText(updateStmt, 4, entry.source.resource.rawValue)
+                sqlite3_bind_int64(updateStmt, 5, entry.revision.rawValue)
+                if sqlite3_step(updateStmt) == SQLITE_DONE, sqlite3_changes(db) > 0 {
+                    claimed.append(entry)
+                }
+            }
+
+            guard sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return []
+            }
+            return claimed
         }
     }
 
@@ -149,8 +223,8 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
                 UPDATE backup_sync_queue SET
                   state = CASE state
                     WHEN 'checking' THEN 'discovered'
-                    WHEN 'hashing' THEN 'checking'
-                    WHEN 'duplicateChecking' THEN 'hashing'
+                    WHEN 'hashing' THEN 'discovered'
+                    WHEN 'duplicateChecking' THEN 'discovered'
                     WHEN 'uploading' THEN 'queuedForUpload'
                     WHEN 'finalizing' THEN 'queuedForUpload'
                     ELSE state

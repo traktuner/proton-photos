@@ -1,4 +1,5 @@
 import Foundation
+import PhotosCore
 import XCTest
 @testable import UploadCore
 
@@ -47,5 +48,38 @@ final class BackupThrottlePolicyTests: XCTestCase {
 
     func testBaseConcurrencyIsAtLeastOne() {
         XCTAssertEqual(BackupThrottlePolicy(baseConcurrency: 0).maxConcurrentItems(for: .unconstrained), 1)
+    }
+}
+
+final class LibraryWorkloadGovernorPolicyTests: XCTestCase {
+
+    func testBackupBudgetMatchesExistingThrottleContract() {
+        let policy = LibraryWorkloadGovernorPolicy()
+
+        XCTAssertEqual(policy.budget(for: .userInitiatedBackup, baseConcurrency: 2).maxConcurrentItems, 2)
+        XCTAssertEqual(policy.budget(
+            for: .userInitiatedBackup,
+            signals: LibraryWorkloadSignals(thermalLevel: .serious),
+            baseConcurrency: 2
+        ).maxConcurrentItems, 1)
+        XCTAssertEqual(policy.budget(
+            for: .userInitiatedBackup,
+            signals: LibraryWorkloadSignals(thermalLevel: .critical),
+            baseConcurrency: 2
+        ).maxConcurrentItems, 0)
+    }
+
+    func testBackgroundLocationYieldsToVisibleMediaAndActiveTransfers() {
+        let policy = LibraryWorkloadGovernorPolicy()
+
+        XCTAssertFalse(policy.budget(for: .backgroundLocationCrawl).shouldYield)
+        XCTAssertTrue(policy.budget(
+            for: .backgroundLocationCrawl,
+            signals: LibraryWorkloadSignals(hasVisibleMediaDemand: true)
+        ).shouldYield)
+        XCTAssertTrue(policy.budget(
+            for: .backgroundLocationCrawl,
+            signals: LibraryWorkloadSignals(hasActiveUserInitiatedTransfer: true)
+        ).shouldYield)
     }
 }

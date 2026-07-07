@@ -145,7 +145,7 @@ public actor BackupSyncRunner {
         }
 
         // Crash recovery FIRST: anything still marked active predates this run and must become
-        // runnable again (the store demotes each active state to its runnable predecessor).
+        // runnable again before this runner atomically claims new work.
         queue.requeueStaleActive(before: now().addingTimeInterval(-configuration.staleActiveGrace), updatedAt: now())
         await requeueDueBlockedRows()
 
@@ -199,7 +199,8 @@ public actor BackupSyncRunner {
 
     private func nextEligibleWave(limit: Int) -> [UploadBackupSyncQueueEntry] {
         let currentTime = now()
-        return queue.nextRunnable(limit: configuration.batchSize)
+        let claimLimit = min(configuration.batchSize, max(1, limit))
+        return queue.claimRunnable(limit: claimLimit, claimedAt: currentTime)
             .filter { entry in
                 guard let eligibleAt = notBefore[Self.key(entry)] else { return true }
                 if eligibleAt <= currentTime {
@@ -208,8 +209,6 @@ public actor BackupSyncRunner {
                 }
                 return false
             }
-            .prefix(limit)
-            .map { $0 }
     }
 
     /// The wait until the next in-memory retry becomes eligible, or nil when none is pending
@@ -580,11 +579,12 @@ public actor BackupSyncRunner {
         // untouched, and let the pass-level guard end the drain if the volume stays full.
         if Self.isTransientResourcePressure(error) {
             resourcePressureStreak += 1
+            let eligibleAt = now().addingTimeInterval(configuration.retry.delay(afterAttempts: 1))
             queue.updateState(
                 source: entry.source, revision: entry.revision,
-                state: .discovered, attempts: entry.attempts, lastError: message, updatedAt: now()
+                state: .discovered, attempts: entry.attempts, lastError: message, updatedAt: eligibleAt
             )
-            notBefore[Self.key(entry)] = now().addingTimeInterval(configuration.retry.delay(afterAttempts: 1))
+            notBefore[Self.key(entry)] = eligibleAt
             adjustProgress(from: oldState, to: .discovered)
             emitProgress()
             return
@@ -598,11 +598,12 @@ public actor BackupSyncRunner {
             )
             adjustProgress(from: oldState, to: .failed)
         } else {
+            let eligibleAt = now().addingTimeInterval(configuration.retry.delay(afterAttempts: attempts))
             queue.updateState(
                 source: entry.source, revision: entry.revision,
-                state: .discovered, attempts: attempts, lastError: message, updatedAt: now()
+                state: .discovered, attempts: attempts, lastError: message, updatedAt: eligibleAt
             )
-            notBefore[Self.key(entry)] = now().addingTimeInterval(configuration.retry.delay(afterAttempts: attempts))
+            notBefore[Self.key(entry)] = eligibleAt
             adjustProgress(from: oldState, to: .discovered)
         }
         emitProgress()

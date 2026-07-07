@@ -226,6 +226,7 @@ final class MobileLibraryModel {
         let store = locationStore
         let crawl = locationCrawl
         let feed = thumbnailFeed
+        let governor = LibraryWorkloadGovernorPolicy()
         Task {
             // Give the thumbnail crawl a head start, then yield only to LIVE visible demand so the map
             // crawl never stalls scrolling - but is also never parked behind the whole-library sequential
@@ -238,7 +239,13 @@ final class MobileLibraryModel {
                 location: LocationCrawl.metadataProbe(backend),
                 index: index,
                 store: store,
-                shouldYield: { await feed?.hasVisibleThumbnailPressure() ?? false },
+                shouldYield: {
+                    let visibleDemand = await feed?.hasVisibleThumbnailPressure() ?? false
+                    return governor.budget(
+                        for: .backgroundLocationCrawl,
+                        signals: LibraryWorkloadSignals(hasVisibleMediaDemand: visibleDemand)
+                    ).shouldYield
+                },
                 log: { DebugLog.log($0) }
             )
         }

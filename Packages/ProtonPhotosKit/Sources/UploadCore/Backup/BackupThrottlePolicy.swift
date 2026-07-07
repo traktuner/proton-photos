@@ -1,4 +1,5 @@
 import Foundation
+import PhotosCore
 
 /// Platform-neutral thermal pressure level. Platform adapters map their OS signal
 /// (`ProcessInfo.thermalState` on both Apple platforms) into this so the throttle table
@@ -46,17 +47,35 @@ public struct BackupThrottlePolicy: Sendable, Equatable {
     /// beside a live UI on old hardware; two in-flight items keep the pipe busy without
     /// competing with the grid for I/O.
     public var baseConcurrency: Int
+    public var governor: LibraryWorkloadGovernorPolicy
 
-    public init(baseConcurrency: Int = 2) {
+    public init(baseConcurrency: Int = 2, governor: LibraryWorkloadGovernorPolicy = LibraryWorkloadGovernorPolicy()) {
         self.baseConcurrency = max(1, baseConcurrency)
+        self.governor = governor
     }
 
     public func maxConcurrentItems(for inputs: BackupThrottleInputs) -> Int {
-        if inputs.thermalLevel == .critical { return 0 }
-        if inputs.thermalLevel == .serious || inputs.isLowPowerMode
-            || inputs.isNetworkConstrained || inputs.isNetworkExpensive {
-            return 1
+        governor.budget(
+            for: .userInitiatedBackup,
+            signals: LibraryWorkloadSignals(
+                thermalLevel: inputs.thermalLevel.libraryLevel,
+                isLowPowerMode: inputs.isLowPowerMode,
+                isNetworkConstrained: inputs.isNetworkConstrained,
+                isNetworkExpensive: inputs.isNetworkExpensive,
+                hasActiveUserInitiatedTransfer: true
+            ),
+            baseConcurrency: baseConcurrency
+        ).maxConcurrentItems
+    }
+}
+
+private extension BackupThermalLevel {
+    var libraryLevel: LibraryThermalLevel {
+        switch self {
+        case .nominal: return .nominal
+        case .fair: return .fair
+        case .serious: return .serious
+        case .critical: return .critical
         }
-        return baseConcurrency
     }
 }

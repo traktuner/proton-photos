@@ -60,9 +60,9 @@ public final class PhotoLibraryBackupController {
     /// the scan-progress seam the catalog-sync tests exercise; surfacing it later needs no Core change.
     public private(set) var lastCatalogProgress: PhotoLibraryCatalogProgress?
 
-    /// False when the dedupe manifest or the backup stores could not open - backup then refuses
-    /// to run rather than risking duplicate uploads.
-    public var isAvailable: Bool { runner != nil }
+    /// False when the dedupe manifest, backup stores, or execution lock could not open - backup
+    /// then refuses to run rather than risking duplicate uploads or multiple drainers.
+    public var isAvailable: Bool { runner != nil && lockStore != nil }
 
     private let engine: UploadBackupSyncEngine?
     private let runner: BackupSyncRunner?
@@ -217,29 +217,32 @@ public final class PhotoLibraryBackupController {
     /// different run makes this call stand down instead of starting a second drainer.
     private func startSync(owner: BackupExecutionOwner) {
         guard isEnabled, accessState.allowsBackup, !isSyncing, let engine, let runner else { return }
+        guard let lockStore else {
+            lastMessage = L10n.string("backup.error_execution_lock_unavailable")
+            refreshFromQueue()
+            return
+        }
 
         let runID = UUID().uuidString
-        if let lockStore {
-            // Recovery must precede the drain: clear any owner that stopped heartbeating (crash,
-            // OS kill, BG expiration) so a dead run can never permanently block backup.
-            let processContext = Self.processContext
-            lockStore.recoverAbandonedProcessLocks(
-                currentProcessContext: processContext,
-                isProcessAlive: Self.processIsAlive
-            )
-            lockStore.recoverStaleLocks(olderThan: Date().addingTimeInterval(-Self.lockLease))
-            switch lockStore.acquire(owner: owner, runID: runID, phase: "scanning", processContext: processContext) {
-            case .acquired:
-                break
-            case .busy:
-                // Another live run owns the queue (e.g. a foreground pass while a BG window fires).
-                // Stand down: its own drain covers the work; a second drainer is never allowed.
-                return
-            case .unavailable:
-                // The lock store write failed. The identity manifest still guarantees no double
-                // upload, so degrade to unlocked rather than block backup entirely.
-                break
-            }
+        // Recovery must precede the drain: clear any owner that stopped heartbeating (crash,
+        // OS kill, BG expiration) so a dead run can never permanently block backup.
+        let processContext = Self.processContext
+        lockStore.recoverAbandonedProcessLocks(
+            currentProcessContext: processContext,
+            isProcessAlive: Self.processIsAlive
+        )
+        lockStore.recoverStaleLocks(olderThan: Date().addingTimeInterval(-Self.lockLease))
+        switch lockStore.acquire(owner: owner, runID: runID, phase: "scanning", processContext: processContext) {
+        case .acquired:
+            break
+        case .busy:
+            // Another live run owns the queue (e.g. a foreground pass while a BG window fires).
+            // Stand down: its own drain covers the work; a second drainer is never allowed.
+            return
+        case .unavailable:
+            lastMessage = L10n.string("backup.error_execution_lock_unavailable")
+            refreshFromQueue()
+            return
         }
         activeRunID = runID
 
@@ -255,9 +258,10 @@ public final class PhotoLibraryBackupController {
             // Incremental first: persistent change history tells us exactly which assets moved.
             // A missing/expired token falls back to the full catalog scan, which the persistent
             // catalog keeps cheap by re-checking only new/changed assets.
-            let changes = monitor.consumeChanges()
+            let preparedChanges = monitor.prepareChanges()
             do {
-                try await self?.runScanPass(engine: engine, catalogStore: catalogStore, changes: changes)
+                try await self?.runScanPass(engine: engine, catalogStore: catalogStore, changes: preparedChanges.changes)
+                monitor.commit(preparedChanges)
             } catch {
                 self?.reportSyncMessage((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
             }
@@ -288,8 +292,11 @@ public final class PhotoLibraryBackupController {
             if needsFullScan {
                 _ = try await sync.run(engine: engine, identifiers: nil)
                 catalogStore.markFullScanCompleted()
-            } else if !changes.changedIdentifiers.isEmpty {
-                _ = try await sync.run(engine: engine, identifiers: changes.changedIdentifiers)
+            } else {
+                let targeted = Array(Set(changes.changedIdentifiers + changes.deletedIdentifiers))
+                if !targeted.isEmpty {
+                    _ = try await sync.run(engine: engine, identifiers: targeted)
+                }
             }
             return
         }
