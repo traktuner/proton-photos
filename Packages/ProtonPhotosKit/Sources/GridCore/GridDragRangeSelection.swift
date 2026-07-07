@@ -2,10 +2,10 @@
 ///
 /// A drag from `anchorIndex` to `currentIndex` (inclusive, in either order) sweeps the CONTIGUOUS run of items
 /// between them in library order. `selecting` chooses whether that run is ADDED to (`true`) or REMOVED from
-/// (`false`) `base` — decided from the anchor cell's membership at drag start, the iOS Photos convention. Cells
+/// (`false`) `base` - decided from the anchor cell's membership at drag start, the iOS Photos convention. Cells
 /// OUTSIDE the swept run keep their `base` membership, so shrinking the drag reverts the cells the finger left.
 ///
-/// Because the swept run is a contiguous index range, the resulting selection can never develop skipped holes —
+/// Because the swept run is a contiguous index range, the resulting selection can never develop skipped holes -
 /// even while the grid auto-scrolls under a stationary finger and the host feeds a moving `currentIndex`.
 ///
 /// Value-only and platform-free, so the range logic is unit-tested here (`GridCoreTests`) and the UIKit host is

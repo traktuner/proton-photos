@@ -7,7 +7,7 @@ import PhotosCore
 /// The cell size is a fraction of the visible viewport's span, so zooming in splits cells (more pins,
 /// individual photos resolve) and zooming out merges them (fewer pins, dense regions collapse to a
 /// handful of count-bearing cells). The `maxCoordinates` cap limits the number of CELLS, not raw
-/// photos, so even a 50k-photo downtown fits in a few hundred pins — each carrying the true count of
+/// photos, so even a 50k-photo downtown fits in a few hundred pins - each carrying the true count of
 /// photos in its cell. MapKit's built-in clustering still merges nearby cells, and the cluster view
 /// sums the cell counts so the badge shows every underlying photo.
 public struct PhotoLocationAggregation {
@@ -33,7 +33,7 @@ public struct PhotoLocationAggregation {
         guard !coordinates.isEmpty, cellDivisor > 0, maxCells > 0 else { return [] }
 
         // Floor the cell size so photos within `minCellMeters` of each other always land in the same
-        // cell — and therefore a single pin — no matter how far the user zooms in. Without a floor the
+        // cell - and therefore a single pin - no matter how far the user zooms in. Without a floor the
         // viewport-relative cell keeps shrinking on zoom-in, so a GPS-noisy burst at one place (dozens
         // of photos taken at home) scatters across adjacent tiny cells into a pile of overlapping pins.
         let metersPerDegLat = 111_320.0
@@ -85,7 +85,7 @@ public struct PhotoLocationAggregation {
             // Keep the cells that represent the MOST photos, not merely the ones nearest the center.
             // A count-blind nearest-center prune could drop the single densest cell (e.g. 2000 photos
             // at home) while keeping hundreds of one-photo cells that happen to sit closer to the map
-            // center — making the densest place vanish as the user pans. Rank by member count first so
+            // center - making the densest place vanish as the user pans. Rank by member count first so
             // a dense cluster can never be dropped; break ties by center distance so, among equally
             // dense cells, the on-screen ones win.
             let centerLat = viewport.centerLatitude

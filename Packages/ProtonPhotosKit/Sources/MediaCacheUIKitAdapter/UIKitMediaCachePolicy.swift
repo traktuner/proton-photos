@@ -5,12 +5,12 @@ import os
 #endif
 
 /// The coarse iOS/iPadOS device memory class. Budgets are keyed on this (plus surface class and the runtime
-/// pressure tier) — never on device names/models, so future hardware inherits sane behavior automatically.
+/// pressure tier) - never on device names/models, so future hardware inherits sane behavior automatically.
 public enum UIKitDeviceMemoryClass: String, Sendable {
-    /// ≤ ~4 GB devices — the conservative baseline (5-year-old iPhone class). Foreground jetsam headroom is
+    /// ≤ ~4 GB devices - the conservative baseline (5-year-old iPhone class). Foreground jetsam headroom is
     /// tight here, so the decoded-thumbnail budget uses a lower fraction and a hard ceiling.
     case constrained
-    /// ≥ 6 GB devices — proportional budgets scale with physical memory as before.
+    /// ≥ 6 GB devices - proportional budgets scale with physical memory as before.
     case standard
 }
 
@@ -31,7 +31,7 @@ public enum UIKitMediaCachePolicy {
     }
 
     /// The device memory class boundary: physical memory at or below ~4.5 GiB is `constrained`. iOS reports
-    /// slightly less than the marketing size (a "4 GB" iPhone reports ~3.7–4.0 GiB), so the threshold carries
+    /// slightly less than the marketing size (a "4 GB" iPhone reports ~3.7-4.0 GiB), so the threshold carries
     /// headroom above 4 GiB without ever capturing a 6 GB device.
     public static func memoryClass(physicalMemory: UInt64 = ProcessInfo.processInfo.physicalMemory) -> UIKitDeviceMemoryClass {
         physicalMemory <= UInt64(4.5 * 1024 * 1024 * 1024) ? .constrained : .standard
@@ -39,8 +39,8 @@ public enum UIKitMediaCachePolicy {
 
     /// Decoded thumbnail RAM budget (the DOMINANT grid-hot cache).
     ///
-    /// Memory-class curve: `constrained` (≤4 GB) devices use 5.5% with a hard 224 MiB ceiling — a 4 GB iPhone
-    /// lands at ~200–224 MiB instead of the old flat 8% (~328 MiB), keeping grid-hot RAM inside a safe
+    /// Memory-class curve: `constrained` (≤4 GB) devices use 5.5% with a hard 224 MiB ceiling - a 4 GB iPhone
+    /// lands at ~200-224 MiB instead of the old flat 8% (~328 MiB), keeping grid-hot RAM inside a safe
     /// jetsam envelope. `standard` (≥6 GB) devices keep the proportional 8% (96 MiB…1 GiB) behavior.
     ///
     /// `availableMemoryBytes` is the dynamic headroom input (`os_proc_available_memory()` on device, injected

@@ -13,7 +13,7 @@ import Testing
 
     @Test func memoryClassSplitsAtFourPointFiveGiB() {
         #expect(UIKitMediaCachePolicy.memoryClass(physicalMemory: 4 * GiB) == .constrained)
-        // Real "4 GB" hardware reports below the marketing size — still constrained.
+        // Real "4 GB" hardware reports below the marketing size - still constrained.
         #expect(UIKitMediaCachePolicy.memoryClass(physicalMemory: UInt64(3.7 * Double(GiB))) == .constrained)
         #expect(UIKitMediaCachePolicy.memoryClass(physicalMemory: UInt64(4.5 * Double(GiB))) == .constrained)
         #expect(UIKitMediaCachePolicy.memoryClass(physicalMemory: UInt64(4.5 * Double(GiB)) + 1) == .standard)
@@ -38,11 +38,11 @@ import Testing
     // MARK: - Decoded thumbnail RAM (constrained 5.5% ≤224 MiB; standard 8% ≤1024 MiB)
 
     @Test func decodedRAMBudgetOnConstrainedFourGiBIsCappedAt224MiB() {
-        // The audit's core number: a 4 GB iPhone must land at ~200–224 MiB, not the old flat 8% (~328 MiB).
+        // The audit's core number: a 4 GB iPhone must land at ~200-224 MiB, not the old flat 8% (~328 MiB).
         let fourGiB = UIKitMediaCachePolicy.decodedRAMBudgetBytes(physicalMemory: 4 * GiB, availableMemoryBytes: nil)
         #expect(fourGiB == 224 * MiB)
 
-        // Real-world "4 GB" hardware reports less than 4 GiB — the curve keeps it inside the target window.
+        // Real-world "4 GB" hardware reports less than 4 GiB - the curve keeps it inside the target window.
         let reported = UIKitMediaCachePolicy.decodedRAMBudgetBytes(
             physicalMemory: UInt64(3.5 * Double(GiB)), availableMemoryBytes: nil)
         #expect(reported == 206_695_301)                       // ~197 MiB

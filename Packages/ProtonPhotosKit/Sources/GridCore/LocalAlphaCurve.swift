@@ -1,7 +1,7 @@
 // LocalAlphaCurve.swift
 //
 // C1 slope-limited "linear-core" local-alpha curve for the single-presentation-lattice transition
-// (CLICKV2 / CLICKV2_420_FULLER_CORNER, per the V3.4–V3.6 offline evidence passes).
+// (CLICKV2 / CLICKV2_420_FULLER_CORNER, per the V3.4-V3.6 offline evidence passes).
 //
 // Pure function of a normalized position u ∈ [0,1]. No state, no timer, no clock. Reversible.
 // For edge fraction a and core slope s = 1/(1-a):

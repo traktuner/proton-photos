@@ -4,21 +4,21 @@ import Foundation
 ///
 /// This is the single shared policy that both platform shells drive so a "loading" bug is fixed once
 /// in Core and behaves identically on macOS, iOS, and iPadOS. It deliberately models only the
-/// *library presentation* lifecycle after sign-in — auth and backend-build orchestration stay in each
+/// *library presentation* lifecycle after sign-in - auth and backend-build orchestration stay in each
 /// app's shell because their UI differs per platform (Safari fork on iOS, `NSWorkspace` on macOS).
 ///
 /// It distinguishes exactly the phases the product requires:
-///  1. `preparingInventory` — signed in, but the photo inventory (count) is not known yet.
-///  2. `loadingContent`      — the inventory count is known (from a cached snapshot or a fresh load) but the
+///  1. `preparingInventory` - signed in, but the photo inventory (count) is not known yet.
+///  2. `loadingContent`      - the inventory count is known (from a cached snapshot or a fresh load) but the
 ///                             first on-screen thumbnails have not been drawn. This is the "Preparing N photos…"
 ///                             phase; the shell must NOT show a blank grid here.
-///  3. `contentReady`        — the first visible thumbnails are drawn; the grid is safe to present.
-///  4. `empty`               — the library finished loading and truly holds no photos.
-///  5. `failed`              — loading failed; `retryable` drives a retry affordance.
+///  3. `contentReady`        - the first visible thumbnails are drawn; the grid is safe to present.
+///  4. `empty`               - the library finished loading and truly holds no photos.
+///  5. `failed`              - loading failed; `retryable` drives a retry affordance.
 ///
 /// The type carries no percentage: first-load progress cannot be measured without faking precision, so the
 /// shell shows indeterminate progress plus the factual `knownCount`. Feed/crawl coverage is deliberately not
-/// folded in here — it is a *background* signal, not "% of the library loaded".
+/// folded in here - it is a *background* signal, not "% of the library loaded".
 public enum LibraryLoadState: Equatable, Sendable {
     /// Signed in; the backend/inventory is still being prepared. No count yet → indeterminate spinner only.
     case preparingInventory
@@ -28,7 +28,7 @@ public enum LibraryLoadState: Equatable, Sendable {
     /// phrase the status truthfully ("Preparing…" vs "Updating…") without claiming false precision.
     case loadingContent(count: Int, usingCachedInventory: Bool)
 
-    /// The first visible thumbnails are drawn — the grid is presentable. `count` is the latest known total.
+    /// The first visible thumbnails are drawn - the grid is presentable. `count` is the latest known total.
     case contentReady(count: Int)
 
     /// The library finished loading and contains no photos.
@@ -67,7 +67,7 @@ public extension LibraryLoadState {
         return false
     }
 
-    /// True once loading settled on a truly empty library — the only case where a blank grid is acceptable.
+    /// True once loading settled on a truly empty library - the only case where a blank grid is acceptable.
     var isEmpty: Bool {
         if case .empty = self { return true }
         return false
@@ -79,7 +79,7 @@ public extension LibraryLoadState {
         return nil
     }
 
-    /// True once loading has reached a terminal, presentable state (grid / empty / error) — i.e. no spinner.
+    /// True once loading has reached a terminal, presentable state (grid / empty / error) - i.e. no spinner.
     var hasSettled: Bool {
         switch self {
         case .contentReady, .empty, .failed: return true
@@ -91,7 +91,7 @@ public extension LibraryLoadState {
 /// Events that drive `LibraryLoadState`. All inputs are plain scalars so the reducer stays a pure, trivially
 /// testable value transform with no dependency on the feed/backend/crawl machinery.
 public enum LibraryLoadEvent: Equatable, Sendable {
-    /// The inventory count became known — from either a cached snapshot (`cached: true`) or a fresh server load
+    /// The inventory count became known - from either a cached snapshot (`cached: true`) or a fresh server load
     /// (`cached: false`). A count of `0` means the library is empty.
     case inventoryResolved(count: Int, cached: Bool)
 
@@ -115,8 +115,8 @@ public enum LibraryLoadPolicy {
 
         case let .failed(message, retryable):
             // A failure only surfaces when there is nothing presentable yet (still preparing, or a prior
-            // failure). Once an inventory has resolved — even a stale cached one still drawing, or a settled
-            // empty/ready grid — a later (background refresh) failure must not replace it: the user keeps their
+            // failure). Once an inventory has resolved - even a stale cached one still drawing, or a settled
+            // empty/ready grid - a later (background refresh) failure must not replace it: the user keeps their
             // photos and browses offline instead of hitting an error wall.
             switch state {
             case .preparingInventory, .failed:

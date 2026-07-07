@@ -4,8 +4,8 @@ import PhotosCore
 import MediaCache
 @testable import TimelineFeature
 
-/// Proves the feed adapter's governor hook (`applyMemoryPressure`) scales/purges BOTH RAM tiers it owns —
-/// the platform-image wrapper cache (shared `WrapperImageCache`) and the decoded-CGImage core tier — and
+/// Proves the feed adapter's governor hook (`applyMemoryPressure`) scales/purges BOTH RAM tiers it owns -
+/// the platform-image wrapper cache (shared `WrapperImageCache`) and the decoded-CGImage core tier - and
 /// that a restored scale lets the tiers refill from the encrypted disk cache. The AppKit and UIKit feeds
 /// share this exact structure (same wrapper cache type, same `applyDecodedMemoryPressure` core hook), so
 /// this locks the behavior for both platforms.
@@ -45,7 +45,7 @@ import MediaCache
         #expect(feed.memoryImage(for: uid) != nil)
         #expect(feed.memoryCGImage(for: uid) != nil)
 
-        // Critical tier: purge now. BOTH tiers must drop — the wrapper cannot silently rebuild either,
+        // Critical tier: purge now. BOTH tiers must drop - the wrapper cannot silently rebuild either,
         // because the decoded tier underneath it is gone too.
         feed.applyMemoryPressure(scale: 0.0, purge: true)
         #expect(feed.memoryCGImage(for: uid) == nil)

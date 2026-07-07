@@ -2,7 +2,7 @@ import Testing
 @testable import TimelineCore
 
 /// Covers the five library-load phases the product requires: unknown count, known count / no thumbnails,
-/// first content ready, empty library, and error — plus the transitions and edge cases between them.
+/// first content ready, empty library, and error - plus the transitions and edge cases between them.
 @Suite struct LibraryLoadStateTests {
 
     private func reduce(_ state: LibraryLoadState, _ events: [LibraryLoadEvent]) -> LibraryLoadState {
@@ -111,7 +111,7 @@ import Testing
 
     @Test func failureAfterCachedInventoryKeepsShowingCachedContent() {
         // A cached snapshot is loading; the fresh refresh then fails. The user keeps their (cached) photos and
-        // browses offline — no error wall replaces resolvable content.
+        // browses offline - no error wall replaces resolvable content.
         let state = reduce(.initial, [
             .inventoryResolved(count: 100, cached: true),
             .failed(message: "Timed out", retryable: true),
@@ -171,7 +171,7 @@ import Testing
     }
 
     @Test func stateIsValueSemantic() {
-        // Equatable + Sendable value type — safe to publish across the app without shared mutable state.
+        // Equatable + Sendable value type - safe to publish across the app without shared mutable state.
         let a = LibraryLoadState.loadingContent(count: 1, usingCachedInventory: false)
         let b = LibraryLoadState.loadingContent(count: 1, usingCachedInventory: false)
         #expect(a == b)

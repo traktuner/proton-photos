@@ -10,7 +10,7 @@ final class SelectionToolbarTextTests: XCTestCase {
     }
 
     func testOneSelectedIsHidden() {
-        // A single selected item needs no count — its own decoration already says it is selected.
+        // A single selected item needs no count - its own decoration already says it is selected.
         XCTAssertEqual(SelectionToolbarText.centerLabel(selectedCount: 1), .hidden)
     }
 

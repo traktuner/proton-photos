@@ -11,7 +11,7 @@ import Testing
         #expect(GridCornerRadiusPolicy.radius(forSlotSidePoints: 48) == 0)
         #expect(GridCornerRadiusPolicy.radius(forSlotSidePoints: 32) == 0)
         #expect(GridCornerRadiusPolicy.radius(forSlotSidePoints: 63.9) == 0)
-        // The cutoff itself is still sharp — the ramp starts CONTINUOUSLY at 0 so a live pinch never pops.
+        // The cutoff itself is still sharp - the ramp starts CONTINUOUSLY at 0 so a live pinch never pops.
         #expect(GridCornerRadiusPolicy.radius(forSlotSidePoints: GridCornerRadiusPolicy.sharpMaxSidePoints) == 0)
     }
 

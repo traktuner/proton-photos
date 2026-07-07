@@ -11,11 +11,11 @@ import PhotosCore
 /// tier policy; this file supplies macOS's events (`DispatchSource` memory pressure + `ProcessInfo`
 /// thermal / Low Power Mode) and lets the tier fan out to the concrete caches. It mirrors how
 /// `AppKitMetalGridTexturePolicy` supplies macOS texture budgets. An iOS adapter would feed the SAME
-/// governor from `UIApplication.didReceiveMemoryWarning` + the thermal notification — the responders
+/// governor from `UIApplication.didReceiveMemoryWarning` + the thermal notification - the responders
 /// and policy do not change.
 ///
 /// Apple references:
-/// - `DispatchSource.makeMemoryPressureSource` — elevated pressure means "reduce future cache sizes",
+/// - `DispatchSource.makeMemoryPressureSource` - elevated pressure means "reduce future cache sizes",
 ///   not "discard now": https://developer.apple.com/documentation/dispatch/dispatchsource/makememorypressuresource(eventmask:queue:)
 /// - `ProcessInfo.thermalState` mitigations (defer prefetch at `.fair`, shed at `.serious`):
 ///   https://developer.apple.com/documentation/foundation/processinfo/thermalstate-swift.enum
@@ -31,7 +31,7 @@ final class AppMemoryPressureCoordinator {
 
     private init() {}
 
-    /// Install the platform event sources and register the app-lifetime cache owners. Idempotent — safe
+    /// Install the platform event sources and register the app-lifetime cache owners. Idempotent - safe
     /// to call on every backend (re)build.
     func install() {
         registerStaticResponders()
@@ -78,12 +78,12 @@ final class AppMemoryPressureCoordinator {
         guard !staticRespondersRegistered else { return }
         staticRespondersRegistered = true
         let governor = MemoryPressureGovernor.shared
-        // Viewer full-resolution cache (static, shared across viewer instances) — the single most
+        // Viewer full-resolution cache (static, shared across viewer instances) - the single most
         // jetsam-prone RAM consumer.
         governor.register { tier in
             PhotoViewerModel.applyMemoryPressure(scale: tier.budgetScale, purge: tier.requiresImmediatePurge)
         }
-        // Encrypted thumbnail byte cache (in-process plaintext RAM tier) — app-lifetime singleton.
+        // Encrypted thumbnail byte cache (in-process plaintext RAM tier) - app-lifetime singleton.
         let byteCache = OfflineLibraryManager.shared.cache
         governor.register { tier in
             byteCache.applyMemoryPressure(scale: tier.budgetScale, purge: tier.requiresImmediatePurge)

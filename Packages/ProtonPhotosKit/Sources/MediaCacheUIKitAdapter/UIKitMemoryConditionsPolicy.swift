@@ -10,7 +10,7 @@ import PhotosCore
 /// - A latched `didReceiveMemoryWarning` or a `DispatchSource` critical event → `.critical`
 ///   (the governor's `.minimal` tier: purge non-essential holdings now).
 /// - A `DispatchSource` warning OR being backgrounded → `.warning` (the `.reduced` tier: halve
-///   future budgets — Apple reclaims backgrounded apps first, so backgrounding sheds proactively).
+///   future budgets - Apple reclaims backgrounded apps first, so backgrounding sheds proactively).
 /// - Otherwise `.normal` (full budgets).
 public enum UIKitMemoryConditionsPolicy {
     public static func conditions(

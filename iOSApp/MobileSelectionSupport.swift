@@ -43,13 +43,13 @@ enum MobileMediaExporter {
         // Cache-first byte retrieval: a just-viewed / previously-shared original is reused from the encrypted
         // originals cache instead of being re-downloaded. On a miss we SEED the cache (`.persisting`): the iOS
         // viewer displays a bounded preview rather than the full original, so on iOS it is the share/export path
-        // that most often warms the originals cache — and every subsequent share/open then avoids the network.
+        // that most often warms the originals cache - and every subsequent share/open then avoids the network.
         // Bytes only ever live in the AES-GCM cache, never as app-owned plaintext.
         let policy: OriginalsCachePolicy = cache != nil ? .persisting(capBytes: cacheCapBytes) : .readOnly
         let provider = EncryptedOriginalProvider(media: backend, cache: cache, policy: policy)
         // Shared, thread-safe uniquer: two selected photos can legitimately carry the SAME original Proton
         // name (e.g. two `IMG_0001.HEIC` from different folders), so the concurrent tasks reserve a unique
-        // on-disk name before writing — mirroring macOS `uniqueName` — instead of silently overwriting.
+        // on-disk name before writing - mirroring macOS `uniqueName` - instead of silently overwriting.
         let names = ExportNames()
 
         let maxConcurrent = 4
@@ -82,12 +82,12 @@ enum MobileMediaExporter {
     ) async -> URL? {
         do {
             let data = try await provider.originalData(for: item.uid)
-            // The real decrypted Proton link name is authoritative — an `IMG_1234.HEIC` must stay
+            // The real decrypted Proton link name is authoritative - an `IMG_1234.HEIC` must stay
             // `IMG_1234.HEIC`, never a re-invented `ProductBrand-…`. Look it up like macOS does; a metadata
             // failure degrades to the generated fallback rather than failing the whole export.
             let meta = try? await backend.metadata(for: item.uid)
             // Extension only matters when the real name lacks one: derive it from the ACTUAL bytes (the SDK
-            // stamps `image/jpeg` on every image — the reason a HEIC used to be saved as `.jpg`), with the
+            // stamps `image/jpeg` on every image - the reason a HEIC used to be saved as `.jpg`), with the
             // real link MIME as a secondary signal.
             let ext = OriginalFileNaming.resolvedExtension(
                 filename: meta?.filename, mimeType: meta?.mimeType, header: data,
@@ -147,7 +147,7 @@ actor ExportNames {
     }
 }
 
-/// Thin SwiftUI wrapper over `UIActivityViewController` — the native iOS share sheet — over exported file URLs.
+/// Thin SwiftUI wrapper over `UIActivityViewController` - the native iOS share sheet - over exported file URLs.
 struct MobileActivityView: UIViewControllerRepresentable {
     let urls: [URL]
 

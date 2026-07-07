@@ -3,7 +3,7 @@ import Testing
 @testable import MediaCacheCore
 
 /// Deterministic tests for the shared wrapper-image cache pressure semantics (used by the AppKit + UIKit
-/// thumbnail feeds and the iOS viewer display cache). Only deterministic `NSCache` behavior is asserted —
+/// thumbnail feeds and the iOS viewer display cache). Only deterministic `NSCache` behavior is asserted -
 /// explicit limit changes and purges, never its internal lazy eviction heuristics.
 @Suite struct WrapperImageCacheTests {
     private final class Wrapped {

@@ -18,9 +18,9 @@ package enum AppKitMetalGridTexturePolicies {
     /// - `maxResidentBytes` 512 MiB ≈ 1,310 worst-case (320×320) textures - several visible+overscan
     ///   bands at the normal zoom levels for scroll-reversal reuse, but far below the unbounded ~1.15 GB
     ///   the count-only budget allowed in practice.
-    /// - `maxCachedTextures` is intentionally high enough that dense, level-aware 96–112 px thumbnails hit
+    /// - `maxCachedTextures` is intentionally high enough that dense, level-aware 96-112 px thumbnails hit
     ///   the byte cap before the count cap. Keeping the old 4096 count cap after level-aware uploads limited
-    ///   L5 to ~140–150 MiB and caused count-cap churn despite an idle byte budget.
+    ///   L5 to ~140-150 MiB and caused count-cap churn despite an idle byte budget.
     /// - `maxUploadBytesPerFrame` 6 MiB ≈ ~15 worst-case 320 px uploads; `maxUploadMillisecondsPerFrame`
     ///   then catches the real measured main-thread cost on the current Mac, so cold fills stay progressive
     ///   even when a source format makes `CGContext` normalization unusually expensive.

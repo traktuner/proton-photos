@@ -2,7 +2,7 @@ import CoreGraphics
 import GridCore
 
 /// How the user manipulates the grid surface. This is a viewport *interaction fact* (fingers occlude and
-/// need tighter, denser ladders than a pointer), not a platform or device family — an adapter states how
+/// need tighter, denser ladders than a pointer), not a platform or device family - an adapter states how
 /// its surface is driven and the shared profile table decides what that means for the grid.
 package enum TimelineGridInputAffinity: String, Equatable, Sendable {
     case pointer

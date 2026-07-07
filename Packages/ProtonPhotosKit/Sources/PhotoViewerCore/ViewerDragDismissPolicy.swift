@@ -1,10 +1,10 @@
 import CoreGraphics
 
-/// Shared semantics for the viewer's one-finger drag-to-dismiss — the interaction iOS users reach for first.
+/// Shared semantics for the viewer's one-finger drag-to-dismiss - the interaction iOS users reach for first.
 ///
 /// With the media UNZOOMED, a downward drag sticks the media to the finger (it translates and shrinks a little
-/// while the backdrop dims), and on release it either springs back to its resting position or — past a
-/// distance/velocity threshold — closes the viewer back to the grid. Platform adapters own the recognizers and
+/// while the backdrop dims), and on release it either springs back to its resting position or - past a
+/// distance/velocity threshold - closes the viewer back to the grid. Platform adapters own the recognizers and
 /// the transform; the engagement axis, the finger→scale/opacity mapping and the release decision live here so it
 /// feels identical everywhere. Complements ``ViewerPinchDismissPolicy`` (two-finger pinch): both can be attached
 /// at once, and neither engages while the media is zoomed in (that regime belongs to pan/zoom).
@@ -20,13 +20,13 @@ public enum ViewerDragDismissPolicy {
     /// Release dismisses when the drag travelled at least this fraction of the viewport height…
     public static let dismissDistanceFraction: CGFloat = 0.20
 
-    /// …OR the downward release velocity (points/second) is at least this — a quick flick closes early.
+    /// …OR the downward release velocity (points/second) is at least this - a quick flick closes early.
     public static let dismissVelocity: CGFloat = 900
 
     /// The media never shrinks below this while attached to the finger (so it stays clearly the same photo).
     public static let minimumDisplayScale: CGFloat = 0.6
 
-    /// How far the black backdrop dims at full drag (1 = opaque, this = most transparent) — a subtle "peeling
+    /// How far the black backdrop dims at full drag (1 = opaque, this = most transparent) - a subtle "peeling
     /// away toward the grid" cue.
     public static let minimumBackdropOpacity: CGFloat = 0.5
 

@@ -1,7 +1,7 @@
 /// The shared routing decision for a live grid pinch: which presentation the first adjacent step in the
 /// resolved direction should ATTEMPT. Both platform hosts (macOS trackpad magnify, iOS two-finger pinch)
 /// previously duplicated this tree in their `.undecided` routing and short-pinch release paths. The attempt
-/// ORDER is policy and lives here; hosts still own attempting the candidate — plan building can fail — and
+/// ORDER is policy and lives here; hosts still own attempting the candidate - plan building can fail - and
 /// fall back to the `GridZoomTransaction` reflow.
 public enum GridPinchRoutePolicy {
     public enum Candidate: Equatable, Sendable {
@@ -10,7 +10,7 @@ public enum GridPinchRoutePolicy {
         /// The step crosses an overview boundary → the two-layer offscreen dissolve.
         case overviewDissolve(target: Int)
         /// Out of ladder bounds or no eligible presentation → the transaction reflow (a short-pinch
-        /// release interprets this as "no step" — there is nothing to animate).
+        /// release interprets this as "no step" - there is nothing to animate).
         case reflow
     }
 

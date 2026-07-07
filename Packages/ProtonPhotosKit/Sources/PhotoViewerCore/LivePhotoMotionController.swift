@@ -3,12 +3,12 @@ import Foundation
 import Observation
 import PhotosCore
 
-/// Owns a Live Photo's paired *motion clip* — its single `AVPlayer`, the fully-preloaded encrypted streaming
+/// Owns a Live Photo's paired *motion clip* - its single `AVPlayer`, the fully-preloaded encrypted streaming
 /// asset, and the play/stop state the viewer crossfades on. Shared by the macOS and iOS viewers so Live Photo
 /// motion behaves identically on both.
 ///
 /// E2EE-safe: the clip streams through the SAME encrypted resource-loader path as regular video
-/// (`makeStreamingAsset` → `protonvideo://`) — the ENCRYPTED blocks are cached locally and decrypted ONLY in
+/// (`makeStreamingAsset` → `protonvideo://`) - the ENCRYPTED blocks are cached locally and decrypted ONLY in
 /// RAM, so plaintext local motion-video files are forbidden by the local E2EE contract and never written.
 /// UNLIKE timeline videos (which stream as they play), the clip is FULLY pre-downloaded (encrypted) before
 /// `player` is exposed, so the first press plays INSTANTLY from the local encrypted cache. Without a `player`
@@ -24,11 +24,11 @@ public final class LivePhotoMotionController {
     /// crossfades it in on `isPlaying`.
     public private(set) var player: AVPlayer?
 
-    /// True while the motion clip is playing — the viewer crossfades the motion layer in/out on this.
+    /// True while the motion clip is playing - the viewer crossfades the motion layer in/out on this.
     public private(set) var isPlaying = false
 
     /// Retains the streaming asset, the ONLY strong owner of the range resource-loader (AVFoundation holds it
-    /// weakly) — it must live as long as the player or every `protonvideo://` range request goes unserved.
+    /// weakly) - it must live as long as the player or every `protonvideo://` range request goes unserved.
     private var asset: StreamingVideoAsset?
     private var prepareTask: Task<Void, Never>?
     private var endObserver: NSObjectProtocol?
@@ -47,13 +47,13 @@ public final class LivePhotoMotionController {
             // 1) Fully download the ENCRYPTED clip into the local encrypted block cache (no plaintext on disk).
             try? await streamer.prefetchEncrypted(for: motionUID)
             guard !Task.isCancelled, isStillCurrent() else { return }
-            // 2) Build the streaming player — its resource loader now serves entirely from the local encrypted cache.
+            // 2) Build the streaming player - its resource loader now serves entirely from the local encrypted cache.
             guard let stream = try? await streamer.makeStreamingAsset(for: motionUID),
                   !Task.isCancelled, isStillCurrent() else { return }
             let player = AVPlayer(playerItem: AVPlayerItem(asset: stream.asset))
             player.actionAtItemEnd = .pause
             player.automaticallyWaitsToMinimizeStalling = false
-            // Wait until ready, then preroll — the clip is local + encrypted-cached, so this is fast.
+            // Wait until ready, then preroll - the clip is local + encrypted-cached, so this is fast.
             if let item = player.currentItem {
                 var tries = 0
                 while item.status == .unknown, !Task.isCancelled, tries < LivePhotoMotionPolicy.prerollMaxTries {
@@ -63,7 +63,7 @@ public final class LivePhotoMotionController {
                 guard item.status == .readyToPlay, !Task.isCancelled, isStillCurrent() else { return }
                 player.preroll(atRate: 1) { _ in }
             }
-            // 3) Expose only now — play/stop is a no-op until the clip is 100% ready (then plays instantly).
+            // 3) Expose only now - play/stop is a no-op until the clip is 100% ready (then plays instantly).
             guard let self, !Task.isCancelled, isStillCurrent() else { return }
             self.asset = stream
             self.player = player

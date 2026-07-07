@@ -3,8 +3,8 @@ import PhotosCore
 
 /// Where to point the map when it first opens. The naive "fit every coordinate" framing is skewed by
 /// outliers: one holiday photo in another continent drags the center out into the ocean (the classic
-/// "somewhere between Africa and Europe" complaint). This frames the DENSE CORE instead — the place
-/// most of the photos actually are — and drops the far-flung few.
+/// "somewhere between Africa and Europe" complaint). This frames the DENSE CORE instead - the place
+/// most of the photos actually are - and drops the far-flung few.
 ///
 /// Platform-neutral (Foundation only), so the macOS and iOS map hosts share one framing rule.
 public enum PhotoLocationFraming {

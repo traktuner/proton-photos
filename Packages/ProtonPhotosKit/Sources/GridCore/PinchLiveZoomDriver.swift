@@ -18,7 +18,7 @@
 //     grid follows the finger until release, then settles the ACTIVE segment to its nearest detent.
 //
 // The driver chains only within the eligible band `[chainLo, chainHi]` (the contiguous focusRowRelayout run
-// the gesture started in - the normal levels L0–L3); the host decides lattice-vs-reflow up front and clamps
+// the gesture started in - the normal levels L0-L3); the host decides lattice-vs-reflow up front and clamps
 // the position into the band, so an out-of-band (overview) excursion holds at the boundary detent.
 
 package struct PinchLiveZoomDriver: Equatable, Sendable {

@@ -1573,7 +1573,7 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if FileManager.default.fileExists(atPath: policyFile.path) {
             let imports = try importedModules(in: policyFile)
-            // `os` is the system module exposing `os_proc_available_memory()` — the live jetsam-headroom
+            // `os` is the system module exposing `os_proc_available_memory()` - the live jetsam-headroom
             // signal the decoded-RAM budget consults on device. It carries no macOS policy.
             if imports != ["Foundation", "MediaByteCache", "os"] {
                 violations.append("MediaCacheUIKitAdapter/UIKitMediaCachePolicy.swift: imports \(imports.sorted()) != [Foundation, MediaByteCache, os]")
@@ -1642,7 +1642,7 @@ final class CoreArchitectureGateTests: XCTestCase {
             let dependencies = Set(dependencies(inTargetLine: targetLine))
             // The shared viewer display store (UIKitViewerImageStore) lives here and needs universal Core:
             // PhotosCore (PhotoUID / FullMediaProvider) and MediaCacheCore (the shared WrapperImageCache with
-            // memory-pressure semantics). Both are platform-neutral Core — NOT the macOS MediaCache umbrella.
+            // memory-pressure semantics). Both are platform-neutral Core - NOT the macOS MediaCache umbrella.
             let expected: Set<String> = ["PhotoViewerCore", "PhotosCore", "MediaCacheCore"]
             if dependencies != expected {
                 violations.append("PhotoViewerUIKitAdapter: dependencies \(dependencies.sorted()) != \(expected.sorted())")
@@ -1667,7 +1667,7 @@ final class CoreArchitectureGateTests: XCTestCase {
                 "public enum UIKitViewerImageAdapter",
                 "UIImage(cgImage: cgImage",
                 // Prefix (no closing paren) so the adapter may pass the optional bounded `maxPixelSize` argument
-                // while the gate still proves it stays core-backed — decoding via the shared `ViewerFullImageDecoder`.
+                // while the gate still proves it stays core-backed - decoding via the shared `ViewerFullImageDecoder`.
                 "ViewerFullImageDecoder.decodeCGImage(data"
             ] where !source.contains(symbol) {
                 violations.append("PhotoViewerUIKitAdapter/UIKitViewerImageAdapter.swift: missing \(symbol)")

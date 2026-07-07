@@ -28,7 +28,7 @@ final class ViewerFullImageDecoderTests: XCTestCase {
         XCTAssertLessThanOrEqual(bounded.width, 50)
         XCTAssertLessThanOrEqual(bounded.height, 50)
 
-        // A cap ABOVE the original never upscales — full resolution is preserved, not enlarged.
+        // A cap ABOVE the original never upscales - full resolution is preserved, not enlarged.
         let notUpscaled = try XCTUnwrap(ViewerFullImageDecoder.decodeCGImage(data, maxPixelSize: 4096))
         XCTAssertEqual(notUpscaled.width, 200)
         XCTAssertEqual(notUpscaled.height, 100)

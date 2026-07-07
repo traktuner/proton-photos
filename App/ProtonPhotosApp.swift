@@ -9,7 +9,7 @@ struct ProtonPhotosApp: App {
     @State private var model = AppModel()
 
     init() {
-        // `.help(...)` tooltips use AppKit's initial hover delay, which defaults to ~1–2 s. SwiftUI exposes no
+        // `.help(...)` tooltips use AppKit's initial hover delay, which defaults to ~1-2 s. SwiftUI exposes no
         // per-view delay, so we shorten it APP-WIDE: 400 ms keeps tooltips snappy (e.g. the library-preparing
         // pill's live percent) without firing on every incidental pass over a control.
         UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 400])

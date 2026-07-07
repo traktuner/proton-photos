@@ -212,7 +212,7 @@ struct ProductionRouteGuardTests {
 
     @Test func viewerNeverPersistsDecryptedMotionVideoTempFiles() throws {
         // The Live Photo motion path lives in the shared `LivePhotoMotionController` (driven by both the macOS
-        // and iOS viewers), so the E2EE guard checks that file — its true home.
+        // and iOS viewers), so the E2EE guard checks that file - its true home.
         let motion = try String(contentsOf: Self.repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoViewerCore/LivePhotoMotionController.swift"), encoding: .utf8)
         #expect(!motion.contains("temporaryDirectory"), "Live Photo motion must not write decrypted video bytes to /tmp")
         #expect(!motion.contains("proton-motion-"), "Live Photo motion must not synthesize plaintext local movie files")

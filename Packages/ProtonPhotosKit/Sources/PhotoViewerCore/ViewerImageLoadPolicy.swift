@@ -1,6 +1,6 @@
 import CoreGraphics
 
-/// Shared, platform-neutral policy for the full-screen viewer's staged, bounded image loading — so no platform
+/// Shared, platform-neutral policy for the full-screen viewer's staged, bounded image loading - so no platform
 /// re-derives "how big to decode" or "how far from the current page to load." Platform adapters own the fetch,
 /// the decode call, and the cache; the sizes/tiers/window live here.
 ///
@@ -13,15 +13,15 @@ public enum ViewerImageLoadPolicy {
     public enum Tier: String, Sendable { case thumbnail, preview, original }
 
     /// Decode headroom over the fit-to-screen size, so a moderate pinch-zoom stays crisp without decoding the full
-    /// original. Bounded on purpose — the original is never decoded just because a page appeared.
+    /// original. Bounded on purpose - the original is never decoded just because a page appeared.
     public static let displayZoomHeadroom: CGFloat = 2
 
     /// Absolute pixel ceiling (longest side) for a DISPLAY decode, so a huge panorama / RAW / burst frame can never
     /// blow the per-image memory even if the viewport reading is unavailable. ~3072² · 4 ≈ 36 MB worst case.
     public static let maxDisplayPixelSize = 3072
 
-    /// Absolute pixel ceiling (longest side) for a ZOOMED-IN decode. Covers a typical 12–24 MP original fully
-    /// (≤ 6144 longest side) while capping monster panoramas/48 MP originals at ~6144×4608·4 ≈ 113 MB —
+    /// Absolute pixel ceiling (longest side) for a ZOOMED-IN decode. Covers a typical 12-24 MP original fully
+    /// (≤ 6144 longest side) while capping monster panoramas/48 MP originals at ~6144×4608·4 ≈ 113 MB -
     /// transient (one page, replaces the display entry in the same cost-limited cache).
     public static let maxZoomedPixelSize = 6144
 
@@ -46,7 +46,7 @@ public enum ViewerImageLoadPolicy {
     }
 
     /// The bounded decode size for a SETTLED zoom level: what the screen actually needs at that zoom
-    /// (fit-size × zoom, no extra headroom — the zoom already happened), clamped to `maxZoomedPixelSize`
+    /// (fit-size × zoom, no extra headroom - the zoom already happened), clamped to `maxZoomedPixelSize`
     /// and never below the display tier's size. The decoder itself never upscales past the source, so a
     /// small original simply decodes fully.
     public static func zoomedMaxPixelSize(viewportPoints: CGSize, scale: CGFloat, zoom: CGFloat) -> Int {

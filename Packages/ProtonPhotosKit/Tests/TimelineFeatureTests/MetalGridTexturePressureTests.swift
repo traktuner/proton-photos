@@ -49,7 +49,7 @@ import PhotosCore
         // Frame 2: only the viewport set stays pinned; the rest is offscreen residency.
         cache.beginFrame(pinned: Set(visible))
 
-        // Critical tier (scale 0): keep ONLY what is currently essential — the visible pinned set.
+        // Critical tier (scale 0): keep ONLY what is currently essential - the visible pinned set.
         cache.setResidencyPressureScale(0.0)
         #expect(visible.allSatisfy { cache.isResident($0) })
         #expect(offscreen.allSatisfy { !cache.isResident($0) })

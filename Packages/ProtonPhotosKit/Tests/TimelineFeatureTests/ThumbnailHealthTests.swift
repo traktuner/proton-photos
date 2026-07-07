@@ -89,7 +89,7 @@ struct ThumbnailHealthTests {
 
     @Test @MainActor func firstWarmPassFetchesVisibleNetworkMissesButNotDiskHits() async throws {
         // The opening viewport (a fresh data source's first warm pass) must decode disk-present cells straight
-        // from disk and fetch only the true disk-misses over the network — exercising the first-pass
+        // from disk and fetch only the true disk-misses over the network - exercising the first-pass
         // `.visibleNow` warm path (map to ThumbnailRequest + priority) end to end.
         let misses = (0 ..< 3).map { PhotoUID(volumeID: "vol", nodeID: "fp-miss-\($0)-\(UUID().uuidString)") }
         let onDisk = PhotoUID(volumeID: "vol", nodeID: "fp-hit-\(UUID().uuidString)")

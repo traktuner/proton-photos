@@ -42,17 +42,17 @@ struct MobilePreviewLoadStatus: Equatable {
 /// Owns the signed-in library for iOS/iPadOS: it builds the shared backend + thumbnail feed and drives the
 /// timeline load through the shared `LibraryLoadState` machine so the first-load experience matches macOS.
 ///
-/// The heavy lifting (auth, the Drive backend, the thumbnail feed, the crawl order) is all shared Core — this
+/// The heavy lifting (auth, the Drive backend, the thumbnail feed, the crawl order) is all shared Core - this
 /// model only sequences `cachedTimeline → loadTimeline → crawl` and maps outcomes onto `LibraryLoadState`.
 ///
 /// `@Observable` (not `ObservableObject`): SwiftUI then tracks each property INDIVIDUALLY, so the Settings,
-/// Collections and Map tabs — which read only `loadState`/`backend`/`thumbnailFeed`, never the 20k-item
-/// `snapshot` — are not re-rendered every time a new timeline snapshot is published. Only views that actually
+/// Collections and Map tabs - which read only `loadState`/`backend`/`thumbnailFeed`, never the 20k-item
+/// `snapshot` - are not re-rendered every time a new timeline snapshot is published. Only views that actually
 /// read `items`/`snapshot` (the Photos grid) invalidate on a timeline change.
 @MainActor
 @Observable
 final class MobileLibraryModel {
-    /// The single source of truth for the onboarding/loading UI. Shared, tested policy — see `LibraryLoadState`.
+    /// The single source of truth for the onboarding/loading UI. Shared, tested policy - see `LibraryLoadState`.
     private(set) var loadState: LibraryLoadState = .initial
     /// The flattened, ordered, indexed timeline. Built OFF the main actor (`TimelineSnapshot` is a pure,
     /// `Sendable` value) and published here as one immutable assignment, so the main actor never flattens/
@@ -63,7 +63,7 @@ final class MobileLibraryModel {
     var items: [PhotoItem] { snapshot.items }
     private(set) var thumbnailFeed: UIKitThumbnailFeed?
     /// True while the background thumbnail crawl is still filling the library AFTER the grid became
-    /// presentable — drives the small persistent top-left indicator. Deliberately NOT part of
+    /// presentable - drives the small persistent top-left indicator. Deliberately NOT part of
     /// `LibraryLoadState` (which models the first-load lifecycle, see its docs): crawl coverage is a
     /// background signal, so it is polled from the feed and ends the first time the crawl runs dry.
     private(set) var isBackgroundLoading = false
@@ -94,7 +94,7 @@ final class MobileLibraryModel {
     private var thumbnailCache: ThumbnailCache?
 
     /// The encrypted on-disk ORIGINALS cache. Seeded when the fullscreen viewer decrypts an original, then
-    /// reused (cache-first, before the network) by later fullscreen opens and by share/export — giving iOS the
+    /// reused (cache-first, before the network) by later fullscreen opens and by share/export - giving iOS the
     /// same E2EE-safe originals reuse macOS already has (`OfflineLibraryManager.originalsCache`). Plaintext
     /// originals are NEVER written outside this AES-GCM store. Exposed so the share/export path can read it.
     private(set) var originalsCache: ThumbnailCache?
@@ -109,7 +109,7 @@ final class MobileLibraryModel {
     private var loadTask: Task<Void, Never>?
     /// Monotonic id for the current load. Bumped whenever a load starts or the model tears down, so an
     /// off-main snapshot sort that finishes AFTER a newer load/teardown superseded it never publishes stale
-    /// items. Belt-and-suspenders alongside `loadTask` cancellation — and makes the "newest load wins"
+    /// items. Belt-and-suspenders alongside `loadTask` cancellation - and makes the "newest load wins"
     /// invariant explicit if the load sequence is ever refactored to build snapshots concurrently.
     private var loadToken = 0
     private var firstContentGuard: Task<Void, Never>?
@@ -131,7 +131,7 @@ final class MobileLibraryModel {
         start(session: session, store: store)
     }
 
-    /// Move the given items to Trash via the shared backend — a REAL, recoverable move (never a permanent
+    /// Move the given items to Trash via the shared backend - a REAL, recoverable move (never a permanent
     /// delete), matching the only capability the backend exposes (`TrashProvider`). On success the items are
     /// dropped from the visible library; the call throws so the caller can surface a failure honestly.
     func trashItems(_ uids: Set<PhotoUID>) async throws {
@@ -145,15 +145,15 @@ final class MobileLibraryModel {
         try await backend.emptyTrash()
     }
 
-    /// Position of `uid` in the ordered timeline, or nil — O(1) via the snapshot index (viewer paging, map/
+    /// Position of `uid` in the ordered timeline, or nil - O(1) via the snapshot index (viewer paging, map/
     /// grid open), replacing the previous O(n) `firstIndex`.
     func index(of uid: PhotoUID) -> Int? { snapshot.index(of: uid) }
 
-    /// The chosen items in timeline order — O(k log k) from the snapshot index, for share/export of a
+    /// The chosen items in timeline order - O(k log k) from the snapshot index, for share/export of a
     /// selection, instead of an O(n) `filter` of the whole library on the main thread.
     func selectedItems(_ uids: Set<PhotoUID>) -> [PhotoItem] { snapshot.items(withUIDs: uids) }
 
-    /// The on-disk size (bytes) of the encrypted thumbnail cache — the app's media-cache footprint, for Settings.
+    /// The on-disk size (bytes) of the encrypted thumbnail cache - the app's media-cache footprint, for Settings.
     /// Computed off the main actor (it sums file sizes on disk), so a large cache never stalls the UI.
     func cacheDiskSizeBytes() async -> Int64 {
         guard let cache = thumbnailCache else { return 0 }
@@ -162,7 +162,7 @@ final class MobileLibraryModel {
 
     /// Clears the on-disk thumbnail cache, then restarts the crawl so the grid refills. Crash-safe with the
     /// grid/viewer active: the feed keeps its already-decoded RAM thumbnails (no broken rendering) and misses are
-    /// re-downloaded. Only the app's own cache directory is touched — never anything outside it.
+    /// re-downloaded. Only the app's own cache directory is touched - never anything outside it.
     func clearCache() async {
         guard let cache = thumbnailCache else { return }
         await cache.clear()
@@ -172,7 +172,7 @@ final class MobileLibraryModel {
         }
     }
 
-    /// Retry after a failure — restarts the whole load for the current session.
+    /// Retry after a failure - restarts the whole load for the current session.
     func retry() {
         guard let session, let store else { return }
         configuredUID = nil
@@ -207,7 +207,7 @@ final class MobileLibraryModel {
         }
     }
 
-    /// Lazily kicks off the background GPS crawl that fills the Map's location index — once per session, only
+    /// Lazily kicks off the background GPS crawl that fills the Map's location index - once per session, only
     /// when the Map is first opened (so users who never open it never pay for the crawl).
     func startLocationCrawlIfNeeded() {
         guard !locationCrawlStarted, let backend, let session, !items.isEmpty else { return }
@@ -221,7 +221,7 @@ final class MobileLibraryModel {
         )
         locationIndex.replaceAll(locationStore.load())   // instant Map on relaunch
 
-        // Newest first — recent photos are likelier geotagged, so pins appear fast.
+        // Newest first - recent photos are likelier geotagged, so pins appear fast.
         let uids = items.reversed().map(\.uid)
         let dates = Dictionary(items.map { ($0.uid, $0.captureTime) }, uniquingKeysWith: { first, _ in first })
         let index = locationIndex

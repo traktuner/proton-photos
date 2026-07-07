@@ -3,8 +3,8 @@ import CoreGraphics
 /// Pure, platform-neutral policy for the pixel side a grid thumbnail should be uploaded at.
 ///
 /// The Metal texture cache is level-blind on its own - it clamps every upload to a single `maxTexturePixels`
-/// cap. That over-supplies texels for the dense overview levels (a 30-column tile is physically ~39–94 px yet
-/// still uploaded at 320 px = 11–33× the texels it can ever display), wasting GPU memory and upload bandwidth
+/// cap. That over-supplies texels for the dense overview levels (a 30-column tile is physically ~39-94 px yet
+/// still uploaded at 320 px = 11-33× the texels it can ever display), wasting GPU memory and upload bandwidth
 /// and - with no mipmaps - adding minification shimmer. This helper derives the *effective* cap for the
 /// on-screen slot so dense levels upload small textures while sparse levels saturate at the platform cap and
 /// keep full quality.

@@ -31,11 +31,11 @@ package struct UIKitMetalGridTexturePolicy: Equatable, Sendable {
 /// bookkeeping. Per-frame upload bytes and measured upload time are sized for a 120 Hz (8.3 ms) frame budget
 /// on A-series parts.
 ///
-/// `maxTexturePixels` is the ABSOLUTE ceiling reached only by the largest (sparsest) grid levels — dense
+/// `maxTexturePixels` is the ABSOLUTE ceiling reached only by the largest (sparsest) grid levels - dense
 /// levels are sized far below it per frame by `GridTextureUploadSizing`, so this ceiling never touches
 /// dense-scroll cost. It is calibrated to the largest L0 tile each surface class can produce: compact
-/// ≈ 133 pt × 3× scale × 1.15 headroom ≈ 460 px → 480; regular/expanded ≈ 200–250 pt × 2× × 1.15 ≈
-/// 460–575 px → 512 (expanded accepts slight undersupply at its very largest tiles to keep one upload
+/// ≈ 133 pt × 3× scale × 1.15 headroom ≈ 460 px → 480; regular/expanded ≈ 200-250 pt × 2× × 1.15 ≈
+/// 460-575 px → 512 (expanded accepts slight undersupply at its very largest tiles to keep one upload
 /// ≤ 1 MiB). Residency stays bounded by the UNCHANGED byte caps: at sparse levels few tiles are visible,
 /// so the visible set's texture bytes stay ≈ viewport pixels × 4 regardless of this ceiling.
 package enum UIKitMetalGridTexturePolicies {

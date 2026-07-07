@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 
 /// Owns the Proton auth lifecycle for the iOS/iPadOS app. This is a thin platform shell over the shared
-/// `ProtonAuthController` — the same controller macOS drives — so auth behavior is not forked per platform.
+/// `ProtonAuthController` - the same controller macOS drives - so auth behavior is not forked per platform.
 @MainActor
 final class MobileSessionModel: ObservableObject {
     static let signInPrompt = String(localized: "auth.sign_in_prompt")

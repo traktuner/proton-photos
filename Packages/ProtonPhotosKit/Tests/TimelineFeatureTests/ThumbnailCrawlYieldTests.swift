@@ -90,7 +90,7 @@ struct ThumbnailCrawlYieldTests {
     @Test func noteVisibleDemandPausesSequentialCrawl() async throws {
         // The cold-start starvation fix: the grid notes a live viewport via `noteVisibleDemand()` BEFORE it
         // decodes anything, so the crawl's `recentDemand` gate backs its filesystem scan off immediately and
-        // yields the serial feed actor to the visible decode — without waiting for `warmDecoded` (the very
+        // yields the serial feed actor to the visible decode - without waiting for `warmDecoded` (the very
         // call the crawl would otherwise starve) to reach the actor first.
         let seq = (0 ..< 3).map { PhotoUID(volumeID: "v", nodeID: "note-seq-\(UUID())-\($0)") }
         let payloads = Dictionary(uniqueKeysWithValues: seq.map { ($0, Self.bytes()) })

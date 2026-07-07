@@ -3,15 +3,15 @@ import Foundation
 /// Resolves the correct on-disk file extension for an EXPORTED / SHARED original, from the best
 /// available source in priority order.
 ///
-/// Why this exists: the shared timeline `mediaType` is a lossy placeholder — `DriveSDKBridge`
+/// Why this exists: the shared timeline `mediaType` is a lossy placeholder - `DriveSDKBridge`
 /// collapses every image to `image/jpeg` and every video to `video/quicktime`, so an extension
 /// derived from `PhotoItem.mediaType` alone mislabels a HEIC original as `.jpg` (the exact user bug
-/// this fixes). This folds the *authoritative* signals — the real decrypted Proton link filename,
-/// the true link MIME, and the original bytes' own magic-number signature — into one pure,
+/// this fixes). This folds the *authoritative* signals - the real decrypted Proton link filename,
+/// the true link MIME, and the original bytes' own magic-number signature - into one pure,
 /// value-only decision that both the iOS and macOS export paths share.
 ///
 /// Pure Foundation: no file I/O (callers pass the leading bytes), no `UniformTypeIdentifiers`/ImageIO
-/// (would break the PhotosCore cross-platform import allowlist), no platform UI — so it is fully
+/// (would break the PhotosCore cross-platform import allowlist), no platform UI - so it is fully
 /// unit-testable with byte fixtures (`OriginalFileNamingTests`). Byte sniffing reuses
 /// ``VideoContentSniffer`` so there is one magic-number source of truth.
 public enum OriginalFileNaming {
@@ -42,7 +42,7 @@ public enum OriginalFileNaming {
     ]
 
     /// The MIME types the SDK timeline stamps on EVERY item. They are too generic to trust for a
-    /// concrete extension whenever a stronger signal (a real filename or the byte signature) exists —
+    /// concrete extension whenever a stronger signal (a real filename or the byte signature) exists -
     /// otherwise a HEIC would be labelled `.jpg`.
     public static let placeholderMIMETypes: Set<String> = ["image/jpeg", "video/quicktime"]
 
@@ -56,20 +56,20 @@ public enum OriginalFileNaming {
 
     /// The best-source export extension (lowercased, no dot), or `nil` if nothing could be resolved
     /// (the caller then supplies a last-resort default). Resolution order:
-    /// 1. the real `filename`'s own extension when it is a recognised media extension — it IS the
+    /// 1. the real `filename`'s own extension when it is a recognised media extension - it IS the
     ///    original name, so it is the most authoritative signal;
     /// 2. a *trustworthy* `mimeType`: present, mapped, and NOT the generic timeline placeholder;
-    /// 3. the `header` bytes' magic-number signature — recovers HEIC/PNG/MP4/… when the MIME is the
+    /// 3. the `header` bytes' magic-number signature - recovers HEIC/PNG/MP4/… when the MIME is the
     ///    `image/jpeg` / `video/quicktime` placeholder (the "mediaType lies" case);
     /// 4. the placeholder `mimeType` mapped anyway (e.g. a genuine JPEG with no bytes to sniff);
-    /// 5. `fallbackMediaType` (the timeline `PhotoItem.mediaType`) mapped — last resort before `nil`.
+    /// 5. `fallbackMediaType` (the timeline `PhotoItem.mediaType`) mapped - last resort before `nil`.
     public static func fileExtension(
         filename: String?,
         mimeType: String?,
         header: Data?,
         fallbackMediaType: String? = nil
     ) -> String? {
-        // 1. Real filename extension (authoritative — this is the original's own name).
+        // 1. Real filename extension (authoritative - this is the original's own name).
         if let ext = recognizedExtension(fromFilename: filename) { return ext }
 
         // 2. Trustworthy metadata MIME (skip the generic timeline placeholder).
@@ -78,7 +78,7 @@ public enum OriginalFileNaming {
             return ext
         }
 
-        // 3. Byte signature — the ground truth when the MIME is the placeholder.
+        // 3. Byte signature - the ground truth when the MIME is the placeholder.
         if let header, let ext = extensionForHeader(header) { return ext }
 
         // 4. Placeholder MIME mapped anyway (genuine JPEG/MOV with nothing better available).
@@ -91,7 +91,7 @@ public enum OriginalFileNaming {
     }
 
     /// Convenience: the export extension with a guaranteed value. Falls back to `mov` for anything
-    /// that looks like a video, else `jpg` — the same last-resort the iOS/macOS paths used before.
+    /// that looks like a video, else `jpg` - the same last-resort the iOS/macOS paths used before.
     public static func resolvedExtension(
         filename: String?,
         mimeType: String?,
@@ -108,7 +108,7 @@ public enum OriginalFileNaming {
     }
 
     /// The exported/saved file's full basename, metadata-first. The real decrypted Proton
-    /// `metadataFilename` is authoritative — it IS the original's own name and already carries the correct
+    /// `metadataFilename` is authoritative - it IS the original's own name and already carries the correct
     /// extension (`IMG_0001.HEIC`), so it is returned verbatim (only sanitised for path safety), never
     /// re-stamped. This is what keeps a HEIC named `IMG_0001.HEIC` instead of a re-invented
     /// `ProductBrand-…jpg`. Only when no usable original name exists (metadata lookup failed completely, or
@@ -117,7 +117,7 @@ public enum OriginalFileNaming {
     /// Pure/value-only, so the iOS and macOS export + Photos-save paths share one decision (unit-tested).
     public static func exportFilename(metadataFilename: String?, fallbackBase: String, ext: String) -> String {
         if let sanitized = sanitizedOriginalName(metadataFilename) {
-            // The original's own extension is the most authoritative signal — keep the whole name verbatim.
+            // The original's own extension is the most authoritative signal - keep the whole name verbatim.
             if recognizedExtension(fromFilename: sanitized) != nil { return sanitized }
             // A real base name with a missing/unknown extension: keep the base, append the sniffed extension.
             return "\(sanitized).\(ext)"
@@ -150,7 +150,7 @@ public enum OriginalFileNaming {
 
     /// The concrete extension for a media file from its leading bytes, or `nil` if unrecognised.
     /// Distinguishes still-image ISO-BMFF brands (HEIC/HEIF/AVIF) from playable video containers
-    /// (MOV/MP4) — the distinction `PhotoItem.mediaType` cannot make.
+    /// (MOV/MP4) - the distinction `PhotoItem.mediaType` cannot make.
     public static func extensionForHeader(_ rawHeader: Data) -> String? {
         // Rebase to a fresh 0-indexed buffer so subscripting is safe regardless of how the caller
         // sliced the Data, and bound the work to the signature region.

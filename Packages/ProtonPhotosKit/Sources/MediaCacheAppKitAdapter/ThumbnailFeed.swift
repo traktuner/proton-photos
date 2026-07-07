@@ -75,7 +75,7 @@ public actor ThumbnailFeed {
     /// Governor-driven memory-pressure response for BOTH macOS RAM tiers this adapter owns: the AppKit
     /// NSImage wrappers here and the shared decoded-CGImage tier in the core. `scale` lowers each cost
     /// limit; `purge` drops held images now. `nonisolated` + thread-safe NSCaches, so the governor never
-    /// hops this actor. Nothing is lost — wrappers rebuild from the decoded tier, decodes from disk.
+    /// hops this actor. Nothing is lost - wrappers rebuild from the decoded tier, decodes from disk.
     public nonisolated func applyMemoryPressure(scale: Double, purge: Bool) {
         imageWrappers.applyMemoryPressure(scale: scale, purge: purge)
         core.applyDecodedMemoryPressure(scale: scale, purge: purge)

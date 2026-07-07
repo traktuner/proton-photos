@@ -169,8 +169,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     //
     // The toggle is a TileContentFitter mode switch, NOT a layout switch: it changes only the thumbnail's
     // contentRect/UV and NEVER the slot, columns, gap, pitch, content size, hit testing, anchor, or phase.
-    // `preferredNormalLevelContentMode` is the user's choice for NORMAL levels (L0–L3); the EFFECTIVE mode
-    // forces squareFillCrop on the dense overview levels (L4–L5, which support only that). The preference is
+    // `preferredNormalLevelContentMode` is the user's choice for NORMAL levels (L0-L3); the EFFECTIVE mode
+    // forces squareFillCrop on the dense overview levels (L4-L5, which support only that). The preference is
     // remembered, so returning from an overview to a normal level restores the user's aspect/square choice.
     // INITIAL DEFAULT = aspectFitInsideSquare (explicit app choice; matches the normal levels in the reference
     // clip - NOT a claim about Apple's own default).
@@ -183,7 +183,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     }
     var effectiveDisplayMode: TileContentDisplayMode { effectiveDisplayMode(for: level) }
 
-    /// Whether the aspect/square toggle is meaningful at a level (both modes supported → the normal levels L0–L3).
+    /// Whether the aspect/square toggle is meaningful at a level (both modes supported → the normal levels L0-L3).
     func aspectToggleAvailable(for level: Int) -> Bool { engine.contentModeToggleAvailable(level: level) }
     var aspectToggleAvailable: Bool { aspectToggleAvailable(for: level) }
 
@@ -220,8 +220,8 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     // MARK: - Level-aware upload sizing
     //
     // Thumbnails upload at the on-screen slot's native pixel size (slot points × display backing scale),
-    // not a fixed 320 px, so the dense overview levels - where a tile is physically ~39–94 px - stop wasting
-    // 11–33× the texels they can display. Sparse levels saturate at the adapter's `maxTexturePixels`, so their
+    // not a fixed 320 px, so the dense overview levels - where a tile is physically ~39-94 px - stop wasting
+    // 11-33× the texels they can display. Sparse levels saturate at the adapter's `maxTexturePixels`, so their
     // quality is unchanged. The pure sizing math lives in `GridCore.GridTextureUploadSizing`; here we only
     // supply the current level's slot side + the live backing scale.
 
@@ -277,7 +277,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
                                            fillOrder: fillOrder)
         super.init()
         rebuildIndex()
-        // Register the GPU texture cache with the injected memory governor (nil in tests — they never
+        // Register the GPU texture cache with the injected memory governor (nil in tests - they never
         // touch the shared governor). Weak capture means an orphaned coordinator's handler no-ops, so
         // no deinit bookkeeping is needed. On pressure the cache sheds offscreen residency but never the
         // visible pinned set, so what is on screen stays drawable.
@@ -674,14 +674,14 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     var topBarInset: CGFloat = 0 {
         didSet { if topBarInset != oldValue { engine.topInset = topBarInset; requestRedraw() } }
     }
-    /// Extra leading breathing room for the NORMAL levels (L0–L3) ONLY, so landscape thumbnails don't butt up
-    /// against the sidebar. Removed on the dense square overviews (L4–L5, which go edge-to-edge) and when no
+    /// Extra leading breathing room for the NORMAL levels (L0-L3) ONLY, so landscape thumbnails don't butt up
+    /// against the sidebar. Removed on the dense square overviews (L4-L5, which go edge-to-edge) and when no
     /// sidebar is present. Set by the host.
     var normalLevelLeadingGap: CGFloat = 0 {
         didSet { if normalLevelLeadingGap != oldValue { onContentSizeChange?(contentSize()); requestRedraw() } }
     }
     /// THE effective leading inset at a given level: the sidebar obstruction plus, for a normal level with a
-    /// visible sidebar, the small breathing gap (`monthLabels` marks the dense overviews L4–L5 → no gap), plus the
+    /// visible sidebar, the small breathing gap (`monthLabels` marks the dense overviews L4-L5 → no gap), plus the
     /// standard outer LEFT margin (`gridHorizontalMargin`). The right margin is taken off `layoutWidth`.
     func effectiveLeadingInset(forLevel lvl: Int) -> CGFloat {
         let gap = (sidebarObstructionInset > 0 && !engine.metrics(level: lvl).monthLabels) ? normalLevelLeadingGap : 0
@@ -693,7 +693,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
     /// level's width while the settled grid renders at the TARGET level's width: that width gap accumulates over the
     /// rows and drifts the anchor by many rows deep in the library (the reported release jump - tiny near the top,
     /// large far down). A constant gutter keeps `layoutWidth` level-independent so the commit lands exactly. Applied
-    /// to the NORMAL levels only (the dense square overviews L4–L5 stay edge-to-edge). The engine is unchanged: this
+    /// to the NORMAL levels only (the dense square overviews L4-L5 stay edge-to-edge). The engine is unchanged: this
     /// is purely a render inset + width trim, so the live-zoom lattice, transitions, and settled grid stay lock-step.
     private func gridHorizontalMargin(forLevel lvl: Int) -> CGFloat {
         engine.metrics(level: lvl).monthLabels ? 0 : Self.standardOuterMargin
@@ -1840,7 +1840,7 @@ final class MetalGridCoordinator: NSObject, MTKViewDelegate {
 extension MetalGridCoordinator {
 
     /// The slot-size-derived card corner radius (shared `GridCornerRadiusPolicy`): tiny dense cells draw
-    /// SHARP 90° corners, medium cells a reduced radius, large cells the full base — matching the settled
+    /// SHARP 90° corners, medium cells a reduced radius, large cells the full base - matching the settled
     /// composer path so a zoom transition never changes a tile's corner treatment mid-flight.
     private func cellRadius(_ base: Float, cell: CGRect) -> Float {
         MetalGridFrameComposer.cellRadius(base: CGFloat(base), cell: cell)

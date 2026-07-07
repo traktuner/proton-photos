@@ -11,7 +11,7 @@ import UIKit
 
 /// Native full-screen photo/video viewer. Paging + chrome live here (pure presentation); the media decoding,
 /// titles, video-playback and pinch-to-close semantics come from shared `PhotoViewerCore` and the shared
-/// backend — no viewer business logic is reimplemented per platform.
+/// backend - no viewer business logic is reimplemented per platform.
 struct MobilePhotoViewer: View {
     let items: [PhotoItem]
     let startIndex: Int
@@ -20,7 +20,7 @@ struct MobilePhotoViewer: View {
     @Environment(\.dismiss) private var dismiss
     @State private var index: Int
     @State private var chromeVisible = true
-    /// Bounded, shared image loader for the pages (thumbnail → screen-bounded preview, off-main + cached) —
+    /// Bounded, shared image loader for the pages (thumbnail → screen-bounded preview, off-main + cached) -
     /// the shared `PhotoViewerUIKitAdapter` store, wired to the feed's RAM tier via a closure so the
     /// adapter never depends on a concrete feed type.
     @State private var imageStore: UIKitViewerImageStore
@@ -58,7 +58,7 @@ struct MobilePhotoViewer: View {
             // The SwiftUI pager keeps its width-bound content offset and page size through a device rotation,
             // so the photo rotated displaced in a corner and snapped to centre only afterwards (a rebuild via
             // `.id` was a hard cut instead). UIPageViewController participates in the size transition and keeps
-            // the current page centred through the whole rotation — the Photos-app behavior.
+            // the current page centred through the whole rotation - the Photos-app behavior.
             MobileViewerPager(count: items.count, index: $index) { i, isCurrent in
                 MobileViewerPage(
                     item: items[i],
@@ -135,7 +135,7 @@ struct MobilePhotoViewer: View {
 }
 
 /// Native horizontal photo pager: `UIPageViewController(.scroll)` hosting the SwiftUI pages. Chosen over
-/// SwiftUI's `TabView(.page)` because it participates in the device-rotation size transition — the current
+/// SwiftUI's `TabView(.page)` because it participates in the device-rotation size transition - the current
 /// page stays centred and refits THROUGH the rotation animation instead of snapping afterwards. Selection
 /// syncs both ways via the `index` binding; `isCurrent` is re-injected into every live page on change, so
 /// pages keep their bounded load/teardown behavior (current page only).
@@ -224,7 +224,7 @@ private struct MobileViewerPager<Page: View>: UIViewControllerRepresentable {
     }
 }
 
-/// A single viewer page — a zoomable image, or a native video player for video items.
+/// A single viewer page - a zoomable image, or a native video player for video items.
 private struct MobileViewerPage: View {
     let item: PhotoItem
     let isCurrent: Bool
@@ -255,7 +255,7 @@ private struct MobileViewerPage: View {
 }
 
 /// Staged, bounded page loading (thumbnail → screen-bounded display image): the grid thumbnail shows instantly,
-/// then — for the CURRENT page ONLY — a mid-size preview or bounded original fallback is fetched and decoded
+/// then - for the CURRENT page ONLY - a mid-size preview or bounded original fallback is fetched and decoded
 /// off-main to a screen-bounded size and swapped in. Swipe-preview neighbours never fetch/decode (no fan-out),
 /// and swiping away cancels an in-flight load (the `.task(id:)` re-runs on the isCurrent flip). No full-resolution
 /// decode just because a page appeared.
@@ -273,7 +273,7 @@ private struct MobileImagePage: View {
     /// The displayed photo rect (aspect-fit area, zoom/pan-transformed) in page coordinates, reported live by
     /// the zoomable scroll view. Anchors the Live badge and the motion overlay to the PHOTO, not the viewer.
     @State private var photoFrame: CGRect?
-    /// In-flight zoom-tier decode — replaced (cancelling the old fetch) when the zoom settles elsewhere.
+    /// In-flight zoom-tier decode - replaced (cancelling the old fetch) when the zoom settles elsewhere.
     @State private var zoomDecodeTask: Task<Void, Never>?
     /// The decode cap of the image currently DISPLAYED (0 = grid thumbnail). Tier assignments are gated on
     /// `newCap >= displayedCap`, so a slower base-tier load can never DOWNGRADE a sharper zoom decode that
@@ -304,7 +304,7 @@ private struct MobileImagePage: View {
 
             // The paired motion clip, crossfaded in over the still while the press is held (once preloaded).
             // Framed to the DISPLAYED photo rect (zoom- and pan-transformed), so a zoomed-in Live Photo plays
-            // its motion at the same zoom/position as the still — never an unzoomed clip floating on top.
+            // its motion at the same zoom/position as the still - never an unzoomed clip floating on top.
             if item.isLivePhoto, let player = motion.player {
                 if let pf = photoFrame {
                     MobileMotionPlayerLayer(player: player)
@@ -321,7 +321,7 @@ private struct MobileImagePage: View {
                 }
             }
 
-            // The LIVE affordance — GLUED to the photo's top-left corner (not the viewer's). When zoom/pan
+            // The LIVE affordance - GLUED to the photo's top-left corner (not the viewer's). When zoom/pan
             // pushes that corner off-screen, the badge clamps to the viewer's edge instead of leaving it.
             if item.isLivePhoto {
                 MobileLiveBadge()
@@ -395,7 +395,7 @@ private struct MobileImagePage: View {
 
     /// Zoom settled beyond fit → decode the original at the size this zoom actually needs and swap it in.
     /// The swap is SEAMLESS by construction: only `UIImageView.image` changes (same aspect ratio), the scroll
-    /// view's zoomScale/contentOffset are untouched, so nothing moves — the pixels just get sharper. The store
+    /// view's zoomScale/contentOffset are untouched, so nothing moves - the pixels just get sharper. The store
     /// serves the bytes from the E2EE originals cache (already fetched by the base tier) and its
     /// `decodedCap` cache gate turns repeat settles at the same zoom into instant hits.
     private func loadZoomedDecodeIfNeeded(zoom: CGFloat) {
@@ -416,7 +416,7 @@ private struct MobileImagePage: View {
 }
 
 /// Positions content at the photo's top-left corner (inset), clamping to the viewer's edges when zoom/pan
-/// pushes that corner off-screen — the badge sticks to the photo but never leaves the viewer. Falls back to
+/// pushes that corner off-screen - the badge sticks to the photo but never leaves the viewer. Falls back to
 /// the classic viewer-corner placement until the first photo frame arrives.
 private struct MobilePhotoAnchoredTopLeading: ViewModifier {
     let photoFrame: CGRect?
@@ -451,7 +451,7 @@ private struct MobilePhotoAnchoredTopLeading: ViewModifier {
 }
 
 /// Native video playback via AVKit over the shared `VideoStreamProvider` streaming asset. Until playback
-/// visibly starts, the grid's thumbnail stands in as a poster with a native centered spinner — never a
+/// visibly starts, the grid's thumbnail stands in as a poster with a native centered spinner - never a
 /// black hole. A two-finger pinch (which the player's tap-driven controls ignore) shrinks the page onto
 /// the fingers and either springs back or closes, same shared policy as photos.
 private struct MobileVideoPage: View {
@@ -462,11 +462,11 @@ private struct MobileVideoPage: View {
 
     @State private var player: AVPlayer?
     /// The streaming asset is the ONLY strong owner of the range resource-loader, which AVFoundation holds
-    /// weakly — it must live as long as the player, or every protonvideo:// range request goes unserved.
+    /// weakly - it must live as long as the player, or every protonvideo:// range request goes unserved.
     @State private var streamingAsset: StreamingVideoAsset?
     @State private var failed = false
     @State private var poster: UIImage?
-    /// Set by the periodic time observer on the first advancing playback time — the moment frames are
+    /// Set by the periodic time observer on the first advancing playback time - the moment frames are
     /// actually rendering, which is when the poster and spinner may leave.
     @State private var playbackStarted = false
     @State private var timeObserverBox = VideoTimeObserverBox()
@@ -594,7 +594,7 @@ private struct MobileVideoPage: View {
 
     private func prepare() async {
         // Poster (grid thumbnail) shows instantly on any page. The player + streaming resource loader are created
-        // ONLY for the current page — a swipe-preview neighbour never spins up an AVPlayer / network loader.
+        // ONLY for the current page - a swipe-preview neighbour never spins up an AVPlayer / network loader.
         if poster == nil {
             poster = libraryModel.thumbnailFeed?.memoryImage(for: item.uid)
         }
@@ -615,7 +615,7 @@ private struct MobileVideoPage: View {
         }
     }
 
-    /// A playback time that actually advances is the reliable "frames are on screen" signal — player/item
+    /// A playback time that actually advances is the reliable "frames are on screen" signal - player/item
     /// status flips to ready well before the first frame renders, which would flash black.
     private func observeFirstFrame(of player: AVPlayer) {
         timeObserverBox.remove()
@@ -649,7 +649,7 @@ private struct ViewerDragState {
     var scale: CGFloat = 1
 }
 
-/// Owns an `AVPlayer` periodic time-observer token — the token must be removed from the SAME player
+/// Owns an `AVPlayer` periodic time-observer token - the token must be removed from the SAME player
 /// instance it was added to, which a plain `@State Any?` cannot guarantee across view updates.
 private final class VideoTimeObserverBox {
     private var token: Any?
@@ -671,7 +671,7 @@ private final class VideoTimeObserverBox {
 }
 
 /// UIScrollView-backed zoomable image: pinch + double-tap to zoom, single-tap toggles chrome. At minimum zoom
-/// the scroll view does not pan, so the enclosing page TabView keeps its swipe — and a pinch-IN at minimum
+/// the scroll view does not pan, so the enclosing page TabView keeps its swipe - and a pinch-IN at minimum
 /// zoom hands the image to the shared pinch-to-close interaction (`ViewerPinchDismissPolicy`): it sticks to
 /// the fingers, springs back below the threshold, closes past it.
 private struct MobileZoomableImage: UIViewRepresentable {
@@ -686,7 +686,7 @@ private struct MobileZoomableImage: UIViewRepresentable {
     /// coordinate space whenever layout/zoom/pan changes it. Drives the photo-anchored Live badge and the
     /// motion overlay's geometry, so both stay glued to the photo instead of the viewer.
     var onPhotoFrameChanged: ((CGRect) -> Void)? = nil
-    /// Fired when a zoom gesture/animation SETTLES, with the final zoom scale — the page uses it to swap in a
+    /// Fired when a zoom gesture/animation SETTLES, with the final zoom scale - the page uses it to swap in a
     /// sharper decode sized for that zoom (never during the gesture, so the interaction stays fluid).
     var onZoomSettled: ((CGFloat) -> Void)? = nil
 
@@ -776,7 +776,7 @@ private struct MobileZoomableImage: UIViewRepresentable {
         var onMotionStop: (() -> Void)?
         var onPhotoFrameChanged: ((CGRect) -> Void)?
         var onZoomSettled: ((CGFloat) -> Void)?
-        /// Last reported photo rect — reports are de-duplicated so a steady frame never spams @State updates.
+        /// Last reported photo rect - reports are de-duplicated so a steady frame never spams @State updates.
         private var lastReportedPhotoFrame: CGRect = .null
 
         private var dismissPinchActive = false
@@ -813,7 +813,7 @@ private struct MobileZoomableImage: UIViewRepresentable {
         func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
 
         /// The displayed photo rect: the aspect-FIT area of the image inside the (zoom-scaled) image view,
-        /// converted to the scroll view's superview space — the same space the page's SwiftUI overlays use.
+        /// converted to the scroll view's superview space - the same space the page's SwiftUI overlays use.
         func displayedPhotoFrame() -> CGRect? {
             guard let scrollView, let imageView, let img = imageView.image,
                   img.size.width > 0, img.size.height > 0 else { return nil }
@@ -845,7 +845,7 @@ private struct MobileZoomableImage: UIViewRepresentable {
             true
         }
 
-        /// Gate the dismiss pan so it begins ONLY on a clearly vertical drag while the image is unzoomed — a
+        /// Gate the dismiss pan so it begins ONLY on a clearly vertical drag while the image is unzoomed - a
         /// horizontal drag then falls through to the page TabView's paging swipe, and a zoomed image keeps its
         /// scroll-view pan. Every other recognizer begins normally.
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -909,7 +909,7 @@ private struct MobileZoomableImage: UIViewRepresentable {
                                       width: side.width / 3, height: side.height / 3)
                 scrollView.zoom(to: zoomRect, animated: true)
             }
-            // Programmatic zooms don't reliably deliver `scrollViewDidEndZooming` — settle explicitly once the
+            // Programmatic zooms don't reliably deliver `scrollViewDidEndZooming` - settle explicitly once the
             // zoom animation is over, so a double-tap zoom also gets its sharper decode.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self, weak scrollView] in
                 guard let self, let scrollView else { return }
@@ -964,7 +964,7 @@ private struct MobileZoomableImage: UIViewRepresentable {
     }
 }
 
-/// Hosts the Live Photo motion clip's `AVPlayerLayer` over the still — aspect-fit, transparent, non-interactive
+/// Hosts the Live Photo motion clip's `AVPlayerLayer` over the still - aspect-fit, transparent, non-interactive
 /// (the still underneath keeps the zoom/tap gestures). Mirrors the macOS `MotionPlayerLayerView`.
 private struct MobileMotionPlayerLayer: UIViewRepresentable {
     let player: AVPlayer
@@ -987,7 +987,7 @@ private struct MobileMotionPlayerLayer: UIViewRepresentable {
     }
 }
 
-/// The small "LIVE" affordance shown on a Live Photo page — signals the press-and-hold-to-play interaction.
+/// The small "LIVE" affordance shown on a Live Photo page - signals the press-and-hold-to-play interaction.
 private struct MobileLiveBadge: View {
     var body: some View {
         HStack(spacing: 4) {

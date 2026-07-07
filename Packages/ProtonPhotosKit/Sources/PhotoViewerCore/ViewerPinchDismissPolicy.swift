@@ -2,12 +2,12 @@ import CoreGraphics
 
 /// Shared semantics for the viewer's pinch-to-close interaction: with the media UNZOOMED, a light
 /// pinch-in attaches the media to the fingers (it scales and follows the pinch), and on release it
-/// either springs back to its resting viewer position or — past the dismiss threshold — closes the
+/// either springs back to its resting viewer position or - past the dismiss threshold - closes the
 /// viewer back to the grid. Platform adapters own the recognizers and animation plumbing; the
 /// engagement rule, the finger→display scale mapping and the release decision live here so the
 /// interaction feels identical on every platform.
 public enum ViewerPinchDismissPolicy {
-    /// Pinch-in engages only below this gesture scale — a zoom-intent (scale up) or noise around 1.0
+    /// Pinch-in engages only below this gesture scale - a zoom-intent (scale up) or noise around 1.0
     /// never grabs the media.
     public static let engagementScale: CGFloat = 0.98
 

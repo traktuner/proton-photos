@@ -83,7 +83,7 @@ struct ZoomableImageView: NSViewRepresentable {
                 imageView.image = image
             }
             // Reset zoom ONLY on photo NAVIGATION. A same-item image swap is a QUALITY UPGRADE
-            // (thumbnail → preview → original) — resetting here yanked the user's zoom/pan back to fit
+            // (thumbnail → preview → original) - resetting here yanked the user's zoom/pan back to fit
             // the moment the sharp original arrived. Same aspect ratio, same geometry: keeping
             // magnification untouched makes the upgrade invisible except for the added sharpness.
             if !sameItem {
@@ -150,7 +150,7 @@ private final class ZoomScrollView: NSScrollView {
     var onForceClick: () -> Void = {}
     var onForceClickEnded: () -> Void = {}
     var onPhotoFrameChanged: ((CGRect) -> Void)?
-    /// Last reported photo rect — reports are de-duplicated so a steady frame never spams SwiftUI state.
+    /// Last reported photo rect - reports are de-duplicated so a steady frame never spams SwiftUI state.
     private var lastReportedPhotoFrame: CGRect = .null
 
     private var dismissing = false
@@ -178,7 +178,7 @@ private final class ZoomScrollView: NSScrollView {
         onPhotoFrameChanged(rect)
     }
 
-    /// Called by AppKit on every scroll AND magnification change of the clip view — the one central hook
+    /// Called by AppKit on every scroll AND magnification change of the clip view - the one central hook
     /// that sees all pan/zoom updates.
     override func reflectScrolledClipView(_ cView: NSClipView) {
         super.reflectScrolledClipView(cView)

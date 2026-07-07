@@ -5,7 +5,7 @@ import XCTest
 /// overview-boundary steps dissolve, everything else (including ladder edges) reflows.
 final class GridPinchRoutePolicyTests: XCTestCase {
 
-    /// Production-shaped ladder: 0–3 are focus-row photo levels, 3→4 the overview warp, 4→5 the dense
+    /// Production-shaped ladder: 0-3 are focus-row photo levels, 3→4 the overview warp, 4→5 the dense
     /// overview zoom.
     private let engine = SquareTileGridEngine(
         sectionCounts: [500],

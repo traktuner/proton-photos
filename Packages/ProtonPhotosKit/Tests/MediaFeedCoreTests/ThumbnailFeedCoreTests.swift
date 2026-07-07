@@ -460,7 +460,7 @@ struct ThumbnailFeedCoreTests {
     // MARK: - Size-aware decoded tier (soft→sharp upgrades)
 
     @Test func warmReDecodesSharperWhenALargerPixelSizeIsRequested() async throws {
-        // Decoded once small for a dense level, the same UID must re-decode sharper for a larger level —
+        // Decoded once small for a dense level, the same UID must re-decode sharper for a larger level -
         // "already decoded" is size-aware, keyed on the shared 1.25× upgrade hysteresis.
         let uid = Self.uid("upgrade")
         let cache = Self.cache("upgrade")
@@ -478,7 +478,7 @@ struct ThumbnailFeedCoreTests {
     }
 
     @Test func warmSkipsSlightlyLargerAsksWithoutChurn() async throws {
-        // An ask below the 1.25× hysteresis (18 vs cap 16) must not re-decode — repeated settled frames at
+        // An ask below the 1.25× hysteresis (18 vs cap 16) must not re-decode - repeated settled frames at
         // a marginally different effective size stay free.
         let uid = Self.uid("no-churn")
         let cache = Self.cache("no-churn")
@@ -561,7 +561,7 @@ struct ThumbnailFeedCoreTests {
 
     @Test func memoryOnlyRenderReadPathNeverFallsThroughToDiskOrDecode() async throws {
         // The per-frame render read (`memoryDecoded`) must be a pure RAM lookup: bytes sitting on DISK must
-        // NOT be silently read/decrypted/decoded by it — that is warmDecoded's (off-render) job. A nil here
+        // NOT be silently read/decrypted/decoded by it - that is warmDecoded's (off-render) job. A nil here
         // despite disk-present bytes is the proof; after an explicit warm the same read serves from RAM.
         let uid = Self.uid("render-pure")
         let diskCache = Self.cache("render-pure")

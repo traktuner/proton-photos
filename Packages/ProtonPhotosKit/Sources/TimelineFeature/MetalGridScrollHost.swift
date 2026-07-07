@@ -91,8 +91,8 @@ final class MetalGridScrollHost: NSView {
             applyContentSize(coordinator.contentSize())
         }
     }
-    /// Extra leading breathing room between the sidebar and the grid for the NORMAL levels (L0–L3) only; the
-    /// dense square overviews (L4–L5) go edge-to-edge. The coordinator applies it only when a sidebar is present.
+    /// Extra leading breathing room between the sidebar and the grid for the NORMAL levels (L0-L3) only; the
+    /// dense square overviews (L4-L5) go edge-to-edge. The coordinator applies it only when a sidebar is present.
     nonisolated static let normalLevelLeadingGap: CGFloat = 16
 
     private var streamingTick: CADisplayLink?
@@ -316,7 +316,7 @@ final class MetalGridScrollHost: NSView {
         liveResizeStartFrame = viewportScreenFrame()
         // ARM the synchronized present for the whole gesture: the renderer then commits, waits until
         // scheduled and presents INSIDE the window's CATransaction (see `MetalGridRenderer.present`).
-        // Without this the async present races the layer resize — the previous frame gets stretched to the
+        // Without this the async present races the layer resize - the previous frame gets stretched to the
         // new size for a beat every tick, which reads as jitter/shimmer while dragging the window edge.
         metalView.presentsWithTransaction = true
         coordinator.liveResizeChanged?(true)

@@ -117,7 +117,7 @@ public struct LibraryMapView: NSViewRepresentable {
                 let hero = cluster.memberAnnotations.first as? PhotoMapAnnotation   // v1: first member (best/cover later)
                 let image = hero.flatMap { thumbnail($0.uid) }
                 // Sum each cell's memberCount so the badge shows every underlying photo the cluster
-                // represents — not just the number of cell pins MapKit chose to show.
+                // represents - not just the number of cell pins MapKit chose to show.
                 let totalCount = cluster.memberAnnotations
                     .compactMap { $0 as? PhotoMapAnnotation }
                     .reduce(0) { $0 + $1.memberCount }

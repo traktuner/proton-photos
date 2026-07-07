@@ -43,7 +43,7 @@ final class OriginalFileNamingTests: XCTestCase {
         XCTAssertNil(OriginalFileNaming.extensionForHeader(Data([0x00, 0x01])))
     }
 
-    /// A sliced (non-zero-based) Data must still sniff correctly — the resolver rebases internally.
+    /// A sliced (non-zero-based) Data must still sniff correctly - the resolver rebases internally.
     func testHeaderSniffHandlesSlicedData() {
         let padded = Data([0xAA, 0xBB]) + heic
         let slice = padded.dropFirst(2)   // startIndex == 2, not 0
@@ -82,7 +82,7 @@ final class OriginalFileNamingTests: XCTestCase {
         )
     }
 
-    /// The real Proton filename out-ranks a lying MIME and even mismatched bytes — it IS the original.
+    /// The real Proton filename out-ranks a lying MIME and even mismatched bytes - it IS the original.
     func testRealFilenameWinsOverMimeAndBytes() {
         XCTAssertEqual(
             OriginalFileNaming.fileExtension(
@@ -146,7 +146,7 @@ final class OriginalFileNamingTests: XCTestCase {
 
     // MARK: - exportFilename (the metadata-first naming decision shared by export + Photos-save)
 
-    /// THE acceptance criterion: a real HEIC original keeps its exact name — no `ProtonPhotos-*`, no `.jpg`.
+    /// THE acceptance criterion: a real HEIC original keeps its exact name - no `ProtonPhotos-*`, no `.jpg`.
     /// Extension case is preserved verbatim (the base filename must remain the original).
     func testExportFilenameKeepsRealHeicNameVerbatim() {
         XCTAssertEqual(
@@ -180,7 +180,7 @@ final class OriginalFileNamingTests: XCTestCase {
         )
     }
 
-    /// A real base name that lacks a (recognised) extension keeps the base and gains the sniffed extension —
+    /// A real base name that lacks a (recognised) extension keeps the base and gains the sniffed extension -
     /// never dropping the original name, never mislabelling the format.
     func testExportFilenameAppendsSniffedExtensionWhenNameHasNone() {
         XCTAssertEqual(

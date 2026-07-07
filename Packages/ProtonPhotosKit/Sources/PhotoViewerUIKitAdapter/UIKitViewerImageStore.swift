@@ -6,7 +6,7 @@ import PhotosCore
 import QuartzCore
 import UIKit
 
-/// Bounded, shared image loader for the full-screen viewer pages — the iOS surface of the shared
+/// Bounded, shared image loader for the full-screen viewer pages - the iOS surface of the shared
 /// ``ViewerImageLoadPolicy``, now owned by the UIKit viewer adapter so every host app shares one
 /// implementation (and its memory-pressure behavior) instead of re-rolling it per app target.
 ///
@@ -18,7 +18,7 @@ import UIKit
 /// back-and-forth paging reuses work without growing memory without bound.
 ///
 /// Memory pressure: `applyMemoryPressure` scales the cache's cost ceiling on the `.reduced` tier and, on
-/// the `.minimal` tier, purges every page EXCEPT the one currently on screen — the viewer stays visually
+/// the `.minimal` tier, purges every page EXCEPT the one currently on screen - the viewer stays visually
 /// intact while its transient RAM drops to a single bounded image. Closing the viewer releases the store
 /// (and with it the whole cache), preserving the existing teardown behavior.
 @MainActor
@@ -39,12 +39,12 @@ public final class UIKitViewerImageStore {
     private let media: (any FullMediaProvider)?
     /// Optional cache-first + persisting override for the ORIGINAL-bytes fallback path. Injected by the host
     /// app (which owns the encrypted originals cache) as a closure, so this adapter stays decoupled from the
-    /// cache layer (`MediaByteCache` deliberately sits outside this target — see `CoreArchitectureGateTests`).
+    /// cache layer (`MediaByteCache` deliberately sits outside this target - see `CoreArchitectureGateTests`).
     /// When present, seeding/reuse of the E2EE originals cache happens inside the closure; when nil the store
     /// falls back to `media.originalData` exactly as before.
     private let originalDataOverride: (@Sendable (PhotoUID) async throws -> Data)?
     private let cache = WrapperImageCache<CachedDisplayImage>(countLimit: 8, costLimitBytes: 48 * 1024 * 1024)
-    /// The page currently on screen — the one entry a `.minimal` purge keeps. `displayImage` is called for
+    /// The page currently on screen - the one entry a `.minimal` purge keeps. `displayImage` is called for
     /// the CURRENT page only (`ViewerImageLoadPolicy` gates neighbours), so recording it here is exact.
     private var currentPageUID: PhotoUID?
 
@@ -65,7 +65,7 @@ public final class UIKitViewerImageStore {
 
     /// Governor-driven memory-pressure response. `scale` lowers the display cache's cost ceiling; `purge`
     /// drops every page EXCEPT the current one, so the on-screen image never blanks under a memory warning.
-    /// One `[ViewerPerf]` line per invocation — the governor only calls on tier CHANGES, so no log spam.
+    /// One `[ViewerPerf]` line per invocation - the governor only calls on tier CHANGES, so no log spam.
     public func applyMemoryPressure(scale: Double, purge: Bool) {
         let clamped = min(1, max(0, scale))
         let scaledLimit = Int(Double(cache.nominalCostLimitBytes) * clamped)
@@ -73,7 +73,7 @@ public final class UIKitViewerImageStore {
             let keptKey = currentPageUID.map(Self.key)
             let keptCost = keptKey.flatMap { cache.image(forKey: $0)?.cost } ?? 0
             // Floor the shrunken limit at the kept page's cost so the on-screen entry survives its own
-            // re-insert even at scale 0 — "keep only what is currently essential", which this page IS.
+            // re-insert even at scale 0 - "keep only what is currently essential", which this page IS.
             cache.setCostLimit(max(scaledLimit, keptCost))
             cache.purge(keeping: keptKey, keptCost: keptCost)       // drop all non-visible pages
         } else {

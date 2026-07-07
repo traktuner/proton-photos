@@ -4,7 +4,7 @@ import PhotosCore
 /// Cache policy for ``EncryptedOriginalProvider``. Separated from the cache instance so the same
 /// encrypted store can back both a *persisting* consumer (the fullscreen viewer, which should seed
 /// the cache the first time an original is decrypted) and a *read-only* consumer (export/share, which
-/// reuses whatever the viewer already cached but must not itself grow the cache — mirroring macOS
+/// reuses whatever the viewer already cached but must not itself grow the cache - mirroring macOS
 /// `MainView.fetchOriginal`, which only ever READS the offline cache).
 public struct OriginalsCachePolicy: Sendable, Equatable {
     /// Whether a network download (cache miss) is sealed into the encrypted cache afterwards.
@@ -29,15 +29,15 @@ public struct OriginalsCachePolicy: Sendable, Equatable {
 /// The ONE shared "get decrypted original bytes, reusing the encrypted offline cache" path, used by
 /// the viewer and export on BOTH iOS and macOS. Before this existed the read-before-network + store +
 /// LRU logic was duplicated and diverged: macOS had it (App/MainView.fetchOriginal + the AppKit
-/// viewer), while iOS hit `FullMediaProvider.originalData` directly with only a RAM cache — so a
+/// viewer), while iOS hit `FullMediaProvider.originalData` directly with only a RAM cache - so a
 /// just-viewed original was re-downloaded for share/export, and decrypted originals were never held in
 /// the E2EE-safe encrypted cache on iOS at all.
 ///
 /// Contract:
 /// - **Cache hit** returns the cached plaintext and bumps its LRU marker, WITHOUT touching
 ///   ``FullMediaProvider/originalData(for:onProgress:)`` (no redundant network/decrypt).
-/// - **Cache miss** downloads via the provider (forwarding real byte progress), then — only when the
-///   policy persists — seals the bytes into the encrypted cache and enforces the byte cap.
+/// - **Cache miss** downloads via the provider (forwarding real byte progress), then - only when the
+///   policy persists - seals the bytes into the encrypted cache and enforces the byte cap.
 /// - All disk read/decrypt/seal work runs OFF the calling actor (`Task.detached`), so a main-actor
 ///   caller never blocks on AES-GCM or file I/O.
 /// - Returns raw `Data`; decoding to a platform image stays in each platform's UI layer, so this type
