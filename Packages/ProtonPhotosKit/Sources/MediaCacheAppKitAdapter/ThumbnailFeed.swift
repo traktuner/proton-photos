@@ -44,6 +44,10 @@ public actor ThumbnailFeed {
             cache: cache,
             loader: loader,
             configuration: configuration,
+            coverageStore: FileThumbnailCoverageCheckpointStore(
+                directory: cache.coverageCheckpointDirectory(),
+                scope: cache.coverageCheckpointScope()
+            ),
             clock: clock,
             onDecoded: { uid, decoded in
                 // Learned dimensions flow into the library metadata DB (batched, off this path);

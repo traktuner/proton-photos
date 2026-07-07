@@ -27,6 +27,7 @@ public actor ThumbnailCache {
     /// Encrypted blob directory (`<namespace>.enc`). The legacy plaintext dir (`<namespace>`) is purged.
     private nonisolated let directory: URL
     private nonisolated let legacyPlaintextDir: URL
+    private nonisolated let coverageCheckpointDir: URL
     private nonisolated let namespace: String
     private nonisolated let derivative: String
     private nonisolated let keyStore: CacheKeyStore
@@ -64,6 +65,7 @@ public actor ThumbnailCache {
         self.keyStore = keyStore
         self.legacyPlaintextDir = root.appendingPathComponent(namespace, isDirectory: true)
         self.directory = root.appendingPathComponent("\(namespace).enc", isDirectory: true)
+        self.coverageCheckpointDir = root.appendingPathComponent("\(namespace).coverage", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         // Secure by default: until account configuration installs the durable per-account key, seal with a
         // process-ephemeral key so nothing readable persists across launches, while in-process round-trips
@@ -187,6 +189,17 @@ public actor ThumbnailCache {
         return directory.appendingPathComponent(filename(uid: uid, account: account))
     }
 
+    /// Account/derivative-scoped checkpoint storage for whole-library thumbnail coverage. Kept beside the
+    /// encrypted cache and purged with it, so a cache clear can never leave stale "already cached" state.
+    public nonisolated func coverageCheckpointDirectory() -> URL {
+        coverageCheckpointDir
+    }
+
+    public nonisolated func coverageCheckpointScope() -> String {
+        let (_, account) = crypto.snapshot()
+        return "\(namespace)\u{1f}\(derivative)\u{1f}\(account)"
+    }
+
     // MARK: - Writes
 
     public nonisolated func storeToDisk(_ data: Data, for uid: PhotoUID) {
@@ -249,6 +262,7 @@ public actor ThumbnailCache {
         validated.clearAll()
         try? FileManager.default.removeItem(at: directory)
         try? FileManager.default.removeItem(at: legacyPlaintextDir)
+        try? FileManager.default.removeItem(at: coverageCheckpointDir)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
@@ -260,6 +274,7 @@ public actor ThumbnailCache {
         validated.clearAll()
         try? FileManager.default.removeItem(at: directory)
         try? FileManager.default.removeItem(at: legacyPlaintextDir)
+        try? FileManager.default.removeItem(at: coverageCheckpointDir)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         keyStore.deleteKey(account: account)
         crypto.set(

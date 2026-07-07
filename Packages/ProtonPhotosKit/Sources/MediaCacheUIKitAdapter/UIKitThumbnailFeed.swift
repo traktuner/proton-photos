@@ -49,6 +49,10 @@ public actor UIKitThumbnailFeed {
             cache: cache,
             loader: loader,
             configuration: configuration,
+            coverageStore: FileThumbnailCoverageCheckpointStore(
+                directory: cache.coverageCheckpointDirectory(),
+                scope: cache.coverageCheckpointScope()
+            ),
             clock: clock,
             onDecoded: { uid, decoded in
                 // Same DB-backed dimension pipeline as the macOS feed - batched, off this path.

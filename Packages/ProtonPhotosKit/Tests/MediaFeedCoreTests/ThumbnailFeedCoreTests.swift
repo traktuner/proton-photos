@@ -616,6 +616,114 @@ struct ThumbnailFeedCoreTests {
         await relaunchedFeed.stopPrefetch()
     }
 
+    @Test func coverageCheckpointSkipsKnownUIDsButFetchesNewRemoteUIDs() async throws {
+        let cached = (0 ..< 8).map { Self.uid("persist-known-\($0)") }
+        let newFirst = Self.uid("persist-new-first")
+        let newLast = Self.uid("persist-new-last")
+        let cache = Self.cache("persist-known")
+        let firstStore = Self.checkpointStore(for: cache)
+        let firstLoader = RecordingLoader(
+            payloads: Dictionary(uniqueKeysWithValues: cached.map { ($0, Self.pngData(width: 8, height: 8)) })
+        )
+        let firstFeed = ThumbnailFeedCore(
+            cache: cache,
+            loader: firstLoader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 2, batchSize: 2),
+            coverageStore: firstStore
+        )
+
+        await firstFeed.startPrefetch(cached)
+        try await Self.waitUntil { await firstFeed.prefetchStatus().diskCoverageVerified }
+        #expect(await firstLoader.requestCount() == cached.count)
+        await firstFeed.stopPrefetch()
+
+        let relaunchedStore = Self.checkpointStore(for: cache)
+        let relaunchedLoader = RecordingLoader(
+            payloads: [
+                newFirst: Self.pngData(width: 8, height: 8),
+                newLast: Self.pngData(width: 8, height: 8),
+            ]
+        )
+        let relaunchedFeed = ThumbnailFeedCore(
+            cache: cache,
+            loader: relaunchedLoader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 2, batchSize: 2),
+            coverageStore: relaunchedStore
+        )
+
+        await relaunchedFeed.startPrefetch([newFirst] + cached + [newLast])
+        try await Self.waitUntil { await relaunchedFeed.prefetchStatus().diskCoverageVerified }
+
+        #expect(await relaunchedLoader.requestCount() == 2)
+        #expect(await relaunchedLoader.fetched(newFirst))
+        #expect(await relaunchedLoader.fetched(newLast))
+        for uid in cached {
+            #expect(await relaunchedLoader.fetched(uid) == false)
+        }
+        #expect(cache.hasUsableDiskData(newFirst))
+        #expect(cache.hasUsableDiskData(newLast))
+        await relaunchedFeed.stopPrefetch()
+    }
+
+    @Test func cacheClearInvalidatesPersistentCoverageCheckpoint() async throws {
+        let uids = (0 ..< 6).map { Self.uid("clear-checkpoint-\($0)") }
+        let cache = Self.cache("clear-checkpoint")
+        let firstLoader = RecordingLoader(
+            payloads: Dictionary(uniqueKeysWithValues: uids.map { ($0, Self.pngData(width: 8, height: 8)) })
+        )
+        let firstFeed = ThumbnailFeedCore(
+            cache: cache,
+            loader: firstLoader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 2, batchSize: 2),
+            coverageStore: Self.checkpointStore(for: cache)
+        )
+
+        await firstFeed.startPrefetch(uids)
+        try await Self.waitUntil { await firstFeed.prefetchStatus().diskCoverageVerified }
+        await firstFeed.stopPrefetch()
+
+        await cache.clear()
+
+        let afterClearLoader = RecordingLoader(
+            payloads: Dictionary(uniqueKeysWithValues: uids.map { ($0, Self.pngData(width: 8, height: 8)) })
+        )
+        let afterClearFeed = ThumbnailFeedCore(
+            cache: cache,
+            loader: afterClearLoader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 2, batchSize: 2),
+            coverageStore: Self.checkpointStore(for: cache)
+        )
+
+        await afterClearFeed.startPrefetch(uids)
+        try await Self.waitUntil { await afterClearFeed.prefetchStatus().downloadCompleted == uids.count }
+        #expect(await afterClearLoader.requestCount() == uids.count)
+        await afterClearFeed.stopPrefetch()
+    }
+
+    @Test func implausibleCoverageCheckpointFallsBackToDiskVerification() async throws {
+        let present = Self.uid("implausible-present")
+        let missing = Self.uid("implausible-missing")
+        let cache = Self.cache("implausible-checkpoint")
+        cache.storeToDisk(Self.pngData(width: 8, height: 8), for: present)
+        let store = Self.checkpointStore(for: cache)
+        store.recordPresent([present, missing], for: "thumbnail-coverage-v1")
+        let loader = RecordingLoader(payloads: [missing: Self.pngData(width: 8, height: 8)])
+        let feed = ThumbnailFeedCore(
+            cache: cache,
+            loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 2),
+            coverageStore: store
+        )
+
+        await feed.startPrefetch([present, missing])
+        try await Self.waitUntil { await feed.prefetchStatus().diskCoverageVerified }
+
+        #expect(await loader.requestCount() == 1)
+        #expect(await loader.fetched(missing))
+        #expect(await loader.fetched(present) == false)
+        await feed.stopPrefetch()
+    }
+
     @Test func prefetchStatusReportsIncrementalDiskCoverage() async throws {
         let cached = (0 ..< 2).map { Self.uid("coverage-cached-\($0)") }
         let missing = Self.uid("coverage-missing")
@@ -796,6 +904,13 @@ struct ThumbnailFeedCoreTests {
         )
         cache.configure(accountUID: "acct-A")
         return cache
+    }
+
+    private static func checkpointStore(for cache: ThumbnailCache) -> FileThumbnailCoverageCheckpointStore {
+        FileThumbnailCoverageCheckpointStore(
+            directory: cache.coverageCheckpointDirectory(),
+            scope: cache.coverageCheckpointScope()
+        )
     }
 
     private static func uid(_ id: String) -> PhotoUID {

@@ -49,6 +49,131 @@ public struct ThumbnailFeedCoreConfiguration: Sendable, Equatable {
     }
 }
 
+public protocol ThumbnailCoverageCheckpointStore: Sendable {
+    func loadPresent(for key: String) -> Set<PhotoUID>
+    func recordPresent(_ uids: [PhotoUID], for key: String)
+    func recordMissing(_ uids: [PhotoUID], for key: String)
+}
+
+public final class FileThumbnailCoverageCheckpointStore: ThumbnailCoverageCheckpointStore, @unchecked Sendable {
+    private let directory: URL
+    private let scope: String
+    private let lock = NSLock()
+    private var loaded: [String: Set<PhotoUID>] = [:]
+
+    public init(directory: URL, scope: String) {
+        self.directory = directory
+        self.scope = Self.safeComponent(scope)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    public func loadPresent(for key: String) -> Set<PhotoUID> {
+        lock.withLock {
+            let pathKey = scopedKey(key)
+            let fileURL = url(for: pathKey)
+            guard FileManager.default.fileExists(atPath: fileURL.path) else {
+                loaded[pathKey] = []
+                return []
+            }
+            if let cached = loaded[pathKey] { return cached }
+            let present = Self.read(from: fileURL)
+            loaded[pathKey] = present
+            return present
+        }
+    }
+
+    public func recordPresent(_ uids: [PhotoUID], for key: String) {
+        record(uids, key: key, present: true)
+    }
+
+    public func recordMissing(_ uids: [PhotoUID], for key: String) {
+        record(uids, key: key, present: false)
+    }
+
+    private func record(_ uids: [PhotoUID], key: String, present: Bool) {
+        guard !uids.isEmpty else { return }
+        lock.withLock {
+            let pathKey = scopedKey(key)
+            let fileURL = url(for: pathKey)
+            var known = loaded[pathKey] ?? Self.read(from: fileURL)
+            let changed: [PhotoUID]
+            if present {
+                changed = uids.filter { known.insert($0).inserted }
+            } else {
+                changed = uids.filter { known.remove($0) != nil }
+            }
+            guard !changed.isEmpty else {
+                loaded[pathKey] = known
+                return
+            }
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let lines = changed.map { Self.line(for: $0, present: present) }.joined()
+            if let data = lines.data(using: .utf8) {
+                if FileManager.default.fileExists(atPath: fileURL.path),
+                   let handle = try? FileHandle(forWritingTo: fileURL) {
+                    do {
+                        try handle.seekToEnd()
+                        try handle.write(contentsOf: data)
+                        try handle.close()
+                    } catch {
+                        try? handle.close()
+                    }
+                } else {
+                    try? data.write(to: fileURL, options: .atomic)
+                }
+            }
+            loaded[pathKey] = known
+        }
+    }
+
+    private func scopedKey(_ key: String) -> String {
+        "\(scope)-\(Self.safeComponent(key))"
+    }
+
+    private func url(for scopedKey: String) -> URL {
+        directory.appendingPathComponent(scopedKey).appendingPathExtension("log")
+    }
+
+    private static func read(from url: URL) -> Set<PhotoUID> {
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else { return [] }
+        var result: Set<PhotoUID> = []
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard parts.count == 3,
+                  let volume = decode(String(parts[1])),
+                  let node = decode(String(parts[2])) else { continue }
+            let uid = PhotoUID(volumeID: volume, nodeID: node)
+            if parts[0] == "P" {
+                result.insert(uid)
+            } else if parts[0] == "M" {
+                result.remove(uid)
+            }
+        }
+        return result
+    }
+
+    private static func line(for uid: PhotoUID, present: Bool) -> String {
+        "\(present ? "P" : "M")\t\(encode(uid.volumeID))\t\(encode(uid.nodeID))\n"
+    }
+
+    private static func encode(_ value: String) -> String {
+        Data(value.utf8).base64EncodedString()
+    }
+
+    private static func decode(_ value: String) -> String? {
+        guard let data = Data(base64Encoded: value) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func safeComponent(_ value: String) -> String {
+        let cleaned = value.unicodeScalars.map { scalar -> String in
+            CharacterSet.alphanumerics.contains(scalar) ? String(scalar) : "_"
+        }.joined()
+        return String(cleaned.prefix(180))
+    }
+}
+
 /// Universal thumbnail pipeline core.
 ///
 /// Owns platform-independent feed behavior: disk/network decisions, priority ordering, background crawl,
@@ -61,6 +186,7 @@ public actor ThumbnailFeedCore {
     private nonisolated let decoded: DecodedThumbnailCache
     private nonisolated let diskPresence = DiskPresenceCache()
     private nonisolated let configuration: ThumbnailFeedCoreConfiguration
+    private nonisolated let coverageStore: (any ThumbnailCoverageCheckpointStore)?
 
     private var priority: [PhotoUID] = []
     private var priorityByUID: [PhotoUID: ThumbnailPriority] = [:]
@@ -76,6 +202,8 @@ public actor ThumbnailFeedCore {
     private var prefetchEnabled = true
     private var prefetchPaused = false
     private var checkpointKey: String?
+    private let coverageCheckpointKey = "thumbnail-coverage-v1"
+    private var checkpointPresent: Set<PhotoUID> = []
     private var prefetchCompleted = 0
     private var prefetchFailed = 0
     private var prefetchFailedTimeout = 0
@@ -130,12 +258,14 @@ public actor ThumbnailFeedCore {
         cache: ThumbnailCache,
         loader: ThumbnailBatchLoader,
         configuration: ThumbnailFeedCoreConfiguration = ThumbnailFeedCoreConfiguration(),
+        coverageStore: (any ThumbnailCoverageCheckpointStore)? = nil,
         clock: @escaping @Sendable () -> Date = { Date() },
         onDecoded: @escaping @Sendable (PhotoUID, DecodedThumbnail) -> Void = { _, _ in }
     ) {
         self.cache = cache
         self.loader = loader
         self.configuration = configuration
+        self.coverageStore = coverageStore
         self.clock = clock
         self.onDecoded = onDecoded
         self.decoded = DecodedThumbnailCache(costLimit: configuration.decodedMemoryBudgetBytes)
@@ -426,10 +556,15 @@ public actor ThumbnailFeedCore {
         guard prefetchEnabled else { return }
         sequential = uids
         checkpointKey = Self.checkpointKey(for: uids)
-        sequentialIndex = checkpointKey.flatMap { UserDefaults.standard.object(forKey: $0) as? Int } ?? 0
+        let storedPresent = coverageStore?.loadPresent(for: coverageCheckpointKey) ?? []
+        let trustedPresent = storedPresent.count <= cache.diskFileCount() ? storedPresent : []
+        checkpointPresent = trustedPresent
+        let firstNotPresent = uids.firstIndex { !trustedPresent.contains($0) } ?? uids.count
+        let legacyIndex = checkpointKey.flatMap { UserDefaults.standard.object(forKey: $0) as? Int } ?? 0
+        sequentialIndex = trustedPresent.isEmpty ? legacyIndex : firstNotPresent
         sequentialIndex = min(max(sequentialIndex, 0), sequential.count)
         lastPersistedSequentialIndex = sequentialIndex
-        diskPresence.beginTracking(uids)
+        diskPresence.beginTracking(uids, knownPresent: trustedPresent)
         unfetchable.removeAll()   // a fresh crawl retries backend-refused items exactly once
         lastRepassPercent = -1.0
         coverageScanCursor = 0
@@ -619,6 +754,7 @@ public actor ThumbnailFeedCore {
             let completed = snapshot.delivered.count
             prefetchCompleted += completed
             prefetchDownloadCompleted += completed
+            recordCheckpointPresent(Array(snapshot.delivered))
             let undelivered = chunk.filter { !snapshot.delivered.contains($0) }
             prefetchFailed += undelivered.count
             var networkSuspect = false   // batch/timeout/unreported failures point at transport, not content
@@ -721,6 +857,8 @@ public actor ThumbnailFeedCore {
 
     private func takeBatch() -> [PhotoUID] {
         var out: [PhotoUID] = []
+        var diskHits: [PhotoUID] = []
+        var diskMisses: [PhotoUID] = []
         while out.count < configuration.batchSize, !priority.isEmpty {
             let bestIndex = priority.indices.min {
                 let lhs = priorityByUID[priority[$0]] ?? .idleLibraryCrawl
@@ -734,12 +872,19 @@ public actor ThumbnailFeedCore {
                 skippedUnfetchable += 1
                 continue
             }
+            if checkpointPresent.contains(uid) {
+                diskPresence.set(uid, present: true)
+                prefetchDiskHit += 1
+                continue
+            }
             PhotoDiagnostics.shared.recordDiskPresenceCheckDuringPinch()
-            let diskHit = cache.has(uid)
+            let diskHit = cache.hasUsableDiskData(uid)
             diskPresence.set(uid, present: diskHit)
             if !diskHit {
+                diskMisses.append(uid)
                 out.append(uid)
             } else {
+                diskHits.append(uid)
                 prefetchDiskHit += 1
             }
         }
@@ -760,14 +905,23 @@ public actor ThumbnailFeedCore {
                 skippedUnfetchable += 1
                 continue
             }
-            let diskHit = cache.has(uid)
+            if checkpointPresent.contains(uid) {
+                diskPresence.set(uid, present: true)
+                prefetchDiskHit += 1
+                continue
+            }
+            let diskHit = cache.hasUsableDiskData(uid)
             diskPresence.set(uid, present: diskHit)
             if !diskHit && !out.contains(uid) {
+                diskMisses.append(uid)
                 out.append(uid)
             } else {
+                if diskHit { diskHits.append(uid) }
                 prefetchDiskHit += 1
             }
         }
+        recordCheckpointPresent(diskHits)
+        recordCheckpointMissing(diskMisses)
         if sequentialIndex > startIndex {
             persistSequentialCheckpointIfNeeded(force: sequentialIndex >= sequential.count)
         }
@@ -789,28 +943,50 @@ public actor ThumbnailFeedCore {
         return (now ?? clock()).timeIntervalSince(last) < configuration.visibleQuietWindow
     }
 
-    /// Bound on `cache.has` stats performed per `advanceDiskCoverageScan` invocation - the ceiling on how long
+    /// Bound on disk-presence stats performed per `advanceDiskCoverageScan` invocation - the ceiling on how long
     /// one end-of-crawl coverage step can hold the serial actor. Small enough that a visible warm decode never
     /// waits behind more than this many filesystem stats.
     private static let coverageScanChunk = 512
 
-    /// Advances the end-of-crawl disk-coverage re-scan by ONE bounded chunk of `cache.has` stats, returning the
+    /// Advances the end-of-crawl disk-coverage re-scan by ONE bounded chunk of disk checks, returning the
     /// refreshed coverage ONLY when a full pass just completed (else `nil` — "call again"). Bounded so it can
     /// never hold the serial actor for an O(library) scan, and it bails to `nil` the instant a viewport goes
     /// live, so it can never starve a visible warm decode. Workers share `coverageScanCursor`, so together they
     /// complete one pass in bounded steps; no single worker runs a full scan.
     private func advanceDiskCoverageScan() -> (present: Int, total: Int, percent: Double)? {
         var scanned = 0
+        var present: [PhotoUID] = []
+        var missing: [PhotoUID] = []
         while coverageScanCursor < sequential.count, scanned < Self.coverageScanChunk {
             if recentVisibleDemand() { return nil }
             let uid = sequential[coverageScanCursor]
-            diskPresence.set(uid, present: cache.has(uid))
+            let diskHit = checkpointPresent.contains(uid) || cache.hasUsableDiskData(uid)
+            diskPresence.set(uid, present: diskHit)
+            if diskHit {
+                present.append(uid)
+            } else {
+                missing.append(uid)
+            }
             coverageScanCursor += 1
             scanned += 1
         }
+        recordCheckpointPresent(present)
+        recordCheckpointMissing(missing)
         guard coverageScanCursor >= sequential.count else { return nil }   // pass not finished yet
         coverageScanCursor = 0
         return diskPresence.coverage()
+    }
+
+    private func recordCheckpointPresent(_ uids: [PhotoUID]) {
+        guard !uids.isEmpty else { return }
+        checkpointPresent.formUnion(uids)
+        coverageStore?.recordPresent(uids, for: coverageCheckpointKey)
+    }
+
+    private func recordCheckpointMissing(_ uids: [PhotoUID]) {
+        guard !uids.isEmpty else { return }
+        checkpointPresent.subtract(uids)
+        coverageStore?.recordMissing(uids, for: coverageCheckpointKey)
     }
 
     private enum CoverageRefreshOutcome { case settled, recrawl, aborted }
@@ -1220,10 +1396,13 @@ final class DiskPresenceCache: @unchecked Sendable {
     private var trackedTotal = 0
     private var trackedPresent = 0
 
-    func beginTracking(_ uids: [PhotoUID]) {
+    func beginTracking(_ uids: [PhotoUID], knownPresent: Set<PhotoUID> = []) {
         lock.withLock {
             trackedKeys = Set(uids)
             trackedTotal = uids.count
+            for uid in knownPresent where trackedKeys.contains(uid) {
+                values[uid] = true
+            }
             trackedPresent = uids.reduce(0) { count, uid in
                 count + (values[uid] == true ? 1 : 0)
             }
