@@ -408,6 +408,21 @@ final class BackupSyncRunnerTests: XCTestCase {
         UploadDedupePipeline(store: identityStore, hasher: hasher, checker: checker, now: { [clock] in clock!.now })
     }
 
+    func testTransientNetworkClassification() {
+        // These are the network's fault, not the item's → never park, and they drive concurrency backoff.
+        for code in [URLError.networkConnectionLost, .timedOut, .notConnectedToInternet,
+                     .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .secureConnectionFailed] {
+            XCTAssertTrue(BackupSyncRunner.isTransientNetwork(URLError(code)), "\(code) must be transient-network")
+        }
+        // The Proton SDK may surface the same as an NSError in the URL-error domain.
+        XCTAssertTrue(BackupSyncRunner.isTransientNetwork(
+            NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost)))
+        // Item-specific / non-network failures must NOT be treated as transient network.
+        XCTAssertFalse(BackupSyncRunner.isTransientNetwork(URLError(.badURL)))
+        XCTAssertFalse(BackupSyncRunner.isTransientNetwork(UploadError.backend("server said no")))
+        XCTAssertFalse(BackupSyncRunner.isTransientNetwork(NSError(domain: "Other", code: NSURLErrorTimedOut)))
+    }
+
     private func makeRunner(
         uploader: (any PhotoUploading)? = nil,
         identityResolver: (any UploadIdentityResolving)? = nil,

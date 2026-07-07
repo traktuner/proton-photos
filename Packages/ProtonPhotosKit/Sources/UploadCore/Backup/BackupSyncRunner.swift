@@ -75,6 +75,12 @@ public actor BackupSyncRunner {
     /// Reset to 0 the moment any export succeeds; when it reaches a full wave the drain ends the
     /// pass (rows stay runnable) instead of spinning against a genuinely full volume.
     private var resourcePressureStreak = 0
+    /// Consecutive transport-level network failures since the last successful settle. Subtracted from
+    /// the throttle's concurrency so the drain backs off a marginal/looping connection instead of
+    /// hammering it with parallel requests, and ramps back up as items succeed. Capped so it can
+    /// never wedge the drain below one in-flight item.
+    private var networkErrorStreak = 0
+    private static let maxNetworkBackoff = 5
     /// Earliest next-attempt time per queue row (in-memory: losing it on crash only means one
     /// immediate retry; the persisted attempt count keeps the budget bounded).
     private var notBefore: [String: Date] = [:]
@@ -160,7 +166,10 @@ public actor BackupSyncRunner {
         while !stopRequested {
             await requeueDueBlockedRows()
 
-            let limit = configuration.throttle.maxConcurrentItems(for: throttleInputs())
+            let policyLimit = configuration.throttle.maxConcurrentItems(for: throttleInputs())
+            // Back off concurrency while a marginal connection is dropping requests, but never below 1
+            // (never stall — a single in-flight item keeps making progress and probes recovery).
+            let limit = policyLimit == 0 ? 0 : max(1, policyLimit - networkErrorStreak)
             if limit == 0 {
                 if !progress.isPausedByPolicy {
                     progress.isPausedByPolicy = true
@@ -585,6 +594,11 @@ public actor BackupSyncRunner {
             source: entry.source, revision: entry.revision,
             state: terminal, attempts: nil, lastError: message, updatedAt: now()
         )
+        // A settled item means the connection is working again — ease the network backoff one step so
+        // concurrency ramps back toward the policy limit (gentle recovery, not an all-at-once jump).
+        if terminal.isTerminalSuccess, networkErrorStreak > 0 {
+            networkErrorStreak -= 1
+        }
         adjustProgress(from: oldState, to: terminal)
         if let resolved { closeDriftedRevisionRow(entry, resolved: resolved, as: terminal) }
         emitProgress()
@@ -626,6 +640,24 @@ public actor BackupSyncRunner {
         // untouched, and let the pass-level guard end the drain if the volume stays full.
         if Self.isTransientResourcePressure(error) {
             resourcePressureStreak += 1
+            let eligibleAt = now().addingTimeInterval(configuration.retry.delay(afterAttempts: 1))
+            queue.updateState(
+                source: entry.source, revision: entry.revision,
+                state: .discovered, attempts: entry.attempts, lastError: message, updatedAt: eligibleAt
+            )
+            notBefore[Self.key(entry)] = eligibleAt
+            adjustProgress(from: oldState, to: .discovered)
+            emitProgress()
+            return
+        }
+
+        // A transport-level network failure (connection reset, timeout, offline) is environmental, not
+        // the item's fault: never burn its retry budget into a permanent `.failed`. Requeue runnable
+        // with a short backoff, and grow a network-error streak so the drain throttles its concurrency
+        // down — many parallel requests are exactly what provokes NSURLErrorNetworkConnectionLost on a
+        // marginal link — then ramps back up as calls start succeeding again.
+        if Self.isTransientNetwork(error) {
+            networkErrorStreak = min(Self.maxNetworkBackoff, networkErrorStreak + 1)
             let eligibleAt = now().addingTimeInterval(configuration.retry.delay(afterAttempts: 1))
             queue.updateState(
                 source: entry.source, revision: entry.revision,
@@ -720,6 +752,22 @@ public actor BackupSyncRunner {
     /// retried indefinitely (with backoff) and never parked as `.failed`.
     private static func isTransientResourcePressure(_ error: Error) -> Bool {
         (error as? BackupTempFileStore.BackupTempFileError) == .diskBudgetExceeded
+    }
+
+    /// Transport-level failures that are the network's fault, not the item's: a dropped/reset
+    /// connection, a timeout, or being briefly offline. These must never park an item as `.failed`
+    /// (the photo is fine, the link isn't) and they drive the adaptive concurrency backoff. Matches
+    /// both `URLError` and an `NSError` in the URL-error domain (as the Proton SDK may surface it).
+    static func isTransientNetwork(_ error: Error) -> Bool {
+        let transientCodes: Set<Int> = [
+            NSURLErrorNetworkConnectionLost, NSURLErrorTimedOut, NSURLErrorNotConnectedToInternet,
+            NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed,
+            NSURLErrorResourceUnavailable, NSURLErrorSecureConnectionFailed, NSURLErrorCannotLoadFromNetwork,
+            NSURLErrorInternationalRoamingOff, NSURLErrorDataNotAllowed, NSURLErrorRequestBodyStreamExhausted,
+        ]
+        if let urlError = error as? URLError, transientCodes.contains(urlError.errorCode) { return true }
+        let ns = error as NSError
+        return ns.domain == NSURLErrorDomain && transientCodes.contains(ns.code)
     }
 
     private static func key(_ entry: UploadBackupSyncQueueEntry) -> String {
