@@ -61,6 +61,9 @@ public struct LibraryMapView: NSViewRepresentable {
         private var thumbnailLoadsInFlight = Set<PhotoUID>()
         private var lastRevision = Int.min
         private var didFrame = false
+        /// Last queried bounding box, so a sub-pixel `regionDidChange` (or a `revision` bump that
+        /// didn't move the box) doesn't re-filter and re-diff for nothing.
+        private var lastBoundingBox: GeoBoundingBox?
         private let visibleCoordinatePolicy = PhotoLocationVisibleCoordinatePolicy(
             marginMultiplier: 1.6,
             maxCoordinates: 3000
@@ -85,6 +88,9 @@ public struct LibraryMapView: NSViewRepresentable {
         func refreshIfChanged(revision: Int) {
             guard revision != lastRevision else { return }
             lastRevision = revision
+            // Index contents changed (crawl added coordinates): invalidate the bounding-box cache so
+            // we re-query even if the map region didn't move.
+            lastBoundingBox = nil
             frameToDenseCoreIfNeeded()
             reloadVisible()
         }
@@ -115,6 +121,12 @@ public struct LibraryMapView: NSViewRepresentable {
                 latitudeDelta: r.span.latitudeDelta,
                 longitudeDelta: r.span.longitudeDelta
             )
+            guard let box = visibleCoordinatePolicy.boundingBox(for: viewport) else { return }
+            // Coalesce: same box → same result set → diff would be a no-op. Skip to avoid churning
+            // annotations on MKMapView's sub-pixel regionDidChange jitter. refreshIfChanged clears
+            // lastBoundingBox when the index contents change, so crawl additions still re-query.
+            if lastBoundingBox == box { return }
+            lastBoundingBox = box
             let capped = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
             let wanted = Set(capped.map(\.uid))
 

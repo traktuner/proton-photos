@@ -52,7 +52,30 @@ public struct PhotoLocationVisibleCoordinatePolicy: Sendable, Equatable {
 
         let visible = coordinates.filter { box.contains(latitude: $0.latitude, longitude: $0.longitude) }
         guard visible.count > maxCoordinates else { return visible }
-        return Array(visible.prefix(maxCoordinates))
+        // Stable selection when capped: pick the N closest to the viewport center so a tiny box
+        // jitter at the margin doesn't swap thousands of results and cause massive diff churn.
+        // Plain euclidean squared distance on lat/lon — only a comparison key, not a real distance,
+        // so we keep MediaLocationCore free of any platform location type.
+        let centerLat = viewport.centerLatitude
+        let centerLon = viewport.centerLongitude
+        return Array(visible
+            .sorted { lhs, rhs in
+                let dl = distSq(lhs, centerLat, centerLon)
+                let dr = distSq(rhs, centerLat, centerLon)
+                if dl != dr { return dl < dr }
+                // Tie on distance: break deterministically so selection is stable across runs and
+                // toolchains (Swift's sorted(by:) stability is not guaranteed). Compare the uid's
+                // (volumeID, nodeID) tuple lexicographically — cheaper and separator-safe vs. a
+                // string key, since PhotoUID isn't Comparable.
+                return (lhs.uid.volumeID, lhs.uid.nodeID) < (rhs.uid.volumeID, rhs.uid.nodeID)
+            }
+            .prefix(maxCoordinates))
+    }
+
+    private func distSq(_ coord: PhotoCoordinate, _ centerLat: Double, _ centerLon: Double) -> Double {
+        let dLat = coord.latitude - centerLat
+        let dLon = coord.longitude - centerLon
+        return dLat * dLat + dLon * dLon
     }
 }
 

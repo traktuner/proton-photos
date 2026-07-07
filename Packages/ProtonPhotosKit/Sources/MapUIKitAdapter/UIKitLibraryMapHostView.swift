@@ -29,6 +29,9 @@ public final class UIKitLibraryMapHostView: UIView {
     private var thumbnailLoadTasks: [PhotoUID: Task<Void, Never>] = [:]
     private var lastRevision = Int.min
     private var didFrame = false
+    /// Last queried bounding box, so a sub-pixel `regionDidChange` (or a `revision` bump that didn't
+    /// move the box) doesn't re-filter, re-diff, and cancel/re-spawn thumbnail loads for nothing.
+    private var lastBoundingBox: GeoBoundingBox?
 
     public init(
         index: PhotoLocationIndex,
@@ -73,12 +76,18 @@ public final class UIKitLibraryMapHostView: UIView {
         self.loadThumbnail = loadThumbnail
         self.onSelectPhoto = onSelectPhoto
         self.onSelectCluster = onSelectCluster
+        // Callbacks changed; force a re-pass so any thumbnail-dequeuing re-resolves against the
+        // new closures (annotations themselves don't move, but the cache would otherwise skip).
+        lastBoundingBox = nil
         reloadVisible()
     }
 
     public func refreshIfChanged() {
         guard index.revision != lastRevision else { return }
         lastRevision = index.revision
+        // The index contents changed (crawl added coordinates): the cached bounding box is no longer
+        // a valid reason to skip re-querying, even if the map region itself didn't move.
+        lastBoundingBox = nil
         frameToDenseCoreIfNeeded()
         reloadVisible()
     }
@@ -132,6 +141,14 @@ public final class UIKitLibraryMapHostView: UIView {
             latitudeDelta: region.span.latitudeDelta,
             longitudeDelta: region.span.longitudeDelta
         )
+        guard let box = visibleCoordinatePolicy.boundingBox(for: viewport) else { return }
+        // Coalesce: if the queried box hasn't changed since the last pass, the result set is
+        // identical (same index, same box → same `visible`), so the diff would be a no-op.
+        // Skipping here avoids cancelling and re-spawning in-flight thumbnail loads on MKMapView's
+        // sub-pixel `regionDidChange` jitter. `refreshIfChanged` invalidates the cache when the
+        // index contents change, so a crawl adding photos still re-queries.
+        if lastBoundingBox == box { return }
+        lastBoundingBox = box
         let visible = index.coordinates(in: viewport, policy: visibleCoordinatePolicy)
         let wanted = Set(visible.map(\.uid))
 

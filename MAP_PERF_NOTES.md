@@ -89,6 +89,48 @@ in reloadVisible), dann ist der nächste Schritt:
   `cluster.memberAnnotations.count` (nur die sichtbaren MKAnnotations).
 - So bleiben alle Fotos repräsentiert, nur die MKMapView sieht weniger Pins.
 
+### Schritt 3b: Stabile Cap-Auswahl + Region-Debounce (IMPLEMENTIERT, work/map-cap-stability)
+
+Die os_log-Logs zeigten ein zweites, von den verlustfreien Fixes ungelöstes
+Symptom: `visible=3000 ... toRemove=2025 fresh=2025 thumbTasks=954` immer
+wieder, mit `thumbTasks` zwischen 37 und 1288 oszillierend.
+
+Ursache: Wenn die Viewport-Menge > `maxCoordinates` (3000) lag, wählte
+`Array(visible.prefix(maxCoordinates))` die ersten 3000 nach **Crawl-Insertion-
+Order** — nicht nach Nähe zum sichtbaren Bereich. Ein winziges Wackeln der
+Bounding-Box (MKMapView's sub-pixel `regionDidChange`, plus `revision`-Bumps vom
+Hintergrund-Crawl, die `refreshIfChanged` → `reloadVisible` triggern) änderte
+die Menge am Box-Rand marginal → `prefix` wählte eine *andere* Teilmenge von 3000
+→ `toRemove≈fresh≈2000` Churn, obwohl sich keine einzige Foto geografisch
+wirklich bewegte. In-flight Thumbnail-Loads wurden gecancelt und neu gespawned
+→ `thumbTasks`-Oszillation.
+
+Zwei ergänzende Fixes (beide verlustfrei — keine Foto-Zahlen, keine Cluster-Count-
+Änderung):
+
+1. **Stabile Cap-Auswahl** (`PhotoLocationViewport.swift`): Wenn gecapt, sortiere
+   die gefilterten Koordinaten nach quadriertem Abstand zum Viewport-Zentrum,
+   dann `prefix(maxCoordinates)`. Tie-Break deterministisch per
+   `(volumeID, nodeID)`-Tupel (Swifts `sorted(by:)`-Stabilität ist nicht garantiert).
+   Selbe Box + selber Index → selbe Auswahl → kein Churn bei Box-Wackeln.
+   Plattform-neutral (kein `CLLocationCoordinate2D` in `MediaLocationCore`;
+   plain-lat/lon-Euklid als Vergleichsschlüssel genügt — es ist kein echter
+   Abstand, nur ein Ordnungs-Key).
+
+2. **Box-Debounce** (`UIKitLibraryMapHostView.swift` iOS,
+   `LibraryMapView.swift` macOS): Cache der letzten `GeoBoundingBox`; wenn
+   `reloadVisible` mit unveränderter Box aufgerufen wird → skip (gleiche Inputs
+   → gleiche Menge → no-op-Diff). `refreshIfChanged` invalidiert den Cache bei
+   `revision`-Bump, damit Crawl-Neuzugänge weiterhin re-query'n. `configure()`
+   invalidiert ebenfalls (Callback-Wechsel).
+
+Was NICHT gelöst wird (bleibt für Schritt 3 / Index-Aggregation, falls nach
+diesem Fix `visible` noch zu hoch): MKMapView-interne Kosten von 3000 Views.
+Aber der Churn (toRemove/fresh/thumbTasks-Oszillation) sollte jetzt auf
+Veränderungen beschränkt sein, die *echte* Mitgliedschafts- oder
+Index-Veränderungen sind — nicht auf sub-pixel-Jitter.
+
+
 ### Schritt 4: Messung (vorbereitet, nicht vom Agent lauffähig)
 
 `UIKitLibraryMapHostView` loggt jetzt via `os_log`:

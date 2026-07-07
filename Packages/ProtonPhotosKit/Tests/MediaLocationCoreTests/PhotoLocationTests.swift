@@ -111,7 +111,7 @@ private func tempDir() -> URL {
         ))
     }
 
-    @Test func viewportPolicyFiltersAndCapsInInputOrder() {
+    @Test func viewportPolicyFiltersAndCapsByDistanceToCenter() {
         let index = PhotoLocationIndex()
         index.merge([
             coord("a", 47.8, 13.0),
@@ -128,7 +128,11 @@ private func tempDir() -> URL {
         )
 
         let hits = index.coordinates(in: viewport, policy: policy)
-        #expect(hits.map(\.uid) == [uid("a"), uid("b")])
+        // When capped, the N closest to the viewport center win — NOT the first N in insertion order.
+        // b is at the exact center (dist 0); a and c tie at equal distance, broken deterministically
+        // by the (volumeID, nodeID) tuple tiebreaker: ("v","a") < ("v","c") → a precedes c.
+        // With maxCoordinates=2 → [b, a].
+        #expect(hits.map(\.uid) == [uid("b"), uid("a")])
     }
 
     @Test func viewportPolicyRejectsInvalidInputsWithoutLeakingAllCoordinates() {
@@ -143,6 +147,51 @@ private func tempDir() -> URL {
         )
 
         #expect(index.coordinates(in: viewport, policy: policy).isEmpty)
+    }
+
+    /// Regression for the map-churn bug: when the viewport holds more photos than `maxCoordinates`,
+    /// a sub-pixel jitter of the map region must not swap which N photos win the cap. Before the fix,
+    /// `prefix(maxCoordinates)` picked by insertion order, so a tiny box-edge change re-selected a
+    /// different subset and caused the host to remove/re-add ~2000 annotations and cancel/re-spawn
+    /// their thumbnail loads on every jitter. Distance-to-center selection keeps the N closest
+    /// stable as the box edges wobble.
+    @Test func viewportPolicyCapsAreStableAcrossSmallViewportJitter() {
+        let index = PhotoLocationIndex()
+        // 6 photos at increasing distances from the cluster center, spaced widely enough that a
+        // sub-pixel center jitter cannot flip which one sits at the cap boundary (5th vs 6th).
+        // Photos ordered in insertion order OPPOSITE to distance, so the OLD prefix-based behavior
+        // would have picked the wrong 5 — this also asserts distance selection is in effect.
+        let center = (lat: 47.7045, lon: 13.1045)
+        index.merge([
+            coord("far1",   center.lat + 0.05, center.lon + 0.05), // insertion 0, but FARTHEST
+            coord("far2",   center.lat + 0.04, center.lon + 0.04),
+            coord("mid1",   center.lat + 0.002, center.lon + 0.002),
+            coord("near3",  center.lat + 0.0015, center.lon + 0.0015),
+            coord("near2",  center.lat + 0.001, center.lon + 0.001),
+            coord("near1",  center.lat, center.lon),               // insertion 5, CLOSEST
+        ])
+        let policy = PhotoLocationVisibleCoordinatePolicy(marginMultiplier: 2.0, maxCoordinates: 5)
+
+        // Box radius = delta * marginMultiplier = 0.03 * 2.0 = 0.06 ≥ 0.05, so all 6 photos are
+        // inside both viewports — cap binds, isolation is purely about deterministic selection.
+        let viewportA = PhotoLocationViewport(
+            centerLatitude: center.lat, centerLongitude: center.lon,
+            latitudeDelta: 0.03, longitudeDelta: 0.03
+        )
+        let viewportB = PhotoLocationViewport(
+            // Sub-pixel jitter: same region scale, fractionally shifted center. All 6 photos
+            // remain inside both boxes (membership unchanged), so the only variable is which 5
+            // win the cap — and distance selection must keep them stable.
+            centerLatitude: center.lat + 0.0000001, centerLongitude: center.lon + 0.0000001,
+            latitudeDelta: 0.03, longitudeDelta: 0.03
+        )
+
+        let hitsA = index.coordinates(in: viewportA, policy: policy).map(\.uid)
+        let hitsB = index.coordinates(in: viewportB, policy: policy).map(\.uid)
+        #expect(hitsA.count == 5, "expected cap to bind; got \(hitsA.count)")
+        #expect(hitsA == hitsB, "capped selection must be stable across sub-pixel viewport jitter")
+        // The farthest photo (far1) is the one dropped, NOT the last-inserted one.
+        #expect(!hitsA.contains(uid("far1")), "distance selection drops the farthest, not the last-inserted")
     }
 }
 
