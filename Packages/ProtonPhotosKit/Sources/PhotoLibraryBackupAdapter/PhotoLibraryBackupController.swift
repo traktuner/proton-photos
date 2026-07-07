@@ -92,6 +92,10 @@ public final class PhotoLibraryBackupController {
     private var activeRunID: String?
     private var pendingSyncAfterStop = false
     private var isScanning = false
+    /// Self-heal: previously-failed items are given a fresh attempt automatically on the first pass of
+    /// each app launch, so a transient failure that exhausted its retries never requires the user to
+    /// tap anything. One shot per launch (permanently-bad items don't spin every pass).
+    private var didAutoRetryFailedThisLaunch = false
     private var lastStatusUpdate = Date.distantPast
     /// Last item the runner reported working on. The 1s status refresh reads the DURABLE queue (which
     /// has no notion of "current item"), so without caching it the liveness line would blink out
@@ -302,6 +306,13 @@ public final class PhotoLibraryBackupController {
             return
         }
         activeRunID = runID
+
+        // Self-heal once per launch: fold previously-failed items back into this pass so the user
+        // never has to tap "back up now" for a transient failure to be retried.
+        if !didAutoRetryFailedThisLaunch {
+            didAutoRetryFailedThisLaunch = true
+            queueStore?.requeueFailed(updatedAt: Date())
+        }
 
         autoResumeTask?.cancel(); autoResumeTask = nil   // a pass is starting; the timer's job is done
         isSyncing = true

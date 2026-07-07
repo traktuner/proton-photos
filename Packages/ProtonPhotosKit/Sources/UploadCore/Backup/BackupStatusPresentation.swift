@@ -76,28 +76,27 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         switch status.phase {
         case .scanning:
             self.init(headlineKey: "backup.phase_scanning", isActive: true, accessory: .activity,
-                      progressFraction: nil, backedUp: status.backedUp, total: status.totalConsidered ?? 0,
-                      attentionCount: status.needsAttentionCount)
+                      progressFraction: nil, backedUp: status.backedUp, total: status.totalConsidered ?? 0)
 
         case .checking, .uploading:
             // The one distinction that must always be right: bytes actually moving => "backing up".
+            // No attention line mid-run - failures self-heal on the next pass; only the terminal
+            // needsAttention state surfaces what genuinely couldn't be backed up.
             self.init(headlineKey: uploadingNow ? "backup.phase_uploading" : "backup.phase_checking",
                       isActive: true, accessory: .activity,
                       progressFraction: status.fractionCompleted,
                       backedUp: status.backedUp, total: status.totalConsidered ?? 0,
-                      uploadPercent: percent, attentionCount: status.needsAttentionCount)
+                      uploadPercent: percent)
 
         case .paused:
             self.init(headlineKey: "backup.phase_paused", isActive: false, accessory: .paused,
                       progressFraction: status.fractionCompleted,
-                      backedUp: status.backedUp, total: status.totalConsidered ?? 0,
-                      attentionCount: status.needsAttentionCount)
+                      backedUp: status.backedUp, total: status.totalConsidered ?? 0)
 
         case .waiting:
             self.init(headlineKey: "backup.phase_waiting", isActive: false, accessory: .idle,
                       progressFraction: status.fractionCompleted,
-                      backedUp: status.backedUp, total: status.totalConsidered ?? 0,
-                      attentionCount: status.needsAttentionCount)
+                      backedUp: status.backedUp, total: status.totalConsidered ?? 0)
 
         case .completed:
             self.init(headlineKey: "backup.phase_completed", isActive: false, accessory: .success,
