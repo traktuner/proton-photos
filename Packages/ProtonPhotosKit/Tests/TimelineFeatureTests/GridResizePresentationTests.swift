@@ -37,6 +37,24 @@ private final class PresentationTestDataSource: MetalGridDataSource {
     private func src(_ name: String) -> String {
         (try? String(contentsOf: repoRoot().appendingPathComponent("Packages/ProtonPhotosKit/Sources/TimelineFeature/\(name)"), encoding: .utf8)) ?? ""
     }
+    /// Extract a full function body by brace-matching from its signature, so a substring guard checks the
+    /// WHOLE function (robust to the function growing) rather than a brittle fixed byte window that silently
+    /// drops the guard the moment the function gets longer. Returns "" if the signature isn't found.
+    private func funcBody(_ source: String, _ signature: String) -> String {
+        guard let sig = source.range(of: signature),
+              let brace = source.range(of: "{", range: sig.upperBound ..< source.endIndex) else { return "" }
+        var depth = 0
+        var i = brace.lowerBound
+        while i < source.endIndex {
+            switch source[i] {
+            case "{": depth += 1
+            case "}": depth -= 1; if depth == 0 { return String(source[brace.lowerBound ... i]) }
+            default: break
+            }
+            i = source.index(after: i)
+        }
+        return String(source[brace.lowerBound...])
+    }
     @MainActor
     private func makeCoordinator(width: CGFloat = 1200, height: CGFloat = 800, level: Int = 3,
                                  scrollY: CGFloat = 1800, count: Int = 2000) -> (MetalGridCoordinator, MetalGridView, NSClipView)? {
@@ -182,10 +200,10 @@ private final class PresentationTestDataSource: MetalGridDataSource {
     // groups from THOSE - never `engine.framePlan` for the render.
     @Test func presentationScalesSnapshotNotPerFrameResolve() {
         let coord = src("MetalGridCoordinator.swift")
-        guard let drawRange = coord.range(of: "func drawPresentationResize") else { Issue.record("drawPresentationResize missing"); return }
-        let drawBody = String(coord[drawRange.lowerBound ..< (coord.index(drawRange.lowerBound, offsetBy: 700, limitedBy: coord.endIndex) ?? coord.endIndex)])
-        guard let slotRange = coord.range(of: "func resizePresentationSlots") else { Issue.record("resizePresentationSlots missing"); return }
-        let slotBody = String(coord[slotRange.lowerBound ..< (coord.index(slotRange.lowerBound, offsetBy: 1600, limitedBy: coord.endIndex) ?? coord.endIndex)])
+        let drawBody = funcBody(coord, "func drawPresentationResize")
+        let slotBody = funcBody(coord, "func resizePresentationSlots")
+        guard !drawBody.isEmpty else { Issue.record("drawPresentationResize missing"); return }
+        guard !slotBody.isEmpty else { Issue.record("resizePresentationSlots missing"); return }
         #expect(drawBody.contains("resizePresentationSlots(viewportSize: viewportSize)"))
         #expect(slotBody.contains("presentationSnapshotSlots") && slotBody.contains("presentationScaledRect"),
                 "the render must SCALE the captured snapshot (one coherent surface), not re-resolve per tick")
@@ -354,8 +372,8 @@ private final class PresentationTestDataSource: MetalGridDataSource {
     // change settles to the counter-scrolled scroll (start − slide), with NO animation.
     @Test func settleIsAxisAware() {
         let host = src("MetalGridScrollHost.swift")
-        guard let dr = host.range(of: "func windowDidEndLiveResize()") else { Issue.record("windowDidEndLiveResize missing"); return }
-        let db = String(host[dr.lowerBound ..< (host.index(dr.lowerBound, offsetBy: 1500, limitedBy: host.endIndex) ?? host.endIndex)])
+        let db = funcBody(host, "func windowDidEndLiveResize()")
+        guard !db.isEmpty else { Issue.record("windowDidEndLiveResize missing"); return }
         #expect(db.contains("widthChanged"), "the settle must branch on the resize axis")
         #expect(db.contains("presentationStartScrollY - coordinator.presentationVerticalShift"), "pure vertical settles to the counter-scrolled scroll")
         #expect(db.contains("widthChanged && coordinator.beginResizeSettle"), "the reserved release-settle guard is width-only")
