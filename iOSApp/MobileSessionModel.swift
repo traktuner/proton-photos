@@ -1,3 +1,4 @@
+import PhotosCore
 import ProtonAuth
 import ProtonCoreCryptoPatchedGoImplementation
 import SwiftUI
@@ -38,6 +39,10 @@ final class MobileSessionModel: ObservableObject {
     }
 
     func signOut() {
+        // Explicit user sign-out: arm the local-data purge BEFORE tearing the session down, so the
+        // post-teardown / next-launch check wipes every account container. Never armed on a transient
+        // session re-check — only here (see BackupLocalDataPurge).
+        BackupLocalDataPurge.requestPurgeOnSignOut()
         apply(authController.signOut())
     }
 
@@ -63,6 +68,7 @@ final class MobileSessionModel: ObservableObject {
             isSigningIn = false
             errorText = nil
             statusText = String(localized: "auth.signed_in")
+            BackupLocalDataPurge.cancelPurgeRequest()   // never purge a now-active account
         }
     }
 

@@ -287,6 +287,9 @@ final class MobileLibraryModel {
         locationIndex.replaceAll([])
         locationIndex.updateScanProgress(PhotoLocationScanProgress())
         Task { [locationCrawl] in await locationCrawl.cancel() }
+        // Purges ONLY when an explicit sign-out armed it (never on a transient session re-check), and
+        // only now that backup is stopped and the session-scoped stores above are released.
+        BackupLocalDataPurge.purgeIfSignOutRequested()
     }
 
     private func start(session: ProtonSession, store: SessionKeychainStore) {

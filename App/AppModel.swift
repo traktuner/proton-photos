@@ -127,6 +127,10 @@ final class AppModel {
                 policy: .standard(libraryDatabasePolicy: ProtonDriveBackendPolicy.desktopLibraryDatabasePolicy)
             )
         }
+        // Nuke EVERY account container (backup queue/state/dedup-manifest/catalog for all uids), not
+        // just the current session's: past sign-ins otherwise leave orphaned containers behind, and a
+        // stale backup state forces the next login to re-verify the whole library. Same shared code as iOS.
+        BackupLocalDataPurge.purgeAllLocalAccountData()
         apply(authController.signOut(), prepareBackendOnSignedIn: false)
     }
 
@@ -196,6 +200,7 @@ final class AppModel {
             auth = .authenticating(status: Self.localizedStatus(for: progress))
         case let .signedIn(session):
             auth = .signedIn(session)
+            BackupLocalDataPurge.cancelPurgeRequest()   // never purge a now-active account
             if prepareBackendOnSignedIn {
                 prepareBackend(session)
             }
