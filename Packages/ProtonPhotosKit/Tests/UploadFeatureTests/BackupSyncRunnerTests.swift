@@ -667,44 +667,17 @@ final class BackupSyncRunnerTests: XCTestCase {
         XCTAssertTrue(uploader.requests.isEmpty)
     }
 
-    // MARK: 9. Throttle pauses scheduling entirely
+    // MARK: 9. Thermal pressure no longer pauses backup (OS manages its own thermal state)
 
-    func testCriticalThermalInputPausesWithoutFailingWork() async throws {
+    func testCriticalThermalInputDoesNotPauseBackup() async throws {
         let entry = seedEntry("hot.jpg")
-        let gate = ThrottleGate()
 
-        let runner = makeRunner(throttleInputs: { gate.inputs })
-        // Flip back to nominal after the runner observed the pause twice.
-        let observer = Task {
-            while gate.pauseObservations < 2 { await Task.yield() }
-            gate.set(BackupThrottleInputs())
-        }
-        gate.set(BackupThrottleInputs(thermalLevel: .critical))
+        let runner = makeRunner(throttleInputs: { BackupThrottleInputs(thermalLevel: .critical) })
         let progress = await runner.runUntilDrained()
-        observer.cancel()
 
-        XCTAssertEqual(state(of: entry), .completed, "paused work must resume, not fail")
+        XCTAssertEqual(state(of: entry), .completed,
+                       "critical thermal must not pause or fail backup work")
         XCTAssertEqual(progress.uploaded, 1)
-        XCTAssertGreaterThanOrEqual(gate.pauseObservations, 2)
-    }
-
-    private final class ThrottleGate: @unchecked Sendable {
-        private let lock = NSLock()
-        private var _inputs = BackupThrottleInputs()
-        private var _pauseObservations = 0
-
-        var inputs: BackupThrottleInputs {
-            lock.withLock {
-                if _inputs.thermalLevel == .critical { _pauseObservations += 1 }
-                return _inputs
-            }
-        }
-
-        var pauseObservations: Int { lock.withLock { _pauseObservations } }
-
-        func set(_ inputs: BackupThrottleInputs) {
-            lock.withLock { _inputs = inputs }
-        }
     }
 
     // MARK: 9b. Identical content discovered concurrently uploads exactly once
