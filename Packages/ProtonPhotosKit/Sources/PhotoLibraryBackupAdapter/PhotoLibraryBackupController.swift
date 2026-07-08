@@ -548,8 +548,8 @@ public final class PhotoLibraryBackupController {
         instantWorkTask = Task.detached(priority: .utility) {
             let sync = PhotoLibraryCatalogSync(store: catalogStore)
             _ = try? await sync.run(engine: engine, identifiers: targeted)
-            // The durable rows are now runnable; the running reconcile loop will claim them. Wake it if
-            // it was sleeping between drains so it does not wait up to 250 ms.
+            // The durable rows are now runnable; the concurrent reconcile loop claims them on its next
+            // drain cycle (within its ~250 ms inter-drain sleep) — no explicit wake needed.
         }
     }
 

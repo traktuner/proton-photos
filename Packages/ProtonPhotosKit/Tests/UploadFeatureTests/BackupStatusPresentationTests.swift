@@ -55,7 +55,6 @@ final class BackupStatusPresentationTests: XCTestCase {
         // in the app build the resolved localized value "...file 43 %" appears. Both contain "43".)
         XCTAssertEqual(subtitle?.contains("43"), true, "the live percentage proves the upload is moving")
         XCTAssertFalse(subtitle?.contains("IMG_5560.MOV") ?? true, "no filename in the subtitle")
-        XCTAssertFalse(subtitle?.contains("IMG_5560.MOV") ?? true, "no filename in the subtitle")
     }
 
     func testSubtitleIsCountOfBackedUpOverTotalWithNoPercentWhenNotUploading() {
