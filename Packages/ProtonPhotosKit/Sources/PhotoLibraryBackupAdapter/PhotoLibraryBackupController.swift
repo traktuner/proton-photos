@@ -108,6 +108,13 @@ public final class PhotoLibraryBackupController {
     private var lastRunnerUploadingFraction: Double?
     private var lastRunnerUploadingByteCount: Int?
 
+    /// Platform hook: invoked with `true` when a backup pass is actively running (so the host app may
+    /// keep the display awake / request background time) and `false` the moment backup goes idle,
+    /// paused, or finished. The controller stays UIKit-agnostic; the iOS app injects a closure that
+    /// toggles `UIApplication.shared.isIdleTimerDisabled`, macOS leaves the default no-op. Called at
+    /// every `isSyncing` transition so the timer never pins the screen after backup ends.
+    public var idleTimerHook: ((Bool) -> Void)?
+
     public init(
         configuration: Configuration,
         identityResolver: (any UploadIdentityResolving)?,
@@ -316,6 +323,7 @@ public final class PhotoLibraryBackupController {
 
         autoResumeTask?.cancel(); autoResumeTask = nil   // a pass is starting; the timer's job is done
         isSyncing = true
+        updateIdleTimerIfNeeded()
         isScanning = false
         lastMessage = nil
         status = BackupStatus(progress: currentQueueProgress(), isScanning: false)
@@ -522,6 +530,7 @@ public final class PhotoLibraryBackupController {
         lockStore?.release(runID: runID)
         if activeRunID == runID { activeRunID = nil }
         isSyncing = false
+        updateIdleTimerIfNeeded()
         isScanning = false
         lastRunnerItemName = nil
         lastRunnerUploadingName = nil
@@ -555,6 +564,14 @@ public final class PhotoLibraryBackupController {
 
     private func refreshFromQueue() {
         status = BackupStatus(progress: currentQueueProgress(), isScanning: false, isUserPaused: isUserPaused)
+    }
+
+    /// Keeps the display awake while a backup pass is actively running (iOS host implements
+    /// `idleTimerHook`). When idle, paused, or disabled the hook receives `false` so the screen
+    /// auto-locks. This method is called at every transition of `isSyncing` to guarantee the timer state
+    /// stays in sync and never pins the display after backup ends, even on cancelled/exiting paths.
+    private func updateIdleTimerIfNeeded() {
+        idleTimerHook?(isSyncing)
     }
 
     private func currentQueueProgress() -> BackupSyncProgress {

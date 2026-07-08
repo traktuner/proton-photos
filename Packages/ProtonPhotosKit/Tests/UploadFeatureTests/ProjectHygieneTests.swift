@@ -623,4 +623,25 @@ final class ProjectHygieneTests: XCTestCase {
             "lock file must stay sandbox-compatible"
         )
     }
+
+    /// Backup must keep the display awake while actively running and release it on every exit path.
+    /// The idle-timer hook is injectable (UIKit stays out of the shared adapter); the controller calls
+    /// it with `isSyncing` at every transition so the host (iOS) can toggle the idle timer and macOS
+    /// can leave the default no-op.
+    func testBackupControllerManagesIdleTimerViaInjectableHook() throws {
+        let controller = try String(
+            contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoLibraryBackupAdapter/PhotoLibraryBackupController.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(controller.contains("idleTimerHook: ((Bool) -> Void)?"),
+                      "controller must expose an injectable idle-timer hook (no UIKit in the shared adapter)")
+        XCTAssertTrue(controller.contains("updateIdleTimerIfNeeded()"), "controller must have a single idle-timer chokepoint")
+        XCTAssertTrue(controller.contains("idleTimerHook?(isSyncing)"),
+                      "hook must be driven by isSyncing")
+        XCTAssertFalse(controller.contains("import UIKit"),
+                       "the shared PhotoKit adapter must remain UIKit-free; the host app owns the idle timer")
+        let idleCalls = controller.components(separatedBy: "updateIdleTimerIfNeeded()").count - 1
+        XCTAssertGreaterThanOrEqual(idleCalls, 2,
+                                     "idle timer must be refreshed at start AND finish of a pass")
+    }
 }
