@@ -118,6 +118,16 @@ final class CoreArchitectureGateTests: XCTestCase {
             expectedDependencies: ["PhotosCore"],
             extraForbiddenTokens: ["PhotoDiagnostics"]
         ),
+        // MLSearchCore: pure Swift, platform-neutral. Owns the ML index model, store protocol,
+        // in-memory store, planner, progress, query/result types, and vector-scorer protocol.
+        // May import only Foundation + PhotosCore. CoreML/Vision/UIKit/AppKit/SwiftUI/Photos/SDK
+        // are banned so a Core bug in search/indexing is fixable once for every platform.
+        CoreTargetRule(
+            name: "MLSearchCore",
+            allowedImports: ["Foundation", "PhotosCore"],
+            expectedDependencies: ["PhotosCore"],
+            extraForbiddenTokens: ["CoreML", "Vision", "NaturalLanguage", "MLModel"]
+        ),
     ]
 
     private static let forbiddenFrameworkImports: Set<String> = [
@@ -2230,6 +2240,132 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             Real Metal texture caching may remain adapter-owned, but item identity must be generic so the
             same cache implementation can be reused by iOS/iPadOS adapters with their own platform bindings.
+            """
+        )
+    }
+
+    // MARK: - ML Search boundaries
+
+    func testMLSearchAppleAdapterStaysAppleOnlyAndCoreBacked() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        let adapterRoot = sourcesRoot.appendingPathComponent("MLSearchAppleAdapter")
+        var violations: [String] = []
+
+        if !manifest.contains(".library(name: \"MLSearchAppleAdapter\", targets: [\"MLSearchAppleAdapter\"])") {
+            violations.append("MLSearchAppleAdapter: missing matching library product")
+        }
+
+        if let targetLine = manifestLine(forTarget: "MLSearchAppleAdapter", in: manifest) {
+            let dependencies = Set(dependencies(inTargetLine: targetLine))
+            if dependencies != ["MLSearchCore", "PhotosCore"] {
+                violations.append("MLSearchAppleAdapter: dependencies \(dependencies.sorted()) != [MLSearchCore, PhotosCore]")
+            }
+        } else {
+            violations.append("MLSearchAppleAdapter: missing Package.swift target declaration")
+        }
+
+        let allowedImports: Set<String> = ["CoreML", "Accelerate", "CoreGraphics", "Foundation", "MLSearchCore", "PhotosCore"]
+        let forbiddenImports: Set<String> = ["UIKit", "AppKit", "SwiftUI", "Photos", "ProtonDriveSDK", "ProtonCore"]
+
+        let files = try swiftFiles(in: adapterRoot)
+        XCTAssertFalse(files.isEmpty, "Expected source files for MLSearchAppleAdapter")
+
+        for file in files {
+            let imports = try importedModules(in: file)
+            let unexpected = imports.subtracting(allowedImports)
+            if !unexpected.isEmpty {
+                violations.append("MLSearchAppleAdapter/\(file.lastPathComponent): unexpected imports \(unexpected.sorted())")
+            }
+            let forbidden = imports.intersection(forbiddenImports)
+            if !forbidden.isEmpty {
+                violations.append("MLSearchAppleAdapter/\(file.lastPathComponent): forbidden imports \(forbidden.sorted())")
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            MLSearchAppleAdapter boundary regressed:
+            \(violations.joined(separator: "\n"))
+
+            The shared Apple adapter may import CoreML/Accelerate/CoreGraphics/Foundation + MLSearchCore +
+            PhotosCore only. UIKit/AppKit/SwiftUI/Photos/SDK imports belong in higher-level platform targets.
+            """
+        )
+    }
+
+    func testNoTargetOutsideMLSearchAppleAdapterMayImportCoreML() throws {
+        let manifest = try String(contentsOf: packageManifest, encoding: .utf8)
+        var violations: [String] = []
+
+        // CoreML is allowed ONLY in MLSearchAppleAdapter. Every other target is banned from
+        // importing it so that inference stays behind the single shared adapter seam.
+        let exemptTargets: Set<String> = ["MLSearchAppleAdapter"]
+
+        // Discover every target directory under Sources/.
+        let topLevelDirs = try FileManager.default.contentsOfDirectory(at: sourcesRoot, includingPropertiesForKeys: [.isDirectoryKey])
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+
+        for dir in topLevelDirs {
+            let targetName = dir.lastPathComponent
+            if exemptTargets.contains(targetName) { continue }
+
+            let files = try swiftFiles(in: dir)
+            for file in files {
+                let imports = try importedModules(in: file)
+                if imports.contains("CoreML") {
+                    violations.append("\(targetName)/\(file.lastPathComponent): CoreML import is only permitted in MLSearchAppleAdapter")
+                }
+                if imports.contains("Vision") {
+                    violations.append("\(targetName)/\(file.lastPathComponent): Vision import is only permitted in MLSearchAppleAdapter (and only if it does not introduce a server-side/CPU-only ML path)")
+                }
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            CoreML/Vision leaked outside MLSearchAppleAdapter:
+            \(violations.joined(separator: "\n"))
+
+            CoreML inference must stay behind the single shared Apple adapter seam so a bug in
+            inference is fixable once for macOS/iOS/iPadOS. UI/feature/Core targets must not
+            import CoreML or Vision directly.
+            """
+        )
+
+        // Sanity: the manifest must publish the adapter product (this catches accidental removal).
+        XCTAssertTrue(manifest.contains("\"MLSearchAppleAdapter\""), "MLSearchAppleAdapter must be declared in Package.swift")
+    }
+
+    func testNoCommittedMLModelArtifactsUnderSourceTree() throws {
+        // No model weights may be committed yet (license spike pending). This gate fails if any
+        // `.mlmodel`, `.mlmodelc`, `.mlpackage`, or large binary appears under Sources/ or Tests/.
+        let bannedExtensions: Set<String> = ["mlmodel", "mlmodelc", "mlpackage"]
+        var violations: [String] = []
+
+        let enumerator = FileManager.default.enumerator(
+            at: packageRoot,
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        )
+        if let enumerator {
+            for case let url as URL in enumerator {
+                let ext = url.pathExtension.lowercased()
+                if bannedExtensions.contains(ext) {
+                    violations.append("\(url.path): ML model artifact must not be committed before license clearance")
+                }
+            }
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            Committed ML model artifact(s) detected:
+            \(violations.joined(separator: "\n"))
+
+            Do not ship model weights until the Stage-0 license spike resolves a permissive
+            license. Stage 1 ships the architecture skeleton only.
             """
         )
     }

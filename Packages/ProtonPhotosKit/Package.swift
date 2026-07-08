@@ -63,6 +63,12 @@ let package = Package(
         .library(name: "MapCore", targets: ["MapCore"]),
         .library(name: "MapUIKitAdapter", targets: ["MapUIKitAdapter"]),
         .library(name: "MapFeature", targets: ["MapFeature"]),
+        // ML Search: on-device semantic photo search via CoreML + Accelerate.
+        // MLSearchCore: pure Swift, platform-neutral; owns the index model, store protocol, planner, and vector-scorer protocol.
+        // MLSearchAppleAdapter: shared Apple adapter (macOS/iOS/iPadOS); owns CoreML model loading facade, compute policy,
+        // and an Accelerate-backed dot-product scorer. No model artifacts are committed yet — the facade returns "missing" stubs.
+        .library(name: "MLSearchCore", targets: ["MLSearchCore"]),
+        .library(name: "MLSearchAppleAdapter", targets: ["MLSearchAppleAdapter"]),
     ],
     dependencies: [
         .package(name: "ProtonDriveSDK", path: "../../Vendor/sdk-swift"),
@@ -184,5 +190,17 @@ let package = Package(
         .target(name: "MapCore", dependencies: ["PhotosCore", "MediaLocationCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MapUIKitAdapter", dependencies: ["PhotosCore", "MediaLocationCore", "MapCore"], swiftSettings: disableDynamicActorIsolation),
         .target(name: "MapFeature", dependencies: ["PhotosCore", "MediaLocationCore", "MapCore", "DesignSystem"], swiftSettings: disableDynamicActorIsolation),
+        // MLSearchCore: pure Swift, platform-neutral. Owns the model metadata, embedding identifiers,
+        // index records, index planner, index status/progress, local store protocol, in-memory test store,
+        // query request/result types, vector scoring protocol, and idempotency semantics. May depend on
+        // PhotosCore only. No CoreML/Vision/UIKit/AppKit/SwiftUI/Photos/SDK imports.
+        .target(name: "MLSearchCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "MLSearchCoreTests", dependencies: ["MLSearchCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        // MLSearchAppleAdapter: shared Apple adapter (macOS/iOS/iPadOS). May import CoreML/Accelerate/
+        // CoreGraphics/Foundation. Owns the CoreML model loading facade, compute unit policy (.cpuAndNeuralEngine),
+        // Accelerate-backed vector scoring implementation, and model availability/diagnostic surface.
+        // Stubs compile and will be wired to generated model classes in Stage 1B (license-permitting).
+        .target(name: "MLSearchAppleAdapter", dependencies: ["MLSearchCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .testTarget(name: "MLSearchAppleAdapterTests", dependencies: ["MLSearchAppleAdapter", "MLSearchCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
     ]
 )
