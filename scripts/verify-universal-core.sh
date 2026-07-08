@@ -29,6 +29,7 @@ CORE_TARGETS=(
   UploadCore
   TimelineCore
   PhotoViewerCore
+  MLSearchCore
 )
 
 SHARED_UI_TARGETS=(
@@ -46,11 +47,13 @@ IOS_PLATFORM_ADAPTER_TARGETS=(
   TimelineUIKitAdapter
   TimelineUIKitFeature
   PhotoLibraryBackupAdapter
+  MLSearchAppleAdapter
 )
 
 MACOS_PLATFORM_ADAPTER_TARGETS=(
   MetalGridTextureAppKitAdapter
   PhotoLibraryBackupAdapter
+  MLSearchAppleAdapter
 )
 
 PLATFORMS=(
