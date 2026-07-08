@@ -358,8 +358,9 @@ private struct MobilePhotoBackupRows: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                // One honest progress line: "<n> von <m> gesichert", plus "· 43 %" only while a real
-                // upload is moving. No filename - the phase headline already says checking vs backing up.
+                // One honest progress line: "<n> von <m> gesichert", plus "· Datei 43 %" only while a real
+                // upload is moving (explicitly the current file's percent, never overall). No filename -
+                // the phase headline already says checking vs backing up.
                 if let subtitle = display.localizedSubtitle {
                     Text(subtitle)
                         .font(.footnote)

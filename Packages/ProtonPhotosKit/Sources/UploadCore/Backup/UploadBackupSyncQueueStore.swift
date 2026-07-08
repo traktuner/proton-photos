@@ -42,9 +42,34 @@ public final class UploadBackupSyncQueueManifestStore: UploadBackupSyncQueueStor
                 ON CONFLICT(source_kind, source_id, resource, revision_us) DO UPDATE SET
                   original_filename=excluded.original_filename,
                   byte_count=excluded.byte_count,
-                  state=excluded.state,
-                  attempts=excluded.attempts,
-                  last_error=excluded.last_error,
+                  state=CASE
+                    -- Forward-only state machine: an upsert may NEVER regress a row that is
+                    -- already claimed (checking/hashing/uploading/…) or terminally succeeded.
+                    -- Without this guard, a targeted mid-pass enqueue could upsert
+                    -- state='discovered' over an in-flight 'checking'/'uploading' row, causing
+                    -- claimRunnable to reclaim it and double-upload. Only idle/retryable states
+                    -- (discovered, queuedForUpload, failed, paused, sourceMissing, blockedByDraft,
+                    -- skippedRemoteDeletion) may be overwritten.
+                    WHEN backup_sync_queue.state IN (
+                      'discovered','queuedForUpload','failed','paused',
+                      'sourceMissing','blockedByDraft','skippedRemoteDeletion'
+                    ) THEN excluded.state
+                    ELSE backup_sync_queue.state
+                  END,
+                  attempts=CASE
+                    WHEN backup_sync_queue.state IN (
+                      'discovered','queuedForUpload','failed','paused',
+                      'sourceMissing','blockedByDraft','skippedRemoteDeletion'
+                    ) THEN excluded.attempts
+                    ELSE backup_sync_queue.attempts
+                  END,
+                  last_error=CASE
+                    WHEN backup_sync_queue.state IN (
+                      'discovered','queuedForUpload','failed','paused',
+                      'sourceMissing','blockedByDraft','skippedRemoteDeletion'
+                    ) THEN excluded.last_error
+                    ELSE backup_sync_queue.last_error
+                  END,
                   updated_at=excluded.updated_at;
                 """,
                 -1, &stmt, nil

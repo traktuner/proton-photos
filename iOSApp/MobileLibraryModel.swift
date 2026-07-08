@@ -10,6 +10,7 @@ import ProtonAuth
 import ProtonDriveBackend
 import SwiftUI
 import TimelineCore
+import UIKit
 
 struct MobilePreviewLoadStatus: Equatable {
     var total = 0
@@ -373,6 +374,12 @@ final class MobileLibraryModel {
                     identityResolver: client.uploadIdentityResolver,
                     uploader: client.photoUploader
                 )
+                // Keep the display awake while a backup pass is actively running so iOS does not
+                // suspend the app mid-upload when the screen auto-locks (the documented overnight
+                // freeze). Reset the moment a pass ends — the controller drives this from isSyncing.
+                self.photoBackup?.idleTimerHook = { isBackingUp in
+                    UIApplication.shared.isIdleTimerDisabled = isBackingUp
+                }
                 let albumSync = AlbumSyncController(
                     configuration: .init(
                         accountDataDirectory: client.accountDataDirectory,

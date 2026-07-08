@@ -71,7 +71,10 @@ public struct LibraryWorkloadGovernorPolicy: Sendable, Equatable {
     ) -> LibraryWorkloadBudget {
         let base = max(1, baseConcurrency)
 
-        if signals.thermalLevel == .critical {
+        // Backup keeps making progress regardless of thermal pressure: the OS manages its own
+        // thermal state and will throttle the CPU/network on its own; the app self-throttling
+        // only adds latency. Background crawls still yield under .critical (they are deferable).
+        if signals.thermalLevel == .critical && workload != .userInitiatedBackup {
             return workload == .visibleMedia
                 ? LibraryWorkloadBudget(maxConcurrentItems: 1)
                 : LibraryWorkloadBudget(maxConcurrentItems: 0, shouldYield: true)
@@ -82,8 +85,9 @@ public struct LibraryWorkloadGovernorPolicy: Sendable, Equatable {
             return LibraryWorkloadBudget(maxConcurrentItems: base)
 
         case .userInitiatedBackup:
-            if signals.thermalLevel >= .serious || signals.isLowPowerMode
-                || signals.isNetworkConstrained || signals.isNetworkExpensive {
+            // Thermal state is intentionally NOT a throttle input here (see above). Low Power
+            // Mode and a constrained/expensive network still clamp to a single in-flight item.
+            if signals.isLowPowerMode || signals.isNetworkConstrained || signals.isNetworkExpensive {
                 return LibraryWorkloadBudget(maxConcurrentItems: 1)
             }
             return LibraryWorkloadBudget(maxConcurrentItems: base)

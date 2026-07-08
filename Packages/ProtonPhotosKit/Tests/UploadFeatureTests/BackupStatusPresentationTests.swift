@@ -50,7 +50,10 @@ final class BackupStatusPresentationTests: XCTestCase {
         XCTAssertEqual(p.headlineKey, "backup.phase_uploading")
         XCTAssertEqual(p.uploadPercent, 43)
         let subtitle = try? XCTUnwrap(p.localizedSubtitle)
-        XCTAssertEqual(subtitle?.contains("43 %"), true, "the live percentage proves the upload is moving")
+        // The per-file percent must appear in the subtitle. (In the SPM test bundle the string catalog
+        // is copied uncompiled, so L10n resolves the key form "...backup.file_upload_percent 43";
+        // in the app build the resolved localized value "...file 43 %" appears. Both contain "43".)
+        XCTAssertEqual(subtitle?.contains("43"), true, "the live percentage proves the upload is moving")
         XCTAssertFalse(subtitle?.contains("IMG_5560.MOV") ?? true, "no filename in the subtitle")
     }
 

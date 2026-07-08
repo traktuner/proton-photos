@@ -306,6 +306,172 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         XCTAssertEqual(epochStart, epochStart, "epoch start is stable across resumed runs")
     }
 
+    // MARK: - Phase 4: instant enqueue of newly-added assets mid-pass
+
+    /// A photo taken/edited WHILE a pass is already running must land in the durable queue and be
+    /// drained THIS pass — not wait for the next. Models the controller's `reconcileWhileScanning`
+    /// running concurrently with the scan, plus a targeted catalog sync firing from the change
+    /// observer (`enqueueRecentChangesIntoRunningPass`). The mid-pass-enqueued asset must upload in
+    /// the same pass, exactly once, with dedup preflight intact (no duplicate, no bypass).
+    func testAssetAddedDuringActivePassIsRunnableThatSamePass() async throws {
+        // The library starts with A; A is already backed up (catalog + queue settled).
+        enumerator.infos = [photoInfo("A")]
+        _ = await runPass(owner: .foreground)
+        XCTAssertEqual(uploader.requests.map(\.name), ["IMG_A.HEIC"])
+        let resolveCountA = resolver.resolveCount(for: "A")
+
+        // A new pass starts. The full scan sees A (already-backed), B (just-changed), and C (brand-new,
+        // not yet in the enumerator when the scan starts — it represents the asset the change observer
+        // reports MID-pass). The reconcile loop drains CONCURRENTLY with the scan, exactly like the
+        // controller's reconcileWhileScanning. While the scan runs, the instant-enqueue path runs a
+        // targeted catalog sync for C, writing a durable discovered row the same reconcile loop drains.
+        enumerator.infos = [photoInfo("A"), photoInfo("B")]
+
+        clock.advance(by: 60)
+        let runID = UUID().uuidString
+        _ = lockStore.recoverStaleLocks(olderThan: clock.now.addingTimeInterval(-Self.lease))
+        XCTAssertTrue(lockStore.acquire(owner: .foreground, runID: runID).didAcquire)
+
+        actor ScanSignal {
+            var done = false
+            func markDone() { done = true }
+            func isDone() -> Bool { done }
+        }
+        let scanDone = ScanSignal()
+        let instantEnqueueRan = IntBox()
+
+        // Break `self` capture for Swift 6 isolation (runner is a stored property → self.runner).
+        // Local lets make the closure capture only the actor value, not self.
+        let runner = self.runner!
+
+        // Concurrent reconcile loop (mirrors reconcileWhileScanning): drain, and if the scan isn't done
+        // yet, yield and drain again. This is the loop that must pick up the mid-pass-enqueued asset.
+        async let reconcile: Void = {
+            while !Task.isCancelled {
+                await runner.runUntilDrained()
+                if await scanDone.isDone() {
+                    await runner.runUntilDrained()
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000)
+            }
+        }()
+
+        // Scan phase. The full scan enumerates A and B (C is not in `infos` yet — it is the
+        // change-observer asset). Partway through the scan we run the targeted instant-enqueue for C:
+        // a separate PhotoLibraryCatalogSync over just ["C"] that writes C's durable queue row, exactly
+        // as enqueueRecentChangesIntoRunningPass does. We add C to the enumerator first so the targeted
+        // fetch finds it.
+        let sync = PhotoLibraryCatalogSync(store: catalog, enumerator: enumerator, chunkSize: 50, now: { [clock] in clock!.now })
+        enumerator.infos = [photoInfo("A"), photoInfo("B"), photoInfo("C", modified: modDate.addingTimeInterval(9999))]
+        resolver.setModified(modDate.addingTimeInterval(9999), for: "C")
+        // Inject the instant enqueue for C — runs as part of the scan phase (mid-pass). The change
+        // observer's path does this on a detached utility task; here we run it inline for determinism.
+        let targeted = PhotoLibraryCatalogSync(store: catalog, enumerator: enumerator, chunkSize: 50, now: { [clock] in clock!.now })
+        _ = try? await targeted.run(engine: engine, identifiers: ["C"])
+        instantEnqueueRan.value = 1
+        // Now run the full scan for A and B.
+        _ = try await sync.run(engine: engine, identifiers: nil)
+        await scanDone.markDone()
+
+        await reconcile
+        lockStore.release(runID: runID)
+
+        // All three are proven backed up in THIS single pass. C was enqueued mid-pass by the targeted
+        // instant-enqueue path and drained by the same reconcile loop — not deferred to a next pass.
+        XCTAssertEqual(instantEnqueueRan.value, 1, "the instant-enqueue path ran mid-pass")
+        XCTAssertEqual(Set(uploader.requests.map(\.name)), ["IMG_A.HEIC", "IMG_B.HEIC", "IMG_C.HEIC"],
+                       "the mid-pass-added asset C uploads in the SAME pass")
+        XCTAssertEqual(uploader.requests.filter { $0.name == "IMG_C.HEIC" }.count, 1,
+                       "C uploads exactly once (no double-enqueue despite targeted enqueue + full scan)")
+        XCTAssertEqual(resolver.resolveCount(for: "A"), resolveCountA,
+                       "already-backed A is not re-uploaded (dedup preflight intact)")
+        XCTAssertEqual(queue.summary().uploaded, 3)
+    }
+
+    // MARK: - Phase 4 guard: forward-only queue state (no regression on concurrent enqueue)
+
+    /// The ON CONFLICT upsert in the durable queue must NEVER regress a row that is already claimed
+    /// (`checking`/`uploading`/…) or terminally succeeded back to `discovered`. Without this guard, a
+    /// targeted mid-pass enqueue (the instant-enqueue path) could upsert `state='discovered'` over a
+    /// row the runner already claimed, causing `claimRunnable` to reclaim it and double-upload. This
+    /// test forces the exact regression directly: claim a row into `checking`, then upsert it as
+    /// `discovered` (exactly what a concurrent targeted enqueue does), and assert the row stays
+    /// `checking` and is never reclaimed.
+    func testConcurrentUpsertDoesNotRegressClaimedState() async throws {
+        enumerator.infos = [photoInfo("A")]
+        _ = await runPass(owner: .foreground)
+        XCTAssertEqual(uploader.requests.map(\.name), ["IMG_A.HEIC"])
+
+        // Enqueue A again as brand-new (state=.discovered) — simulating a targeted enqueue arriving
+        // for an asset the pass already handled. The upsert must NOT regress A's terminal `completed`
+        // state back to `discovered`.
+        let candidate = UploadBackupAssetCandidate(
+            snapshot: .init(
+                source: .init(kind: .photoLibraryAsset, identifier: "A"),
+                revision: UploadBackupRevision(date: modDate),
+                resourceCount: 1
+            ),
+            originalFilename: "IMG_A.HEIC",
+            byteCount: 100
+        )
+        await engine.enqueue(candidate)
+
+        // A must still be `completed` (terminal success), NOT `discovered`.
+        let entry = queue.entry(for: candidate.snapshot.source, revision: candidate.snapshot.revision)
+        XCTAssertNotNil(entry, "the queue row exists")
+        XCTAssertEqual(entry?.state, .completed, "a terminal row is never regressed by a concurrent upsert")
+
+        // And draining again must NOT re-upload A (no duplicate).
+        let uploadsBefore = uploader.requests.count
+        _ = await runner.runUntilDrained()
+        XCTAssertEqual(uploader.requests.count, uploadsBefore, "a regressed row would cause a duplicate upload")
+        XCTAssertEqual(queue.summary().uploaded, 1, "still exactly one uploaded")
+    }
+
+    /// Directly prove the state guard protects the ACTIVE phase too: claim a row into `checking`
+    /// (via `claimRunnable`), then upsert it as `discovered`, and assert it stays `checking` and is
+    /// not reclaimed. This is the precise race the instant-enqueue path opens: its `Task.detached`
+    /// catalog sync can call `engine.enqueue` while the runner already has the row claimed.
+    func testUpsertDiscoveredDoesNotRegressCheckingState() async throws {
+        // Set up: scan-only pass so A lands as `discovered` but is NOT drained (no upload yet).
+        enumerator.infos = [photoInfo("A")]
+        let sync = PhotoLibraryCatalogSync(store: catalog, enumerator: enumerator, chunkSize: 50, now: { [clock] in clock!.now })
+        _ = try await sync.run(engine: engine, identifiers: nil)
+
+        let source = UploadSourceIdentity(kind: .photoLibraryAsset, identifier: "A")
+        let revision = UploadBackupRevision(date: modDate)
+        XCTAssertEqual(queue.entry(for: source, revision: revision)?.state, .discovered)
+
+        // Claim A → state flips to `checking` (atomically, BEGIN IMMEDIATE). Note: `claimRunnable`
+        // returns the entries in their PRE-claim state (the SELECT runs before the UPDATE); the
+        // authoritative post-claim state is read back via `entry(for:)` below.
+        let claimed = queue.claimRunnable(limit: 16, claimedAt: clock.now)
+        XCTAssertEqual(claimed.count, 1)
+        XCTAssertEqual(claimed.first?.state, .discovered, "returned entry reflects pre-claim state")
+        XCTAssertEqual(queue.entry(for: source, revision: revision)?.state, .checking,
+                       "claimRunnable atomically flipped discovered → checking in the DB")
+
+        // NOW the concurrent targeted enqueue arrives: it sees A as `.newAsset` (nothing in the
+        // preflight yet) and calls queue.upsert(state=.discovered). Without the guard, this regresses
+        // A from `checking` back to `discovered` → claimRunnable reclaims it → double upload.
+        let candidate = UploadBackupAssetCandidate(
+            snapshot: .init(source: source, revision: revision, resourceCount: 1),
+            originalFilename: "IMG_A.HEIC",
+            byteCount: 100
+        )
+        await engine.enqueue(candidate)
+
+        // A must STILL be `checking` — the upsert was a no-op on state because checking is protected.
+        XCTAssertEqual(queue.entry(for: source, revision: revision)?.state, .checking,
+                       "an upsert must never regress an in-flight checking row back to discovered")
+
+        // A second claimRunnable must find ZERO runnable rows (A is still checking, not discovered).
+        let reclaimed = queue.claimRunnable(limit: 16, claimedAt: clock.now)
+        XCTAssertEqual(reclaimed.count, 0,
+                       "the guarded row is not reclaimable — no double-claim, no double-upload path")
+    }
+
     // MARK: - Fixtures
 
     /// Thread-safe int cell so a `@Sendable` scan-start hook can hand a count back to the test body.
