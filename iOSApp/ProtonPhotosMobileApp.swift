@@ -84,8 +84,9 @@ struct ProtonPhotosMobileApp: App {
     static func schedulePhotoBackupTask() {
         let request = BGProcessingTaskRequest(identifier: photoBackupTaskIdentifier)
         request.requiresNetworkConnectivity = true
-        // Bulk hashing/upload belongs in charging windows; the system may still grant earlier.
-        request.requiresExternalPower = true
+        // Allow background catch-up on battery — OS manages thermal throttling; we must not
+        // artificially constrain throughput beyond what the system permits.
+        request.requiresExternalPower = false
         try? BGTaskScheduler.shared.submit(request)
     }
 }
