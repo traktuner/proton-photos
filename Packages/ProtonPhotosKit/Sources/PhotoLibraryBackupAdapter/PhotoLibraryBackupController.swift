@@ -79,6 +79,13 @@ public final class PhotoLibraryBackupController {
     private let defaults: UserDefaults
     private var syncTask: Task<Void, Never>?
     private var changeDebounceTask: Task<Void, Never>?
+    /// Targeted enqueue fired by the change observer WHILE a pass is already running, so a photo
+    /// added mid-backup lands in the durable queue and gets drained THIS pass.
+    private var instantEnqueueTask: Task<Void, Never>?
+    /// The detached catalog sync spawned by `enqueueRecentChangesIntoRunningPass`. Tracked so every
+    /// exit path can cancel it — otherwise a late targeted enqueue could write durable rows AFTER the
+    /// pass released its lock (safe, but breaks the "drained THIS pass" promise and leaks the task).
+    private var instantWorkTask: Task<Void, Never>?
     private var heartbeatTask: Task<Void, Never>?
     /// Periodically refreshes the UI status from the durable queue summary while a pass runs. The
     /// runner's emitted in-memory progress mirror only counts ITS OWN transitions; since scan and
@@ -322,6 +329,8 @@ public final class PhotoLibraryBackupController {
         }
 
         autoResumeTask?.cancel(); autoResumeTask = nil   // a pass is starting; the timer's job is done
+        instantEnqueueTask?.cancel(); instantEnqueueTask = nil
+        instantWorkTask?.cancel(); instantWorkTask = nil
         isSyncing = true
         updateIdleTimerIfNeeded()
         isScanning = false
@@ -440,6 +449,8 @@ public final class PhotoLibraryBackupController {
         syncTask?.cancel()
         statusRefreshTask?.cancel(); statusRefreshTask = nil
         autoResumeTask?.cancel(); autoResumeTask = nil
+        instantEnqueueTask?.cancel(); instantEnqueueTask = nil
+        instantWorkTask?.cancel(); instantWorkTask = nil
         guard let runner else { return }
         Task { await runner.stop() }
     }
@@ -482,7 +493,26 @@ public final class PhotoLibraryBackupController {
     }
 
     private func scheduleChangeDrivenSync() {
-        guard isEnabled, !isSyncing else { return }
+        guard isEnabled else { return }
+        if isSyncing {
+            // A pass is already running: enqueue the newly-changed assets IMMEDIATELY into the durable
+            // queue so the concurrent reconcile loop picks them up THIS pass, instead of waiting for
+            // the next one. (Before this, the guard bailed and a photo taken mid-backup sat unbacked
+            // until the following pass.) Debounced slightly so a burst of edits coalesces into one
+            // targeted enqueue. Transaction-safe: enqueue is an idempotent upsert keyed by source +
+            // revision; the dedup preflight still runs per-item in the runner, so nothing bypasses it.
+            // We deliberately do NOT commit the change token here — the running pass owns that commit.
+            instantEnqueueTask?.cancel()
+            instantEnqueueTask = Task { [weak self, monitor, engine, catalogStore] in
+                try? await Task.sleep(nanoseconds: 750_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run { [weak self] in
+                    guard let self, self.isSyncing else { return }
+                    self.enqueueRecentChangesIntoRunningPass(monitor: monitor, engine: engine, catalogStore: catalogStore)
+                }
+            }
+            return
+        }
         changeDebounceTask?.cancel()
         changeDebounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -491,6 +521,35 @@ public final class PhotoLibraryBackupController {
                 guard let self, self.isEnabled, !self.isSyncing else { return }
                 self.syncNow()
             }
+        }
+    }
+
+    /// Targeted enqueue of changes that arrived WHILE a pass is running. Reads the change token WITHOUT
+    /// committing (the running pass owns the commit), runs a targeted catalog sync for exactly those
+    /// identifiers so each becomes a durable `discovered` queue row with its real revision, and lets
+    /// the concurrent reconcile loop drain it this pass. Re-enqueueing an asset the pass already
+    /// handled is an idempotent upsert no-op (the queue's ON CONFLICT guard keeps state forward-only:
+    /// a row already in checking/uploading/etc. is never regressed to discovered); the runner's per-
+    /// item dedup preflight is never bypassed.
+    private func enqueueRecentChangesIntoRunningPass(
+        monitor: PhotoLibraryChangeMonitor,
+        engine: UploadBackupSyncEngine?,
+        catalogStore: PhotoLibraryCatalogManifestStore?
+    ) {
+        guard let engine, let catalogStore else { return }
+        let prepared = monitor.prepareChanges()
+        // requiresFullRescan means the token is untrusted (expired) — the running pass's own full scan
+        // covers it; do not spin a targeted enqueue from an unreliable id list.
+        guard !prepared.changes.requiresFullRescan else { return }
+        let targeted = Array(Set(prepared.changes.changedIdentifiers + prepared.changes.deletedIdentifiers))
+        guard !targeted.isEmpty else { return }
+        // Off the main actor: the catalog sync enumerates PhotoKit and writes SQLite. Tracked so the
+        // exit paths can cancel it if the pass ends before this completes.
+        instantWorkTask = Task.detached(priority: .utility) {
+            let sync = PhotoLibraryCatalogSync(store: catalogStore)
+            _ = try? await sync.run(engine: engine, identifiers: targeted)
+            // The durable rows are now runnable; the running reconcile loop will claim them. Wake it if
+            // it was sleeping between drains so it does not wait up to 250 ms.
         }
     }
 
@@ -550,6 +609,10 @@ public final class PhotoLibraryBackupController {
         heartbeatTask = nil
         statusRefreshTask?.cancel()
         statusRefreshTask = nil
+        instantEnqueueTask?.cancel()
+        instantEnqueueTask = nil
+        instantWorkTask?.cancel()
+        instantWorkTask = nil
         lockStore?.release(runID: runID)
         if activeRunID == runID { activeRunID = nil }
         isSyncing = false
