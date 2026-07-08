@@ -219,6 +219,14 @@
         "de": { "stringUnit": { "state": "translated", "value": "%lld von %lld gesichert" } }
       }
     },
+    "backup.file_upload_percent %lld": {
+      "extractionState": "manual",
+      "comment": "Backup status subtitle segment: the upload percentage of the single file currently being transferred. Appended to the overall count line only while a real byte transfer is in flight, clearly labelled so it cannot be mistaken for the overall progress.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "file %lld %" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Datei %lld %" } }
+      }
+    },
     "backup.progress_attention %lld": {
       "extractionState": "manual",
       "comment": "Backup status attention line, shown only when some items could not be backed up and need the user.",

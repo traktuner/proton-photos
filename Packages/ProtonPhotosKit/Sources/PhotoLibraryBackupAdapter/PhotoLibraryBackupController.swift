@@ -503,7 +503,30 @@ public final class PhotoLibraryBackupController {
         lastRunnerUploadingName = snapshot.currentUploadingName
         lastRunnerUploadingFraction = snapshot.currentUploadingFraction
         lastRunnerUploadingByteCount = snapshot.currentUploadingByteCount
-        let candidate = BackupStatus(progress: snapshot, isScanning: isScanning, isUserPaused: isUserPaused)
+        
+        // Unify on DB-truth for ALL counts — the runner snapshot's live fields (currentItemName,
+        // uploadingFraction, isRunning) are merged with the durable queue's summary. This eliminates
+        // the denominator flip that arose from alternating between the runner's in-memory total
+        // (stale/incremental) and the DB-truth summary. The stable denominator changes only when the
+        // library actually changes (a new photo enqueued), never by mixing sources.
+        let dbSummary = queueStore?.summary()
+        var unified = snapshot
+        if let summary = dbSummary {
+            unified.total = summary.total
+            unified.waiting = summary.waiting
+            unified.uploadQueued = summary.queuedForUpload
+            unified.checking = summary.checkingActive
+            unified.uploading = summary.uploadingActive
+            unified.uploaded = summary.uploaded
+            unified.alreadyBackedUp = summary.alreadyBackedUp
+            unified.skippedRemoteDeletions = summary.skippedRemoteDeletions
+            unified.sourceMissing = summary.sourceMissing
+            unified.blocked = summary.blocked
+            unified.failed = summary.failed
+            unified.paused = summary.paused
+        }
+        
+        let candidate = BackupStatus(progress: unified, isScanning: isScanning, isUserPaused: isUserPaused)
         guard candidate != status else { return }
         let now = Date()
         if candidate.phase == status.phase, snapshot.isRunning, now.timeIntervalSince(lastStatusUpdate) < 0.15 {

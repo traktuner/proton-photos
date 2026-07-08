@@ -128,12 +128,18 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         }
     }
 
-    /// "<n> of <m> backed up", plus "· 43 %" only while a real upload is moving. nil when there is no
-    /// honest total yet (scanning / idle).
+    /// "<n> of <m> backed up", plus "· file 43 %" only while a real upload is moving. The per-file
+    /// segment is explicitly labelled ("file"/"Datei") so it can never be mistaken for the overall
+    /// progress bar (which is a separate determinate element below). nil when there is no honest total
+    /// yet (scanning/idle).
     public var localizedSubtitle: String? {
         guard total > 0 else { return nil }
         var line = L10n.string("backup.progress_backed_up \(backedUp) \(total)")
-        if let uploadPercent { line += " · \(uploadPercent) %" }
+        if let uploadPercent {
+            // Labelled explicitly as the current file's upload so it is unambiguous next to the
+            // overall "<n> of <m>" count and the separate overall progress bar.
+            line += " · " + L10n.string("backup.file_upload_percent \(uploadPercent)")
+        }
         return line
     }
 

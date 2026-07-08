@@ -390,7 +390,8 @@ private struct PhotoLibraryBackupSection: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(display.localizedHeadline)
                         .font(.system(size: 12, weight: .medium))
-                    // One honest line: "<n> von <m> gesichert" (+ "· 43 %" only during a real upload).
+                    // One honest line: "<n> von <m> gesichert" (+ "· Datei 43 %" only during a real upload,
+                    // explicitly labelled as the current file's upload so it can't be read as overall %).
                     if let subtitle = display.localizedSubtitle {
                         Text(subtitle)
                             .font(.system(size: 11).monospacedDigit())
