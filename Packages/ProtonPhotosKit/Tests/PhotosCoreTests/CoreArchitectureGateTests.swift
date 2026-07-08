@@ -2370,6 +2370,57 @@ final class CoreArchitectureGateTests: XCTestCase {
         )
     }
 
+    func testMLSearchAppleAdapterComputePolicyHoldsToNeuralEngineOnly() throws {
+        // Production sources under MLSearchAppleAdapter must not expose public .all or .cpuOnly.
+        // These may only appear behind #if DEBUG guards or in test files.
+        let adapterRoot = sourcesRoot.appendingPathComponent("MLSearchAppleAdapter")
+        let files = try swiftFiles(in: adapterRoot)
+        var violations: [String] = []
+
+        for file in files {
+            guard file.lastPathComponent != "CoreMLComputePolicy.swift" else {
+                // Policy file itself is checked separately below.
+                continue
+            }
+
+            let source = try String(contentsOf: file, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: source)
+
+            // No non-policy source may reference .all or .cpuOnly as compute units outside DEBUG guards.
+            if code.contains(".all") && !source.contains("#if DEBUG") {
+                violations.append("\(file.lastPathComponent): reference to .all must be behind #if DEBUG guard")
+            }
+            if code.contains(".cpuOnly") && !source.contains("#if DEBUG") {
+                violations.append("\(file.lastPathComponent): reference to .cpuOnly must be behind #if DEBUG guard")
+            }
+        }
+
+        // CoreMLComputePolicy.swift itself must not expose public .all/.cpuOnly as static members,
+        // nor a public init taking arbitrary MLComputeUnits (that would allow .all/.cpuOnly in production).
+        let policyFile = adapterRoot.appendingPathComponent("CoreMLComputePolicy.swift")
+        let policySource = try String(contentsOf: policyFile, encoding: .utf8)
+        if policySource.contains("public static let performanceOptimized") {
+            violations.append("CoreMLComputePolicy.swift: must not expose public performanceOptimized")
+        }
+        if policySource.contains("public static let cpuOnly") {
+            violations.append("CoreMLComputePolicy.swift: must not expose public cpuOnly")
+        }
+        if policySource.contains("public init(computeUnits:") {
+            violations.append("CoreMLComputePolicy.swift: must not have public init(computeUnits:) — allows arbitrary units in production")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            ML compute policy hardened incorrectly:
+            \(violations.joined(separator: "\n"))
+
+            Production inference must only allow .cpuAndNeuralEngine. Debug escape hatches
+            must be internal and behind #if DEBUG guards.
+            """
+        )
+    }
+
     private func swiftFiles(in directory: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: directory,

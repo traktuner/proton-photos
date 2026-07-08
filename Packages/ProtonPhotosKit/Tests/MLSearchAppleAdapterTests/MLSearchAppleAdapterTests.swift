@@ -27,20 +27,26 @@ import MLSearchCore
         #expect(config.computeUnits == .cpuAndNeuralEngine)
     }
 
-    @Test func cpuOnlyPolicyRoundTrips() {
-        let policy = CoreMLComputePolicy.cpuOnly
-        #expect(policy.computeUnits == .cpuOnly)
-        #expect(policy.modelConfiguration.computeUnits == .cpuOnly)
-    }
-
-    @Test func performanceOptimizedUsesAllUnits() {
-        let policy = CoreMLComputePolicy.performanceOptimized
-        #expect(policy.computeUnits == .all)
+    @Test func defaultInitAlsoMapsToCpuAndNeuralEngine() {
+        let policy = CoreMLComputePolicy()
+        #expect(policy.computeUnits == .cpuAndNeuralEngine)
+        #expect(policy == .default)
     }
 
     @Test func policyEquality() {
-        #expect(CoreMLComputePolicy.default == CoreMLComputePolicy(computeUnits: .cpuAndNeuralEngine))
-        #expect(CoreMLComputePolicy.default != CoreMLComputePolicy.cpuOnly)
+        #expect(CoreMLComputePolicy.default == CoreMLComputePolicy())
+    }
+
+    @Test func noPublicProductionAPIExposesAllUnits() {
+        // .all (GPU) must not be reachable as a production policy.
+        let policy = CoreMLComputePolicy.default
+        #expect(policy.computeUnits != .all)
+    }
+
+    @Test func noPublicProductionAPIExposesCpuOnly() {
+        // .cpuOnly must not be reachable as a production policy.
+        let policy = CoreMLComputePolicy.default
+        #expect(policy.computeUnits != .cpuOnly)
     }
 
     // MARK: - Model availability (stubs: no model committed yet)
