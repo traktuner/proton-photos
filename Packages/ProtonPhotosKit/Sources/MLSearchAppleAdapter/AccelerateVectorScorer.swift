@@ -2,69 +2,32 @@ import Foundation
 import Accelerate
 import MLSearchCore
 
-/// Accelerate-backed implementation of `MLVectorScorer`.
+/// Accelerate-backed scoring kernel — the production scorer.
 ///
-/// Uses `vDSP.dot` (which wraps `vDSP_dotpr`) for the dot product — a single BLAS call per
-/// vector pair that avoids per-element heap churn compared to a manual loop. This is the
-/// production scorer; the pure-Swift `ReferenceDotProductScorer` in Core is the reference
-/// fallback and test oracle.
+/// One `vDSP_mmul` matrix-vector multiply covers the entire packed block
+/// (`count × dimension` · `dimension × 1`), instead of N separate dot-product calls.
+/// That is the memory-bandwidth-optimal shape on Apple silicon (AMX/NEON backed) and the
+/// reason `MLVectorBlock` exists: at 250k × 512-d this is a single pass over one contiguous
+/// buffer with zero per-record overhead.
 ///
-/// ## Performance notes
-/// - **No per-vector allocation**: `withUnsafeBufferPointer` exposes the underlying storage
-///   of `ContiguousArray` directly to vDSP without copying.
-/// - **Single sort pass**: scores accumulate into one `[MLSearchResult]` buffer; sort happens once.
-/// - **Dimension guard**: vectors of mismatched dimension are skipped (defensive).
+/// Ranking/top-k live in Core (`MLVectorScorer.rank`); this type supplies arithmetic only
+/// and must agree with `ReferenceDotProductScorer` within Float epsilon (test-enforced).
 public struct AccelerateVectorScorer: MLVectorScorer {
     public init() {}
-    
-    public func rank(records: [MLEmbeddingRecord], queryVector: ContiguousArray<Float32>, limit: Int) -> MLSearchResults {
-        var scored: [MLSearchResult] = []
-        scored.reserveCapacity(records.count)
-        
-        // Snapshot the query vector's dimension once.
-        let queryDim = queryVector.count
-        guard queryDim > 0 else {
-            return MLSearchResults(
-                descriptor: records.first?.descriptor ?? MLModelDescriptor(identifier: "unknown", version: 0, embeddingDimension: 0),
-                queryText: "",
-                results: []
-            )
-        }
-        
-        for record in records {
-            guard record.vector.count == queryDim else { continue }
-            
-            let score = computeDotProduct(record.vector, queryVector)
-            scored.append(MLSearchResult(uid: record.uid, score: score, timestamp: record.timestamp))
-        }
-        
-        // Sort: highest score first; ties broken by newest-first (deterministic).
-        scored.sort { (a, b) in
-            if a.score != b.score { return a.score > b.score }
-            return a.timestamp > b.timestamp
-        }
-        
-        let top = Array(scored.prefix(limit))
-        return MLSearchResults(
-            descriptor: records.first?.descriptor ?? MLModelDescriptor(identifier: "unknown", version: 0, embeddingDimension: queryDim),
-            queryText: "",
-            results: top
-        )
-    }
-    
-    /// `vDSP_dotpr` over two `ContiguousArray<Float32>` — zero-copy via unsafe buffer pointer.
-    private func computeDotProduct(_ a: ContiguousArray<Float32>, _ b: ContiguousArray<Float32>) -> Float {
-        precondition(a.count == b.count, "Vector mismatch: \(a.count) vs \(b.count)")
-        // Empty vectors yield a zero dot product without invoking vDSP (which would receive a
-        // nil baseAddress for a zero-length ContiguousArray — safe to guard explicitly).
-        guard a.count > 0 else { return 0 }
-        var result: Float = 0
-        a.withUnsafeBufferPointer { aBuf in
-            b.withUnsafeBufferPointer { bBuf in
-                guard let aBase = aBuf.baseAddress, let bBase = bBuf.baseAddress else { return }
-                vDSP_dotpr(aBase, 1, bBase, 1, &result, vDSP_Length(a.count))
+
+    public func score(block: MLVectorBlock, query: ContiguousArray<Float32>, into scores: inout [Float32]) {
+        let rows = block.count
+        let dimension = block.dimension
+        guard rows > 0, dimension > 0, query.count == dimension, scores.count == rows else { return }
+
+        block.withUnsafeStorage { matrix in
+            query.withUnsafeBufferPointer { q in
+                scores.withUnsafeMutableBufferPointer { out in
+                    guard let a = matrix.baseAddress, let x = q.baseAddress, let y = out.baseAddress else { return }
+                    // C(rows×1) = A(rows×dimension) · B(dimension×1), all row-major.
+                    vDSP_mmul(a, 1, x, 1, y, 1, vDSP_Length(rows), 1, vDSP_Length(dimension))
+                }
             }
         }
-        return result
     }
 }

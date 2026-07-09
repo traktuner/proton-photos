@@ -119,12 +119,14 @@ final class CoreArchitectureGateTests: XCTestCase {
             extraForbiddenTokens: ["PhotoDiagnostics"]
         ),
         // MLSearchCore: pure Swift, platform-neutral. Owns the ML index model, store protocol,
-        // in-memory store, planner, progress, query/result types, and vector-scorer protocol.
-        // May import only Foundation + PhotosCore. CoreML/Vision/UIKit/AppKit/SwiftUI/Photos/SDK
-        // are banned so a Core bug in search/indexing is fixable once for every platform.
+        // in-memory + SQLite stores, packed vector block, planner, progress, query/result types,
+        // and vector-scorer protocol. SQLite3: the system C library backing the persistent
+        // embedding store (same allowance as PhotosCore/UploadCore stores). CoreML/Vision/
+        // UIKit/AppKit/SwiftUI/Photos/SDK are banned so a Core bug in search/indexing is
+        // fixable once for every platform.
         CoreTargetRule(
             name: "MLSearchCore",
-            allowedImports: ["Foundation", "PhotosCore"],
+            allowedImports: ["Foundation", "PhotosCore", "SQLite3"],
             expectedDependencies: ["PhotosCore"],
             extraForbiddenTokens: ["CoreML", "Vision", "NaturalLanguage", "MLModel"]
         ),
