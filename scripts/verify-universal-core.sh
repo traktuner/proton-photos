@@ -3,7 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE="$ROOT/Packages/ProtonPhotosKit"
-DERIVED_DATA_BASE="${DERIVED_DATA_BASE:-/tmp/protonphotos-package-core-gate}"
+# Repo lives on a network share - all build output stays on the local Mac (see rebuild.sh).
+BUILD_ROOT="${PROTONPHOTOS_BUILD_ROOT:-$HOME/Developer/xcode/ProtonPhotos}"
+SPM_SCRATCH="${SPM_SCRATCH_PATH:-$BUILD_ROOT/SPM.noindex}"
+DERIVED_DATA_BASE="${DERIVED_DATA_BASE:-$BUILD_ROOT/core-gate-dd.noindex}"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 MODE="${CORE_GATE_MODE:-${1:-full}}"
@@ -66,8 +69,9 @@ echo "[core-gate] developer dir: $DEVELOPER_DIR"
 echo "[core-gate] mode: $MODE"
 echo "[core-gate] derived data base: $DERIVED_DATA_BASE"
 
+echo "[core-gate] spm scratch: $SPM_SCRATCH"
 echo "[core-gate] running CoreArchitectureGateTests"
-xcrun swift test --package-path "$PACKAGE" --filter CoreArchitectureGateTests
+xcrun swift test --package-path "$PACKAGE" --scratch-path "$SPM_SCRATCH" --filter CoreArchitectureGateTests
 
 if [[ "$MODE" == "fast" ]]; then
   echo "[core-gate] fast architecture gate passed"

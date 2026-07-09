@@ -32,7 +32,11 @@ lipo -create \
   -output "$SDK_DIR/Resources/libbootstrapperdll.osx-universal.o"
 
 echo "Clearing local Xcode module caches that may reference the previous SDK..."
-rm -rf "$ROOT/build/DD.noindex" "$ROOT/build/DD.ios.noindex"
+BUILD_ROOT="${PROTONPHOTOS_BUILD_ROOT:-$HOME/Developer/xcode/ProtonPhotos}"
+rm -rf "$BUILD_ROOT/DD.noindex" "$BUILD_ROOT/DD.ios.noindex" "$BUILD_ROOT/SPM.noindex" \
+       "$BUILD_ROOT/core-gate-dd.noindex"
+# Legacy in-repo build dirs (pre-NAS layout).
+rm -rf "$ROOT/build" "$ROOT/Packages/ProtonPhotosKit/.build"
 
 CORE=$(grep -o 'protoncore_ios.git", exact: "[^"]*"' "$SDK_DIR/Package.swift" | grep -o '[0-9][0-9.]*')
 echo ""
