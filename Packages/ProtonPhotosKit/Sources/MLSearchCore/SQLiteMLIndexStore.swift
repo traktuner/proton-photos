@@ -4,11 +4,21 @@ import SQLite3
 
 /// Local derived index with WAL, batched transactions and authenticated vector encryption.
 /// Corrupt or wrong-key rows are ignored and can be rebuilt from the media cache.
+///
+/// Rows persist vectors as IEEE-754 binary16 (`MLFloat16Codec`): half the disk footprint and
+/// read/write I/O of Float32 at ~2^-11 relative precision — far below ranking noise for
+/// normalized CLIP-family embeddings. The in-memory scoring block stays Float32; widening
+/// happens once, streamed, on block load. A `user_version` mismatch resets the ML-only schema
+/// (vectors are derived data, rebuilt from the media cache — no migration machinery).
 public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
     public static let databaseFileName = "ml-search-index-v1.sqlite"
 
-    private static let schemaVersion: Int32 = 2
+    /// v3: vector blobs switched from Float32 to binary16 rows (clean reset, no migration).
+    private static let schemaVersion: Int32 = 3
     private static let membershipChunkSize = 200
+    /// The one precision this build writes and reads. Rows with any other precision are
+    /// invisible (skipped by the epoch-read predicate), never misinterpreted.
+    private static let precision = MLEmbeddingPrecision.float16
 
     private var db: OpaquePointer?
     private let lock = NSLock()
@@ -90,8 +100,8 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
                 bindText(stmt, 3, record.descriptor.identifier)
                 sqlite3_bind_int64(stmt, 4, Int64(record.descriptor.version))
                 sqlite3_bind_int64(stmt, 5, Int64(record.descriptor.embeddingDimension))
-                bindText(stmt, 6, MLEmbeddingPrecision.float32.rawValue)
-                let plaintext = record.vector.withUnsafeBytes { Data($0) }
+                bindText(stmt, 6, Self.precision.rawValue)
+                let plaintext = MLFloat16Codec.encodeLittleEndian(record.vector)
                 let ciphertext: Data
                 do {
                     ciphertext = try cipher.seal(
@@ -434,24 +444,30 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
             bindEpochRead(stmt, descriptor)
 
             var records: [MLEmbeddingRecord] = []
-            let expectedBytes = descriptor.embeddingDimension * MemoryLayout<Float32>.size
+            let expectedBytes = descriptor.embeddingDimension * MLFloat16Codec.bytesPerElement
+            let expectedSealedBytes = cipher.sealedByteCount(forPlaintextByteCount: expectedBytes)
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let encryptedBytes = Int(sqlite3_column_bytes(stmt, 2))
                 guard encryptedBytes > 0, let blob = sqlite3_column_blob(stmt, 2) else { continue }
+                // Byte-count validation BEFORE any decryption: a truncated/corrupt blob is
+                // skipped for the cost of a length compare, never a crypto operation.
+                if let expectedSealedBytes, encryptedBytes != expectedSealedBytes { continue }
                 let ciphertext = Data(bytes: blob, count: encryptedBytes)
                 let context = MLVectorCipherContext(
                     uid: PhotoUID(volumeID: columnText(stmt, 0), nodeID: columnText(stmt, 1)),
                     descriptor: descriptor
                 )
                 guard let plaintext = try? cipher.open(ciphertext, context: context),
-                      plaintext.count == expectedBytes else { continue }
+                      let vector = plaintext.withUnsafeBytes({
+                          MLFloat16Codec.decodeLittleEndian($0, dimension: descriptor.embeddingDimension)
+                      }) else { continue }
                 let captureTime: Date? = sqlite3_column_type(stmt, 4) == SQLITE_NULL
                     ? nil
                     : Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
                 records.append(MLEmbeddingRecord(
                     uid: context.uid,
                     descriptor: descriptor,
-                    vector: plaintext.withUnsafeBytes { ContiguousArray($0.bindMemory(to: Float32.self)) },
+                    vector: vector,
                     timestamp: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3)),
                     captureTime: captureTime
                 ))
@@ -480,17 +496,21 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
             defer { sqlite3_finalize(stmt) }
             bindEpochRead(stmt, descriptor)
 
-            let expectedBytes = descriptor.embeddingDimension * MemoryLayout<Float32>.size
+            let expectedBytes = descriptor.embeddingDimension * MLFloat16Codec.bytesPerElement
+            let expectedSealedBytes = cipher.sealedByteCount(forPlaintextByteCount: expectedBytes)
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let uid = PhotoUID(volumeID: columnText(stmt, 0), nodeID: columnText(stmt, 1))
                 let encryptedBytes = Int(sqlite3_column_bytes(stmt, 2))
                 guard encryptedBytes > 0, let blob = sqlite3_column_blob(stmt, 2) else { continue }
+                // Length check before decryption — corrupt rows never cost a crypto pass.
+                if let expectedSealedBytes, encryptedBytes != expectedSealedBytes { continue }
                 let ciphertext = Data(bytes: blob, count: encryptedBytes)
                 let context = MLVectorCipherContext(uid: uid, descriptor: descriptor)
                 guard let plaintext = try? cipher.open(ciphertext, context: context),
                       plaintext.count == expectedBytes else { continue }
+                // Widen binary16 → Float32 straight into the packed scoring buffer.
                 _ = plaintext.withUnsafeBytes { raw in
-                    block.append(uid: uid, rawLittleEndianFloat32: raw)
+                    block.append(uid: uid, rawLittleEndianFloat16: raw)
                 }
             }
             return block
@@ -624,7 +644,7 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
     private func bindEpochRead(_ stmt: OpaquePointer?, _ descriptor: MLModelDescriptor) {
         bindDescriptor(stmt, descriptor)
         sqlite3_bind_int64(stmt, 3, Int64(descriptor.embeddingDimension))
-        bindText(stmt, 4, MLEmbeddingPrecision.float32.rawValue)
+        bindText(stmt, 4, Self.precision.rawValue)
     }
 
     private func bindText(_ stmt: OpaquePointer?, _ index: Int32, _ value: String) {

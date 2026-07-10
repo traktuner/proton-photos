@@ -33,6 +33,12 @@ public struct CryptoKitMLVectorCipher: MLVectorCipher, Sendable {
         return try AES.GCM.open(box, using: key, authenticating: associatedData(for: context))
     }
 
+    /// AES-GCM combined representation is length-deterministic: 12-byte nonce + payload +
+    /// 16-byte tag. Lets the store reject wrong-sized rows before decrypting.
+    public func sealedByteCount(forPlaintextByteCount plaintextByteCount: Int) -> Int? {
+        plaintextByteCount + 12 + 16
+    }
+
     private func associatedData(for context: MLVectorCipherContext) -> Data {
         let fields = [
             "ns=ml-search",

@@ -3,7 +3,7 @@ import Foundation
 import PhotosCore
 @testable import MLSearchCore
 
-private struct TestMLVectorCipher: MLVectorCipher {
+struct TestMLVectorCipher: MLVectorCipher {
     private let mask: UInt8 = 0xA5
 
     func seal(_ plaintext: Data, context: MLVectorCipherContext) throws -> Data {
@@ -12,6 +12,12 @@ private struct TestMLVectorCipher: MLVectorCipher {
 
     func open(_ ciphertext: Data, context: MLVectorCipherContext) throws -> Data {
         Data(ciphertext.map { $0 ^ mask })
+    }
+
+    /// Length-preserving scheme → sealed size == plaintext size (enables the store's
+    /// pre-decryption byte-count validation in tests).
+    func sealedByteCount(forPlaintextByteCount plaintextByteCount: Int) -> Int? {
+        plaintextByteCount
     }
 }
 
@@ -61,7 +67,12 @@ private struct TestMLVectorCipher: MLVectorCipher {
             let loaded = try #require(store.allRecords(for: descriptorV1).first)
             #expect(loaded.uid == uid("a0"))
             #expect(loaded.descriptor == descriptorV1)
-            #expect(loaded.vector == ContiguousArray<Float32>([0.1, 0.2, 0.3, 0.4]))
+            // Rows persist as binary16: the round trip returns the fp16-quantized values.
+            let expected = ContiguousArray<Float32>([0.1, 0.2, 0.3, 0.4].map(MLFloat16Codec.quantized))
+            #expect(loaded.vector == expected)
+            for (stored, original) in zip(loaded.vector, [0.1, 0.2, 0.3, 0.4] as [Float32]) {
+                #expect(abs(stored - original) <= abs(original) * 0.001)
+            }
             #expect(loaded.timestamp == Date(timeIntervalSince1970: 1_000))
             #expect(loaded.captureTime == capture)
             #expect(store.contains(uid: uid("a0"), descriptor: descriptorV1))

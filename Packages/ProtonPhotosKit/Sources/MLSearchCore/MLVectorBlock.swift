@@ -1,10 +1,13 @@
 import Foundation
 import PhotosCore
 
-/// Storage precision of a persisted embedding vector. Persisted per row so fp16/int8 can be
-/// added later without schema churn; readers skip precisions they don't understand.
+/// Storage precision of a persisted embedding vector. Persisted per row so further precisions
+/// (int8) can be added without schema churn; readers skip precisions they don't understand.
 public enum MLEmbeddingPrecision: String, Sendable {
     case float32 = "f32"
+    /// IEEE-754 binary16 rows — the production storage format (half the disk and I/O of f32;
+    /// normalized CLIP-family vectors lose ~2^-11 relative precision, far below ranking noise).
+    case float16 = "f16"
 }
 
 /// A packed, query-ready matrix of embeddings for one model epoch.
@@ -59,7 +62,7 @@ public struct MLVectorBlock: Sendable {
         return true
     }
 
-    /// Append one row from raw little-endian `Float32` bytes (the persisted blob format).
+    /// Append one row from raw little-endian `Float32` bytes (legacy blob format).
     /// Avoids materializing an intermediate `ContiguousArray` when streaming from disk.
     @discardableResult
     public mutating func append(uid: PhotoUID, rawLittleEndianFloat32 bytes: UnsafeRawBufferPointer) -> Bool {
@@ -67,6 +70,24 @@ public struct MLVectorBlock: Sendable {
         uids.append(uid)
         // Apple platforms are little-endian; the blob is the native memory layout.
         storage.append(contentsOf: bytes.bindMemory(to: Float32.self))
+        return true
+    }
+
+    /// Append one row from raw little-endian binary16 bytes (the persisted blob format),
+    /// widening straight into the packed `Float32` scoring buffer — one pass, no intermediate
+    /// array, so loading a large epoch stays a single streamed conversion.
+    @discardableResult
+    public mutating func append(uid: PhotoUID, rawLittleEndianFloat16 bytes: UnsafeRawBufferPointer) -> Bool {
+        guard bytes.count == dimension * MLFloat16Codec.bytesPerElement else { return false }
+        uids.append(uid)
+        storage.reserveCapacity(storage.count + dimension)
+        for index in 0..<dimension {
+            let bits = UInt16(littleEndian: bytes.loadUnaligned(
+                fromByteOffset: index * MLFloat16Codec.bytesPerElement,
+                as: UInt16.self
+            ))
+            storage.append(MLFloat16Codec.float32(fromBits: bits))
+        }
         return true
     }
 
