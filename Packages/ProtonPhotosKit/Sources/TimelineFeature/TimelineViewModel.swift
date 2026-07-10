@@ -121,13 +121,19 @@ public final class TimelineViewModel {
         ])
     }
 
-    func visibleContent(searchText: String, favoriteUIDs: Set<PhotoUID>, includeMonthMarkers: Bool) -> TimelineVisibleContent {
+    func visibleContent(
+        searchText: String,
+        favoriteUIDs: Set<PhotoUID>,
+        includeMonthMarkers: Bool,
+        semanticMatches: Set<PhotoUID>? = nil
+    ) -> TimelineVisibleContent {
         let context = TimelineSearchContext(activeFilter: filter, favoriteUIDs: favoriteUIDs)
         let key = VisibleContentCacheKey(
             generation: visibleContentGeneration,
             searchText: searchText,
             context: context,
-            includeMonthMarkers: includeMonthMarkers
+            includeMonthMarkers: includeMonthMarkers,
+            semanticMatches: semanticMatches
         )
         if visibleContentCacheKey == key, let visibleContentCacheValue {
             return visibleContentCacheValue
@@ -145,7 +151,9 @@ public final class TimelineViewModel {
             return value
         }
 
-        let visibleSections = TimelineSearch.filter(sections, query: searchText, context: context)
+        let visibleSections = TimelineSearch.filter(
+            sections, query: searchText, context: context, semanticMatches: semanticMatches
+        )
         let visibleItems = visibleSections.flatMap(\.items)
         let monthMarkers = includeMonthMarkers
             ? MetalGridProductionAdapter.dateMarkers(items: visibleItems, granularity: .month)
@@ -172,6 +180,7 @@ public final class TimelineViewModel {
         let searchText: String
         let context: TimelineSearchContext
         let includeMonthMarkers: Bool
+        let semanticMatches: Set<PhotoUID>?
     }
 
     /// Switches what the grid shows. `.all` reuses the cached/SDK timeline; tag & album views load

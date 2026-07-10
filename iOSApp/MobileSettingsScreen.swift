@@ -1,5 +1,6 @@
 import DesignSystemCore
 import Foundation
+import MLSearchCore
 import PhotoLibraryBackupAdapter
 import Photos
 import PhotosUI
@@ -29,6 +30,7 @@ struct MobileSettingsScreen: View {
             List {
                 accountSection
                 librarySection
+                smartSearchSection
                 backupSection
                 cacheSection
                 signOutSection
@@ -106,6 +108,25 @@ struct MobileSettingsScreen: View {
                         : "settings.library_previews_checking"),
                     detail: previewLoadingDetail
                 )
+            }
+        }
+    }
+
+    /// One row into the dedicated Smart Search screen (the settings list itself stays lean).
+    /// Status wording comes from the shared Core presentation, same as macOS.
+    @ViewBuilder private var smartSearchSection: some View {
+        if let smartSearch = libraryModel.smartSearch {
+            Section {
+                NavigationLink {
+                    MobileSmartSearchScreen(controller: smartSearch)
+                } label: {
+                    LabeledContent {
+                        Text(smartSearch.presentation.statusText)
+                            .foregroundStyle(.secondary)
+                    } label: {
+                        Label(L10n.string("mlsearch.settings_title"), systemImage: "sparkle.magnifyingglass")
+                    }
+                }
             }
         }
     }

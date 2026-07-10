@@ -18,6 +18,9 @@ public enum LibraryWorkloadKind: Sendable, Equatable {
     case userInitiatedBackup
     case backgroundThumbnailCrawl
     case backgroundLocationCrawl
+    /// On-device ML embedding of library assets for Smart Search. Fully deferrable: never
+    /// competes with visible thumbnails, transfers, thermal headroom or battery.
+    case backgroundSemanticIndexing
 }
 
 public struct LibraryWorkloadSignals: Sendable, Equatable {
@@ -105,7 +108,7 @@ public struct LibraryWorkloadGovernorPolicy: Sendable, Equatable {
             }
             return LibraryWorkloadBudget(maxConcurrentItems: base)
 
-        case .backgroundLocationCrawl:
+        case .backgroundLocationCrawl, .backgroundSemanticIndexing:
             if signals.hasVisibleMediaDemand || signals.hasActiveUserInitiatedTransfer
                 || signals.thermalLevel >= .serious || signals.isLowPowerMode {
                 return LibraryWorkloadBudget(maxConcurrentItems: 0, shouldYield: true)

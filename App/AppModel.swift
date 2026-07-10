@@ -1,5 +1,8 @@
 import Foundation
 import AppKit
+import MediaFeedCore
+import MLSearchAppleAdapter
+import MLSearchCore
 import PhotoLibraryBackupAdapter
 import PhotosCore
 import ProtonAuth
@@ -41,6 +44,11 @@ final class AppModel {
     /// Bumped after album sync creates or mutates Proton albums. Views use it only to refresh
     /// visible album lists; sync correctness lives in the shared controller.
     private(set) var albumCatalogRevision = 0
+    /// Smart Search (on-device semantic search): the SHARED cross-platform controller over the
+    /// universal lifecycle actor. Built lazily by `configureSmartSearch` once the account feed
+    /// and timeline exist; every lifecycle decision stays in MLSearchCore.
+    private(set) var smartSearch: MLSmartSearchController?
+    @ObservationIgnored private var smartSearchMemoryRegistration: MemoryPressureRegistration?
     /// True once the signed-in library has finished its first load (loaded / empty / failed). Drives the
     /// launch veil, which lifts only after the real grid is ready to be revealed. Reset on sign-out and on a
     /// fresh backend build so a new session shows the veil again.
@@ -107,6 +115,11 @@ final class AppModel {
     func signOut() {
         backendTask?.cancel()
         backend = .idle
+        // Smart Search state lives inside the account container purged below; dropping the
+        // controller stops indexing/downloads before the files disappear.
+        smartSearch = nil
+        smartSearchMemoryRegistration?.end()
+        smartSearchMemoryRegistration = nil
         backupController?.stopSync()
         backupController = nil
         photoBackupController?.stopSync()
@@ -140,9 +153,44 @@ final class AppModel {
         if case let .signedIn(session) = auth { prepareBackend(session) }
     }
 
+    /// Builds the Smart Search stack once the account feed and timeline exist (MainView calls
+    /// this from its attach path). Idempotent per backend build; composition only — every
+    /// lifecycle decision lives in the shared Core actor.
+    func configureSmartSearch(
+        feedCore: ThumbnailFeedCore,
+        assetsProvider: @escaping @Sendable () async -> [PhotoUID]
+    ) {
+        guard smartSearch == nil,
+              let session = authController.currentSession,
+              let facade else { return }
+        #if DEBUG
+        let allowsDeveloperModels = true
+        #else
+        let allowsDeveloperModels = false
+        #endif
+        let lifecycle = AppleSmartSearchBootstrap.makeLifecycle(
+            accountDirectory: facade.accountDataDirectory,
+            accountUID: session.uid,
+            keyPassword: session.keyPassword,
+            feed: feedCore,
+            assetsProvider: assetsProvider,
+            allowsDeveloperModels: allowsDeveloperModels,
+            databasePolicy: facade.accountDatabasePolicy
+        )
+        smartSearch = MLSmartSearchController(lifecycle: lifecycle)
+        // Under memory pressure the search stack drops cached vector blocks and unloads the
+        // CoreML model; both rebuild on demand.
+        smartSearchMemoryRegistration?.end()
+        smartSearchMemoryRegistration = MemoryPressureGovernor.shared.register { tier in
+            guard tier.requiresImmediatePurge else { return }
+            Task { await lifecycle.releaseMemory() }
+        }
+    }
+
     private func prepareBackend(_ session: ProtonSession) {
         backendTask?.cancel()
         libraryReady = false           // a fresh build isn't ready until its first library load lands
+        smartSearch = nil              // rebuilt against the fresh backend's feed/timeline
         // Install the per-account encrypted-cache key derived from the restored session (and purge any legacy
         // plaintext cache) before the grid renders or the crawl begins.
         OfflineLibraryManager.shared.configure(session: session)

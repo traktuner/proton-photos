@@ -69,6 +69,12 @@ targets:
         product: PhotoLibraryBackupAdapter
       - package: ProtonPhotosKit
         product: MapFeature
+      - package: ProtonPhotosKit
+        product: MLSearchCore
+      - package: ProtonPhotosKit
+        product: MLSearchAppleAdapter
+      - package: ProtonPhotosKit
+        product: MLSearchFeature
       - package: ProtonCore
         product: ProtonCoreCryptoPatchedGoImplementation
     settings:
@@ -149,6 +155,12 @@ targets:
         product: MediaLocationCore
       - package: ProtonPhotosKit
         product: MapUIKitAdapter
+      - package: ProtonPhotosKit
+        product: MLSearchCore
+      - package: ProtonPhotosKit
+        product: MLSearchAppleAdapter
+      - package: ProtonPhotosKit
+        product: MLSearchFeature
       - package: ProtonCore
         product: ProtonCoreCryptoPatchedGoImplementation
     settings:

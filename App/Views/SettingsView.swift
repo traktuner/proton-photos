@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import AlbumSyncCore
+import MLSearchCore
 import PhotoLibraryBackupAdapter
 import PhotosCore
 import DesignSystem
@@ -13,6 +14,7 @@ struct SettingsView: View {
     let backup: FolderBackupController?
     let photoBackup: PhotoLibraryBackupController?
     let albumSync: AlbumSyncController?
+    let smartSearch: MLSmartSearchController?
     let signOut: () -> Void
 
     var body: some View {
@@ -21,6 +23,10 @@ struct SettingsView: View {
                 .tabItem { Label("settings.account_tab", systemImage: "person.crop.circle") }
             LibrarySettingsTab()
                 .tabItem { Label("settings.library_tab", systemImage: "photo.on.rectangle.angled") }
+            if let smartSearch {
+                SmartSearchSettingsTab(controller: smartSearch)
+                    .tabItem { Label(L10n.string("mlsearch.settings_title"), systemImage: "sparkle.magnifyingglass") }
+            }
             if let backup {
                 BackupSettingsTab(backup: backup, photoBackup: photoBackup, albumSync: albumSync, uploadCoordinator: uploadCoordinator)
                     .tabItem { Label("settings.backup_tab", systemImage: "arrow.triangle.2.circlepath.icloud") }

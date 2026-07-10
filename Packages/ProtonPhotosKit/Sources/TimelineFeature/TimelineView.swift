@@ -17,6 +17,8 @@ public struct TimelineView: View {
     private let routeScrollGeneration: Int
     private let routeInitialScrollAnchor: GridScrollAnchor<PhotoUID>?
     private let searchText: String
+    /// UIDs the on-device Smart Search ranked for `searchText` (nil = semantic search inactive).
+    private let semanticMatches: Set<PhotoUID>?
     private let selectionMode: Bool
     private let onSelectionChange: (Set<PhotoUID>) -> Void
     private let media: FullMediaProvider?
@@ -38,6 +40,7 @@ public struct TimelineView: View {
         routeScrollGeneration: Int = 0,
         routeInitialScrollAnchor: GridScrollAnchor<PhotoUID>? = nil,
         searchText: String = "",
+        semanticMatches: Set<PhotoUID>? = nil,
         selectionMode: Bool = false,
         media: FullMediaProvider? = nil,
         metadataProvider: PhotoMetadataProvider? = nil,
@@ -57,6 +60,7 @@ public struct TimelineView: View {
         self.routeScrollGeneration = routeScrollGeneration
         self.routeInitialScrollAnchor = routeInitialScrollAnchor
         self.searchText = searchText
+        self.semanticMatches = semanticMatches
         self.selectionMode = selectionMode
         self.media = media
         self.metadataProvider = metadataProvider
@@ -98,7 +102,8 @@ public struct TimelineView: View {
                 let visibleContent = model.visibleContent(
                     searchText: searchText,
                     favoriteUIDs: favoriteUIDs,
-                    includeMonthMarkers: showsMonthLabels
+                    includeMonthMarkers: showsMonthLabels,
+                    semanticMatches: semanticMatches
                 )
                 // Production timeline is MetalGrid-ONLY: the canonical `SquareTileGridEngine` owns all
                 // geometry (square slots). No legacy-grid fallback, no aspect-driven justified layout,
@@ -215,8 +220,9 @@ public struct TimelineView: View {
     }
 
     nonisolated static func filteredSections(_ sections: [TimelineSection], query: String,
-                                             context: TimelineSearchContext = TimelineSearchContext()) -> [TimelineSection] {
-        TimelineSearch.filter(sections, query: query, context: context)
+                                             context: TimelineSearchContext = TimelineSearchContext(),
+                                             semanticMatches: Set<PhotoUID>? = nil) -> [TimelineSection] {
+        TimelineSearch.filter(sections, query: query, context: context, semanticMatches: semanticMatches)
     }
 }
 

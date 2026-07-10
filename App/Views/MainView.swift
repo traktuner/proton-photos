@@ -13,6 +13,7 @@ import PhotoViewerFeature
 import UploadCore
 import UploadFeature
 import MapFeature
+import MLSearchCore
 import ProtonDriveBackend
 
 struct MainView: View {
@@ -50,6 +51,9 @@ struct MainView: View {
     @State private var routeInitialScrollAnchor: GridScrollAnchor<PhotoUID>? = nil
     @State private var searchText = ""
     @State private var committedSearchText = ""
+    /// Debounced, epoch-guarded semantic query pipeline (shared Core). Created once Smart Search
+    /// is configured; publishes ranked UIDs the timeline widens its lexical results with.
+    @State private var semanticQuery: MLSmartSearchQueryCoordinator?
     @State private var searchDebounceTask: Task<Void, Never>?
     // Shared-element zoom transition (photo ↔ its grid cell).
     @State private var gridProxy = GridProxy<PhotoUID>()
@@ -140,6 +144,7 @@ struct MainView: View {
                              routeScrollGeneration: routeScrollGeneration,
                              routeInitialScrollAnchor: routeInitialScrollAnchor,
                              searchText: committedSearchText,
+                             semanticMatches: semanticQuery?.rankedUIDs.map(Set.init),
                              selectionMode: selectionMode, media: backend, metadataProvider: backend, favoriteUIDs: favorites,
                              isOffline: !networkMonitor.isOnline,
                              onSelectionChange: { selectedUIDs = $0 }) { item, items in
@@ -224,6 +229,8 @@ struct MainView: View {
                 // Kick off the low-priority GPS crawl (once) so the Map's location index fills in behind the
                 // thumbnail crawl.
                 OfflineLibraryManager.shared.startLocationCrawl(items: timelineModel.allItems, metadata: backend)
+                // New/removed assets flow into the Smart Search index on its next background pass.
+                model.smartSearch?.noteLibraryChanged()
             }
             .onDisappear {
                 searchDebounceTask?.cancel()
@@ -717,6 +724,11 @@ struct MainView: View {
         let manager = OfflineLibraryManager.shared
         manager.attach(feed: feed, stats: backend)
         manager.liveAssetCount = timelineModel.allItems.count
+        // Smart Search composition: same account feed, timeline UIDs as the asset universe.
+        let timeline = timelineModel
+        model.configureSmartSearch(feedCore: feed.feedCore) {
+            await MainActor.run { timeline.allItems.map(\.uid) }
+        }
     }
 
     /// Aspect-fit rect of `image` centred in `size` - the photo's fullscreen frame.
@@ -1075,6 +1087,10 @@ struct MainView: View {
 
     private func scheduleSearchCommit(_ value: String) {
         searchDebounceTask?.cancel()
+        if semanticQuery == nil, let smartSearch = model.smartSearch {
+            semanticQuery = MLSmartSearchQueryCoordinator(lifecycle: smartSearch.lifecycleActor)
+        }
+        semanticQuery?.update(query: value)
         if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             committedSearchText = ""
             // Clearing the search restores the FULL timeline - land at the newest (bottom-right), the grid's home,

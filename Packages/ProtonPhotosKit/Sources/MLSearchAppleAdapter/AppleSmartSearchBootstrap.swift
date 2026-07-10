@@ -19,8 +19,8 @@ public enum AppleSmartSearchBootstrap {
         keyPassword: String,
         feed: ThumbnailFeedCore,
         assetsProvider: @escaping @Sendable () async -> [PhotoUID],
-        permitsIndexing: @escaping @Sendable () -> Bool,
         allowsDeveloperModels: Bool,
+        hostPermitsIndexing: @escaping @Sendable () -> Bool = { true },
         databasePolicy: LibraryDatabasePolicy = .conservative,
         catalog: MLModelCatalog = .builtIn,
         runnerConfiguration: MLIndexRunner.Configuration = .init()
@@ -28,6 +28,7 @@ public enum AppleSmartSearchBootstrap {
         let layout = MLModelInstallLayout(
             rootDirectory: accountDirectory.appendingPathComponent(rootDirectoryName, isDirectory: true)
         )
+        let workGate = AppleSmartSearchWorkGate(feed: feed, hostPermitsIndexing: hostPermitsIndexing)
         let cipher = CryptoKitMLVectorCipher(
             key: MLSearchKeyDerivation.localIndexKey(accountUID: accountUID, keyPassword: keyPassword),
             accountUID: accountUID
@@ -40,7 +41,7 @@ public enum AppleSmartSearchBootstrap {
             storeProvider: SQLiteMLIndexStoreProvider(url: layout.indexDatabaseURL, policy: databasePolicy, cipher: cipher),
             runtimeProvider: AppleSmartSearchRuntimeProvider(feed: feed, runnerConfiguration: runnerConfiguration),
             assetsProvider: assetsProvider,
-            governor: MLClosureIndexingGovernor(permitsIndexing),
+            governor: MLClosureIndexingGovernor({ workGate.permitsIndexing() }),
             allowsDeveloperModels: allowsDeveloperModels
         ))
     }

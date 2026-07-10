@@ -37,6 +37,7 @@ CORE_TARGETS=(
 
 SHARED_UI_TARGETS=(
   DesignSystemCore
+  MLSearchFeature
 )
 
 RENDERING_CORE_TARGETS=(

@@ -45,6 +45,8 @@ struct ProtonPhotosMobileApp: App {
                         }
                     } else if phase == .active {
                         PhotoBackupBackgroundGrace.shared.end()
+                        // Foregrounding reopens the background-indexing gate promptly.
+                        libraryModel.smartSearch?.noteConditionsChanged()
                     }
                 }
         }

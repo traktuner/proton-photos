@@ -71,6 +71,7 @@ struct ProtonPhotosApp: App {
                 backup: model.backupController,
                 photoBackup: model.photoBackupController,
                 albumSync: model.albumSyncController,
+                smartSearch: model.smartSearch,
                 signOut: { model.signOut() }
             )
         }

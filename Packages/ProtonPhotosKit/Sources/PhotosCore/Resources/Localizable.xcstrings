@@ -301,6 +301,94 @@
         "de": { "stringUnit": { "state": "translated", "value": "Alles in Ordnung." } }
       }
     },
+    "mlsearch.settings_title": {
+      "extractionState": "manual",
+      "comment": "Title of the Smart Search settings area on every platform.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Smart Search" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Intelligente Suche" } }
+      }
+    },
+    "mlsearch.model_picker": {
+      "extractionState": "manual",
+      "comment": "Label of the model picker in Smart Search settings.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Model" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modell" } }
+      }
+    },
+    "mlsearch.status_label": {
+      "extractionState": "manual",
+      "comment": "Label of the status row in Smart Search settings.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Status" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Status" } }
+      }
+    },
+    "mlsearch.model_size_label": {
+      "extractionState": "manual",
+      "comment": "Label of the installed model size row.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Model size" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modellgröße" } }
+      }
+    },
+    "mlsearch.disable_confirm_title": {
+      "extractionState": "manual",
+      "comment": "Confirmation title when turning Smart Search off.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Turn off Smart Search?" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Intelligente Suche ausschalten?" } }
+      }
+    },
+    "mlsearch.disable_confirm_message": {
+      "extractionState": "manual",
+      "comment": "Confirmation body when turning Smart Search off.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The downloaded model and the local search index will be deleted from this device. Your photos in Proton Drive are not affected." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Das geladene Modell und der lokale Suchindex werden von diesem Gerät gelöscht. Deine Fotos in Proton Drive sind nicht betroffen." } }
+      }
+    },
+    "mlsearch.disable_confirm_action": {
+      "extractionState": "manual",
+      "comment": "Destructive confirm button when turning Smart Search off.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Turn off and delete" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Ausschalten und löschen" } }
+      }
+    },
+    "mlsearch.switch_confirm_title": {
+      "extractionState": "manual",
+      "comment": "Confirmation title when picking another model.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Switch model?" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modell wechseln?" } }
+      }
+    },
+    "mlsearch.switch_confirm_message": {
+      "extractionState": "manual",
+      "comment": "Confirmation body when picking another model.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local search data will be deleted and rebuilt with the new model." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Die lokalen Suchdaten werden gelöscht und mit dem neuen Modell neu aufgebaut." } }
+      }
+    },
+    "mlsearch.switch_confirm_action": {
+      "extractionState": "manual",
+      "comment": "Confirm button when picking another model.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Switch" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Wechseln" } }
+      }
+    },
+    "mlsearch.install_dev_model": {
+      "extractionState": "manual",
+      "comment": "Developer-only button that installs a local model artifact.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Install local model folder" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Lokalen Modellordner installieren" } }
+      }
+    },
     "mlsearch.status_disabled": {
       "extractionState": "manual",
       "comment": "Smart Search status: feature is off.",

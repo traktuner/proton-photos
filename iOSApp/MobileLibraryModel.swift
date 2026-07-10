@@ -2,7 +2,10 @@ import Foundation
 import MediaByteCache
 import MediaCacheCore
 import MediaCacheUIKitAdapter
+import MediaFeedCore
 import MediaLocationCore
+import MLSearchAppleAdapter
+import MLSearchCore
 import Observation
 import PhotoLibraryBackupAdapter
 import PhotosCore
@@ -82,6 +85,10 @@ final class MobileLibraryModel {
     /// Bumped by the shared album-sync controller after remote album mutations so Collections can
     /// refresh without reloading the whole timeline.
     private(set) var albumCatalogRevision = 0
+    /// Smart Search (on-device semantic search): the SHARED cross-platform controller over the
+    /// universal lifecycle actor (same code as macOS). Built with the session feed; every
+    /// lifecycle decision stays in MLSearchCore.
+    private(set) var smartSearch: MLSmartSearchController?
 
     /// Whole-library GPS index for the Map tab (shared MediaLocationCore). Persisted encrypted at rest with the
     /// same per-account key as the media caches, so the Map is instant on relaunch.
@@ -115,6 +122,7 @@ final class MobileLibraryModel {
     private var loadToken = 0
     private var firstContentGuard: Task<Void, Never>?
     private var backgroundActivityTask: Task<Void, Never>?
+    @ObservationIgnored private var smartSearchMemoryRegistration: MemoryPressureRegistration?
 
     /// Safety net: if the grid never reports a first drawn frame (e.g. every visible thumbnail is unfetchable),
     /// the loading overlay must still lift onto whatever the grid shows rather than hang forever.
@@ -261,6 +269,35 @@ final class MobileLibraryModel {
         startLocationCrawlIfNeeded()
     }
 
+    /// Builds the Smart Search stack for this session (composition only; the shared Core actor
+    /// owns every lifecycle decision). Same bootstrap as macOS.
+    private func configureSmartSearch(session: ProtonSession, client: ProtonClientFacade, feed: UIKitThumbnailFeed) {
+        #if DEBUG
+        let allowsDeveloperModels = true
+        #else
+        let allowsDeveloperModels = false
+        #endif
+        let lifecycle = AppleSmartSearchBootstrap.makeLifecycle(
+            accountDirectory: client.accountDataDirectory,
+            accountUID: session.uid,
+            keyPassword: session.keyPassword,
+            feed: feed.feedCore,
+            assetsProvider: { [weak self] in
+                await MainActor.run { self?.items.map(\.uid) ?? [] }
+            },
+            allowsDeveloperModels: allowsDeveloperModels,
+            databasePolicy: client.accountDatabasePolicy
+        )
+        smartSearch = MLSmartSearchController(lifecycle: lifecycle)
+        // Under memory pressure the search stack drops cached vector blocks and unloads the
+        // CoreML model; both rebuild on demand.
+        smartSearchMemoryRegistration?.end()
+        smartSearchMemoryRegistration = MemoryPressureGovernor.shared.register { tier in
+            guard tier.requiresImmediatePurge else { return }
+            Task { await lifecycle.releaseMemory() }
+        }
+    }
+
     private func teardown() {
         loadToken &+= 1   // supersede any in-flight snapshot sort
         loadTask?.cancel()
@@ -281,6 +318,9 @@ final class MobileLibraryModel {
         albumCatalogRevision = 0
         snapshot = TimelineSnapshot()
         thumbnailFeed = nil
+        smartSearch = nil
+        smartSearchMemoryRegistration?.end()
+        smartSearchMemoryRegistration = nil
         thumbnailCache = nil
         originalsCache?.clearAndForgetKey()   // sign-out purges decrypted-originals blobs + the account key
         originalsCache = nil
@@ -312,6 +352,7 @@ final class MobileLibraryModel {
         albumSync = nil
         snapshot = TimelineSnapshot()
         thumbnailFeed = nil
+        smartSearch = nil
         loadState = .preparingInventory
 
         let cache = ThumbnailCache(
@@ -400,6 +441,7 @@ final class MobileLibraryModel {
                 self.thumbnailFeed = feed
                 // The live feed's RAM tiers (UIImage wrappers + decoded core) respond to pressure tiers.
                 UIKitMemoryPressureCoordinator.shared.attachFeed(feed)
+                self.configureSmartSearch(session: session, client: client, feed: feed)
 
                 // Stale-while-revalidate: show the cached snapshot instantly (its count + a crawl seed), then
                 // refresh from the server. The grid mounts under the loading overlay so it can report first
@@ -440,7 +482,11 @@ final class MobileLibraryModel {
         // bumped the token while we sorted off-main.
         guard !Task.isCancelled, token == loadToken else { return false }
         let changed = prepared != snapshot
-        if changed { snapshot = prepared }
+        if changed {
+            snapshot = prepared
+            // New/removed assets flow into the Smart Search index on its next background pass.
+            smartSearch?.noteLibraryChanged()
+        }
         apply(.inventoryResolved(count: prepared.count, cached: cached))
         armFirstContentGuardIfNeeded()
         return changed

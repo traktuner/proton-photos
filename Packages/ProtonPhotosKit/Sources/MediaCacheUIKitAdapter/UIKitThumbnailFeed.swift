@@ -17,6 +17,10 @@ public actor UIKitThumbnailFeed {
     private nonisolated let core: ThumbnailFeedCore
     private nonisolated let imageWrappers: WrapperImageCache<UIImage>
 
+    /// The universal feed core, for shared consumers that must stay platform-neutral
+    /// (Smart Search indexing reads cached thumbnails through it).
+    public nonisolated var feedCore: ThumbnailFeedCore { core }
+
     public init(
         cache: ThumbnailCache,
         loader: ThumbnailBatchLoader,

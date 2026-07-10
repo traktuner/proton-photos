@@ -69,6 +69,10 @@ let package = Package(
         // and an Accelerate-backed dot-product scorer. No model artifacts are committed yet — the facade returns "missing" stubs.
         .library(name: "MLSearchCore", targets: ["MLSearchCore"]),
         .library(name: "MLSearchAppleAdapter", targets: ["MLSearchAppleAdapter"]),
+        // MLSearchFeature: the one shared SwiftUI Smart Search settings surface (macOS tab and
+        // iOS/iPadOS screen embed it verbatim). Follows the UploadFeature pattern: SwiftUI over
+        // Core, no platform chrome, no AppKit/UIKit.
+        .library(name: "MLSearchFeature", targets: ["MLSearchFeature"]),
     ],
     dependencies: [
         .package(name: "ProtonDriveSDK", path: "../../Vendor/sdk-swift"),
@@ -201,5 +205,6 @@ let package = Package(
         // compute policy (.cpuAndNeuralEngine), Accelerate scoring, and the shared Apple runtime factory.
         .target(name: "MLSearchAppleAdapter", dependencies: ["MLSearchCore", "MediaFeedCore", "PhotosCore"], resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "MLSearchAppleAdapterTests", dependencies: ["MLSearchAppleAdapter", "MLSearchCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        .target(name: "MLSearchFeature", dependencies: ["MLSearchCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
     ]
 )

@@ -12,13 +12,21 @@ package struct TimelineSearchContext: Equatable, Sendable {
 }
 
 package enum TimelineSearch {
+    /// Filter sections by the lexical/smart-token query, optionally widened by Smart Search:
+    /// `semanticMatches` are UIDs the on-device semantic engine ranked for the same query, so a
+    /// photo matches when either the text query or the semantic engine says it does. Timeline
+    /// order is preserved (results stay date-organized, not score-ordered).
     package static func filter(_ sections: [TimelineSection], query rawQuery: String,
-                               context: TimelineSearchContext = TimelineSearchContext()) -> [TimelineSection] {
+                               context: TimelineSearchContext = TimelineSearchContext(),
+                               semanticMatches: Set<PhotoUID>? = nil) -> [TimelineSection] {
         let query = TimelineSearchQuery(rawQuery)
         guard !query.isEmpty else { return sections }
 
         return sections.compactMap { section in
-            let items = section.items.filter { query.matches(item: $0, in: section, context: context) }
+            let items = section.items.filter { item in
+                query.matches(item: item, in: section, context: context)
+                    || (semanticMatches?.contains(item.uid) ?? false)
+            }
             guard !items.isEmpty else { return nil }
             return TimelineSection(id: section.id, date: section.date, title: section.title, items: items)
         }

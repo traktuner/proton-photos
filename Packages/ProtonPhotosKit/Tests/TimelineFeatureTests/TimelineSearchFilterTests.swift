@@ -82,6 +82,29 @@ import TimelineCore
         #expect(result.flatMap(\.items).map(\.uid.nodeID) == ["video-node"])
     }
 
+    @Test func semanticMatchesWidenLexicalResultsInTimelineOrder() {
+        let sections = makeSections()
+        // "video" lexically matches only video-node; the semantic engine additionally ranked
+        // scan-node (different section). Both appear, each in its own date section, timeline order.
+        let semantic: Set<PhotoUID> = [PhotoUID(volumeID: "v", nodeID: "scan-node")]
+        let result = TimelineView.filteredSections(sections, query: "video", semanticMatches: semantic)
+        #expect(result.flatMap(\.items).map(\.uid.nodeID) == ["video-node", "scan-node"])
+    }
+
+    @Test func semanticMatchesDoNothingWithoutAQuery() {
+        let sections = makeSections()
+        let semantic: Set<PhotoUID> = [PhotoUID(volumeID: "v", nodeID: "scan-node")]
+        let result = TimelineView.filteredSections(sections, query: "   ", semanticMatches: semantic)
+        #expect(result.count == sections.count)
+    }
+
+    @Test func staleSemanticMatchesForMissingUIDsAreHarmless() {
+        let sections = makeSections()
+        let semantic: Set<PhotoUID> = [PhotoUID(volumeID: "v", nodeID: "deleted-node")]
+        let result = TimelineView.filteredSections(sections, query: "video", semanticMatches: semantic)
+        #expect(result.flatMap(\.items).map(\.uid.nodeID) == ["video-node"])
+    }
+
     private func makeSections() -> [TimelineSection] {
         [
             TimelineSection(
