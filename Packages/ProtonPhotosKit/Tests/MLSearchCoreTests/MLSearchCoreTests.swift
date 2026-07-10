@@ -196,7 +196,8 @@ import PhotosCore
         ])
         let scorer = ReferenceDotProductScorer()
         let query: ContiguousArray<Float32> = [1, 0, 0, 0]
-        let results = scorer.rank(records: store.allRecords(for: descriptorV1), queryVector: query, limit: 3)
+        let results = scorer.rank(block: store.vectorBlock(for: descriptorV1), query: query, limit: 3)
+        #expect(results.descriptor == descriptorV1)
         #expect(results.count == 3)
         #expect(results.results[0].uid == uid("a0"))
         #expect(results.results[0].score == 1.0)
@@ -214,8 +215,8 @@ import PhotosCore
         ])
         let scorer = ReferenceDotProductScorer()
         let query: ContiguousArray<Float32> = [1, 0, 0, 0]
-        let r1 = scorer.rank(records: store.allRecords(for: descriptorV1), queryVector: query, limit: 10)
-        let r2 = scorer.rank(records: store.allRecords(for: descriptorV1), queryVector: query, limit: 10)
+        let r1 = scorer.rank(block: store.vectorBlock(for: descriptorV1), query: query, limit: 10)
+        let r2 = scorer.rank(block: store.vectorBlock(for: descriptorV1), query: query, limit: 10)
         #expect(r1.results.map(\.uid.nodeID) == r2.results.map(\.uid.nodeID))
         #expect(r1.results.map(\.score) == r2.results.map(\.score))
     }
@@ -228,23 +229,43 @@ import PhotosCore
             record("a2", descriptorV1, [0.1, 0, 0, 0]),
         ])
         let scorer = ReferenceDotProductScorer()
-        let results = scorer.rank(records: store.allRecords(for: descriptorV1), queryVector: [1, 0, 0, 0], limit: 2)
+        let results = scorer.rank(block: store.vectorBlock(for: descriptorV1), query: [1, 0, 0, 0], limit: 2)
         #expect(results.count == 2)
         #expect(results.results[0].uid == uid("a0"))
     }
 
-    @Test func scoringTieBreaksByNewestTimestamp() {
-        let older = Date(timeIntervalSince1970: 1000)
-        let newer = Date(timeIntervalSince1970: 2000)
+    @Test func scoringTieBreaksByRowOrder() {
+        // Equal scores must break by block row order (store key order) — deterministic across
+        // calls and store reopen, unlike wall-clock timestamps.
         let store = InMemoryMLIndexStore()
         store.upsert([
-            MLEmbeddingRecord(uid: uid("older"), descriptor: descriptorV1, vector: ContiguousArray([1, 0, 0, 0]), timestamp: older),
-            MLEmbeddingRecord(uid: uid("newer"), descriptor: descriptorV1, vector: ContiguousArray([1, 0, 0, 0]), timestamp: newer),
+            record("b-later", descriptorV1, [1, 0, 0, 0]),
+            record("a-earlier", descriptorV1, [1, 0, 0, 0]),
         ])
         let scorer = ReferenceDotProductScorer()
-        let results = scorer.rank(records: store.allRecords(for: descriptorV1), queryVector: [1, 0, 0, 0], limit: 2)
-        // Same score → newer first.
-        #expect(results.results[0].uid == uid("newer"))
+        let results = scorer.rank(block: store.vectorBlock(for: descriptorV1), query: [1, 0, 0, 0], limit: 2)
+        #expect(results.results.map(\.uid.nodeID) == ["a-earlier", "b-later"])
+    }
+
+    @Test func scoringQueryDimensionMismatchReturnsEmpty() {
+        let store = InMemoryMLIndexStore()
+        store.upsert([record("a0", descriptorV1, [1, 0, 0, 0])])
+        let scorer = ReferenceDotProductScorer()
+        let results = scorer.rank(block: store.vectorBlock(for: descriptorV1), query: [1, 0, 0, 0, 0], limit: 5)
+        #expect(results.isEmpty)
+    }
+
+    @Test func topKSelectionMatchesFullSort() {
+        // Structural check: bounded-heap top-k must equal a full sort's prefix, including the
+        // (score desc, row asc) tie-break, for a mixed score buffer with duplicates.
+        let scores: [Float32] = [0.3, 0.9, 0.9, 0.1, 0.5, 0.9, 0.5, 0.0, 1.0, 0.3]
+        let fullOrder = scores.indices.sorted {
+            scores[$0] != scores[$1] ? scores[$0] > scores[$1] : $0 < $1
+        }
+        for limit in [1, 3, 5, scores.count, scores.count + 5] {
+            let top = MLTopKSelector.select(scores: scores, limit: limit)
+            #expect(top.map(\.row) == Array(fullOrder.prefix(limit)))
+        }
     }
 
     // MARK: - 7. No duplicate records for same PhotoUID + modelIdentifier + modelVersion
@@ -359,11 +380,16 @@ import PhotosCore
 
     @Test func dimensionMismatchRejected() {
         let store = InMemoryMLIndexStore()
-        // A record whose vector doesn't match the descriptor's dimension is rejected at construction (precondition).
-        // The store additionally defends against any malformed input by skipping it.
         let valid = record("a0", descriptorV1, [1, 0, 0, 0])
-        store.upsert([valid])
+        let tooShort = record("a1", descriptorV1, [1, 0])
+        let report = store.upsert([valid, tooShort])
+        // The mismatch is rejected AND accounted: partitions always sum to total, so a bad
+        // record can never silently vanish from progress reporting.
+        #expect(report.indexed == 1)
+        #expect(report.permanentFailure == 1)
+        #expect(report.total == report.indexed + report.skippedAlreadyIndexed + report.permanentFailure + report.transientFailure)
         #expect(store.count(for: descriptorV1) == 1)
+        #expect(!store.contains(uid: uid("a1"), descriptor: descriptorV1))
     }
 
     @Test func descriptorDisplayName() {

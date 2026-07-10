@@ -7,12 +7,21 @@
 # directory whose name ends in `.noindex` (the same reason Xcode's own `Intermediates.noindex` never
 # shows up while `Products` would). So the build product is never indexed, and /Applications is the only
 # bundle Spotlight knows about. Any ad-hoc `xcodebuild` must use this same `-derivedDataPath`.
+#
+# RULE (do not break): the repo lives on a network share (TrueNAS). NOTHING may be built into the
+# repo tree - all build output goes to the local Mac under $PROTONPHOTOS_BUILD_ROOT
+# (default: ~/Developer/xcode/ProtonPhotos). Building into the repo pushes every object file
+# over SMB and must never happen again.
 set -e
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 cd "$(dirname "$0")/.."
 
-DD="build/DD.noindex"
-rm -rf build/DD   # remove any legacy INDEXED build dir so its product stops appearing in Spotlight
+BUILD_ROOT="${PROTONPHOTOS_BUILD_ROOT:-$HOME/Developer/xcode/ProtonPhotos}"
+DD="$BUILD_ROOT/DD.noindex"
+SPM_SCRATCH="$BUILD_ROOT/SPM.noindex"
+mkdir -p "$BUILD_ROOT"
+# Remove legacy in-repo build dirs (pre-NAS layout) so no stale product lingers on the share.
+rm -rf build Packages/ProtonPhotosKit/.build
 find "$HOME/Library/Developer/Xcode/DerivedData" \
   \( -path "*/Build/Products/*/ProtonPhotos.app" -o -path "*/Build/Products/*/Proton Photos.app" \) \
   -prune -exec rm -rf {} + 2>/dev/null || true
@@ -23,7 +32,7 @@ echo "Preflight: generating Xcode project"
 xcodegen generate >/dev/null
 
 echo "Preflight: building ProtonPhotosMobile shell for generic iOS"
-SKIP_XCODEGEN=1 ./scripts/verify-ios-app-shell.sh
+SKIP_XCODEGEN=1 bash ./scripts/verify-ios-app-shell.sh
 
 SIGNING_IDENTITY_HASH="${PROTONPHOTOS_CODE_SIGN_IDENTITY:-}"
 SIGNING_IDENTITY_NAME=""
@@ -46,7 +55,7 @@ fi
 
 echo "Preflight: validating grid profile configuration"
 plutil -lint Packages/ProtonPhotosKit/Sources/TimelineCore/Resources/GridProfiles.plist >/dev/null
-xcrun swift test --package-path Packages/ProtonPhotosKit --filter TimelineGridProfileConfigurationTests
+xcrun swift test --package-path Packages/ProtonPhotosKit --scratch-path "$SPM_SCRATCH" --filter TimelineGridProfileConfigurationTests
 
 echo "Preflight: building $SCHEME scheme for generic macOS"
 xcodebuild build -project "$PROJECT" -scheme "$SCHEME" \

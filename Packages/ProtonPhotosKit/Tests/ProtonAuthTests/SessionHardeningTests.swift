@@ -21,4 +21,16 @@ struct SessionHardeningTests {
         store.clear()
         #expect(store.load() == nil)
     }
+
+    @Test func deviceIdentityIsStableAndDeviceLocal() {
+        let store = DeviceIdentityKeychainStore(
+            service: "me.protonphotos.device.tests-\(UUID().uuidString)",
+            account: "installation"
+        )
+        defer { store.clear() }
+
+        let first = store.loadOrCreate()
+        #expect(!first.isEmpty)
+        #expect(store.loadOrCreate() == first)
+    }
 }

@@ -283,7 +283,7 @@ public actor UploadManager: UploadManaging {
             // must know (future runs skip without a remote query) - and recording is what settles
             // the pipeline's same-content claim for identical items waiting on this upload.
             if let identityResolver, let preflight {
-                await identityResolver.recordUploaded(
+                try await identityResolver.recordUploaded(
                     descriptor, identity: preflight.identity,
                     remoteVolumeID: uid.volumeID, remoteLinkID: uid.nodeID
                 )

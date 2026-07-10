@@ -15,6 +15,7 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
 
     /// Proton Drive iOS 1.61.0 queries the duplicates endpoint in groups of 150 name hashes.
     public static let protonDuplicateBatchSize = 150
+    private static let primeLookupConcurrency = 3
 
     private let store: any UploadIdentityStore
     private let hasher: any UploadHashing
@@ -60,6 +61,12 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
     }
 
     // MARK: - UploadIdentityResolving
+
+    public func remoteAssetProofs(
+        for identities: [UploadBackupExternalIdentity]
+    ) async throws -> [UploadBackupExternalIdentity: UploadRemoteAssetIndexRecord] {
+        try await checker.findRemoteAssetProofs(for: identities)
+    }
 
     public func resolve(_ descriptor: UploadResourceDescriptor) async throws -> UploadPreflightResult {
         let corrected = ProtonPhotoNameCorrection.correctedName(for: descriptor.filename)
@@ -116,14 +123,17 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
             #endif
         }
         #if DEBUG
-        // [BackupPerf] per-item local identity cost. Steps 2-4: sha1 = read temp + hash; hmac = the two
-        // Proton HMACs. "cached" means the manifest already had it (no work). Grep the device console.
-        PhotoDiagnostics.shared.emit("BackupPerf", [
-            "step": "identity",
-            "file": descriptor.filename,
-            "sha1_ms": _shaRan ? String(format: "%.0f", _shaMs) : "cached",
-            "hmac_ms": _hmacRan ? String(format: "%.2f", Date().timeIntervalSince(_tHmac) * 1000) : "cached",
-        ])
+        // PhotoKit reports precomputed identity reads in aggregate at the adapter boundary. Emit
+        // only unexpectedly slow local work here so a large duplicate pass does not write one
+        // console line per asset and distort the throughput being measured.
+        let _hmacMs = _hmacRan ? Date().timeIntervalSince(_tHmac) * 1000 : 0
+        if (_shaRan && _shaMs >= 250) || (_hmacRan && _hmacMs >= 25) {
+            PhotoDiagnostics.shared.emit("BackupPerf", [
+                "step": "identitySlow",
+                "sha1_ms": _shaRan ? String(format: "%.0f", _shaMs) : "cached",
+                "hmac_ms": _hmacRan ? String(format: "%.2f", _hmacMs) : "cached",
+            ])
+        }
         #endif
         let identity = UploadIdentity(
             correctedName: corrected, nameHash: nameHash,
@@ -147,7 +157,7 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
             outcome: hmacReusable ? cached?.outcome : nil,
             updatedAt: now()
         )
-        store.upsert(record)
+        try persistRecord(record)
 
         // Account-wide content dedupe + same-run coalescing. Loop invariant on exit: either we
         // returned a known-content skip, or WE hold the pending-upload claim for this content.
@@ -162,7 +172,7 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
                 record.remoteLinkID = knownLink
                 record.outcome = UploadIdentityManifestStore.Outcome.duplicateActive.rawValue
                 record.updatedAt = now()
-                store.upsert(record)
+                try persistRecord(record)
                 return UploadPreflightResult(identity: identity, decision: .skip(.knownFromManifest, remoteLinkID: knownLink))
             }
             guard let pending = pendingContentUploads[contentKey] else {
@@ -188,31 +198,6 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
             try Task.checkCancellation()
         }
 
-        do {
-            if let remoteContent = try await checker.findDuplicate(contentHash: contentHash) {
-                let decision = decisionForRemoteContent(remoteContent)
-                switch decision {
-                case let .skip(.activeDuplicate, remoteLinkID):
-                    record.outcome = UploadIdentityManifestStore.Outcome.duplicateActive.rawValue
-                    record.remoteLinkID = remoteLinkID
-                    record.updatedAt = now()
-                    store.upsert(record)
-                case .skip(.trashedDuplicate, _):
-                    record.outcome = UploadIdentityManifestStore.Outcome.duplicateTrashed.rawValue
-                    record.updatedAt = now()
-                    store.upsert(record)
-                default:
-                    break
-                }
-                releasePendingContentClaim(contentKey, owner: descriptor.source)
-                return UploadPreflightResult(identity: identity, decision: decision)
-            }
-            try Task.checkCancellation()
-        } catch {
-            releasePendingContentClaim(contentKey, owner: descriptor.source)
-            throw error
-        }
-
         let remoteItems: [RemotePhotoDuplicate]
         do {
             remoteItems = try await duplicates(forNameHash: nameHash)
@@ -222,37 +207,66 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
             throw error
         }
 
-        let decision = UploadDuplicateDecisionPolicy.decide(
+        let nameDecision = UploadDuplicateDecisionPolicy.decide(
             primary: .init(source: descriptor.source, nameHash: nameHash, contentHash: contentHash),
             remoteItems: remoteItems
         )
 
-        // Durable outcomes: active duplicates are remembered (Proton keeps an equivalent local
-        // skip cache); trashed is recorded for observability but NOT trusted by the fast path -
-        // the user can restore or purge the trash, so it re-checks every run. Draft/deleted are
-        // transient and never persisted.
+        // The batched name endpoint is both the Proton-native path and the cheap path. Any skip it
+        // proves is already conservative, so return immediately. Only a would-upload item needs the
+        // expensive account-wide content fallback for renamed/copied originals.
+        if case .upload = nameDecision {
+            do {
+                if let remoteContent = try await checker.findDuplicate(contentHash: contentHash) {
+                    let contentDecision = decisionForRemoteContent(remoteContent)
+                    try persist(contentDecision, in: &record)
+                    releasePendingContentClaim(contentKey, owner: descriptor.source)
+                    return UploadPreflightResult(identity: identity, decision: contentDecision)
+                }
+                try Task.checkCancellation()
+            } catch {
+                releasePendingContentClaim(contentKey, owner: descriptor.source)
+                throw error
+            }
+        } else {
+            do {
+                try persist(nameDecision, in: &record)
+            } catch {
+                releasePendingContentClaim(contentKey, owner: descriptor.source)
+                throw error
+            }
+            releasePendingContentClaim(contentKey, owner: descriptor.source)
+            return UploadPreflightResult(identity: identity, decision: nameDecision)
+        }
+
+        // The claim stays held: the caller now owns this content's upload and MUST settle it via
+        // `recordUploaded` (success) or `uploadDidFail` (anything else).
+        return UploadPreflightResult(identity: identity, decision: nameDecision)
+    }
+
+    /// Persists only outcomes that remain useful across runs. Active duplicates are trusted by the
+    /// manifest fast path. Trashed rows are diagnostic only and are rechecked because users can
+    /// restore or permanently delete them. Draft/deleted states stay transient.
+    private func persist(_ decision: UploadDuplicateDecision, in record: inout UploadIdentityRecord) throws {
         switch decision {
         case let .skip(.activeDuplicate, remoteLinkID):
             record.outcome = UploadIdentityManifestStore.Outcome.duplicateActive.rawValue
             record.remoteLinkID = remoteLinkID
             record.updatedAt = now()
-            store.upsert(record)
+            try persistRecord(record)
         case .skip(.trashedDuplicate, _):
             record.outcome = UploadIdentityManifestStore.Outcome.duplicateTrashed.rawValue
             record.updatedAt = now()
-            store.upsert(record)
+            try persistRecord(record)
         default:
             break
         }
+    }
 
-        if case .upload = decision {
-            // The claim stays held: the caller now owns this content's upload and MUST settle it
-            // via `recordUploaded` (success) or `uploadDidFail` (anything else). Identical items
-            // wait on the claim until then.
-        } else {
-            releasePendingContentClaim(contentKey, owner: descriptor.source)
+    private func persistRecord(_ record: UploadIdentityRecord) throws {
+        guard store.upsert(record) else {
+            throw UploadError.backend("Upload identity manifest could not be updated")
         }
-        return UploadPreflightResult(identity: identity, decision: decision)
     }
 
     private func decisionForRemoteContent(_ remote: RemotePhotoDuplicate) -> UploadDuplicateDecision {
@@ -283,9 +297,13 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
     /// re-queries the server. Called after failed/cancelled upload attempts and before
     /// draft-blocked re-checks - the moments where the server may know more than the cache.
     public func invalidateCachedRemoteState() async {
+        invalidateNameCache()
+        await checker.invalidateCachedRemoteState()
+    }
+
+    private func invalidateNameCache() {
         cacheGeneration += 1
         duplicateCache.removeAll()
-        await checker.invalidateCachedRemoteState()
         // Don't cancel running lookups (their callers still get server truth as of their start),
         // but stop new callers from joining them and stop their results from repopulating the
         // invalidated cache (guarded by `cacheGeneration` in `lookup`).
@@ -294,13 +312,23 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
 
     /// Batch-prefetch for a fresh enqueue: computes name hashes (no content hashing) and queries
     /// the duplicates endpoint in Proton-sized chunks, so per-item `resolve` calls become cache
-    /// hits. Clears the previous batch's remote view first - every enqueue sees fresh state.
+    /// hits. Clears only the short-lived name view. The backend's expensive account-wide content
+    /// index has its own freshness window and must not be rebuilt every lookahead batch.
     public func prime(_ descriptors: [UploadResourceDescriptor]) async {
-        await invalidateCachedRemoteState()
+        invalidateNameCache()
         guard let epoch = try? await checker.hashKeyEpoch() else { return }
 
         var pending: [String] = []
         var pendingSet: Set<String> = []
+        var correctedNamesToHash: [String] = []
+        var correctedNamesToHashSet: Set<String> = []
+
+        func appendPendingHash(_ hash: String) {
+            if duplicateCache[hash] == nil, inFlight[hash] == nil, pendingSet.insert(hash).inserted {
+                pending.append(hash)
+            }
+        }
+
         for descriptor in descriptors {
             let corrected = ProtonPhotoNameCorrection.correctedName(for: descriptor.filename)
             let cached = store.record(for: descriptor.source)
@@ -315,19 +343,44 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
                 }
                 nameHash = cached.nameHash
             } else {
-                guard let hash = try? await checker.nameHash(forCorrectedName: corrected) else { continue }
-                nameHash = hash
+                if correctedNamesToHashSet.insert(corrected).inserted {
+                    correctedNamesToHash.append(corrected)
+                }
+                continue
             }
-            if duplicateCache[nameHash] == nil, inFlight[nameHash] == nil, pendingSet.insert(nameHash).inserted {
-                pending.append(nameHash)
+            appendPendingHash(nameHash)
+        }
+
+        if !correctedNamesToHash.isEmpty,
+           let hashes = try? await checker.nameHashes(forCorrectedNames: correctedNamesToHash),
+           hashes.count == correctedNamesToHash.count {
+            for hash in hashes {
+                appendPendingHash(hash)
             }
         }
 
-        var start = 0
-        while start < pending.count {
-            let chunk = Array(pending[start ..< min(start + batchSize, pending.count)])
-            _ = try? await lookup(batch: chunk)
-            start += batchSize
+        let chunks = stride(from: 0, to: pending.count, by: batchSize).map { start in
+            Array(pending[start ..< min(start + batchSize, pending.count)])
+        }
+        await withTaskGroup(of: Int.self) { group in
+            var nextChunk = 0
+
+            func submitNext() {
+                guard nextChunk < chunks.count else { return }
+                let index = nextChunk
+                nextChunk += 1
+                group.addTask { [self] in
+                    _ = try? await lookup(batch: chunks[index])
+                    return index
+                }
+            }
+
+            for _ in 0 ..< min(Self.primeLookupConcurrency, chunks.count) {
+                submitNext()
+            }
+            while await group.next() != nil {
+                submitNext()
+            }
         }
     }
 
@@ -336,9 +389,10 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
         identity: UploadIdentity,
         remoteVolumeID: String,
         remoteLinkID: String
-    ) async {
-        if let epoch = try? await checker.hashKeyEpoch() {
-            store.upsert(UploadIdentityRecord(
+    ) async throws {
+        do {
+            let epoch = try await checker.hashKeyEpoch()
+            try persistRecord(UploadIdentityRecord(
                 source: descriptor.source,
                 filename: descriptor.filename,
                 correctedName: identity.correctedName,
@@ -353,7 +407,12 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
                 outcome: UploadIdentityManifestStore.Outcome.uploaded.rawValue,
                 updatedAt: now()
             ))
+        } catch {
+            await invalidateCachedRemoteState()
+            releasePendingContentClaims(ownedBy: descriptor.source)
+            throw error
         }
+        await checker.recordUploaded(contentHash: identity.contentHash, remoteLinkID: remoteLinkID)
         // Narrow cache update: the server now has this name+content ACTIVE. A cached "free" view
         // for this name hash must not survive the upload it predates - that is exactly how a
         // second copied folder used to re-upload identical photos in the same session.
@@ -404,10 +463,13 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
             #endif
             let items = try await checker.findDuplicates(nameHashes: nameHashes)   // step 5: the ONE network call
             #if DEBUG
-            PhotoDiagnostics.shared.emit("BackupPerf", [
-                "step": "dupLookup", "batch": String(nameHashes.count),
-                "ms": String(format: "%.0f", Date().timeIntervalSince(_t) * 1000),
-            ])
+            let lookupMs = Date().timeIntervalSince(_t) * 1_000
+            if lookupMs >= 250 {
+                PhotoDiagnostics.shared.emit("BackupPerf", [
+                    "step": "dupLookupSlow", "batch": String(nameHashes.count),
+                    "ms": String(format: "%.0f", lookupMs),
+                ])
+            }
             #endif
             // Every requested hash gets an entry - [] distinguishes "server says free" from
             // "never asked" in the cache.

@@ -3,7 +3,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
-DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$ROOT/build/DD.ios.noindex}"
+# Repo lives on a network share - build output must stay on the local Mac (see rebuild.sh).
+BUILD_ROOT="${PROTONPHOTOS_BUILD_ROOT:-$HOME/Developer/xcode/ProtonPhotos}"
+DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-$BUILD_ROOT/DD.ios.noindex}"
 export DEVELOPER_DIR
 
 cd "$ROOT"

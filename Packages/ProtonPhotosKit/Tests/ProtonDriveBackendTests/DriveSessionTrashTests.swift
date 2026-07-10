@@ -216,3 +216,73 @@ extension DriveSessionStubSuite {
     }
 }
 }
+
+extension DriveSessionStubSuite {
+@Suite struct DriveSessionVolumeEventTests {
+    @Test func latestEventUsesTheVolumeScopedEndpoint() async throws {
+        StubURLProtocol.reset()
+        StubURLProtocol.route(
+            "GET /drive/volumes/vol1/events/latest",
+            json: #"{"Code":1000,"EventID":"event-100"}"#
+        )
+
+        let eventID = try await makeSession().latestVolumeEventID(volumeID: "vol1")
+
+        #expect(eventID == "event-100")
+        let request = try #require(StubURLProtocol.requests().first)
+        #expect(request.method == "GET")
+        #expect(request.path == "/drive/volumes/vol1/events/latest")
+    }
+
+    @Test func eventPageDecodesDeleteAndActivePhotoChanges() async throws {
+        StubURLProtocol.reset()
+        StubURLProtocol.route("GET /drive/volumes/vol1/events/event-100", json: #"""
+        {
+          "Code": 1000,
+          "EventID": "event-101",
+          "More": 1,
+          "Refresh": 0,
+          "Events": [
+            {
+              "EventType": 0,
+              "Link": {"LinkID": "deleted-link"}
+            },
+            {
+              "EventType": 2,
+              "ContextShareID": "photos-share",
+              "Link": {"LinkID": "updated-link", "Type": 2, "State": 1}
+            }
+          ]
+        }
+        """#)
+
+        let page = try await makeSession().fetchVolumeEvents(volumeID: "vol1", since: "event-100")
+
+        #expect(page.eventID == "event-101")
+        #expect(page.hasMore)
+        #expect(!page.requiresRefresh)
+        #expect(page.events.count == 2)
+        #expect(page.events[0].eventType == 0)
+        #expect(page.events[0].linkID == "deleted-link")
+        #expect(page.events[0].contextShareID == nil)
+        #expect(page.events[1].eventType == 2)
+        #expect(page.events[1].contextShareID == "photos-share")
+        #expect(page.events[1].linkType == 2)
+        #expect(page.events[1].linkState == 1)
+        #expect(StubURLProtocol.requests().first?.path == "/drive/volumes/vol1/events/event-100")
+    }
+
+    @Test func refreshFlagIsNotMistakenForAnEmptyDelta() async throws {
+        StubURLProtocol.reset()
+        StubURLProtocol.route("GET /drive/volumes/vol1/events/stale", json: #"""
+        {"Code":1000,"EventID":"event-200","More":0,"Refresh":1,"Events":[]}
+        """#)
+
+        let page = try await makeSession().fetchVolumeEvents(volumeID: "vol1", since: "stale")
+
+        #expect(page.requiresRefresh)
+        #expect(!page.hasMore)
+        #expect(page.events.isEmpty)
+    }
+}
+}

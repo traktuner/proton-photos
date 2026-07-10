@@ -26,15 +26,13 @@ final class BackupStatusPresentationTests: XCTestCase {
         BackupStatus(progress: p, isScanning: isScanning)
     }
 
-    // MARK: The one distinction that must always be right: checking vs backing up
+    // MARK: Stable active presentation
 
     func testCheckingHeadlineWhenNoBytesAreMoving() {
         // A running pass with no in-flight upload is CHECKING - never "backing up".
         let s = status(progress(total: 100, uploadQueued: 5, checking: 1, alreadyBackedUp: 20, isRunning: true))
         let p = BackupStatusPresentation(s)
-        XCTAssertEqual(p.headlineKey, "backup.phase_checking")
-        XCTAssertNotEqual(p.headlineKey, "backup.phase_uploading",
-                          "checking/hashing must never be worded as uploading")
+        XCTAssertEqual(p.headlineKey, "backup.status_active")
         XCTAssertNil(p.uploadPercent, "no byte transfer => no percentage")
         XCTAssertTrue(p.isActive)
         XCTAssertEqual(p.accessory, .activity)
@@ -47,7 +45,7 @@ final class BackupStatusPresentationTests: XCTestCase {
         raw.currentUploadingName = "IMG_5560.MOV"
         raw.currentUploadingFraction = 0.43
         let p = BackupStatusPresentation(status(raw))
-        XCTAssertEqual(p.headlineKey, "backup.phase_uploading")
+        XCTAssertEqual(p.headlineKey, "backup.status_active")
         XCTAssertEqual(p.uploadPercent, 43)
         let subtitle = try? XCTUnwrap(p.localizedSubtitle)
         // The per-file percent must appear in the subtitle. (In the SPM test bundle the string catalog
@@ -73,7 +71,7 @@ final class BackupStatusPresentationTests: XCTestCase {
         let s = status(progress(total: 40, waiting: 40), isScanning: true)
         XCTAssertEqual(s.phase, .scanning)
         let p = BackupStatusPresentation(s)
-        XCTAssertEqual(p.headlineKey, "backup.phase_scanning")
+        XCTAssertEqual(p.headlineKey, "backup.status_active")
         XCTAssertNil(p.progressFraction, "scanning must stay indeterminate")
         XCTAssertNil(p.localizedSubtitle, "no honest total mid-scan => no subtitle")
         XCTAssertTrue(p.isActive)

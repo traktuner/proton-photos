@@ -173,7 +173,12 @@ public actor ThumbnailCache {
         guard let cipher else { return nil }   // locked
         let name = filename(uid: uid, account: account)
         let url = directory.appendingPathComponent(name)
-        guard let blob = try? Data(contentsOf: url) else { return nil }
+        guard let blob = try? Data(contentsOf: url) else {
+            // The cache directory may be purged while the process is alive. Never let a stale
+            // validation proof suppress the network fallback after the file disappeared.
+            validated.remove(name)
+            return nil
+        }
         guard let plaintext = cipher.open(blob, uid: uid) else {
             try? FileManager.default.removeItem(at: url)   // auth failure / corruption → drop & re-fetch later
             validated.remove(name)
@@ -318,7 +323,19 @@ public actor ThumbnailCache {
     private nonisolated func filename(uid: PhotoUID, account: String) -> String {
         let material = "\(namespace)\u{1f}\(account)\u{1f}\(uid.volumeID)\u{1f}\(uid.nodeID)"
         let digest = SHA256.hash(data: Data(material.utf8))
-        return digest.map { String(format: "%02x", $0) }.joined() + ".blob"
+        return Self.lowercaseHex(digest) + ".blob"
+    }
+
+    private static let lowercaseHexDigits = Array("0123456789abcdef".utf8)
+
+    private nonisolated static func lowercaseHex<S: Sequence>(_ bytes: S) -> String where S.Element == UInt8 {
+        var output: [UInt8] = []
+        output.reserveCapacity(64)
+        for byte in bytes {
+            output.append(lowercaseHexDigits[Int(byte >> 4)])
+            output.append(lowercaseHexDigits[Int(byte & 0x0F)])
+        }
+        return String(decoding: output, as: UTF8.self)
     }
 
     /// In-RAM NSCache key (process-local plaintext tier; not security sensitive).

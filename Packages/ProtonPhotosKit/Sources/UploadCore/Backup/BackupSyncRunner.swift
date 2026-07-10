@@ -99,6 +99,26 @@ public actor BackupSyncRunner {
     private var progress = BackupSyncProgress()
     private var onProgress: (@Sendable (BackupSyncProgress) -> Void)?
 
+    #if DEBUG
+    private struct ThrottleDiagnostic: Equatable {
+        var inputs: BackupThrottleInputs
+        var policyLimit: Int
+        var effectiveLimit: Int
+        var networkErrorStreak: Int
+    }
+
+    private struct ThroughputWindow {
+        var startedAt = Date()
+        var settled = 0
+        var uploaded = 0
+        var duplicates = 0
+        var notBackedUp = 0
+    }
+
+    private var lastThrottleDiagnostic: ThrottleDiagnostic?
+    private var throughputWindow = ThroughputWindow()
+    #endif
+
     public init(
         queue: any UploadBackupSyncQueueStore,
         preflight: UploadBackupPreflightIndex,
@@ -130,6 +150,12 @@ public actor BackupSyncRunner {
         progress
     }
 
+    /// Queue health is part of the runner contract: callers must never treat an empty result from a
+    /// failed SQLite read as a drained backup.
+    public func isQueueOperational() -> Bool {
+        queue.isOperational()
+    }
+
     /// Ask the current pass to wind down: no new work starts, in-flight uploads are cancelled,
     /// and every touched row is reverted to a runnable state for the next pass.
     public func stop() {
@@ -147,11 +173,20 @@ public actor BackupSyncRunner {
     @discardableResult
     public func runUntilDrained() async -> BackupSyncProgress {
         guard !isRunning else { return progress }
+        guard queue.isOperational() else {
+            progress.isRunning = false
+            progress.currentItemName = nil
+            emitProgress()
+            return progress
+        }
         isRunning = true
         stopRequested = false
         notBefore = [:]
         resourcePressureStreak = 0
         defer {
+            #if DEBUG
+            reportThroughputIfNeeded()
+            #endif
             isRunning = false
             progress.isRunning = false
             progress.currentItemName = nil
@@ -161,23 +196,43 @@ public actor BackupSyncRunner {
         // Crash recovery FIRST: anything still marked active predates this run and must become
         // runnable again before this runner atomically claims new work.
         queue.requeueStaleActive(before: now().addingTimeInterval(-configuration.staleActiveGrace), updatedAt: now())
+        guard queue.isOperational() else { return progress }
         await requeueDueBlockedRows()
+        guard queue.isOperational() else { return progress }
 
         progress = BackupSyncProgress(summary: queue.summary(), isRunning: true)
+        guard queue.isOperational() else { return progress }
         emitProgress()
 
         // Warm the dedup pipeline's remote cache for the first batch so per-item resolves are cache
         // hits (see primeRunnableLookahead). Re-warmed periodically as the queue drains.
         await primeRunnableLookahead()
+        guard queue.isOperational() else { return progress }
         var wavesSincePrime = 0
 
         while !stopRequested {
+            guard queue.isOperational() else {
+                stopRequested = true
+                break
+            }
             await requeueDueBlockedRows()
+            guard queue.isOperational() else {
+                stopRequested = true
+                break
+            }
 
-            let policyLimit = configuration.throttle.maxConcurrentItems(for: throttleInputs())
+            let throttleSnapshot = throttleInputs()
+            let policyLimit = configuration.throttle.maxConcurrentItems(for: throttleSnapshot)
             // Back off concurrency while a marginal connection is dropping requests, but never below 1
             // (never stall — a single in-flight item keeps making progress and probes recovery).
             let limit = policyLimit == 0 ? 0 : max(1, policyLimit - networkErrorStreak)
+            #if DEBUG
+            reportThrottleIfChanged(
+                inputs: throttleSnapshot,
+                policyLimit: policyLimit,
+                effectiveLimit: limit
+            )
+            #endif
             if limit == 0 {
                 if !progress.isPausedByPolicy {
                     progress.isPausedByPolicy = true
@@ -201,7 +256,14 @@ public actor BackupSyncRunner {
 
             let wave = nextEligibleWave(limit: limit)
             if wave.isEmpty {
-                guard let wait = shortestPendingWait() else { break }
+                guard queue.isOperational() else {
+                    stopRequested = true
+                    break
+                }
+                guard let wait = shortestPendingWait() else {
+                    if !queue.isOperational() { stopRequested = true }
+                    break
+                }
                 try? await clock.sleep(for: wait)
                 continue
             }
@@ -221,7 +283,13 @@ public actor BackupSyncRunner {
 
         // Truth re-sync from the store: incremental counters were exact (single writer), but the
         // final snapshot should come from the durable state regardless.
-        progress = BackupSyncProgress(summary: queue.summary(), isRunning: false)
+        if queue.isOperational() {
+            progress = BackupSyncProgress(summary: queue.summary(), isRunning: false)
+        } else {
+            // Preserve the last trustworthy counters. The controller exposes the unavailable store;
+            // replacing this with an empty summary would falsely look like a completed backup.
+            progress.isRunning = false
+        }
         emitProgress()
         return progress
     }
@@ -246,9 +314,12 @@ public actor BackupSyncRunner {
     /// (which - with no runnable rows - means the pass is drained).
     private func shortestPendingWait() -> TimeInterval? {
         let currentTime = now()
-        // Entries whose backoff already elapsed were consumed by the wave fetch; anything left
-        // here is strictly in the future. Prune rows that turned terminal in the meantime.
-        let pending = notBefore.values.map { $0.timeIntervalSince(currentTime) }.filter { $0 > 0 }
+        var pending = notBefore.values.map { $0.timeIntervalSince(currentTime) }.filter { $0 > 0 }
+        if let persisted = queue.nextRunnableDate() {
+            // This is load-bearing after relaunch: the in-memory map is gone, but the queue's
+            // eligibility timestamp still tells us when to continue the same pass.
+            pending.append(max(0.05, persisted.timeIntervalSince(currentTime)))
+        }
         return pending.min()
     }
 
@@ -262,10 +333,13 @@ public actor BackupSyncRunner {
         for entry in blocked {
             let due = entry.updatedAt.addingTimeInterval(configuration.retry.delay(afterAttempts: max(1, entry.attempts)))
             guard due <= currentTime else { continue }
-            queue.updateState(
+            guard queue.updateState(
                 source: entry.source, revision: entry.revision,
                 state: .discovered, attempts: entry.attempts, lastError: entry.lastError, updatedAt: currentTime
-            )
+            ) else {
+                stopRequested = true
+                return
+            }
             adjustProgress(from: .blockedByDraft, to: .discovered)
             requeued = true
         }
@@ -313,7 +387,9 @@ public actor BackupSyncRunner {
 
     private func process(_ entry: UploadBackupSyncQueueEntry) async {
         let key = Self.key(entry)
-        var persistedState = entry.state
+        // `claimRunnable` already moved this row to `.checking` in the same transaction that
+        // reserved it. Mirror that persisted transition without paying a second SQLite write.
+        let persistedState: UploadBackupSyncQueueState = .checking
         inFlightNames[key] = entry.originalFilename
         progress.currentItemName = entry.originalFilename
         // Released the instant this entry settles, so temp exports never accumulate across a pass.
@@ -327,8 +403,8 @@ public actor BackupSyncRunner {
             emitProgress()
         }
 
-        // Checking phase - persisted before any bytes are read.
-        persistedState = transition(entry, from: persistedState, to: .checking)
+        adjustProgress(from: entry.state, to: .checking)
+        emitProgress()
 
         let resolved: BackupResolvedResource?
         do {
@@ -368,7 +444,33 @@ public actor BackupSyncRunner {
 
         switch preflightResult.decision {
         case .upload:
-            await upload(entry, from: persistedState, resolved: resolved, preflight: preflightResult)
+            let uploadDescriptor: UploadResourceDescriptor
+            do {
+                uploadDescriptor = try await resolved.materializedDescriptor()
+            } catch is CancellationError {
+                await identityResolver.uploadDidFail(resolved.descriptor)
+                revert(entry, from: persistedState)
+                return
+            } catch {
+                await identityResolver.uploadDidFail(resolved.descriptor)
+                retryOrPark(entry, from: persistedState, error: error)
+                return
+            }
+            if resolved.materialize != nil,
+               uploadDescriptor.precomputedSHA1Digest != preflightResult.identity.sha1Digest {
+                // The PhotoKit resource changed between hash-only preflight and export. Release the
+                // content claim and re-resolve current bytes; never upload under a stale identity.
+                await identityResolver.uploadDidFail(resolved.descriptor)
+                revert(entry, from: persistedState)
+                return
+            }
+            await upload(
+                entry,
+                from: persistedState,
+                resolved: resolved,
+                descriptor: uploadDescriptor,
+                preflight: preflightResult
+            )
 
         case let .uploadMissingSecondaries(primaryLinkID, _):
             // This entry IS the primary and the policy proved it active remotely; only paired
@@ -402,11 +504,14 @@ public actor BackupSyncRunner {
                 // Another upload (possibly our own crashed one) occupies the name. Park with
                 // backoff; NEVER a success state.
                 let attempts = entry.attempts + 1
-                queue.updateState(
+                guard queue.updateState(
                     source: entry.source, revision: entry.revision,
                     state: .blockedByDraft, attempts: attempts,
                     lastError: L10n.string("upload.error_remote_draft"), updatedAt: now()
-                )
+                ) else {
+                    stopRequested = true
+                    return
+                }
                 adjustProgress(from: persistedState, to: .blockedByDraft)
                 emitProgress()
 
@@ -421,19 +526,20 @@ public actor BackupSyncRunner {
         _ entry: UploadBackupSyncQueueEntry,
         from state: UploadBackupSyncQueueState,
         resolved: BackupResolvedResource,
+        descriptor: UploadResourceDescriptor,
         preflight preflightResult: UploadPreflightResult
     ) async {
         let key = Self.key(entry)
-        let persistedState = transition(entry, from: state, to: .uploading)
+        guard let persistedState = transition(entry, from: state, to: .uploading) else { return }
         let token = UUID()
         inFlightTokens[key] = token
         // This item is now genuinely pushing bytes: expose it as the "wird gesichert" name so the UI
         // can prove a specific file is being backed up (not just checked). emitProgress right away so
         // the change is visible immediately, not only at the next settle.
         uploadingNames[key] = entry.originalFilename
-        uploadingByteCounts[key] = Int(resolved.descriptor.fileSize)
+        uploadingByteCounts[key] = Int(descriptor.fileSize)
         progress.currentUploadingName = entry.originalFilename
-        progress.currentUploadingByteCount = Int(resolved.descriptor.fileSize)
+        progress.currentUploadingByteCount = Int(descriptor.fileSize)
         progress.currentUploadingFraction = 0
         lastEmittedUploadFraction[key] = 0
         emitProgress()
@@ -454,10 +560,10 @@ public actor BackupSyncRunner {
         let request = PhotoUploadRequest(
             queueItemID: UUID(),
             cancellationToken: token,
-            fileURL: resolved.descriptor.fileURL,
-            name: resolved.descriptor.filename,
+            fileURL: descriptor.fileURL,
+            name: descriptor.filename,
             mediaType: resolved.mediaType,
-            fileSize: resolved.descriptor.fileSize,
+            fileSize: descriptor.fileSize,
             captureTime: resolved.captureDate,
             modificationDate: resolved.descriptor.modificationDate,
             tags: [],
@@ -478,7 +584,7 @@ public actor BackupSyncRunner {
             // Settle the pipeline's same-content claim (identical items may be waiting on this
             // upload) and drop the cached remote view - the server may have committed the
             // attempt even though the call failed, so the retry must re-query.
-            await identityResolver.uploadDidFail(resolved.descriptor)
+            await identityResolver.uploadDidFail(descriptor)
             if error is CancellationError || stopRequested {
                 revert(entry, from: persistedState)
             } else {
@@ -487,17 +593,19 @@ public actor BackupSyncRunner {
             return
         }
         #if DEBUG
-        // [BackupPerf] the ONE previously-unmeasured step: the actual bytes-to-Proton transfer. All
-        // local steps (read/identity/dupLookup) proved trivial, so this is where a slow pass is spent.
+        // The actual bytes-to-Proton transfer, kept separate from the PhotoKit identity-read window,
+        // local HMAC work, and duplicate lookup so a slow pass can be attributed to the right stage.
         let _upMs = Date().timeIntervalSince(_tUpload) * 1000
-        let _upMB = Double(resolved.descriptor.fileSize) / 1_048_576
-        PhotoDiagnostics.shared.emit("BackupPerf", [
-            "step": "upload",
-            "file": resolved.descriptor.filename,
-            "mb": String(format: "%.1f", _upMB),
-            "ms": String(format: "%.0f", _upMs),
-            "mb_s": _upMs > 0 ? String(format: "%.1f", _upMB / (_upMs / 1000)) : "-",
-        ])
+        let _upMB = Double(descriptor.fileSize) / 1_048_576
+        if _upMs >= 1_000 {
+            PhotoDiagnostics.shared.emit("BackupPerf", [
+                "step": "uploadSlow",
+                "file": descriptor.filename,
+                "mb": String(format: "%.1f", _upMB),
+                "ms": String(format: "%.0f", _upMs),
+                "mb_s": _upMs > 0 ? String(format: "%.1f", _upMB / (_upMs / 1000)) : "-",
+            ])
+        }
         #endif
 
         // Durability order is the no-double-upload guarantee:
@@ -505,10 +613,15 @@ public actor BackupSyncRunner {
         // 2. backup preflight marks the source revision complete,
         // 3. only then does the queue row turn terminal.
         // A crash between any of these re-resolves to a known/active duplicate - never a re-upload.
-        await identityResolver.recordUploaded(
-            resolved.descriptor, identity: preflightResult.identity,
-            remoteVolumeID: uid.volumeID, remoteLinkID: uid.nodeID
-        )
+        do {
+            try await identityResolver.recordUploaded(
+                descriptor, identity: preflightResult.identity,
+                remoteVolumeID: uid.volumeID, remoteLinkID: uid.nodeID
+            )
+        } catch {
+            retryOrPark(entry, from: persistedState, error: error)
+            return
+        }
         await settleCompound(entry, from: persistedState, resolved: resolved, primaryUID: uid, terminal: .completed)
     }
 
@@ -517,7 +630,10 @@ public actor BackupSyncRunner {
     private enum SecondaryOutcome {
         case allSettled
         case failed(remaining: Int, message: String)
+        case blockedByDraft
+        case skippedRemoteDeletion
         case cancelled
+        case sourceChanged
     }
 
     /// Uploads/dedupes any secondary resources, then - and only then - marks the compound backed
@@ -533,7 +649,8 @@ public actor BackupSyncRunner {
         var persistedState = state
         if !resolved.secondaries.isEmpty {
             if persistedState != .uploading {
-                persistedState = transition(entry, from: persistedState, to: .uploading)
+                guard let nextState = transition(entry, from: persistedState, to: .uploading) else { return }
+                persistedState = nextState
             }
             guard let primaryUID else {
                 // No remote reference for the primary - cannot pair secondaries safely.
@@ -545,15 +662,56 @@ public actor BackupSyncRunner {
             case .allSettled:
                 break
             case let .failed(remaining, message):
-                await preflight.markPending(resolved.candidate.snapshot, pendingResourceCount: remaining)
+                do {
+                    try await preflight.markPending(
+                        resolved.candidate.snapshot,
+                        pendingResourceCount: remaining
+                    )
+                } catch {
+                    retryOrPark(entry, from: persistedState, error: error)
+                    return
+                }
                 retryOrPark(entry, from: persistedState, error: UploadError.backend(message))
+                return
+            case .blockedByDraft:
+                let attempts = entry.attempts + 1
+                guard queue.updateState(
+                    source: entry.source,
+                    revision: entry.revision,
+                    state: .blockedByDraft,
+                    attempts: attempts,
+                    lastError: L10n.string("upload.error_remote_draft"),
+                    updatedAt: now()
+                ) else {
+                    stopRequested = true
+                    return
+                }
+                adjustProgress(from: persistedState, to: .blockedByDraft)
+                emitProgress()
+                return
+            case .skippedRemoteDeletion:
+                finish(
+                    entry,
+                    from: persistedState,
+                    as: .skippedRemoteDeletion,
+                    message: L10n.string("backup.state_skipped_remote_deletion"),
+                    resolved: resolved
+                )
                 return
             case .cancelled:
                 revert(entry, from: persistedState)
                 return
+            case .sourceChanged:
+                revert(entry, from: persistedState)
+                return
             }
         }
-        await preflight.markBackedUp(resolved.candidate.snapshot)
+        do {
+            try await preflight.markBackedUp(resolved.candidate.snapshot)
+        } catch {
+            retryOrPark(entry, from: persistedState, error: error)
+            return
+        }
         finish(entry, from: persistedState, as: terminal, message: nil, resolved: resolved)
     }
 
@@ -571,21 +729,42 @@ public actor BackupSyncRunner {
             do {
                 let result = try await identityResolver.resolve(secondary.descriptor)
                 switch result.decision {
-                case .skip, .uploadMissingSecondaries:
+                case .skip(.activeDuplicate, _), .skip(.knownFromManifest, _):
                     remaining -= 1
+                case .skip(.trashedDuplicate, _), .skip(.deletedRemotely, _):
+                    return .skippedRemoteDeletion
+                case .skip(.draftExists, _):
+                    return .blockedByDraft
+                case .skip(.inconsistentRemoteState, _), .uploadMissingSecondaries:
+                    return .failed(
+                        remaining: remaining,
+                        message: L10n.string("upload.error_remote_inconsistent")
+                    )
                 case .upload:
+                    let uploadDescriptor: UploadResourceDescriptor
+                    do {
+                        uploadDescriptor = try await secondary.materializedDescriptor()
+                    } catch {
+                        await identityResolver.uploadDidFail(secondary.descriptor)
+                        throw error
+                    }
+                    if secondary.materialize != nil,
+                       uploadDescriptor.precomputedSHA1Digest != result.identity.sha1Digest {
+                        await identityResolver.uploadDidFail(secondary.descriptor)
+                        return .sourceChanged
+                    }
                     let token = UUID()
-                    inFlightTokens["\(entryKey)#\(secondary.descriptor.source.resource.rawValue)"] = token
-                    defer { inFlightTokens["\(entryKey)#\(secondary.descriptor.source.resource.rawValue)"] = nil }
+                    inFlightTokens["\(entryKey)#\(uploadDescriptor.source.resource.rawValue)"] = token
+                    defer { inFlightTokens["\(entryKey)#\(uploadDescriptor.source.resource.rawValue)"] = nil }
                     let request = PhotoUploadRequest(
                         queueItemID: UUID(),
                         cancellationToken: token,
-                        fileURL: secondary.descriptor.fileURL,
-                        name: secondary.descriptor.filename,
+                        fileURL: uploadDescriptor.fileURL,
+                        name: uploadDescriptor.filename,
                         mediaType: secondary.mediaType,
-                        fileSize: secondary.descriptor.fileSize,
+                        fileSize: uploadDescriptor.fileSize,
                         captureTime: resolvedCaptureDate(for: secondary),
-                        modificationDate: secondary.descriptor.modificationDate,
+                        modificationDate: uploadDescriptor.modificationDate,
                         tags: [],
                         additionalMetadata: secondary.additionalMetadata,
                         mainPhotoUID: primaryUID
@@ -594,11 +773,11 @@ public actor BackupSyncRunner {
                     do {
                         uid = try await uploader.upload(request) { _ in }
                     } catch {
-                        await identityResolver.uploadDidFail(secondary.descriptor)
+                        await identityResolver.uploadDidFail(uploadDescriptor)
                         throw error
                     }
-                    await identityResolver.recordUploaded(
-                        secondary.descriptor, identity: result.identity,
+                    try await identityResolver.recordUploaded(
+                        uploadDescriptor, identity: result.identity,
                         remoteVolumeID: uid.volumeID, remoteLinkID: uid.nodeID
                     )
                     remaining -= 1
@@ -623,11 +802,14 @@ public actor BackupSyncRunner {
         _ entry: UploadBackupSyncQueueEntry,
         from oldState: UploadBackupSyncQueueState,
         to newState: UploadBackupSyncQueueState
-    ) -> UploadBackupSyncQueueState {
-        queue.updateState(
+    ) -> UploadBackupSyncQueueState? {
+        guard queue.updateState(
             source: entry.source, revision: entry.revision,
             state: newState, attempts: nil, lastError: nil, updatedAt: now()
-        )
+        ) else {
+            stopRequested = true
+            return nil
+        }
         adjustProgress(from: oldState, to: newState)
         emitProgress()
         return newState
@@ -640,16 +822,22 @@ public actor BackupSyncRunner {
         message: String?,
         resolved: BackupResolvedResource?
     ) {
-        queue.updateState(
+        guard queue.updateState(
             source: entry.source, revision: entry.revision,
             state: terminal, attempts: nil, lastError: message, updatedAt: now()
-        )
+        ) else {
+            stopRequested = true
+            return
+        }
         // A settled item means the connection is working again — ease the network backoff one step so
         // concurrency ramps back toward the policy limit (gentle recovery, not an all-at-once jump).
         if terminal.isTerminalSuccess, networkErrorStreak > 0 {
             networkErrorStreak -= 1
         }
         adjustProgress(from: oldState, to: terminal)
+        #if DEBUG
+        recordSettlement(terminal)
+        #endif
         if let resolved { closeDriftedRevisionRow(entry, resolved: resolved, as: terminal) }
         emitProgress()
     }
@@ -664,7 +852,7 @@ public actor BackupSyncRunner {
     ) {
         let snapshot = resolved.candidate.snapshot
         guard snapshot.revision != entry.revision else { return }
-        queue.upsert(UploadBackupSyncQueueEntry(
+        guard queue.upsert(UploadBackupSyncQueueEntry(
             source: snapshot.source,
             revision: snapshot.revision,
             originalFilename: resolved.candidate.originalFilename,
@@ -673,7 +861,10 @@ public actor BackupSyncRunner {
             attempts: 0,
             lastError: nil,
             updatedAt: now()
-        ))
+        )) else {
+            stopRequested = true
+            return
+        }
         adjustProgress(from: nil, to: terminal)
     }
 
@@ -691,10 +882,13 @@ public actor BackupSyncRunner {
         if Self.isTransientResourcePressure(error) {
             resourcePressureStreak += 1
             let eligibleAt = now().addingTimeInterval(configuration.retry.delay(afterAttempts: 1))
-            queue.updateState(
+            guard queue.updateState(
                 source: entry.source, revision: entry.revision,
                 state: .discovered, attempts: entry.attempts, lastError: message, updatedAt: eligibleAt
-            )
+            ) else {
+                stopRequested = true
+                return
+            }
             notBefore[Self.key(entry)] = eligibleAt
             adjustProgress(from: oldState, to: .discovered)
             emitProgress()
@@ -709,10 +903,13 @@ public actor BackupSyncRunner {
         if Self.isTransientNetwork(error) {
             networkErrorStreak = min(Self.maxNetworkBackoff, networkErrorStreak + 1)
             let eligibleAt = now().addingTimeInterval(configuration.retry.delay(afterAttempts: 1))
-            queue.updateState(
+            guard queue.updateState(
                 source: entry.source, revision: entry.revision,
                 state: .discovered, attempts: entry.attempts, lastError: message, updatedAt: eligibleAt
-            )
+            ) else {
+                stopRequested = true
+                return
+            }
             notBefore[Self.key(entry)] = eligibleAt
             adjustProgress(from: oldState, to: .discovered)
             emitProgress()
@@ -721,17 +918,23 @@ public actor BackupSyncRunner {
 
         let attempts = entry.attempts + 1
         if configuration.retry.shouldPark(attempts: attempts) {
-            queue.updateState(
+            guard queue.updateState(
                 source: entry.source, revision: entry.revision,
                 state: .failed, attempts: attempts, lastError: message, updatedAt: now()
-            )
+            ) else {
+                stopRequested = true
+                return
+            }
             adjustProgress(from: oldState, to: .failed)
         } else {
             let eligibleAt = now().addingTimeInterval(configuration.retry.delay(afterAttempts: attempts))
-            queue.updateState(
+            guard queue.updateState(
                 source: entry.source, revision: entry.revision,
                 state: .discovered, attempts: attempts, lastError: message, updatedAt: eligibleAt
-            )
+            ) else {
+                stopRequested = true
+                return
+            }
             notBefore[Self.key(entry)] = eligibleAt
             adjustProgress(from: oldState, to: .discovered)
         }
@@ -744,10 +947,13 @@ public actor BackupSyncRunner {
         let runnable: UploadBackupSyncQueueState = (oldState == .uploading || oldState == .finalizing)
             ? .queuedForUpload
             : .discovered
-        queue.updateState(
+        guard queue.updateState(
             source: entry.source, revision: entry.revision,
             state: runnable, attempts: nil, lastError: entry.lastError, updatedAt: now()
-        )
+        ) else {
+            stopRequested = true
+            return
+        }
         adjustProgress(from: oldState, to: runnable)
         emitProgress()
     }
@@ -797,6 +1003,65 @@ public actor BackupSyncRunner {
     private func emitProgress() {
         onProgress?(progress)
     }
+
+    #if DEBUG
+    private func reportThrottleIfChanged(
+        inputs: BackupThrottleInputs,
+        policyLimit: Int,
+        effectiveLimit: Int
+    ) {
+        let snapshot = ThrottleDiagnostic(
+            inputs: inputs,
+            policyLimit: policyLimit,
+            effectiveLimit: effectiveLimit,
+            networkErrorStreak: networkErrorStreak
+        )
+        guard snapshot != lastThrottleDiagnostic else { return }
+        lastThrottleDiagnostic = snapshot
+        PhotoDiagnostics.shared.emit("BackupPerf", [
+            "step": "throttle",
+            "thermal": String(describing: inputs.thermalLevel),
+            "low_power": String(inputs.isLowPowerMode),
+            "online": String(inputs.isNetworkAvailable),
+            "constrained": String(inputs.isNetworkConstrained),
+            "expensive": String(inputs.isNetworkExpensive),
+            "policy_limit": String(policyLimit),
+            "effective_limit": String(effectiveLimit),
+            "network_errors": String(networkErrorStreak),
+        ])
+    }
+
+    private func recordSettlement(_ terminal: UploadBackupSyncQueueState) {
+        throughputWindow.settled += 1
+        switch terminal {
+        case .completed:
+            throughputWindow.uploaded += 1
+        case .alreadyBackedUp:
+            throughputWindow.duplicates += 1
+        case .skippedRemoteDeletion, .sourceMissing, .failed:
+            throughputWindow.notBackedUp += 1
+        default:
+            break
+        }
+        reportThroughputIfNeeded()
+    }
+
+    private func reportThroughputIfNeeded() {
+        guard throughputWindow.settled > 0 else { return }
+        let elapsed = max(0, Date().timeIntervalSince(throughputWindow.startedAt))
+        guard throughputWindow.settled >= 100 || elapsed >= 60 else { return }
+        PhotoDiagnostics.shared.emit("BackupPerf", [
+            "step": "settleWindow",
+            "items": String(throughputWindow.settled),
+            "uploaded": String(throughputWindow.uploaded),
+            "duplicates": String(throughputWindow.duplicates),
+            "not_backed_up": String(throughputWindow.notBackedUp),
+            "wall_ms": String(format: "%.0f", elapsed * 1_000),
+            "items_s": elapsed > 0 ? String(format: "%.2f", Double(throughputWindow.settled) / elapsed) : "-",
+        ])
+        throughputWindow = ThroughputWindow()
+    }
+    #endif
 
     /// Byte-progress from an in-flight upload. Only forwarded when this item is still the one being
     /// shown and the fraction advanced by at least 1% (or completed), so a large video reads as a

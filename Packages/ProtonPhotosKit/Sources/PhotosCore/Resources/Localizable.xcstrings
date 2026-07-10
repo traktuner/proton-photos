@@ -117,6 +117,24 @@
         }
       }
     },
+    "backup.error_local_state_unavailable": {
+      "extractionState": "manual",
+      "comment": "Backup cannot continue safely because its local persistent queue is unavailable.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup cannot continue safely because its local state is unavailable. Please restart the app."
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Backup kann nicht sicher fortgesetzt werden, weil der lokale Status nicht verfügbar ist. Bitte starte die App neu."
+          }
+        }
+      }
+    },
     "backup.error_execution_lock_unavailable": {
       "extractionState": "manual",
       "comment": "Backup cannot start safely because the local execution lock store is unavailable.",

@@ -61,12 +61,17 @@ public struct UploadSourceIdentity: Sendable, Hashable, Codable {
 /// they never make dedupe decisions themselves.
 public struct UploadResourceDescriptor: Sendable {
     public let source: UploadSourceIdentity
-    /// Local file readable for streaming (the original on macOS; a temp export for PhotoKit).
+    /// Local file readable for upload. For a deferred PhotoKit descriptor this is a placeholder;
+    /// the precomputed digest is sufficient for dedupe and Core materializes a real file only for
+    /// an `.upload` decision.
     public let fileURL: URL
     /// The claimed original filename (used for Proton name correction + the name hash).
     public let filename: String
     public let fileSize: Int64
     public let modificationDate: Date
+    /// Digest produced while the source streamed its bytes. PhotoKit supplies it before any temp
+    /// export; local-file adapters leave it nil and use the shared streaming file hasher.
+    public let precomputedSHA1Digest: Data?
     /// The primary resource of this compound when `source.resource` is secondary - lets a future
     /// Live Photo path upload only the missing paired video via `mainPhotoUid`.
     public let mainResource: UploadSourceIdentity?
@@ -77,6 +82,7 @@ public struct UploadResourceDescriptor: Sendable {
         filename: String,
         fileSize: Int64,
         modificationDate: Date,
+        precomputedSHA1Digest: Data? = nil,
         mainResource: UploadSourceIdentity? = nil
     ) {
         self.source = source
@@ -84,6 +90,7 @@ public struct UploadResourceDescriptor: Sendable {
         self.filename = filename
         self.fileSize = fileSize
         self.modificationDate = modificationDate
+        self.precomputedSHA1Digest = precomputedSHA1Digest
         self.mainResource = mainResource
     }
 }
@@ -278,7 +285,90 @@ public protocol UploadIdentityStore: Sendable {
     /// lets a copied folder (or a renamed file) skip re-uploading bytes the account already owns.
     /// Trashed/deleted outcomes are deliberately NOT trustworthy here.
     func trustedRecord(contentHash: String, hashKeyEpoch: String) -> UploadIdentityRecord?
-    func upsert(_ record: UploadIdentityRecord)
+    @discardableResult
+    func upsert(_ record: UploadIdentityRecord) -> Bool
+}
+
+/// One active remote photo identity retained by the local content index. The hash is already keyed
+/// to the account's photos root; no plaintext filename or media bytes are stored.
+public struct UploadRemoteContentIndexRecord: Sendable, Equatable {
+    public var contentHash: String
+    public var hashKeyEpoch: String
+    public var remoteLinkID: String
+
+    public init(contentHash: String, hashKeyEpoch: String, remoteLinkID: String) {
+        self.contentHash = contentHash
+        self.hashKeyEpoch = hashKeyEpoch
+        self.remoteLinkID = remoteLinkID
+    }
+}
+
+/// Durable volume-event frontier for the remote content index. A page is applied transactionally
+/// with its next event ID, so a crash either replays the whole page or resumes after all its rows.
+public struct UploadRemoteContentIndexCheckpoint: Sendable, Equatable {
+    public var eventID: String
+    public var refreshedAt: Date
+
+    public init(eventID: String, refreshedAt: Date) {
+        self.eventID = eventID
+        self.refreshedAt = refreshedAt
+    }
+}
+
+/// One active remote compound proved by encrypted source metadata. `remoteLinkIDs` contains the
+/// primary and every related resource that contributed to `resourceCount`; any event touching one
+/// of those links invalidates the whole proof.
+public struct UploadRemoteAssetIndexRecord: Sendable, Equatable {
+    public var externalIdentity: UploadBackupExternalIdentity
+    public var resourceCount: Int
+    public var remoteLinkIDs: [String]
+    public var hashKeyEpoch: String
+
+    public init(
+        externalIdentity: UploadBackupExternalIdentity,
+        resourceCount: Int,
+        remoteLinkIDs: [String],
+        hashKeyEpoch: String
+    ) {
+        self.externalIdentity = externalIdentity
+        self.resourceCount = max(1, resourceCount)
+        self.remoteLinkIDs = remoteLinkIDs
+        self.hashKeyEpoch = hashKeyEpoch
+    }
+}
+
+/// Persistent, platform-neutral cache for account-wide content dedupe. Proton-specific code owns
+/// remote enumeration and event decoding; Core owns the transactional storage contract.
+public protocol UploadRemoteContentIndexStore: Sendable {
+    func remoteContentRecord(contentHash: String, hashKeyEpoch: String) -> UploadRemoteContentIndexRecord?
+    func remoteContentIndexCheckpoint(hashKeyEpoch: String) -> UploadRemoteContentIndexCheckpoint?
+    func hasRemoteAssetIndexCheckpoint(hashKeyEpoch: String) -> Bool
+    func remoteAssetRecords(
+        for identities: [UploadBackupExternalIdentity],
+        hashKeyEpoch: String
+    ) -> [UploadBackupExternalIdentity: UploadRemoteAssetIndexRecord]
+    /// True when at least one active remote photo could not provide a SHA-1 identity. A content miss
+    /// is not safe to interpret as unique while this is true.
+    func hasUnresolvedRemoteContent(hashKeyEpoch: String) -> Bool
+    @discardableResult
+    func replaceRemoteContentIndex(
+        _ records: [UploadRemoteContentIndexRecord],
+        remoteAssetRecords: [UploadRemoteAssetIndexRecord],
+        unresolvedRemoteLinkIDs: [String],
+        hashKeyEpoch: String,
+        checkpoint: UploadRemoteContentIndexCheckpoint
+    ) -> Bool
+    @discardableResult
+    func applyRemoteContentIndexChanges(
+        upserting records: [UploadRemoteContentIndexRecord],
+        upsertingRemoteAssetRecords: [UploadRemoteAssetIndexRecord],
+        unresolvedRemoteLinkIDs: [String],
+        removingRemoteLinkIDs: [String],
+        hashKeyEpoch: String,
+        checkpoint: UploadRemoteContentIndexCheckpoint
+    ) -> Bool
+    @discardableResult
+    func upsertRemoteContentRecord(_ record: UploadRemoteContentIndexRecord) -> Bool
 }
 
 /// Local content hashing (streaming SHA-1). Separated behind a protocol so tests can fake byte
@@ -296,7 +386,13 @@ public struct UploadFileHasher: UploadHashing {
     public init() {}
 
     public func sha1(of descriptor: UploadResourceDescriptor) async throws -> Data {
-        try UploadContentSHA1.digest(ofFileAt: descriptor.fileURL)
+        if let digest = descriptor.precomputedSHA1Digest {
+            guard digest.count == 20 else {
+                throw UploadError.backend("Invalid precomputed SHA-1 digest")
+            }
+            return digest
+        }
+        return try UploadContentSHA1.digest(ofFileAt: descriptor.fileURL)
     }
 }
 
@@ -305,6 +401,9 @@ public struct UploadFileHasher: UploadHashing {
 public protocol UploadDuplicateChecking: Sendable {
     /// HMAC-SHA256 over the corrected name, keyed with the photos root hash key. Lowercase hex.
     func nameHash(forCorrectedName name: String) async throws -> String
+    /// Batch form used by large backup lookaheads. Implementations that own the key material can
+    /// resolve it once and hash the whole batch without one actor hop per filename.
+    func nameHashes(forCorrectedNames names: [String]) async throws -> [String]
     /// HMAC-SHA256 over the lowercase-hex SHA-1 string, same key. Lowercase hex.
     func contentHash(forSHA1Hex sha1Hex: String) async throws -> String
     /// Remote occupants of the given name hashes. Callers pass at most
@@ -313,17 +412,37 @@ public protocol UploadDuplicateChecking: Sendable {
     /// Optional stronger lookup: an active remote photo with the same content hash, independent
     /// of filename/name hash. Backends that cannot provide a remote content index return nil.
     func findDuplicate(contentHash: String) async throws -> RemotePhotoDuplicate?
+    /// Exact active-remote proofs for source identities stored in Proton's encrypted metadata.
+    /// Missing entries are unknown, never negative proof.
+    func findRemoteAssetProofs(
+        for identities: [UploadBackupExternalIdentity]
+    ) async throws -> [UploadBackupExternalIdentity: UploadRemoteAssetIndexRecord]
     /// Drops backend-owned remote duplicate/content caches. Called whenever the upload resolver's
     /// remote view is known stale; the next lookup must re-read server state.
     func invalidateCachedRemoteState() async
+    /// Updates backend-owned content indexes after this client commits an upload. This is a local
+    /// optimization only; the upload manifest remains the authoritative durability boundary.
+    func recordUploaded(contentHash: String, remoteLinkID: String) async
     /// Irreversible fingerprint of the current photos-root hash key (for manifest validity) -
     /// never the key itself.
     func hashKeyEpoch() async throws -> String
 }
 
 public extension UploadDuplicateChecking {
+    func nameHashes(forCorrectedNames names: [String]) async throws -> [String] {
+        var hashes: [String] = []
+        hashes.reserveCapacity(names.count)
+        for name in names {
+            hashes.append(try await nameHash(forCorrectedName: name))
+        }
+        return hashes
+    }
     func findDuplicate(contentHash: String) async throws -> RemotePhotoDuplicate? { nil }
+    func findRemoteAssetProofs(
+        for identities: [UploadBackupExternalIdentity]
+    ) async throws -> [UploadBackupExternalIdentity: UploadRemoteAssetIndexRecord] { [:] }
     func invalidateCachedRemoteState() async {}
+    func recordUploaded(contentHash: String, remoteLinkID: String) async {}
 }
 
 /// Fail-closed resolver used when the account's identity manifest cannot be opened. Uploading
@@ -341,7 +460,7 @@ public struct DedupeUnavailableIdentityResolver: UploadIdentityResolving {
     }
 
     public func prime(_ descriptors: [UploadResourceDescriptor]) async {}
-    public func recordUploaded(_ descriptor: UploadResourceDescriptor, identity: UploadIdentity, remoteVolumeID: String, remoteLinkID: String) async {}
+    public func recordUploaded(_ descriptor: UploadResourceDescriptor, identity: UploadIdentity, remoteVolumeID: String, remoteLinkID: String) async throws {}
     public func invalidateCachedRemoteState() async {}
     public func uploadDidFail(_ descriptor: UploadResourceDescriptor) async {}
 }
@@ -350,12 +469,15 @@ public struct DedupeUnavailableIdentityResolver: UploadIdentityResolving {
 /// ONE implementation (`UploadDedupePipeline`) serves every platform.
 public protocol UploadIdentityResolving: Sendable {
     func resolve(_ descriptor: UploadResourceDescriptor) async throws -> UploadPreflightResult
+    func remoteAssetProofs(
+        for identities: [UploadBackupExternalIdentity]
+    ) async throws -> [UploadBackupExternalIdentity: UploadRemoteAssetIndexRecord]
     /// Batch-prefetch duplicate states for a fresh enqueue batch (Proton queries name hashes in
     /// chunks of 150). Best-effort: failures surface later through per-item `resolve`.
     func prime(_ descriptors: [UploadResourceDescriptor]) async
     /// Records that `descriptor` was uploaded as `remoteLinkID` so later runs can skip it without
     /// a remote round-trip.
-    func recordUploaded(_ descriptor: UploadResourceDescriptor, identity: UploadIdentity, remoteVolumeID: String, remoteLinkID: String) async
+    func recordUploaded(_ descriptor: UploadResourceDescriptor, identity: UploadIdentity, remoteVolumeID: String, remoteLinkID: String) async throws
     /// Drops any batch-cached remote duplicate state so the next `resolve` re-queries the server.
     /// MUST be called after a failed/cancelled upload attempt and before re-checking a
     /// draft-blocked item: the server may have committed work the cache predates (e.g. an upload
@@ -370,6 +492,9 @@ public protocol UploadIdentityResolving: Sendable {
 }
 
 public extension UploadIdentityResolving {
+    func remoteAssetProofs(
+        for identities: [UploadBackupExternalIdentity]
+    ) async throws -> [UploadBackupExternalIdentity: UploadRemoteAssetIndexRecord] { [:] }
     func prime(_ descriptors: [UploadResourceDescriptor]) async {}
     func invalidateCachedRemoteState() async {}
     func uploadDidFail(_ descriptor: UploadResourceDescriptor) async {}

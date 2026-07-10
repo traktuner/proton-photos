@@ -147,9 +147,20 @@ public struct UploadBackupSyncQueueSummary: Sendable, Equatable {
 }
 
 public protocol UploadBackupSyncQueueStore: Sendable {
-    func upsert(_ entry: UploadBackupSyncQueueEntry)
+    /// False after a SQLite operation failed or the store was closed. An empty read is safe to
+    /// interpret as "drained" only while this remains true.
+    func isOperational() -> Bool
+    @discardableResult
+    func upsert(_ entry: UploadBackupSyncQueueEntry) -> Bool
+    /// Persists one discovery chunk atomically. The default keeps test/fake stores source-compatible;
+    /// the SQLite store reuses one statement and one transaction for the whole chunk.
+    @discardableResult
+    func upsertBatch(_ entries: [UploadBackupSyncQueueEntry]) -> Bool
     func entry(for source: UploadSourceIdentity, revision: UploadBackupRevision) -> UploadBackupSyncQueueEntry?
     func nextRunnable(limit: Int) -> [UploadBackupSyncQueueEntry]
+    /// Earliest persisted eligibility time for any runnable row. Retry delays survive process death,
+    /// so a restarted runner can wait for due work instead of declaring the queue drained.
+    func nextRunnableDate() -> Date?
     /// Atomically reserves runnable rows for one runner. Returned entries keep their pre-claim
     /// state so the runner can mirror progress accurately; the store has already moved them to an
     /// active state, so another runner cannot take the same work. Crash recovery demotes these
@@ -160,6 +171,7 @@ public protocol UploadBackupSyncQueueStore: Sendable {
     func entries(in state: UploadBackupSyncQueueState, updatedBefore: Date, limit: Int) -> [UploadBackupSyncQueueEntry]
     @discardableResult
     func requeueStaleActive(before cutoff: Date, updatedAt: Date) -> Int
+    @discardableResult
     func updateState(
         source: UploadSourceIdentity,
         revision: UploadBackupRevision,
@@ -167,7 +179,15 @@ public protocol UploadBackupSyncQueueStore: Sendable {
         attempts: Int?,
         lastError: String?,
         updatedAt: Date
-    )
+    ) -> Bool
     func summary() -> UploadBackupSyncQueueSummary
     func count() -> Int
+}
+
+public extension UploadBackupSyncQueueStore {
+    func isOperational() -> Bool { true }
+
+    func upsertBatch(_ entries: [UploadBackupSyncQueueEntry]) -> Bool {
+        entries.allSatisfy(upsert)
+    }
 }

@@ -82,10 +82,13 @@ public actor AlbumSyncRunner {
     /// What starting a sync for `album` would do. UI calls this to decide whether to show the
     /// "use existing Proton album?" dialog before `sync`.
     public func precheck(album: LocalAlbumSummary) async throws -> Precheck {
-        guard let mappingStore else { throw AlbumSyncError.mappingStoreUnavailable }
+        guard let mappingStore, mappingStore.isOperational() else {
+            throw AlbumSyncError.mappingStoreUnavailable
+        }
         if let mapping = mappingStore.mapping(localAlbumID: album.id) {
             return .mapped(remoteAlbumID: mapping.remoteAlbumID)
         }
+        guard mappingStore.isOperational() else { throw AlbumSyncError.mappingStoreUnavailable }
         let twins = try await nameTwins(of: album.title)
         return twins.isEmpty ? .clear : .nameConflict(twins)
     }
@@ -97,7 +100,9 @@ public actor AlbumSyncRunner {
     @discardableResult
     public func sync(album: LocalAlbumSummary, resolution: AlbumSyncResolution = .automatic) async throws -> AlbumSyncReport {
         guard !isRunning else { throw AlbumSyncError.alreadyRunning }
-        guard let mappingStore else { throw AlbumSyncError.mappingStoreUnavailable }
+        guard let mappingStore, mappingStore.isOperational() else {
+            throw AlbumSyncError.mappingStoreUnavailable
+        }
         isRunning = true
         stopRequested = false
         defer { isRunning = false }
@@ -207,7 +212,7 @@ public actor AlbumSyncRunner {
         mapping.lastSyncedAt = now()
         mapping.lastAttachedCount = report.attached
         mapping.lastFailedCount = report.attachFailed + report.unattachable
-        mappingStore.upsert(mapping)
+        guard mappingStore.upsert(mapping) else { throw AlbumSyncError.mappingStoreUnavailable }
 
         progress.phase = report.isFullySynced ? .completed : .needsAttention
         if !report.isFullySynced, progress.message == nil {
@@ -225,6 +230,7 @@ public actor AlbumSyncRunner {
         if let mapping = mappingStore.mapping(localAlbumID: album.id) {
             return mapping.remoteAlbumID
         }
+        guard mappingStore.isOperational() else { throw AlbumSyncError.mappingStoreUnavailable }
         let name = album.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let remoteAlbumID: String
         switch resolution {
@@ -237,12 +243,14 @@ public actor AlbumSyncRunner {
         case .createNew:
             remoteAlbumID = try await remoteOps.createAlbum(name: name)
         }
-        mappingStore.upsert(AlbumSyncMapping(
+        guard mappingStore.upsert(AlbumSyncMapping(
             localAlbumID: album.id,
             remoteAlbumID: remoteAlbumID,
             title: album.title,
             createdAt: now()
-        ))
+        )) else {
+            throw AlbumSyncError.mappingStoreUnavailable
+        }
         return remoteAlbumID
     }
 

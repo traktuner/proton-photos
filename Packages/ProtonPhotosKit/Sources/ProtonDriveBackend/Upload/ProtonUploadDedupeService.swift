@@ -47,9 +47,10 @@ enum ProtonUploadDedupeError: LocalizedError {
 actor ProtonUploadDedupeService: UploadDuplicateChecking {
     private let session: DriveSession
     private let crypto: DriveCrypto
+    private let contentIndexStore: any UploadRemoteContentIndexStore
     private let contextProvider: @Sendable () async throws -> PhotosShareContext
 
-    private struct Material {
+    private struct Material: Sendable {
         let context: PhotosShareContext
         let rootKey: UnlockableKey
         let hashKey: Data
@@ -58,17 +59,24 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
 
     private var material: Material?
     private var materialTask: Task<Material, any Error>?
-    private var remoteContentIndex: [String: RemotePhotoDuplicate]?
-    private var remoteContentIndexTask: Task<[String: RemotePhotoDuplicate], any Error>?
+    private var remoteContentIndexTask: Task<Void, any Error>?
     private var remoteContentIndexGeneration = 0
+    private var lastRemoteContentRefreshAt: Date?
+    private static let remoteContentIndexLifetime: TimeInterval = 15
+    /// Four metadata requests overlap network latency without producing the unbounded request fan-out
+    /// used by the reference client. Decryption and the transactional store update remain serialized.
+    private static let remoteMetadataRequestConcurrency = 4
+    private static let remoteMetadataWindow = UploadDedupePipeline.protonDuplicateBatchSize * remoteMetadataRequestConcurrency
 
     init(
         session: DriveSession,
         crypto: DriveCrypto,
+        contentIndexStore: any UploadRemoteContentIndexStore,
         contextProvider: @Sendable @escaping () async throws -> PhotosShareContext
     ) {
         self.session = session
         self.crypto = crypto
+        self.contentIndexStore = contentIndexStore
         self.contextProvider = contextProvider
     }
 
@@ -76,6 +84,11 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
 
     func nameHash(forCorrectedName name: String) async throws -> String {
         ProtonPhotoHMAC.hex(message: name, key: try await resolveMaterial().hashKey)
+    }
+
+    func nameHashes(forCorrectedNames names: [String]) async throws -> [String] {
+        let key = try await resolveMaterial().hashKey
+        return names.map { ProtonPhotoHMAC.hex(message: $0, key: key) }
     }
 
     func contentHash(forSHA1Hex sha1Hex: String) async throws -> String {
@@ -102,15 +115,53 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
     }
 
     func findDuplicate(contentHash: String) async throws -> RemotePhotoDuplicate? {
-        let index = try await resolveRemoteContentIndex()
-        return index[contentHash]
+        let material = try await resolveMaterial()
+        try await refreshRemoteContentIndex(material: material)
+        guard let record = contentIndexStore.remoteContentRecord(
+            contentHash: contentHash,
+            hashKeyEpoch: material.epoch
+        ) else {
+            guard !contentIndexStore.hasUnresolvedRemoteContent(hashKeyEpoch: material.epoch) else {
+                throw UploadError.backend(
+                    "Remote duplicate index contains photos without SHA-1 metadata"
+                )
+            }
+            return nil
+        }
+        return RemotePhotoDuplicate(
+            nameHash: "",
+            contentHash: contentHash,
+            linkState: .active,
+            linkID: record.remoteLinkID
+        )
+    }
+
+    func findRemoteAssetProofs(
+        for identities: [UploadBackupExternalIdentity]
+    ) async throws -> [UploadBackupExternalIdentity: UploadRemoteAssetIndexRecord] {
+        guard !identities.isEmpty else { return [:] }
+        let material = try await resolveMaterial()
+        try await refreshRemoteContentIndex(material: material)
+        return contentIndexStore.remoteAssetRecords(
+            for: identities,
+            hashKeyEpoch: material.epoch
+        )
     }
 
     func invalidateCachedRemoteState() async {
         remoteContentIndexGeneration += 1
-        remoteContentIndex = nil
+        lastRemoteContentRefreshAt = nil
         remoteContentIndexTask?.cancel()
         remoteContentIndexTask = nil
+    }
+
+    func recordUploaded(contentHash: String, remoteLinkID: String) async {
+        guard let material = try? await resolveMaterial() else { return }
+        _ = contentIndexStore.upsertRemoteContentRecord(UploadRemoteContentIndexRecord(
+            contentHash: contentHash,
+            hashKeyEpoch: material.epoch,
+            remoteLinkID: remoteLinkID
+        ))
     }
 
     // MARK: Key material
@@ -160,84 +211,279 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
 
     // MARK: Remote content index
 
-    private func resolveRemoteContentIndex() async throws -> [String: RemotePhotoDuplicate] {
-        if let remoteContentIndex { return remoteContentIndex }
+    private func refreshRemoteContentIndex(material: Material) async throws {
+        if let lastRemoteContentRefreshAt,
+           Date().timeIntervalSince(lastRemoteContentRefreshAt) < Self.remoteContentIndexLifetime {
+            return
+        }
         if let remoteContentIndexTask { return try await remoteContentIndexTask.value }
+
         let session = self.session
         let crypto = self.crypto
-        let material = try await resolveMaterial()
+        let store = self.contentIndexStore
         let generation = remoteContentIndexGeneration
-        let task = Task { () -> [String: RemotePhotoDuplicate] in
-            let photos = try await session.fetchPhotosList(volumeID: material.context.volumeID)
-            guard !photos.isEmpty else { return [:] }
-
-            var links: [String: AlbumPhotoLinkBody] = [:]
-            let ids = photos.map(\.linkID)
-            for chunk in stride(from: 0, to: ids.count, by: UploadDedupePipeline.protonDuplicateBatchSize)
-                .map({ Array(ids[$0 ..< min($0 + UploadDedupePipeline.protonDuplicateBatchSize, ids.count)]) }) {
-                try Task.checkCancellation()
-                for link in try await session.fetchPhotoLinksMetadata(shareID: material.context.shareID, linkIDs: chunk) {
-                    if let id = link.linkID { links[id] = link }
-                }
-            }
-
-            var index: [String: RemotePhotoDuplicate] = [:]
-            index.reserveCapacity(photos.count)
-            var unresolved = 0
-            for id in ids {
-                try Task.checkCancellation()
-                guard let link = links[id],
-                      let nodeKey = link.nodeKey,
-                      let nodePassphrase = link.nodePassphrase,
-                      let armoredXAttr = link.xAttr ?? link.fileProperties?.activeRevision?.xAttr,
-                      let fileKey = try? crypto.unlockNode(key: nodeKey, passphrase: nodePassphrase, parent: material.rootKey),
-                      let data = try? crypto.decryptXAttr(armoredXAttr, node: fileKey),
-                      let sha1 = (try? JSONDecoder().decode(DedupeXAttrDigests.self, from: data))?.common?.digests?.sha1?.lowercased(),
-                      !sha1.isEmpty else {
-                    unresolved += 1
-                    continue
-                }
-                let contentHash = ProtonPhotoHMAC.hex(message: sha1, key: material.hashKey)
-                index[contentHash] = RemotePhotoDuplicate(
-                    nameHash: "",
-                    contentHash: contentHash,
-                    linkState: .active,
-                    linkID: id
+        let task = Task {
+            if let checkpoint = store.remoteContentIndexCheckpoint(hashKeyEpoch: material.epoch),
+               store.hasRemoteAssetIndexCheckpoint(hashKeyEpoch: material.epoch) {
+                try await Self.applyRemoteEvents(
+                    from: checkpoint,
+                    material: material,
+                    session: session,
+                    crypto: crypto,
+                    store: store
+                )
+            } else {
+                try await Self.rebuildRemoteContentIndex(
+                    material: material,
+                    session: session,
+                    crypto: crypto,
+                    store: store
                 )
             }
-            guard unresolved == 0 else {
-                throw UploadError.backend("Remote duplicate index is incomplete (\(unresolved) photos lack SHA-1 metadata).")
-            }
-            DebugLog.log("[Dedupe] remote content index built photos=\(photos.count)")
-            return index
         }
         remoteContentIndexTask = task
         do {
-            let resolved = try await task.value
+            try await task.value
             guard remoteContentIndexGeneration == generation else { throw CancellationError() }
             remoteContentIndexTask = nil
-            remoteContentIndex = resolved
-            return resolved
+            lastRemoteContentRefreshAt = Date()
         } catch {
-            if remoteContentIndexGeneration == generation {
-                remoteContentIndexTask = nil
-            }
+            if remoteContentIndexGeneration == generation { remoteContentIndexTask = nil }
             throw error
         }
     }
-}
 
-private struct DedupeXAttrDigests: Decodable {
-    let common: Common?
-    enum CodingKeys: String, CodingKey { case common = "Common" }
-    struct Common: Decodable {
-        let digests: Digests?
-        enum CodingKeys: String, CodingKey { case digests = "Digests" }
-        struct Digests: Decodable {
-            let sha1: String?
-            enum CodingKeys: String, CodingKey { case sha1 = "SHA1" }
+    private static func rebuildRemoteContentIndex(
+        material: Material,
+        session: DriveSession,
+        crypto: DriveCrypto,
+        store: any UploadRemoteContentIndexStore
+    ) async throws {
+        let eventID = try await session.latestVolumeEventID(volumeID: material.context.volumeID)
+        let photos = try await session.fetchPhotosList(volumeID: material.context.volumeID)
+        let ids = Array(Set(photos.flatMap { photo in
+            [photo.linkID] + photo.relatedPhotos.map(\.linkID)
+        }))
+        var rows = RemoteContentIndexRows()
+        for start in stride(from: 0, to: ids.count, by: remoteMetadataWindow) {
+            try Task.checkCancellation()
+            let window = Array(ids[start ..< min(start + remoteMetadataWindow, ids.count)])
+            let links = try await fetchLinks(
+                ids: window,
+                shareID: material.context.shareID,
+                session: session
+            )
+            rows.merge(try makeIndexRows(
+                links: links,
+                expectedActiveFileIDs: Set(window),
+                material: material,
+                crypto: crypto
+            ))
+        }
+        rows.remoteAssetRecords = RemotePhotoAssetProofBuilder.records(
+            photos: photos,
+            externalIdentitiesByLinkID: rows.externalIdentitiesByLinkID,
+            hashKeyEpoch: material.epoch
+        )
+        let checkpoint = UploadRemoteContentIndexCheckpoint(eventID: eventID, refreshedAt: Date())
+        guard store.replaceRemoteContentIndex(
+            rows.records,
+            remoteAssetRecords: rows.remoteAssetRecords,
+            unresolvedRemoteLinkIDs: rows.unresolvedLinkIDs,
+            hashKeyEpoch: material.epoch,
+            checkpoint: checkpoint
+        ) else {
+            throw UploadError.backend("Remote duplicate index could not be saved")
+        }
+        DebugLog.log(
+            "[Dedupe] remote content index rebuilt records=\(rows.records.count) "
+                + "unresolved=\(rows.unresolvedLinkIDs.count)"
+        )
+    }
+
+    private static func applyRemoteEvents(
+        from checkpoint: UploadRemoteContentIndexCheckpoint,
+        material: Material,
+        session: DriveSession,
+        crypto: DriveCrypto,
+        store: any UploadRemoteContentIndexStore
+    ) async throws {
+        var eventID = checkpoint.eventID
+        while true {
+            try Task.checkCancellation()
+            let page = try await session.fetchVolumeEvents(
+                volumeID: material.context.volumeID,
+                since: eventID
+            )
+            if page.requiresRefresh {
+                try await rebuildRemoteContentIndex(
+                    material: material,
+                    session: session,
+                    crypto: crypto,
+                    store: store
+                )
+                return
+            }
+
+            let relevant = page.events.filter { event in
+                event.eventType == 0
+                    || event.contextShareID == material.context.shareID
+            }
+            let removedIDs = Array(Set(relevant.map(\.linkID)))
+            let activeFileIDs = Set(relevant.compactMap { event -> String? in
+                guard event.eventType != 0 else { return nil }
+                if let type = event.linkType, type != 2 { return nil }
+                if let state = event.linkState, state != 1 { return nil }
+                return event.linkID
+            })
+            let links = try await fetchLinks(
+                ids: Array(activeFileIDs),
+                shareID: material.context.shareID,
+                session: session
+            )
+            let rows = try makeIndexRows(
+                links: links,
+                expectedActiveFileIDs: activeFileIDs,
+                material: material,
+                crypto: crypto
+            )
+            let next = UploadRemoteContentIndexCheckpoint(eventID: page.eventID, refreshedAt: Date())
+            guard store.applyRemoteContentIndexChanges(
+                upserting: rows.records,
+                upsertingRemoteAssetRecords: rows.remoteAssetRecords,
+                unresolvedRemoteLinkIDs: rows.unresolvedLinkIDs,
+                removingRemoteLinkIDs: removedIDs,
+                hashKeyEpoch: material.epoch,
+                checkpoint: next
+            ) else {
+                throw UploadError.backend("Remote duplicate index changes could not be saved")
+            }
+            eventID = page.eventID
+            if !page.hasMore { return }
         }
     }
+
+    private static func fetchLinks(
+        ids: [String],
+        shareID: String,
+        session: DriveSession
+    ) async throws -> [String: AlbumPhotoLinkBody] {
+        guard !ids.isEmpty else { return [:] }
+        let chunks = stride(from: 0, to: ids.count, by: UploadDedupePipeline.protonDuplicateBatchSize).map { start in
+            Array(ids[start ..< min(start + UploadDedupePipeline.protonDuplicateBatchSize, ids.count)])
+        }
+        var links: [String: AlbumPhotoLinkBody] = [:]
+        links.reserveCapacity(ids.count)
+
+        try await withThrowingTaskGroup(of: [AlbumPhotoLinkBody].self) { group in
+            var nextChunk = 0
+
+            func submitNext() {
+                guard nextChunk < chunks.count else { return }
+                let chunk = chunks[nextChunk]
+                nextChunk += 1
+                group.addTask {
+                    try Task.checkCancellation()
+                    return try await session.fetchPhotoLinksMetadata(shareID: shareID, linkIDs: chunk)
+                }
+            }
+
+            for _ in 0 ..< min(Self.remoteMetadataRequestConcurrency, chunks.count) {
+                submitNext()
+            }
+            while let batch = try await group.next() {
+                for link in batch {
+                    if let id = link.linkID { links[id] = link }
+                }
+                submitNext()
+            }
+        }
+        return links
+    }
+
+    private struct RemoteContentIndexRows {
+        var records: [UploadRemoteContentIndexRecord] = []
+        var remoteAssetRecords: [UploadRemoteAssetIndexRecord] = []
+        var unresolvedLinkIDs: [String] = []
+        var externalIdentitiesByLinkID: [String: UploadBackupExternalIdentity] = [:]
+
+        mutating func merge(_ other: Self) {
+            records.append(contentsOf: other.records)
+            unresolvedLinkIDs.append(contentsOf: other.unresolvedLinkIDs)
+            externalIdentitiesByLinkID.merge(other.externalIdentitiesByLinkID) { _, new in new }
+        }
+    }
+
+    private static func makeIndexRows(
+        links: [String: AlbumPhotoLinkBody],
+        expectedActiveFileIDs: Set<String>,
+        material: Material,
+        crypto: DriveCrypto
+    ) throws -> RemoteContentIndexRows {
+        let fractionalDateFormatter = ISO8601DateFormatter()
+        fractionalDateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let standardDateFormatter = ISO8601DateFormatter()
+        standardDateFormatter.formatOptions = [.withInternetDateTime]
+        func parseDate(_ value: String) -> Date? {
+            fractionalDateFormatter.date(from: value) ?? standardDateFormatter.date(from: value)
+        }
+
+        var records: [UploadRemoteContentIndexRecord] = []
+        records.reserveCapacity(expectedActiveFileIDs.count)
+        var unresolved: [String] = []
+        var externalIdentitiesByLinkID: [String: UploadBackupExternalIdentity] = [:]
+        externalIdentitiesByLinkID.reserveCapacity(expectedActiveFileIDs.count)
+        for id in expectedActiveFileIDs {
+            try Task.checkCancellation()
+            guard let link = links[id] else {
+                throw UploadError.backend("Remote duplicate metadata response is incomplete")
+            }
+            guard link.type == nil || link.type == 2,
+                  link.state == nil || link.state == 1 else {
+                continue
+            }
+            guard let nodeKey = link.nodeKey, let nodePassphrase = link.nodePassphrase else {
+                throw UploadError.backend("Remote photo key metadata is incomplete")
+            }
+            guard let armoredXAttr = link.xAttr ?? link.fileProperties?.activeRevision?.xAttr else {
+                unresolved.append(id)
+                continue
+            }
+            let fileKey = try crypto.unlockNode(
+                key: nodeKey,
+                passphrase: nodePassphrase,
+                parent: material.rootKey
+            )
+            let data = try crypto.decryptXAttr(armoredXAttr, node: fileKey)
+            let attributes = try JSONDecoder().decode(DedupeXAttr.self, from: data)
+            if let iOSPhotos = attributes.iOSPhotos,
+               let cloudID = iOSPhotos.iCloudID,
+               !cloudID.isEmpty,
+               let rawDate = iOSPhotos.modificationTime,
+               let modificationDate = parseDate(rawDate) {
+                externalIdentitiesByLinkID[id] = UploadBackupExternalIdentity(
+                    identifier: cloudID,
+                    modificationDate: modificationDate
+                )
+            }
+            guard let sha1 = attributes.common?.digests?.sha1?.lowercased(), !sha1.isEmpty else {
+                unresolved.append(id)
+                continue
+            }
+            records.append(UploadRemoteContentIndexRecord(
+                contentHash: ProtonPhotoHMAC.hex(message: sha1, key: material.hashKey),
+                hashKeyEpoch: material.epoch,
+                remoteLinkID: id
+            ))
+        }
+
+        return RemoteContentIndexRows(
+            records: records,
+            unresolvedLinkIDs: unresolved,
+            externalIdentitiesByLinkID: externalIdentitiesByLinkID
+        )
+    }
+
 }
 
 // MARK: - Wire models (PascalCase JSON)

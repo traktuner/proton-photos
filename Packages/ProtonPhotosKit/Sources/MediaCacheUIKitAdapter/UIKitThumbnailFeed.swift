@@ -158,6 +158,10 @@ public actor UIKitThumbnailFeed {
         await core.stopPrefetch()
     }
 
+    public func clearCacheAndRestartPrefetch() async {
+        await core.clearCacheAndRestartPrefetch()
+    }
+
     public func setPrefetchEnabled(_ enabled: Bool) async {
         await core.setPrefetchEnabled(enabled)
     }

@@ -164,6 +164,68 @@ private struct PhotosListResponse: Decodable {
     enum CodingKeys: String, CodingKey { case photos = "Photos" }
 }
 
+struct VolumeEventPage: Decodable {
+    struct Item: Decodable {
+        let eventType: Int
+        let linkID: String
+        let contextShareID: String?
+        let linkType: Int?
+        let linkState: Int?
+
+        private struct Link: Decodable {
+            let linkID: String
+            let type: Int?
+            let state: Int?
+            enum CodingKeys: String, CodingKey {
+                case linkID = "LinkID"
+                case type = "Type"
+                case state = "State"
+            }
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case eventType = "EventType"
+            case link = "Link"
+            case contextShareID = "ContextShareID"
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            eventType = try values.decode(Int.self, forKey: .eventType)
+            let link = try values.decode(Link.self, forKey: .link)
+            linkID = link.linkID
+            linkType = link.type
+            linkState = link.state
+            contextShareID = try values.decodeIfPresent(String.self, forKey: .contextShareID)
+        }
+    }
+
+    let events: [Item]
+    let eventID: String
+    let hasMore: Bool
+    let requiresRefresh: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case events = "Events"
+        case eventID = "EventID"
+        case more = "More"
+        case refresh = "Refresh"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        events = try values.decodeIfPresent([Item].self, forKey: .events) ?? []
+        eventID = try values.decode(String.self, forKey: .eventID)
+        hasMore = (try values.decodeIfPresent(Int.self, forKey: .more) ?? 0) != 0
+        requiresRefresh = (try values.decodeIfPresent(Int.self, forKey: .refresh) ?? 0) != 0
+    }
+}
+
+private struct LatestVolumeEventResponse: Decodable {
+    let eventID: String
+    enum CodingKeys: String, CodingKey { case eventID = "EventID" }
+}
+
 extension DriveSession {
     /// Fetches raw encrypted block bytes from storage for video streaming. Two patterns:
     ///  • `token != nil` → hit `url` (a BareURL) with the `pm-storage-token` header and NO session
@@ -214,6 +276,20 @@ extension DriveSession {
             cursor = last
         }
         return all
+    }
+
+    func latestVolumeEventID(volumeID: String) async throws -> String {
+        try await getJSON(
+            "/drive/volumes/\(volumeID)/events/latest",
+            as: LatestVolumeEventResponse.self
+        ).eventID
+    }
+
+    func fetchVolumeEvents(volumeID: String, since eventID: String) async throws -> VolumeEventPage {
+        try await getJSON(
+            "/drive/volumes/\(volumeID)/events/\(eventID)",
+            as: VolumeEventPage.self
+        )
     }
 
     /// Favorite (POST) or un-favorite (DELETE the favorites tag 0) a photo. Volume-keyed.

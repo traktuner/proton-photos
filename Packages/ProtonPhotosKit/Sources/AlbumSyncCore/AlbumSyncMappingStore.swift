@@ -16,6 +16,7 @@ public final class AlbumSyncMappingStore: @unchecked Sendable {
     public static let databaseFileName = "album-sync-mapping-v1.sqlite"
 
     private var db: OpaquePointer?
+    private var operationFailed = false
     private let lock = NSLock()
     private static let schemaVersion = 1
 
@@ -25,6 +26,23 @@ public final class AlbumSyncMappingStore: @unchecked Sendable {
     }
 
     deinit { close() }
+
+    public func isOperational() -> Bool {
+        lock.withLock {
+            guard db != nil, !operationFailed else { return false }
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "SELECT 1;", -1, &stmt, nil) == SQLITE_OK else {
+                operationFailed = true
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+            guard sqlite3_step(stmt) == SQLITE_ROW else {
+                operationFailed = true
+                return false
+            }
+            return true
+        }
+    }
 
     public func close() {
         lock.withLock {
@@ -38,11 +56,9 @@ public final class AlbumSyncMappingStore: @unchecked Sendable {
     // MARK: Open / schema
 
     private static func openVerified(url: URL, policy: LibraryDatabasePolicy) -> OpaquePointer? {
-        if let handle = openOnce(url: url, policy: policy) { return handle }
-        for suffix in ["", "-wal", "-shm"] {
-            try? FileManager.default.removeItem(at: URL(fileURLWithPath: url.path + suffix))
-        }
-        return openOnce(url: url, policy: policy)
+        // Album mappings are authoritative state, not a rebuildable cache. A transient open,
+        // schema, or I/O failure must disable sync instead of deleting the durable mapping.
+        openOnce(url: url, policy: policy)
     }
 
     private static func openOnce(url: URL, policy: LibraryDatabasePolicy) -> OpaquePointer? {
@@ -104,41 +120,54 @@ public final class AlbumSyncMappingStore: @unchecked Sendable {
     public func mapping(localAlbumID: String) -> AlbumSyncMapping? {
         lock.withLock {
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(
+            guard requireOperational(sqlite3_prepare_v2(
                 db,
                 "SELECT local_album_id, remote_album_id, title, mode, created_at, last_synced_at, last_attached, last_failed "
                     + "FROM album_sync_mapping WHERE local_album_id=?;",
                 -1, &stmt, nil
-            ) == SQLITE_OK else { return nil }
+            ) == SQLITE_OK) else { return nil }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text(stmt, 1, localAlbumID, -1, Self.transient)
-            guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-            return Self.rowToMapping(stmt)
+            let result = sqlite3_step(stmt)
+            if result == SQLITE_DONE { return nil }
+            guard requireOperational(result == SQLITE_ROW), let mapping = Self.rowToMapping(stmt) else {
+                operationFailed = true
+                return nil
+            }
+            return mapping
         }
     }
 
     public func allMappings() -> [AlbumSyncMapping] {
         lock.withLock {
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(
+            guard requireOperational(sqlite3_prepare_v2(
                 db,
                 "SELECT local_album_id, remote_album_id, title, mode, created_at, last_synced_at, last_attached, last_failed "
                     + "FROM album_sync_mapping ORDER BY title;",
                 -1, &stmt, nil
-            ) == SQLITE_OK else { return [] }
+            ) == SQLITE_OK) else { return [] }
             defer { sqlite3_finalize(stmt) }
             var result: [AlbumSyncMapping] = []
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                if let mapping = Self.rowToMapping(stmt) { result.append(mapping) }
+            var stepResult = sqlite3_step(stmt)
+            while stepResult == SQLITE_ROW {
+                guard let mapping = Self.rowToMapping(stmt) else {
+                    operationFailed = true
+                    return []
+                }
+                result.append(mapping)
+                stepResult = sqlite3_step(stmt)
             }
+            guard requireOperational(stepResult == SQLITE_DONE) else { return [] }
             return result
         }
     }
 
-    public func upsert(_ mapping: AlbumSyncMapping) {
+    @discardableResult
+    public func upsert(_ mapping: AlbumSyncMapping) -> Bool {
         lock.withLock {
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(
+            guard requireOperational(sqlite3_prepare_v2(
                 db,
                 """
                 INSERT INTO album_sync_mapping
@@ -150,7 +179,7 @@ public final class AlbumSyncMappingStore: @unchecked Sendable {
                   last_failed=excluded.last_failed;
                 """,
                 -1, &stmt, nil
-            ) == SQLITE_OK else { return }
+            ) == SQLITE_OK) else { return false }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text(stmt, 1, mapping.localAlbumID, -1, Self.transient)
             sqlite3_bind_text(stmt, 2, mapping.remoteAlbumID, -1, Self.transient)
@@ -164,17 +193,20 @@ public final class AlbumSyncMappingStore: @unchecked Sendable {
             }
             sqlite3_bind_int64(stmt, 7, Int64(mapping.lastAttachedCount))
             sqlite3_bind_int64(stmt, 8, Int64(mapping.lastFailedCount))
-            _ = sqlite3_step(stmt)
+            return requireOperational(sqlite3_step(stmt) == SQLITE_DONE)
         }
     }
 
-    public func removeMapping(localAlbumID: String) {
+    @discardableResult
+    public func removeMapping(localAlbumID: String) -> Bool {
         lock.withLock {
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, "DELETE FROM album_sync_mapping WHERE local_album_id=?;", -1, &stmt, nil) == SQLITE_OK else { return }
+            guard requireOperational(
+                sqlite3_prepare_v2(db, "DELETE FROM album_sync_mapping WHERE local_album_id=?;", -1, &stmt, nil) == SQLITE_OK
+            ) else { return false }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text(stmt, 1, localAlbumID, -1, Self.transient)
-            _ = sqlite3_step(stmt)
+            return requireOperational(sqlite3_step(stmt) == SQLITE_DONE)
         }
     }
 
@@ -185,50 +217,60 @@ public final class AlbumSyncMappingStore: @unchecked Sendable {
     public func selections() -> [AlbumSyncSelection] {
         lock.withLock {
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(
+            guard requireOperational(sqlite3_prepare_v2(
                 db,
                 "SELECT local_album_id, title, added_at FROM album_sync_selection ORDER BY title;",
                 -1, &stmt, nil
-            ) == SQLITE_OK else { return [] }
+            ) == SQLITE_OK) else { return [] }
             defer { sqlite3_finalize(stmt) }
             var result: [AlbumSyncSelection] = []
-            while sqlite3_step(stmt) == SQLITE_ROW {
+            var stepResult = sqlite3_step(stmt)
+            while stepResult == SQLITE_ROW {
                 guard let id = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
-                      let title = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) else { continue }
+                      let title = sqlite3_column_text(stmt, 1).map({ String(cString: $0) }) else {
+                    operationFailed = true
+                    return []
+                }
                 result.append(AlbumSyncSelection(
                     localAlbumID: id,
                     title: title,
                     addedAt: Date(timeIntervalSinceReferenceDate: sqlite3_column_double(stmt, 2))
                 ))
+                stepResult = sqlite3_step(stmt)
             }
+            guard requireOperational(stepResult == SQLITE_DONE) else { return [] }
             return result
         }
     }
 
-    public func addSelection(_ selection: AlbumSyncSelection) {
+    @discardableResult
+    public func addSelection(_ selection: AlbumSyncSelection) -> Bool {
         lock.withLock {
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(
+            guard requireOperational(sqlite3_prepare_v2(
                 db,
                 "INSERT INTO album_sync_selection(local_album_id, title, added_at) VALUES (?,?,?) "
                     + "ON CONFLICT(local_album_id) DO UPDATE SET title=excluded.title;",
                 -1, &stmt, nil
-            ) == SQLITE_OK else { return }
+            ) == SQLITE_OK) else { return false }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text(stmt, 1, selection.localAlbumID, -1, Self.transient)
             sqlite3_bind_text(stmt, 2, selection.title, -1, Self.transient)
             sqlite3_bind_double(stmt, 3, selection.addedAt.timeIntervalSinceReferenceDate)
-            _ = sqlite3_step(stmt)
+            return requireOperational(sqlite3_step(stmt) == SQLITE_DONE)
         }
     }
 
-    public func removeSelection(localAlbumID: String) {
+    @discardableResult
+    public func removeSelection(localAlbumID: String) -> Bool {
         lock.withLock {
             var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(db, "DELETE FROM album_sync_selection WHERE local_album_id=?;", -1, &stmt, nil) == SQLITE_OK else { return }
+            guard requireOperational(
+                sqlite3_prepare_v2(db, "DELETE FROM album_sync_selection WHERE local_album_id=?;", -1, &stmt, nil) == SQLITE_OK
+            ) else { return false }
             defer { sqlite3_finalize(stmt) }
             sqlite3_bind_text(stmt, 1, localAlbumID, -1, Self.transient)
-            _ = sqlite3_step(stmt)
+            return requireOperational(sqlite3_step(stmt) == SQLITE_DONE)
         }
     }
 
@@ -257,5 +299,11 @@ public final class AlbumSyncMappingStore: @unchecked Sendable {
             lastAttachedCount: Int(sqlite3_column_int64(stmt, 6)),
             lastFailedCount: Int(sqlite3_column_int64(stmt, 7))
         )
+    }
+
+    @discardableResult
+    private func requireOperational(_ condition: Bool) -> Bool {
+        if !condition { operationFailed = true }
+        return condition
     }
 }

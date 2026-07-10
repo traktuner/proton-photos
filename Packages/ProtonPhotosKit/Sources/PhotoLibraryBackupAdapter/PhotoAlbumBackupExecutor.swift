@@ -72,24 +72,18 @@ public final class PhotoAlbumBackupExecutor: AlbumSyncBackupExecuting, @unchecke
             directory: accountDataDirectory.appendingPathComponent("album-sync-temp", isDirectory: true)
         )
         let preflight = UploadBackupPreflightIndex(store: stateStore)
-        let engine = UploadBackupSyncEngine(preflight: preflight, queue: queueStore)
+        let engine = UploadBackupSyncEngine(
+            preflight: preflight,
+            queue: queueStore,
+            remoteProofResolver: identityResolver
+        )
         let runner = BackupSyncRunner(
             queue: queueStore,
             preflight: preflight,
             resolver: PhotoLibraryResourceResolver(tempStore: tempStore),
             identityResolver: identityResolver,
             uploader: uploader,
-            throttleInputs: {
-                let process = ProcessInfo.processInfo
-                let level: BackupThermalLevel = switch process.thermalState {
-                case .nominal: .nominal
-                case .fair: .fair
-                case .serious: .serious
-                case .critical: .critical
-                @unknown default: .serious
-                }
-                return BackupThrottleInputs(thermalLevel: level, isLowPowerMode: process.isLowPowerModeEnabled)
-            }
+            throttleInputs: { AppleBackupRuntimeSignals.current() }
         )
         lock.withLock { activeRunner = runner }
         defer { lock.withLock { activeRunner = nil } }
@@ -97,9 +91,15 @@ public final class PhotoAlbumBackupExecutor: AlbumSyncBackupExecuting, @unchecke
         await runner.setOnProgress { snapshot in onProgress(snapshot) }
         _ = try await engine.scan(PhotoLibraryBackupCatalog(localIdentifiers: localIdentifiers))
         _ = await runner.runUntilDrained()
+        guard await runner.isQueueOperational(), queueStore.isOperational() else {
+            throw AlbumSyncError.mappingStoreUnavailable
+        }
         tempStore.sweep()
 
         let summary = queueStore.summary()
+        guard queueStore.isOperational() else {
+            throw AlbumSyncError.mappingStoreUnavailable
+        }
         return AlbumSyncBackupReport(
             total: summary.total,
             backedUp: summary.resolved,

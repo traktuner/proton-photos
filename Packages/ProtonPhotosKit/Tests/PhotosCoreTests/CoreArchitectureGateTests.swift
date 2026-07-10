@@ -53,7 +53,9 @@ final class CoreArchitectureGateTests: XCTestCase {
         ),
         CoreTargetRule(
             name: "MediaFeedCore",
-            allowedImports: ["Foundation", "MediaByteCache", "MediaDecodingCore", "PhotosCore"],
+            // CryptoKit hashes coverage identifiers before they reach disk; it is universal
+            // Apple-platform infrastructure, not platform UI or hardware policy.
+            allowedImports: ["CryptoKit", "Foundation", "MediaByteCache", "MediaDecodingCore", "PhotosCore"],
             expectedDependencies: ["MediaByteCache", "MediaDecodingCore", "PhotosCore"],
             extraForbiddenTokens: []
         ),
@@ -119,12 +121,14 @@ final class CoreArchitectureGateTests: XCTestCase {
             extraForbiddenTokens: ["PhotoDiagnostics"]
         ),
         // MLSearchCore: pure Swift, platform-neutral. Owns the ML index model, store protocol,
-        // in-memory store, planner, progress, query/result types, and vector-scorer protocol.
-        // May import only Foundation + PhotosCore. CoreML/Vision/UIKit/AppKit/SwiftUI/Photos/SDK
-        // are banned so a Core bug in search/indexing is fixable once for every platform.
+        // in-memory + SQLite stores, packed vector block, planner, progress, query/result types,
+        // and vector-scorer protocol. SQLite3: the system C library backing the persistent
+        // embedding store (same allowance as PhotosCore/UploadCore stores). CoreML/Vision/
+        // UIKit/AppKit/SwiftUI/Photos/SDK are banned so a Core bug in search/indexing is
+        // fixable once for every platform.
         CoreTargetRule(
             name: "MLSearchCore",
-            allowedImports: ["Foundation", "PhotosCore"],
+            allowedImports: ["Foundation", "PhotosCore", "SQLite3"],
             expectedDependencies: ["PhotosCore"],
             extraForbiddenTokens: ["CoreML", "Vision", "NaturalLanguage", "MLModel"]
         ),
@@ -2366,6 +2370,57 @@ final class CoreArchitectureGateTests: XCTestCase {
 
             Do not ship model weights until the Stage-0 license spike resolves a permissive
             license. Stage 1 ships the architecture skeleton only.
+            """
+        )
+    }
+
+    func testMLSearchAppleAdapterComputePolicyHoldsToNeuralEngineOnly() throws {
+        // Production sources under MLSearchAppleAdapter must not expose public .all or .cpuOnly.
+        // These may only appear behind #if DEBUG guards or in test files.
+        let adapterRoot = sourcesRoot.appendingPathComponent("MLSearchAppleAdapter")
+        let files = try swiftFiles(in: adapterRoot)
+        var violations: [String] = []
+
+        for file in files {
+            guard file.lastPathComponent != "CoreMLComputePolicy.swift" else {
+                // Policy file itself is checked separately below.
+                continue
+            }
+
+            let source = try String(contentsOf: file, encoding: .utf8)
+            let code = stripCommentsAndStringLiterals(from: source)
+
+            // No non-policy source may reference .all or .cpuOnly as compute units outside DEBUG guards.
+            if code.contains(".all") && !source.contains("#if DEBUG") {
+                violations.append("\(file.lastPathComponent): reference to .all must be behind #if DEBUG guard")
+            }
+            if code.contains(".cpuOnly") && !source.contains("#if DEBUG") {
+                violations.append("\(file.lastPathComponent): reference to .cpuOnly must be behind #if DEBUG guard")
+            }
+        }
+
+        // CoreMLComputePolicy.swift itself must not expose public .all/.cpuOnly as static members,
+        // nor a public init taking arbitrary MLComputeUnits (that would allow .all/.cpuOnly in production).
+        let policyFile = adapterRoot.appendingPathComponent("CoreMLComputePolicy.swift")
+        let policySource = try String(contentsOf: policyFile, encoding: .utf8)
+        if policySource.contains("public static let performanceOptimized") {
+            violations.append("CoreMLComputePolicy.swift: must not expose public performanceOptimized")
+        }
+        if policySource.contains("public static let cpuOnly") {
+            violations.append("CoreMLComputePolicy.swift: must not expose public cpuOnly")
+        }
+        if policySource.contains("public init(computeUnits:") {
+            violations.append("CoreMLComputePolicy.swift: must not have public init(computeUnits:) — allows arbitrary units in production")
+        }
+
+        XCTAssertTrue(
+            violations.isEmpty,
+            """
+            ML compute policy hardened incorrectly:
+            \(violations.joined(separator: "\n"))
+
+            Production inference must only allow .cpuAndNeuralEngine. Debug escape hatches
+            must be internal and behind #if DEBUG guards.
             """
         )
     }

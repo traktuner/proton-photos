@@ -55,7 +55,8 @@ public struct MLIndexProgress: Sendable, Equatable {
         phase == .completed || (settled >= totalAssets && transientFailure == 0)
     }
     
-    /// One-line, locale-neutral summary suitable for a progress row.
+    /// One-line summary for logs/diagnostics ONLY — never show in UI. Shipped UI copy must go
+    /// through the feature layer's L10n catalog (en+de), not through Core strings.
     public var summary: String {
         let pct = Int((fraction * 100).rounded())
         switch phase {

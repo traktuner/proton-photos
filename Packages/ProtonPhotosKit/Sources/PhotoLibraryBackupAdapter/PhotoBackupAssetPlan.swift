@@ -48,6 +48,9 @@ public struct PhotoBackupAssetInfo: Sendable, Equatable {
     public var isLivePhoto: Bool
     public var isVideo: Bool
     public var resources: [Resource]
+    /// Stable iCloud identity when PhotoKit can provide one. Discovery resolves these in batches;
+    /// Core treats it as upload metadata, never as the local lookup key.
+    public var cloudIdentifier: String?
 
     public init(
         localIdentifier: String,
@@ -58,7 +61,8 @@ public struct PhotoBackupAssetInfo: Sendable, Equatable {
         durationSeconds: Double,
         isLivePhoto: Bool,
         isVideo: Bool,
-        resources: [Resource]
+        resources: [Resource],
+        cloudIdentifier: String? = nil
     ) {
         self.localIdentifier = localIdentifier
         self.creationDate = creationDate
@@ -69,6 +73,7 @@ public struct PhotoBackupAssetInfo: Sendable, Equatable {
         self.isLivePhoto = isLivePhoto
         self.isVideo = isVideo
         self.resources = resources
+        self.cloudIdentifier = cloudIdentifier
     }
 
     public var hasEditEvidence: Bool {
@@ -139,7 +144,8 @@ public enum PhotoBackupAssetPlanner {
             source: source(for: info),
             revision: metadataRevision(for: info),
             editRevision: editRevision(for: info),
-            resourceCount: 1 + plan.secondaries.count
+            resourceCount: 1 + plan.secondaries.count,
+            externalIdentity: externalIdentity(for: info)
         )
         return UploadBackupAssetCandidate(
             snapshot: snapshot,
@@ -156,6 +162,14 @@ public enum PhotoBackupAssetPlanner {
     /// this drifts often - the edit-revision evidence below keeps drift cheap for unedited assets.
     public static func metadataRevision(for info: PhotoBackupAssetInfo) -> UploadBackupRevision {
         UploadBackupRevision(date: info.modificationDate ?? info.creationDate ?? .distantPast)
+    }
+
+    private static func externalIdentity(for info: PhotoBackupAssetInfo) -> UploadBackupExternalIdentity? {
+        guard let identifier = info.cloudIdentifier, !identifier.isEmpty,
+              let revisionDate = info.modificationDate ?? info.creationDate else {
+            return nil
+        }
+        return UploadBackupExternalIdentity(identifier: identifier, modificationDate: revisionDate)
     }
 
     /// Edit evidence, on the safe side of PhotoKit's official surface:

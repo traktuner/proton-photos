@@ -25,10 +25,3 @@ public struct MLModelDescriptor: Hashable, Sendable, Codable {
         self.embeddingDimension = embeddingDimension
     }
 }
-
-extension MLModelDescriptor: Comparable {
-    public static func < (lhs: MLModelDescriptor, rhs: MLModelDescriptor) -> Bool {
-        if lhs.identifier != rhs.identifier { return lhs.identifier < rhs.identifier }
-        return lhs.version < rhs.version
-    }
-}
