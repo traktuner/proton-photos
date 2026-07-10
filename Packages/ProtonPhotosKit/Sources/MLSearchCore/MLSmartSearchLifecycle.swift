@@ -90,6 +90,7 @@ public actor MLSmartSearchLifecycle {
     private var observers: [UUID: AsyncStream<MLSmartSearchSnapshot>.Continuation] = [:]
     private var kickWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var started = false
+    private var stateLoadFailed = false
     /// Terminal: set by `shutdown()`. Every intent becomes a no-op, so a host tearing the
     /// session down can never race new lifecycle work against its account purge.
     private var isShutDown = false
@@ -143,8 +144,28 @@ public actor MLSmartSearchLifecycle {
     public func start() async {
         guard !started, !isShutDown else { return }
         started = true
-        persistent = deps.stateStore.load() ?? MLSmartSearchPersistentState()
+        guard restorePersistentState() else { return }
+        await resumePersistentState()
+    }
 
+    private func restorePersistentState() -> Bool {
+        do {
+            persistent = try deps.stateStore.load() ?? MLSmartSearchPersistentState()
+            stateLoadFailed = false
+            return true
+        } catch {
+            stateLoadFailed = true
+            phase = .failed(MLSmartSearchFailure(
+                kind: .storage,
+                isRetryable: true,
+                debugDescription: "state read failed: \(String(describing: error))"
+            ))
+            emit()
+            return false
+        }
+    }
+
+    private func resumePersistentState() async {
         switch persistent.pendingOperation {
         case .purge:
             // A purge that began before a crash completes before anything else may run.
@@ -269,6 +290,12 @@ public actor MLSmartSearchLifecycle {
     /// have interrupted a journaled operation — recovery re-runs that operation (idempotent)
     /// instead of blindly re-activating over it.
     public func retry() async {
+        guard !isShutDown else { return }
+        if stateLoadFailed {
+            guard restorePersistentState() else { return }
+            await resumePersistentState()
+            return
+        }
         guard !isShutDown, persistent.isEnabled || persistent.pendingOperation == .purge,
               case .failed(let failure) = phase, failure.isRetryable else { return }
         switch persistent.pendingOperation {
@@ -406,13 +433,16 @@ public actor MLSmartSearchLifecycle {
                     Task { await self.noteIndexProgress(progress) }
                 }
             )
+            let previousRevision = persistent.activatedRevision
+            persistent.activatedRevision = record.revision
+            guard persistState() else {
+                persistent.activatedRevision = previousRevision
+                await newSession.shutdown()
+                return
+            }
             session = newSession
             activeModel = installed
             sessionGeneration &+= 1
-            persistent.activatedRevision = record.revision
-            // Not a journal write: on failure the next launch falls back to any verified
-            // installed revision, so activation proceeds (persistState surfaced the error).
-            _ = persistState()
             startIndexingLoop()
         } catch {
             phase = .failed(MLSmartSearchFailure(
@@ -696,11 +726,11 @@ public actor MLSmartSearchLifecycle {
     }
 
     /// Persist the current state. On failure: emit an honest, retryable `.failed(.storage)`
-    /// phase and return `false` — callers must not continue a multi-step operation whose
-    /// journal never became durable.
+    /// phase and return `false`; callers must not continue without an atomic state commit.
     private func persistState() -> Bool {
         do {
             try deps.stateStore.save(persistent)
+            stateLoadFailed = false
             return true
         } catch {
             phase = .failed(MLSmartSearchFailure(

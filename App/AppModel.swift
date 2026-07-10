@@ -51,6 +51,7 @@ final class AppModel {
     @ObservationIgnored private var smartSearchMemoryRegistration: MemoryPressureRegistration?
     /// The most recent ordered Smart Search shutdown; sign-out awaits it before purging.
     @ObservationIgnored private var smartSearchShutdownTask: Task<Void, Never>?
+    @ObservationIgnored private let signOutBarrier = AccountSignOutBarrier()
     /// True once the signed-in library has finished its first load (loaded / empty / failed). Drives the
     /// launch veil, which lifts only after the real grid is ready to be revealed. Reset on sign-out and on a
     /// fresh backend build so a new session shows the veil again.
@@ -86,6 +87,8 @@ final class AppModel {
     private var backendTask: Task<Void, Never>?
 
     init() {
+        // Finish a sign-out interrupted after credentials were cleared but before disk cleanup.
+        BackupLocalDataPurge.purgeIfSignOutRequested()
         let store = SessionKeychainStore()
         self.sessionStore = store
         self.authController = ProtonAuthController(
@@ -102,6 +105,7 @@ final class AppModel {
     }
 
     func signIn() {
+        guard !signOutBarrier.isRunning else { return }
         authController.signIn(
             openURL: { url in Task { @MainActor in NSWorkspace.shared.open(url) } },
             onStateChange: { [weak self] state in
@@ -111,15 +115,20 @@ final class AppModel {
     }
 
     func cancelSignIn() {
+        guard !signOutBarrier.isRunning else { return }
         apply(authController.cancelSignIn(), prepareBackendOnSignedIn: false)
     }
 
     func signOut() {
+        guard !signOutBarrier.isRunning else { return }
+        BackupLocalDataPurge.requestPurgeOnSignOut()
+        let session = authController.currentSession
+        let signedOutState = authController.signOut()
+        auth = .checking
+        let backendShutdown = backendTask
         backendTask?.cancel()
+        backendTask = nil
         backend = .idle
-        // Smart Search state lives inside the account container purged below. The purge MUST
-        // NOT race the lifecycle: the awaited shared shutdown below stops indexing/installs
-        // and closes the index SQLite (incl. WAL) before any account file is deleted.
         let smartSearchShutdown = stopSmartSearch()
         backupController?.stopSync()
         backupController = nil
@@ -131,18 +140,9 @@ final class AppModel {
         albumCatalogRevision = 0
         facade = nil
         libraryReady = false
-        let session = authController.currentSession
-        Task { [weak self] in
-            // Ordered teardown, shared with iOS via MLSmartSearchLifecycle.shutdown(): no new
-            // work → installs cancelled+awaited → index task awaited → inference session
-            // closed → SQLite/WAL closed. Only then may the account purge touch the disk.
+        signOutBarrier.begin { [self] in
+            await backendShutdown?.value
             await smartSearchShutdown?.value
-            guard let self else { return }
-            // FULL PURGE: sign-out must leave nothing tied to the account on disk. Erase the encrypted
-            // thumbnail/preview/originals blobs + their account cache key and the streamed video blocks, the
-            // encrypted account-data cache, AND the SDK metadata SQLite stores (entities + timeline). The
-            // Settings "Delete Offline Cache" button is deliberately NARROWER (cached media only, keeps the key,
-            // stays signed in) - do not converge the two.
             OfflineLibraryManager.shared.purgeOnSignOut()
             if let session {
                 ProtonDriveBackendFactory.purgeLocalAccountData(
@@ -150,11 +150,8 @@ final class AppModel {
                     policy: .standard(libraryDatabasePolicy: ProtonDriveBackendPolicy.desktopLibraryDatabasePolicy)
                 )
             }
-            // Nuke EVERY account container (backup queue/state/dedup-manifest/catalog for all uids), not
-            // just the current session's: past sign-ins otherwise leave orphaned containers behind, and a
-            // stale backup state forces the next login to re-verify the whole library. Same shared code as iOS.
-            BackupLocalDataPurge.purgeAllLocalAccountData()
-            self.apply(self.authController.signOut(), prepareBackendOnSignedIn: false)
+            BackupLocalDataPurge.purgeIfSignOutRequested()
+            apply(signedOutState, prepareBackendOnSignedIn: false)
         }
     }
 

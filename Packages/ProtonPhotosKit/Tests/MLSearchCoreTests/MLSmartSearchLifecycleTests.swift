@@ -130,18 +130,70 @@ import Testing
         private let backing: FileMLSmartSearchStateStore
         private let lock = NSLock()
         private var failing = false
+        private var failingActivationWrites = false
 
         init(layout: MLModelInstallLayout) {
             backing = FileMLSmartSearchStateStore(layout: layout)
         }
 
         func setFailing(_ value: Bool) { lock.withLock { failing = value } }
-        func load() -> MLSmartSearchPersistentState? { backing.load() }
+        func setFailingActivationWrites(_ value: Bool) {
+            lock.withLock { failingActivationWrites = value }
+        }
+        func load() throws -> MLSmartSearchPersistentState? { try backing.load() }
         func save(_ state: MLSmartSearchPersistentState) throws {
-            if lock.withLock({ failing }) { throw WriteFailure() }
+            if lock.withLock({ failing || (failingActivationWrites && state.activatedRevision != nil) }) {
+                throw WriteFailure()
+            }
             try backing.save(state)
         }
         func clear() { backing.clear() }
+    }
+
+    private final class TrackingSession: MLSmartSearchSession, @unchecked Sendable {
+        let descriptor: MLModelDescriptor
+        private let lock = NSLock()
+        private var indexes = 0
+        private var shutdowns = 0
+
+        init(descriptor: MLModelDescriptor) { self.descriptor = descriptor }
+
+        func index(_ assets: [PhotoUID]) async -> MLIndexPassOutcome {
+            lock.withLock { indexes += 1 }
+            return MLIndexPassOutcome(
+                report: MLIndexBatchReport(),
+                ranToCompletion: false,
+                newPermanentFailures: [],
+                progress: MLIndexProgress(phase: .idle, descriptor: descriptor)
+            )
+        }
+
+        func search(_ text: String, limit: Int) async throws -> MLSearchResults {
+            MLSearchResults(descriptor: descriptor, queryText: text, results: [])
+        }
+
+        func coverage(for assets: [PhotoUID]) async -> MLIndexCoverage {
+            MLIndexCoverage(total: assets.count, indexed: 0, permanentlyUnindexable: 0)
+        }
+
+        func releaseMemory() async {}
+        func shutdown() async { lock.withLock { shutdowns += 1 } }
+
+        var indexCount: Int { lock.withLock { indexes } }
+        var shutdownCount: Int { lock.withLock { shutdowns } }
+    }
+
+    private final class SessionRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [TrackingSession] = []
+
+        func make(_ model: MLInstalledModel) -> TrackingSession {
+            let session = TrackingSession(descriptor: model.entry.descriptor)
+            lock.withLock { storage.append(session) }
+            return session
+        }
+
+        var sessions: [TrackingSession] { lock.withLock { storage } }
     }
 
     private final class MutableAssets: @unchecked Sendable {
@@ -600,7 +652,7 @@ import Testing
         // The entire Smart Search root is gone: index DB + WAL/SHM, models, tmp, state file.
         #expect(!FileManager.default.fileExists(atPath: harness.layout.rootDirectory.path))
         #expect(FileManager.default.fileExists(atPath: sibling.path))
-        #expect(harness.stateStore.load() == nil)
+        #expect(try harness.stateStore.load() == nil)
 
         // Second disable is harmless.
         await harness.lifecycle.disableAndPurge()
@@ -882,12 +934,69 @@ import Testing
         // of an unpersisted enable.
         #expect(await waitForStorageFailure(harness))
         #expect(harness.transport.downloadCount == 0)
-        #expect(flaky.load() == nil)
+        #expect(try flaky.load() == nil)
 
         flaky.setFailing(false)
         await harness.lifecycle.retry()
         #expect(await waitForCompleteIndex(harness, total: assets.count))
-        #expect(flaky.load()?.isEnabled == true)
+        #expect(try flaky.load()?.isEnabled == true)
+    }
+
+    @Test func failedActivationStateWriteClosesSessionAndNeverStartsIndexing() async throws {
+        let payload = Data("model-a-bytes".utf8)
+        let (entryA, urlA) = downloadableEntry(id: "model-a", payload: payload)
+        let (harness, flaky) = try makeFlakyHarness(
+            catalog: MLModelCatalog(entries: [entryA]),
+            payloads: [urlA: payload],
+            assets: [uid("asset-a")]
+        )
+        defer { try? FileManager.default.removeItem(at: harness.layout.rootDirectory) }
+        let recorder = SessionRecorder()
+        harness.provider.sessionOverride = { recorder.make($0) }
+
+        await harness.lifecycle.start()
+        flaky.setFailingActivationWrites(true)
+        await harness.lifecycle.setEnabled(true)
+
+        #expect(await waitForStorageFailure(harness))
+        #expect(harness.provider.builtCount == 1)
+        #expect(recorder.sessions.count == 1)
+        #expect(recorder.sessions[0].shutdownCount == 1)
+        #expect(recorder.sessions[0].indexCount == 0)
+        #expect(try flaky.load()?.activatedRevision == nil)
+        await #expect(throws: MLSmartSearchQueryError.unavailable) {
+            _ = try await harness.lifecycle.search("anything", limit: 3)
+        }
+
+        flaky.setFailingActivationWrites(false)
+        await harness.lifecycle.retry()
+        #expect(await waitUntil {
+            recorder.sessions.count == 2 && recorder.sessions[1].indexCount > 0
+        })
+        #expect(harness.provider.builtCount == 2)
+        #expect(recorder.sessions[0].shutdownCount == 1)
+        await harness.lifecycle.shutdown()
+    }
+
+    @Test func corruptStateIsReportedAndCanBePurgedWithoutStartingWork() async throws {
+        let payload = Data("model-a-bytes".utf8)
+        let (entryA, urlA) = downloadableEntry(id: "model-a", payload: payload)
+        let harness = try makeHarness(
+            catalog: MLModelCatalog(entries: [entryA]),
+            payloads: [urlA: payload],
+            assets: [uid("asset-a")]
+        )
+        try Data("not-json".utf8).write(to: harness.layout.stateFileURL)
+
+        await harness.lifecycle.start()
+
+        #expect(await waitForStorageFailure(harness))
+        #expect(harness.provider.builtCount == 0)
+        #expect(harness.transport.downloadCount == 0)
+
+        await harness.lifecycle.disableAndPurge()
+        #expect(await harness.lifecycle.currentSnapshot().phase == .disabled)
+        #expect(!FileManager.default.fileExists(atPath: harness.layout.rootDirectory.path))
     }
 
     @Test func failedSwitchJournalKeepsOldModelServing() async throws {
@@ -914,8 +1023,8 @@ import Testing
         #expect(await waitForStorageFailure(harness))
         let snapshot = await harness.lifecycle.currentSnapshot()
         #expect(snapshot.selectedModelID == entryA.id)
-        #expect(flaky.load()?.selectedModelID == entryA.id)
-        #expect(flaky.load()?.pendingOperation == nil)
+        #expect(try flaky.load()?.selectedModelID == entryA.id)
+        #expect(try flaky.load()?.pendingOperation == nil)
         // Old epoch still queryable — nothing was retired on an unjournaled switch.
         let results = try await harness.lifecycle.search("anything", limit: 3)
         #expect(results.descriptor == entryA.descriptor)
@@ -950,7 +1059,7 @@ import Testing
         #expect(await waitForStorageFailure(harness))
         #expect(FileManager.default.fileExists(atPath: harness.layout.rootDirectory.path))
         #expect(FileManager.default.fileExists(atPath: harness.layout.modelDirectory(for: entryA.id).path))
-        #expect(flaky.load()?.isEnabled == true)
+        #expect(try flaky.load()?.isEnabled == true)
 
         flaky.setFailing(false)
         await harness.lifecycle.retry()

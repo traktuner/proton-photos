@@ -5,6 +5,22 @@ import XCTest
 /// its safety gate is pinned here: it fires ONLY when an explicit sign-out armed it, and a sign-in
 /// disarms it so a stale flag can never wipe a now-active account on a transient session re-check.
 final class BackupLocalDataPurgeTests: XCTestCase {
+    private actor Gate {
+        private var isOpen = false
+        private var continuation: CheckedContinuation<Void, Never>?
+
+        func wait() async {
+            guard !isOpen else { return }
+            await withCheckedContinuation { continuation = $0 }
+        }
+
+        func open() {
+            isOpen = true
+            continuation?.resume()
+            continuation = nil
+        }
+    }
+
     private var defaults: UserDefaults!
     private var suiteName: String!
 
@@ -55,5 +71,25 @@ final class BackupLocalDataPurgeTests: XCTestCase {
     func testPurgeAllIsIdempotentOverMissingRoots() throws {
         let missing = FileManager.default.temporaryDirectory.appendingPathComponent("does-not-exist-\(UUID().uuidString)")
         XCTAssertEqual(BackupLocalDataPurge.purgeAllLocalAccountData(roots: [missing]), 0, "missing roots are ignored, not errors")
+    }
+
+    @MainActor
+    func testSignOutBarrierRejectsOverlapAndWaitsForCleanup() async {
+        let barrier = AccountSignOutBarrier()
+        let gate = Gate()
+        var completed = 0
+
+        XCTAssertTrue(barrier.begin {
+            await gate.wait()
+            completed += 1
+        })
+        XCTAssertTrue(barrier.isRunning)
+        XCTAssertFalse(barrier.begin { completed += 100 })
+
+        await gate.open()
+        await barrier.waitUntilFinished()
+
+        XCTAssertFalse(barrier.isRunning)
+        XCTAssertEqual(completed, 1)
     }
 }

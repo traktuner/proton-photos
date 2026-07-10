@@ -147,7 +147,7 @@ import Testing
         #expect(throws: (any Error).self) {
             try store.save(MLSmartSearchPersistentState(isEnabled: true))
         }
-        #expect(store.load() == nil)
+        #expect(try store.load() == nil)
     }
 
     @Test func saveIsAtomicAndRoundTrips() throws {
@@ -163,9 +163,23 @@ import Testing
             pendingOperation: .switchModel(from: MLModelID("model-a"), to: MLModelID("model-b"))
         )
         try store.save(state)
-        #expect(store.load() == state)
+        #expect(try store.load() == state)
 
         store.clear()
-        #expect(store.load() == nil)
+        #expect(try store.load() == nil)
+    }
+
+    @Test func corruptStateIsNotSilentlyTreatedAsDisabled() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ml-statestore-corrupt-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = MLModelInstallLayout(rootDirectory: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("not-json".utf8).write(to: layout.stateFileURL)
+
+        let store = FileMLSmartSearchStateStore(layout: layout)
+        #expect(throws: (any Error).self) {
+            _ = try store.load()
+        }
     }
 }
