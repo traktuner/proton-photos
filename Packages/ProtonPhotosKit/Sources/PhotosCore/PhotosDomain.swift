@@ -160,6 +160,16 @@ public protocol ThumbnailBatchLoader: Sendable {
     ) async -> ThumbnailBatchLoadResult
 }
 
+/// Optional priority-aware refinement used by shared feed scheduling. Loaders that do not need
+/// transport prioritization keep implementing `ThumbnailBatchLoader` unchanged.
+public protocol PriorityThumbnailBatchLoader: ThumbnailBatchLoader {
+    func loadThumbnails(
+        for uids: [PhotoUID],
+        priority: ThumbnailPriority,
+        onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
+    ) async -> ThumbnailBatchLoadResult
+}
+
 /// Loads full-resolution original bytes without creating an app-owned plaintext cache file.
 public protocol FullMediaProvider: Sendable {
     /// Larger preview image bytes (shown immediately in the viewer before the original arrives).

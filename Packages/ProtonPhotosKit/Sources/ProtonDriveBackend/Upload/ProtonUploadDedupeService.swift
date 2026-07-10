@@ -542,7 +542,8 @@ extension DriveSession {
         let data = try await send(
             "/drive/volumes/\(volumeID)/photos/duplicates",
             method: "POST",
-            body: ["NameHashes": nameHashes]
+            body: ["NameHashes": nameHashes],
+            retryOnRateLimit: true
         )
         return (try JSONDecoder().decode(PhotoDuplicatesResponse.self, from: data)).duplicateHashes ?? []
     }

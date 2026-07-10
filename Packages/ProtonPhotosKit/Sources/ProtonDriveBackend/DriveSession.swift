@@ -10,6 +10,8 @@ final class DriveSession: @unchecked Sendable {
     private let store: SessionKeychainStore
     private let accountCacheDirectory: URL
     private let urlSession: URLSession
+    private let storageSession: URLSession
+    private let requestGovernor: ProtonRequestGovernor
     private let lock = NSLock()
     private var session: ProtonSession
     private var refreshing: Task<Bool, Never>?
@@ -19,17 +21,22 @@ final class DriveSession: @unchecked Sendable {
         store: SessionKeychainStore,
         config: ProtonAPIConfig = ProtonAPIConfig(),
         accountCacheDirectory: URL,
+        requestGovernor: ProtonRequestGovernor = ProtonRequestGovernor(),
         urlProtocolClasses: [AnyClass]? = nil
     ) {
         self.session = session
         self.store = store
         self.config = config
         self.accountCacheDirectory = accountCacheDirectory
+        self.requestGovernor = requestGovernor
         let cfg = URLSessionConfiguration.ephemeral
         cfg.httpAdditionalHeaders = ["Accept": "application/vnd.protonmail.v1+json"]
         // Test seam: lets unit tests intercept requests with a URLProtocol stub (never set in production).
         if let urlProtocolClasses { cfg.protocolClasses = urlProtocolClasses }
         self.urlSession = URLSession(configuration: cfg)
+        let storageConfiguration = URLSessionConfiguration.ephemeral
+        if let urlProtocolClasses { storageConfiguration.protocolClasses = urlProtocolClasses }
+        self.storageSession = URLSession(configuration: storageConfiguration)
     }
 
     var current: ProtonSession { lock.withLock { session } }
@@ -55,17 +62,33 @@ final class DriveSession: @unchecked Sendable {
     // MARK: - Authenticated JSON
 
     func getJSON<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
-        let data = try await authedData(path: path, method: "GET")
+        let data = try await authedData(path: path, method: "GET", retryOn429: true)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
     /// Authenticated write request (POST/PUT/DELETE) with an optional JSON body.
     @discardableResult
-    func send(_ path: String, method: String, body: [String: Any]? = nil) async throws -> Data {
-        try await authedData(path: path, method: method, body: body)
+    func send(
+        _ path: String,
+        method: String,
+        body: [String: Any]? = nil,
+        retryOnRateLimit: Bool = false
+    ) async throws -> Data {
+        try await authedData(
+            path: path,
+            method: method,
+            body: body,
+            retryOn429: retryOnRateLimit
+        )
     }
 
-    private func authedData(path: String, method: String, body: [String: Any]? = nil, retryOn401: Bool = true) async throws -> Data {
+    private func authedData(
+        path: String,
+        method: String,
+        body: [String: Any]? = nil,
+        retryOn401: Bool = true,
+        retryOn429: Bool
+    ) async throws -> Data {
         var req = URLRequest(url: makeURL(path))
         req.httpMethod = method
         for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
@@ -74,12 +97,44 @@ final class DriveSession: @unchecked Sendable {
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
-        let (data, response) = try await urlSession.data(for: req)
-        guard let http = response as? HTTPURLResponse else { throw ProtonAuthError.invalidResponse }
+        let permit = try await requestGovernor.acquire(scope: .api)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await urlSession.data(for: req)
+        } catch {
+            await requestGovernor.finish(permit, statusCode: nil)
+            throw error
+        }
+        guard let http = response as? HTTPURLResponse else {
+            await requestGovernor.finish(permit, statusCode: nil)
+            throw ProtonAuthError.invalidResponse
+        }
+        await requestGovernor.finish(
+            permit,
+            statusCode: http.statusCode,
+            retryAfter: ProtonRetryAfter.seconds(from: http)
+        )
+
+        if http.statusCode == 429, retryOn429 {
+            return try await authedData(
+                path: path,
+                method: method,
+                body: body,
+                retryOn401: retryOn401,
+                retryOn429: false
+            )
+        }
 
         if http.statusCode == 401, retryOn401 {
             if await refreshToken() {
-                return try await authedData(path: path, method: method, body: body, retryOn401: false)
+                return try await authedData(
+                    path: path,
+                    method: method,
+                    body: body,
+                    retryOn401: false,
+                    retryOn429: retryOn429
+                )
             }
         }
         guard (200...299).contains(http.statusCode) else {
@@ -113,8 +168,19 @@ final class DriveSession: @unchecked Sendable {
         req.httpBody = try? JSONSerialization.data(withJSONObject: [
             "ResponseType": "token", "GrantType": "refresh_token", "RefreshToken": s.refreshToken,
         ])
+        guard let permit = try? await requestGovernor.acquire(scope: .api, priority: .immediate)
+        else { return false }
         guard let (data, response) = try? await urlSession.data(for: req),
-              let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+              let http = response as? HTTPURLResponse else {
+            await requestGovernor.finish(permit, statusCode: nil)
+            return false
+        }
+        await requestGovernor.finish(
+            permit,
+            statusCode: http.statusCode,
+            retryAfter: ProtonRetryAfter.seconds(from: http)
+        )
+        guard (200...299).contains(http.statusCode),
               let body = try? JSONDecoder().decode(RefreshResponse.self, from: data),
               let at = body.accessToken else {
             return false
@@ -232,7 +298,7 @@ extension DriveSession {
     ///    auth (the web client pattern).
     ///  • `token == nil` → `url` is a full URL. Session auth is sent only to the trusted Drive API host;
     ///    pre-signed storage URLs are fetched as-is so bearer tokens cannot leak cross-host.
-    /// A fresh `URLSession.shared` request is used so the JSON `Accept` header isn't sent to the CDN.
+    /// A dedicated storage session is used so the JSON `Accept` header isn't sent to the CDN.
     func fetchBlock(url: String, token: String?) async throws -> Data {
         guard let u = URL(string: url), u.scheme == "https", u.host != nil else {
             throw ProtonAuthError.invalidResponse
@@ -244,8 +310,24 @@ extension DriveSession {
         } else if isTrustedAPIURL(u) {
             for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
         }
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse else { throw ProtonAuthError.invalidResponse }
+        let permit = try await requestGovernor.acquire(scope: .storageDownload)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await storageSession.data(for: req)
+        } catch {
+            await requestGovernor.finish(permit, statusCode: nil)
+            throw error
+        }
+        guard let http = response as? HTTPURLResponse else {
+            await requestGovernor.finish(permit, statusCode: nil)
+            throw ProtonAuthError.invalidResponse
+        }
+        await requestGovernor.finish(
+            permit,
+            statusCode: http.statusCode,
+            retryAfter: ProtonRetryAfter.seconds(from: http)
+        )
         guard (200...299).contains(http.statusCode) else {
             throw ProtonAuthError.apiError(code: http.statusCode, message: "block fetch HTTP \(http.statusCode)")
         }
@@ -388,7 +470,12 @@ extension DriveSession {
         var all: [TrashLink] = []
         for (shareID, ids) in idsByShare {
             for chunk in Self.chunked(ids, size: Self.metadataBatchSize) {
-                let data = try await send("/drive/shares/\(shareID)/links/fetch_metadata", method: "POST", body: ["LinkIDs": chunk])
+                let data = try await send(
+                    "/drive/shares/\(shareID)/links/fetch_metadata",
+                    method: "POST",
+                    body: ["LinkIDs": chunk],
+                    retryOnRateLimit: true
+                )
                 let decoded = try JSONDecoder().decode(LinkMetaBatchResponse.self, from: data)
                 all.append(contentsOf: decoded.links ?? [])
             }
@@ -546,8 +633,8 @@ extension DriveSession {
     /// We decode minimal DTOs (ProtonCore's own `Codable` is stricter than the live API) and
     /// construct `ProtonCoreDataModel.Key`/`Address` via their public initialisers.
     func fetchAccountData() async throws -> AccountData {
-        async let usersData = authedData(path: "/core/v4/users", method: "GET")
-        async let addressesData = authedData(path: "/core/v4/addresses", method: "GET")
+        async let usersData = authedData(path: "/core/v4/users", method: "GET", retryOn429: true)
+        async let addressesData = authedData(path: "/core/v4/addresses", method: "GET", retryOn429: true)
         let (uData, aData) = try await (usersData, addressesData)
         // Persist (encrypted) so a later OFFLINE cold start can rebuild the crypto without the network.
         AccountDataCache.save(users: uData, addresses: aData, uid: current.uid, keyPassword: current.keyPassword, in: accountCacheDirectory)

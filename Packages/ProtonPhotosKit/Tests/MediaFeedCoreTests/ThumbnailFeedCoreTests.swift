@@ -77,6 +77,33 @@ private actor RecordingLoader: ThumbnailBatchLoader {
     func finishedBatches() -> Int { finishedBatchCount }
 }
 
+private actor PriorityRecordingLoader: PriorityThumbnailBatchLoader {
+    private let payload: Data
+    private var priorities: [ThumbnailPriority] = []
+
+    init(payload: Data) { self.payload = payload }
+
+    func loadThumbnails(
+        for uids: [PhotoUID],
+        onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
+    ) async -> ThumbnailBatchLoadResult {
+        for uid in uids { onLoaded(uid, payload) }
+        return .delivered
+    }
+
+    func loadThumbnails(
+        for uids: [PhotoUID],
+        priority: ThumbnailPriority,
+        onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
+    ) async -> ThumbnailBatchLoadResult {
+        priorities.append(priority)
+        for uid in uids { onLoaded(uid, payload) }
+        return .delivered
+    }
+
+    var recordedPriorities: [ThumbnailPriority] { priorities }
+}
+
 /// Advanceable monotonic clock for deterministic demand-window tests (no real sleeps / wall-clock reliance).
 private final class MutableClock: @unchecked Sendable {
     private let lock = NSLock()
@@ -138,6 +165,19 @@ private final class RecordingCoverageStore: ThumbnailCoverageCheckpointStore, @u
 
 @Suite("MediaFeedCore")
 struct ThumbnailFeedCoreTests {
+    @Test func directVisibleFetchUsesPriorityAwareLoader() async throws {
+        let uid = Self.uid("priority-visible")
+        let loader = PriorityRecordingLoader(payload: Self.pngData(width: 24, height: 24))
+        let feed = ThumbnailFeedCore(
+            cache: Self.cache("priority-visible"),
+            loader: loader,
+            configuration: Self.configuration()
+        )
+
+        #expect(await feed.decoded(for: uid) != nil)
+        #expect(await loader.recordedPriorities == [.visibleNow])
+    }
+
     @Test func coverageCheckpointStoresOnlyOpaqueIdentifiers() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("thumbnail-coverage-opaque-\(UUID().uuidString)", isDirectory: true)

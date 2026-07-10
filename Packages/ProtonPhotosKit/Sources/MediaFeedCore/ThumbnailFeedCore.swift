@@ -623,8 +623,15 @@ public actor ThumbnailFeedCore {
         }
         let box = ByteBox()
         PhotoDiagnostics.shared.recordNetworkRequestDuringPinch()
-        let result = await loader.loadThumbnails(for: [uid]) { loadedUID, data in
-            if loadedUID == uid { box.set(data) }
+        let result: ThumbnailBatchLoadResult
+        if let priorityLoader = loader as? any PriorityThumbnailBatchLoader {
+            result = await priorityLoader.loadThumbnails(for: [uid], priority: .visibleNow) { loadedUID, data in
+                if loadedUID == uid { box.set(data) }
+            }
+        } else {
+            result = await loader.loadThumbnails(for: [uid]) { loadedUID, data in
+                if loadedUID == uid { box.set(data) }
+            }
         }
         guard let data = box.value else {
             if let reason = result.itemErrors[uid] {
@@ -821,7 +828,8 @@ public actor ThumbnailFeedCore {
 
     private func worker() async {
         while !Task.isCancelled {
-            let chunk = takeBatch()
+            let work = takeBatch()
+            let chunk = work.uids
             if chunk.isEmpty {
                 if priority.isEmpty && sequentialIndex >= sequential.count {
                     // Coverage already verified for this crawl → nothing left to do.
@@ -873,6 +881,7 @@ public actor ThumbnailFeedCore {
                 loader: loader,
                 cache: cache,
                 diskPresence: diskPresence,
+                priority: work.priority,
                 seconds: configuration.downloadTimeoutSeconds
             )
             activeDownloaders = max(0, activeDownloaders - 1)
@@ -951,6 +960,11 @@ public actor ThumbnailFeedCore {
         let lateLoader: Task<ThumbnailBatchLoadResult, Never>?
     }
 
+    private struct BatchWork: Sendable {
+        var uids: [PhotoUID] = []
+        var priority: ThumbnailPriority = .idleLibraryCrawl
+    }
+
     /// Runs one loader batch against a real wall-clock timeout. The loader await is not
     /// cancellable (the SDK's FFI continuation ignores task cancellation), so on timeout the
     /// loader is left running detached: late deliveries still land in the disk cache (a later
@@ -961,14 +975,23 @@ public actor ThumbnailFeedCore {
         loader: ThumbnailBatchLoader,
         cache: ThumbnailCache,
         diskPresence: DiskPresenceCache,
+        priority: ThumbnailPriority,
         seconds: Double
     ) async -> BatchSnapshot {
         let delivered = UIDSetBox()
         let loaderTask = Task {
-            await loader.loadThumbnails(for: chunk) { uid, data in
-                cache.storeToDisk(data, for: uid)
-                diskPresence.set(uid, present: true)
-                delivered.insert(uid)
+            if let priorityLoader = loader as? any PriorityThumbnailBatchLoader {
+                await priorityLoader.loadThumbnails(for: chunk, priority: priority) { uid, data in
+                    cache.storeToDisk(data, for: uid)
+                    diskPresence.set(uid, present: true)
+                    delivered.insert(uid)
+                }
+            } else {
+                await loader.loadThumbnails(for: chunk) { uid, data in
+                    cache.storeToDisk(data, for: uid)
+                    diskPresence.set(uid, present: true)
+                    delivered.insert(uid)
+                }
             }
         }
         let resolution: BatchResolution = await withCheckedContinuation { continuation in
@@ -1000,8 +1023,9 @@ public actor ThumbnailFeedCore {
         downloadInFlight = max(0, downloadInFlight - itemCount)
     }
 
-    private func takeBatch() -> [PhotoUID] {
+    private func takeBatch() -> BatchWork {
         var out: [PhotoUID] = []
+        var batchPriority = ThumbnailPriority.idleLibraryCrawl
         var diskHits: [PhotoUID] = []
         var diskMisses: [PhotoUID] = []
         while out.count < configuration.batchSize, !priority.isEmpty {
@@ -1012,7 +1036,8 @@ public actor ThumbnailFeedCore {
                 return $0 > $1
             } ?? priority.index(before: priority.endIndex)
             let uid = priority.remove(at: bestIndex)
-            priorityByUID.removeValue(forKey: uid)
+            let itemPriority = priorityByUID.removeValue(forKey: uid) ?? .idleLibraryCrawl
+            batchPriority = min(batchPriority, itemPriority)
             if unfetchable.contains(uid) {
                 skippedUnfetchable += 1
                 continue
@@ -1036,7 +1061,9 @@ public actor ThumbnailFeedCore {
 
         let now = clock()
         let backingOff = crawlBackoffUntil.map { now < $0 } ?? false
-        guard !interactionActive, !prefetchPaused, prefetchEnabled, !recentVisibleDemand(now: now), !backingOff else { return out }
+        guard !interactionActive, !prefetchPaused, prefetchEnabled, !recentVisibleDemand(now: now), !backingOff else {
+            return BatchWork(uids: out, priority: batchPriority)
+        }
 
         var scannedThisCall = 0
         while out.count < configuration.batchSize,
@@ -1066,7 +1093,7 @@ public actor ThumbnailFeedCore {
         }
         recordCheckpointPresent(diskHits)
         recordCheckpointMissing(diskMisses)
-        return out
+        return BatchWork(uids: out, priority: batchPriority)
     }
 
     /// Whether a viewport has demanded thumbnails within the quiet window. `nonisolated` (reads the lock-guarded
