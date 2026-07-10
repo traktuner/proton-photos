@@ -7,6 +7,7 @@ import PhotosCore
 public enum AppleSmartSearchRuntimeError: Error, Equatable {
     case noModelArtifact
     case unsupportedTokenizer(String)
+    case unsupportedPreprocessing(String)
     /// The catalog-declared runtime contract and the resolved tokenizer disagree — the
     /// session must not start with mismatched text inputs.
     case tokenizerContractMismatch(expected: Int, actual: Int)
@@ -33,7 +34,7 @@ public struct AppleSmartSearchRuntimeProvider: MLSmartSearchRuntimeProvider {
         onIndexProgress: @escaping @Sendable (MLIndexProgress) -> Void
     ) async throws -> any MLSmartSearchSession {
         let modelURL = try await Self.loadableModelURL(in: model.installDirectory)
-        let tokenizer = try Self.tokenizer(for: model.entry.tokenizerID)
+        let tokenizer = try Self.tokenizer(for: model.entry.tokenizerID, installDirectory: model.installDirectory)
         // The catalog entry's runtime contract is validated END TO END before activation:
         // tokenizer identity here, function/input/output names, context length, image size
         // and embedding dimension inside the encoder against the loaded artifact.
@@ -44,12 +45,14 @@ public struct AppleSmartSearchRuntimeProvider: MLSmartSearchRuntimeProvider {
                 actual: tokenizer.contextLength
             )
         }
+        var schema = CoreMLDualEncoderSchema(contract: contract)
+        schema.imageCropMode = try Self.cropMode(for: model.entry.preprocessingID)
         let encoder = try await CoreMLDualEncoder(
             modelURL: modelURL,
             descriptor: model.entry.descriptor,
             imageSource: CachedThumbnailMLImageSource(feed: feed),
             tokenizer: tokenizer,
-            schema: CoreMLDualEncoderSchema(contract: contract)
+            schema: schema
         )
         return MLSearchService(
             descriptor: model.entry.descriptor,
@@ -64,10 +67,25 @@ public struct AppleSmartSearchRuntimeProvider: MLSmartSearchRuntimeProvider {
         )
     }
 
-    private static func tokenizer(for tokenizerID: String) throws -> any MLTextTokenizer {
+    /// Pixel path by preprocessing identity: CLIP recipes center-crop, SigLIP recipes
+    /// squash-resize. Unknown recipes refuse activation instead of guessing.
+    static func cropMode(for preprocessingID: String) throws -> CoreMLImageCropMode {
+        if preprocessingID.contains("centercrop") { return .centerCrop }
+        if preprocessingID.contains("resize") { return .scaleFill }
+        throw AppleSmartSearchRuntimeError.unsupportedPreprocessing(preprocessingID)
+    }
+
+    /// Tokenizer resolution by catalog identity. CLIP-BPE ships bundled (small, shared by
+    /// every CLIP-family entry); SentencePiece vocabularies are large and model-specific, so
+    /// they live INSIDE the verified artifact (`tokenizer.json`, hash-checked like weights).
+    private static func tokenizer(for tokenizerID: String, installDirectory: URL) throws -> any MLTextTokenizer {
         switch tokenizerID {
         case "clip-bpe-77":
             return try CLIPBPETokenizer.bundledTinyCLIP()
+        case "gemma-sentencepiece-64":
+            return try SentencePieceBPETokenizer(
+                fileURL: installDirectory.appendingPathComponent("tokenizer.json")
+            )
         default:
             throw AppleSmartSearchRuntimeError.unsupportedTokenizer(tokenizerID)
         }

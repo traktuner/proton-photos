@@ -198,8 +198,18 @@ import MLSearchCore
         #expect(!mobileCLIP.license.allowsRedistribution && !mobileCLIP.license.allowsProductUse)
         #expect(!mobileCLIP.isDownloadable)
 
+        // SigLIP2: Apache-2.0 (redistribution + product use), multilingual production entry;
+        // no hosted CoreML artifact yet → no plan, not downloadable.
+        let sigLIP2 = MLModelCatalogEntry.sigLIP2Base256
+        #expect(sigLIP2.license.allowsRedistribution && sigLIP2.license.allowsProductUse)
+        #expect(sigLIP2.downloadPlan == nil)
+        #expect(!sigLIP2.isDownloadable)
+        #expect(sigLIP2.runtimeContract.endTokenMaskInputName == nil)
+        #expect(sigLIP2.runtimeContract.textContextLength == 64)
+        #expect(sigLIP2.descriptor.embeddingDimension == 768)
+
         let releaseSelectable = MLModelCatalog.builtIn.selectableEntries(allowsDeveloperModels: false)
-        #expect(releaseSelectable.map(\.id) == [tinyCLIP.id])
+        #expect(releaseSelectable.map(\.id) == [sigLIP2.id, tinyCLIP.id])
     }
 
     // MARK: - Compute policy

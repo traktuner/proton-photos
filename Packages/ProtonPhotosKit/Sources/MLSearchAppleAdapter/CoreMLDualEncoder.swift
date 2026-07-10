@@ -26,17 +26,34 @@ public protocol CoreMLImageSource: Sendable {
     func image(for uid: PhotoUID) async -> CoreMLImageSourceOutcome
 }
 
+/// How source pixels reach the model's square input. Identified by the catalog entry's
+/// `preprocessingID`; CLIP-family recipes center-crop, SigLIP-family recipes squash-resize.
+public enum CoreMLImageCropMode: Sendable, Equatable {
+    case centerCrop
+    case scaleFill
+
+    var visionOption: VNImageCropAndScaleOption {
+        switch self {
+        case .centerCrop: .centerCrop
+        case .scaleFill: .scaleFill
+        }
+    }
+}
+
 public struct CoreMLDualEncoderSchema: Sendable, Equatable {
     public var imageFunction = "image"
     public var textFunction = "text"
     public var imageInput = "image"
     public var tokenInput = "input_ids"
-    public var endTokenMaskInput = "eot_mask"
+    /// `nil` for families whose text tower pools internally (SigLIP): ids are the only input.
+    public var endTokenMaskInput: String? = "eot_mask"
     public var embeddingOutput = "embedding"
     public var contextLength = CLIPBPETokenizer.contextLength
     /// Expected square input side of the image encoder; `nil` skips the size check (tests
     /// with synthetic models). Catalog-driven sessions always set it.
     public var imagePixelSide: Int?
+    /// Pixel path into the square input (from the entry's `preprocessingID`).
+    public var imageCropMode: CoreMLImageCropMode = .centerCrop
 
     public init() {}
 
@@ -112,7 +129,7 @@ public actor CoreMLDualEncoder: MLAssetEmbedder, MLTextQueryEncoder {
                     cgImage: source.cgImage,
                     orientation: source.orientation,
                     constraint: imageConstraint,
-                    options: [.cropAndScale: VNImageCropAndScaleOption.centerCrop.rawValue]
+                    options: [.cropAndScale: schema.imageCropMode.visionOption.rawValue]
                 )
                 let input = try MLDictionaryFeatureProvider(dictionary: [schema.imageInput: feature])
                 let model = try await model(for: schema.imageFunction)
@@ -138,10 +155,11 @@ public actor CoreMLDualEncoder: MLAssetEmbedder, MLTextQueryEncoder {
         }
 
         let inputs = try CoreMLArrayCodec.textInputs(tokenized)
-        let provider = try MLDictionaryFeatureProvider(dictionary: [
-            schema.tokenInput: MLFeatureValue(multiArray: inputs.ids),
-            schema.endTokenMaskInput: MLFeatureValue(multiArray: inputs.endMask),
-        ])
+        var features: [String: MLFeatureValue] = [schema.tokenInput: MLFeatureValue(multiArray: inputs.ids)]
+        if let maskInput = schema.endTokenMaskInput {
+            features[maskInput] = MLFeatureValue(multiArray: inputs.endMask)
+        }
+        let provider = try MLDictionaryFeatureProvider(dictionary: features)
         let model = try await model(for: schema.textFunction)
         let output = try await model.prediction(from: provider)
         return try Self.embedding(from: output, name: schema.embeddingOutput, dimension: descriptor.embeddingDimension)
@@ -195,12 +213,20 @@ public actor CoreMLDualEncoder: MLAssetEmbedder, MLTextQueryEncoder {
             throw CoreMLDualEncoderError.invalidModelSchema(schema.tokenInput)
         }
 
-        guard let maskDescription = textDescription.inputDescriptionsByName[schema.endTokenMaskInput],
-              maskDescription.type == .multiArray,
-              let maskConstraint = maskDescription.multiArrayConstraint,
-              maskConstraint.dataType == .float32,
-              maskConstraint.shape.map(\.intValue).reduce(1, *) == schema.contextLength else {
-            throw CoreMLDualEncoderError.invalidModelSchema(schema.endTokenMaskInput)
+        if let maskInputName = schema.endTokenMaskInput {
+            guard let maskDescription = textDescription.inputDescriptionsByName[maskInputName],
+                  maskDescription.type == .multiArray,
+                  let maskConstraint = maskDescription.multiArrayConstraint,
+                  maskConstraint.dataType == .float32,
+                  maskConstraint.shape.map(\.intValue).reduce(1, *) == schema.contextLength else {
+                throw CoreMLDualEncoderError.invalidModelSchema(maskInputName)
+            }
+        } else {
+            // Contract says ids-only (SigLIP-style): an artifact that DEMANDS more text inputs
+            // cannot be satisfied — refuse before activation instead of failing at inference.
+            guard textDescription.inputDescriptionsByName.count == 1 else {
+                throw CoreMLDualEncoderError.invalidModelSchema("unexpected extra text inputs")
+            }
         }
 
         try validateOutput(imageDescription, descriptor: descriptor, schema: schema)
@@ -279,28 +305,8 @@ enum CoreMLArrayCodec {
     }
 
     static func float32(fromIEEE754Half bits: UInt16) -> Float32 {
-        let sign = UInt32(bits & 0x8000) << 16
-        var exponent = Int((bits >> 10) & 0x1f)
-        var significand = UInt32(bits & 0x03ff)
-
-        let floatBits: UInt32
-        if exponent == 0 {
-            if significand == 0 {
-                floatBits = sign
-            } else {
-                exponent = -14
-                while significand & 0x0400 == 0 {
-                    significand <<= 1
-                    exponent -= 1
-                }
-                significand &= 0x03ff
-                floatBits = sign | (UInt32(exponent + 127) << 23) | (significand << 13)
-            }
-        } else if exponent == 0x1f {
-            floatBits = sign | 0x7f80_0000 | (significand << 13)
-        } else {
-            floatBits = sign | (UInt32(exponent + 112) << 23) | (significand << 13)
-        }
-        return Float32(bitPattern: floatBits)
+        // One shared binary16 implementation: the persistent index (Core) and the CoreML
+        // output path must decode identically.
+        MLFloat16Codec.float32(fromBits: bits)
     }
 }

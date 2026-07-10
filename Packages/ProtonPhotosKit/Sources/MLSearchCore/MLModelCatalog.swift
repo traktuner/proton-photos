@@ -31,6 +31,7 @@ public struct MLModelLicense: Sendable, Equatable, Codable {
     }
 
     public static let mit = MLModelLicense(identifier: "MIT", allowsRedistribution: true, allowsProductUse: true)
+    public static let apache2 = MLModelLicense(identifier: "Apache-2.0", allowsRedistribution: true, allowsProductUse: true)
     /// Apple Machine Learning Research Model License: research-only. Weights must never be
     /// bundled, mirrored, or auto-downloaded by the product.
     public static let appleAMLR = MLModelLicense(identifier: "Apple-AMLR", allowsRedistribution: false, allowsProductUse: false)
@@ -101,7 +102,9 @@ public struct MLModelRuntimeContract: Sendable, Equatable, Codable {
     public var textFunctionName: String
     public var imageInputName: String
     public var tokenInputName: String
-    public var endTokenMaskInputName: String
+    /// End-of-text mask input, or `nil` for families whose text tower pools internally
+    /// (SigLIP-style: fixed-length padded ids are the only text input).
+    public var endTokenMaskInputName: String?
     public var embeddingOutputName: String
     /// Fixed token count of the text encoder input; the tokenizer must produce exactly this.
     public var textContextLength: Int
@@ -114,7 +117,7 @@ public struct MLModelRuntimeContract: Sendable, Equatable, Codable {
         textFunctionName: String,
         imageInputName: String,
         tokenInputName: String,
-        endTokenMaskInputName: String,
+        endTokenMaskInputName: String?,
         embeddingOutputName: String,
         textContextLength: Int,
         imagePixelSide: Int
@@ -139,6 +142,21 @@ public struct MLModelRuntimeContract: Sendable, Equatable, Codable {
             endTokenMaskInputName: "eot_mask",
             embeddingOutputName: "embedding",
             textContextLength: 77,
+            imagePixelSide: imagePixelSide
+        )
+    }
+
+    /// The SigLIP dual-encoder convention: fixed-length padded ids, internal pooling
+    /// (no mask input), 64-token context.
+    public static func siglipDualEncoder(imagePixelSide: Int) -> MLModelRuntimeContract {
+        MLModelRuntimeContract(
+            imageFunctionName: "image",
+            textFunctionName: "text",
+            imageInputName: "image",
+            tokenInputName: "input_ids",
+            endTokenMaskInputName: nil,
+            embeddingOutputName: "embedding",
+            textContextLength: 64,
             imagePixelSide: imagePixelSide
         )
     }
@@ -255,6 +273,36 @@ extension MLModelCatalogEntry {
         downloadPlan: nil
     )
 
+    /// Google SigLIP2 base, patch16, 256px — the multilingual production model.
+    ///
+    /// Weights license: Apache-2.0 (verified 2026-07 on the HF repo metadata for
+    /// `google/siglip2-base-patch16-256`; every `google/siglip2-*` repo carries apache-2.0).
+    /// Redistribution and product use permitted. Upstream revision pinned for conversion:
+    /// `3f9f96cb90da5dbc758b01813f2f6f1aee24c1ab`.
+    ///
+    /// Measured on the local reference-photo corpus (22 real photos, 8 concepts):
+    /// German top-1 14/16 vs TinyCLIP's 10/16, at English parity (14/16 both) — the German
+    /// gap ("Bäume", "Berg", "Menschen") closes. Lowercasing is part of the tokenizer
+    /// contract (`tokenizer.json`, shipped inside the artifact and hash-verified).
+    ///
+    /// `downloadPlan` is `nil` until release engineering hosts the converted multi-function
+    /// CoreML artifact (image+text towers, ~715 MB fp16) at an immutable URL — conversion is
+    /// reproducible via `ml-model-spike.noindex/convert_siglip2.py`. Until then it installs
+    /// from a developer artifact only; the plan slots in without touching lifecycle code.
+    public static let sigLIP2Base256 = MLModelCatalogEntry(
+        id: MLModelID("siglip2-base-patch16-256"),
+        displayName: "SigLIP 2",
+        family: "SigLIP2",
+        descriptor: MLModelDescriptor(identifier: "siglip2-base-patch16-256", version: 1, embeddingDimension: 768),
+        tokenizerID: "gemma-sentencepiece-64",
+        preprocessingID: "siglip-resize-256",
+        runtimeContract: .siglipDualEncoder(imagePixelSide: 256),
+        license: .apache2,
+        releaseTrack: .production,
+        estimatedInstalledBytes: 760_000_000,
+        downloadPlan: nil
+    )
+
     /// Apple MobileCLIP-S2. Current authoritative weights license (apple/ml-mobileclip
     /// LICENSE_MODELS) is the Apple Machine Learning Research license: research-only, no
     /// product use, no redistribution. Developer-only: local artifact installs, never
@@ -276,6 +324,7 @@ extension MLModelCatalogEntry {
 
 extension MLModelCatalog {
     public static let builtIn = MLModelCatalog(entries: [
+        .sigLIP2Base256,
         .tinyCLIPVit40M,
         .appleMobileCLIPS2Developer,
     ])
