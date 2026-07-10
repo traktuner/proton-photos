@@ -2345,6 +2345,24 @@
           }
         }
       }
+    },
+    "search.prompt %@": {
+      "extractionState": "manual",
+      "comment": "Search field placeholder. %@ is the current view title (e.g. Photos).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search %@"
+          }
+        },
+        "de": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ durchsuchen"
+          }
+        }
+      }
     }
   },
   "version": "1.1"

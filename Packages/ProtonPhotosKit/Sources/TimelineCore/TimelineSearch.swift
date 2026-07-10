@@ -1,22 +1,22 @@
 import Foundation
 import PhotosCore
 
-package struct TimelineSearchContext: Equatable, Sendable {
-    package var activeFilter: PhotoFilter?
-    package var favoriteUIDs: Set<PhotoUID>
+public struct TimelineSearchContext: Equatable, Sendable {
+    public var activeFilter: PhotoFilter?
+    public var favoriteUIDs: Set<PhotoUID>
 
-    package init(activeFilter: PhotoFilter? = nil, favoriteUIDs: Set<PhotoUID> = []) {
+    public init(activeFilter: PhotoFilter? = nil, favoriteUIDs: Set<PhotoUID> = []) {
         self.activeFilter = activeFilter
         self.favoriteUIDs = favoriteUIDs
     }
 }
 
-package enum TimelineSearch {
+public enum TimelineSearch {
     /// Filter sections by the lexical/smart-token query, optionally widened by Smart Search:
     /// `semanticMatches` are UIDs the on-device semantic engine ranked for the same query, so a
     /// photo matches when either the text query or the semantic engine says it does. Timeline
     /// order is preserved (results stay date-organized, not score-ordered).
-    package static func filter(_ sections: [TimelineSection], query rawQuery: String,
+    public static func filter(_ sections: [TimelineSection], query rawQuery: String,
                                context: TimelineSearchContext = TimelineSearchContext(),
                                semanticMatches: Set<PhotoUID>? = nil) -> [TimelineSection] {
         let query = TimelineSearchQuery(rawQuery)
@@ -33,7 +33,7 @@ package enum TimelineSearch {
     }
 }
 
-package struct TimelineSearchQuery: Equatable, Sendable {
+public struct TimelineSearchQuery: Equatable, Sendable {
     private enum Term: Equatable, Sendable {
         case text(String)
         case smart(SmartKind)
@@ -59,7 +59,7 @@ package struct TimelineSearchQuery: Equatable, Sendable {
 
     private let terms: [Term]
 
-    package init(_ raw: String) {
+    public init(_ raw: String) {
         terms = Self.tokens(from: raw).map { token in
             if let smart = Self.smartKind(for: token) {
                 .smart(smart)
@@ -69,7 +69,7 @@ package struct TimelineSearchQuery: Equatable, Sendable {
         }
     }
 
-    package var isEmpty: Bool { terms.isEmpty }
+    public var isEmpty: Bool { terms.isEmpty }
 
     func matches(item: PhotoItem, in section: TimelineSection, context: TimelineSearchContext) -> Bool {
         let haystack = Self.searchText(for: item, in: section)

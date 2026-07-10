@@ -1,7 +1,9 @@
 import DesignSystemCore
 import GridCore
+import MLSearchCore
 import PhotosCore
 import SwiftUI
+import TimelineCore
 import TimelineUIKitFeature
 import UIKit
 
@@ -27,6 +29,15 @@ struct MobileTimelineScreen: View {
     /// Frosted-bar height, read from the key window ONCE (init + onAppear) and cached - never read live
     /// during body evaluation, which cycles the layout under the safe-area-ignoring overlay.
     @State private var topFrostHeight: CGFloat = mobileTopBarFrostHeightDefault
+    // Search: the SAME pipeline as macOS - live text debounces into a committed query, and the
+    // shared MLSmartSearchQueryCoordinator (Core) widens the lexical filter with epoch-guarded
+    // semantic matches. No mobile-only search logic exists.
+    @State private var searchText = ""
+    @State private var committedSearchText = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
+    @State private var semanticQuery: MLSmartSearchQueryCoordinator?
+    /// Identity of the lifecycle the coordinator is bound to - a new session rebinds it.
+    @State private var semanticQueryLifecycle: ObjectIdentifier?
 
     /// True while any selection action is running, so the other toolbar buttons disable together.
     private var selectionBusy: Bool { isExporting }
@@ -58,6 +69,12 @@ struct MobileTimelineScreen: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbarContent }
                 .toolbar(selectionMode ? .hidden : .automatic, for: .tabBar)
+                .searchable(text: $searchText, prompt: Text("search.prompt \(String(localized: "tab.photos"))"))
+                .onChange(of: searchText) { _, value in scheduleSearchCommit(value) }
+                .onDisappear {
+                    searchDebounceTask?.cancel()
+                    searchDebounceTask = nil
+                }
         }
         .sheet(item: $sharePayload) { payload in
             MobileActivityView(urls: payload.urls)
@@ -155,13 +172,27 @@ struct MobileTimelineScreen: View {
         }
     }
 
+    /// The grid's items: the full timeline, or - while a committed search query is active -
+    /// the SHARED `TimelineSearch` filter (identical semantics to macOS) widened by the
+    /// semantic engine's ranked UIDs. Timeline order is preserved, never score order.
+    private var visibleItems: [PhotoItem] {
+        guard !TimelineSearchQuery(committedSearchText).isEmpty else { return model.items }
+        let filtered = TimelineSearch.filter(
+            model.sections,
+            query: committedSearchText,
+            semanticMatches: semanticQuery?.rankedUIDs.map(Set.init)
+        )
+        return TimelineSnapshot(sections: filtered).items
+    }
+
     @ViewBuilder private var content: some View {
+        let visibleItems = self.visibleItems
         ZStack(alignment: .topLeading) {
             ProtonColor.backgroundNorm.ignoresSafeArea()
 
-            if let feed = model.thumbnailFeed, !model.items.isEmpty {
+            if let feed = model.thumbnailFeed, !visibleItems.isEmpty {
                 UIKitTimelineGrid(
-                    items: model.items,
+                    items: visibleItems,
                     thumbnailFeed: feed,
                     selectionMode: selectionMode,
                     selectedUIDs: selected,
@@ -196,12 +227,53 @@ struct MobileTimelineScreen: View {
             MobileLibraryErrorView(message: failure.message, retryable: failure.retryable) {
                 model.retry()
             }
+        } else if !model.items.isEmpty, visibleItems.isEmpty, !TimelineSearchQuery(committedSearchText).isEmpty {
+            // Same empty-search treatment as the macOS timeline.
+            ContentUnavailableView.search(text: committedSearchText)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
     private func open(_ item: PhotoItem) {
-        guard let index = model.index(of: item.uid) else { return }   // O(1), not an O(n) firstIndex scan
-        viewerRouter.presentation = MobileViewerPresentation(index: index, items: model.items)
+        if TimelineSearchQuery(committedSearchText).isEmpty {
+            guard let index = model.index(of: item.uid) else { return }   // O(1), not an O(n) firstIndex scan
+            viewerRouter.presentation = MobileViewerPresentation(index: index, items: model.items)
+        } else {
+            // While searching, the viewer pages through the FILTERED result set (macOS parity).
+            let items = visibleItems
+            guard let index = items.firstIndex(where: { $0.uid == item.uid }) else { return }
+            viewerRouter.presentation = MobileViewerPresentation(index: index, items: items)
+        }
+    }
+
+    /// Debounced search commit - the exact macOS pipeline: the semantic coordinator sees every
+    /// keystroke (it debounces internally and discards stale epochs), while the committed
+    /// lexical query updates after a short pause so the grid never refilters per keystroke.
+    private func scheduleSearchCommit(_ value: String) {
+        searchDebounceTask?.cancel()
+        if let smartSearch = model.smartSearch {
+            let lifecycle = smartSearch.lifecycleActor
+            if semanticQueryLifecycle != ObjectIdentifier(lifecycle) {
+                // New session (or first search): bind the coordinator to the CURRENT lifecycle.
+                semanticQuery = MLSmartSearchQueryCoordinator(lifecycle: lifecycle)
+                semanticQueryLifecycle = ObjectIdentifier(lifecycle)
+            }
+        } else {
+            semanticQuery = nil
+            semanticQueryLifecycle = nil
+        }
+        semanticQuery?.update(query: value)
+        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            committedSearchText = ""
+            searchDebounceTask = nil
+            return
+        }
+        searchDebounceTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(280))
+            guard !Task.isCancelled else { return }
+            committedSearchText = value
+            searchDebounceTask = nil
+        }
     }
 
     private func toggleSelectionMode() {
