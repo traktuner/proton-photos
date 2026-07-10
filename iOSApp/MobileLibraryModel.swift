@@ -298,6 +298,17 @@ final class MobileLibraryModel {
         }
     }
 
+    /// Stops Smart Search background work and drops the stack: a parked indexing loop would
+    /// otherwise keep the lifecycle actor (and its store handle) alive past this session.
+    private func stopSmartSearch() {
+        if let lifecycle = smartSearch?.lifecycleActor {
+            Task { await lifecycle.prepareForTermination() }
+        }
+        smartSearch = nil
+        smartSearchMemoryRegistration?.end()
+        smartSearchMemoryRegistration = nil
+    }
+
     private func teardown() {
         loadToken &+= 1   // supersede any in-flight snapshot sort
         loadTask?.cancel()
@@ -318,9 +329,7 @@ final class MobileLibraryModel {
         albumCatalogRevision = 0
         snapshot = TimelineSnapshot()
         thumbnailFeed = nil
-        smartSearch = nil
-        smartSearchMemoryRegistration?.end()
-        smartSearchMemoryRegistration = nil
+        stopSmartSearch()
         thumbnailCache = nil
         originalsCache?.clearAndForgetKey()   // sign-out purges decrypted-originals blobs + the account key
         originalsCache = nil
@@ -352,7 +361,7 @@ final class MobileLibraryModel {
         albumSync = nil
         snapshot = TimelineSnapshot()
         thumbnailFeed = nil
-        smartSearch = nil
+        stopSmartSearch()
         loadState = .preparingInventory
 
         let cache = ThumbnailCache(

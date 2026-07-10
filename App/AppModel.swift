@@ -115,11 +115,10 @@ final class AppModel {
     func signOut() {
         backendTask?.cancel()
         backend = .idle
-        // Smart Search state lives inside the account container purged below; dropping the
-        // controller stops indexing/downloads before the files disappear.
-        smartSearch = nil
-        smartSearchMemoryRegistration?.end()
-        smartSearchMemoryRegistration = nil
+        // Smart Search state lives inside the account container purged below. Stop its
+        // background work explicitly: a parked indexing loop would otherwise keep the
+        // lifecycle actor (and its store handle) alive past sign-out.
+        stopSmartSearch()
         backupController?.stopSync()
         backupController = nil
         photoBackupController?.stopSync()
@@ -151,6 +150,15 @@ final class AppModel {
 
     func retryBackend() {
         if case let .signedIn(session) = auth { prepareBackend(session) }
+    }
+
+    private func stopSmartSearch() {
+        if let lifecycle = smartSearch?.lifecycleActor {
+            Task { await lifecycle.prepareForTermination() }
+        }
+        smartSearch = nil
+        smartSearchMemoryRegistration?.end()
+        smartSearchMemoryRegistration = nil
     }
 
     /// Builds the Smart Search stack once the account feed and timeline exist (MainView calls
@@ -190,7 +198,7 @@ final class AppModel {
     private func prepareBackend(_ session: ProtonSession) {
         backendTask?.cancel()
         libraryReady = false           // a fresh build isn't ready until its first library load lands
-        smartSearch = nil              // rebuilt against the fresh backend's feed/timeline
+        stopSmartSearch()              // rebuilt against the fresh backend's feed/timeline
         // Install the per-account encrypted-cache key derived from the restored session (and purge any legacy
         // plaintext cache) before the grid renders or the crawl begins.
         OfflineLibraryManager.shared.configure(session: session)

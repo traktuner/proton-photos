@@ -161,10 +161,15 @@ public actor MLSmartSearchLifecycle {
         await activateSelectedModel()
     }
 
-    /// Cancel background work before process exit. Chunk-durable indexing and the journaled
-    /// install/switch/purge steps make sudden termination safe; this just stops new work.
-    public func prepareForTermination() {
+    /// Cancel background work before process exit or session teardown. Chunk-durable indexing
+    /// and the journaled install/switch/purge steps make sudden termination safe; this just
+    /// stops new work (and releases the parked indexing loop's reference to this actor).
+    public func prepareForTermination() async {
         indexTask?.cancel()
+        kick()
+        if let selectedID = persistent.selectedModelID {
+            await deps.installer.cancelInstall(of: selectedID)
+        }
     }
 
     // MARK: - Intents
