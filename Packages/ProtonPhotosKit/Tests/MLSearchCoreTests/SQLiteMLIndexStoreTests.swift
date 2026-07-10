@@ -3,6 +3,18 @@ import Foundation
 import PhotosCore
 @testable import MLSearchCore
 
+private struct TestMLVectorCipher: MLVectorCipher {
+    private let mask: UInt8 = 0xA5
+
+    func seal(_ plaintext: Data, context: MLVectorCipherContext) throws -> Data {
+        Data(plaintext.map { $0 ^ mask })
+    }
+
+    func open(_ ciphertext: Data, context: MLVectorCipherContext) throws -> Data {
+        Data(ciphertext.map { $0 ^ mask })
+    }
+}
+
 /// Persistent-store coverage for `SQLiteMLIndexStore`.
 ///
 /// Every test runs against a throwaway on-disk database (real SQLite, real reopen semantics).
@@ -34,7 +46,7 @@ import PhotosCore
     private func withStore(_ body: (SQLiteMLIndexStore, URL) throws -> Void) throws {
         let url = makeTempURL()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        let store = try #require(SQLiteMLIndexStore(url: url))
+        let store = try #require(SQLiteMLIndexStore(url: url, cipher: TestMLVectorCipher()))
         try body(store, url)
         store.close()
     }
@@ -162,14 +174,14 @@ import PhotosCore
         let url = makeTempURL()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
 
-        let first = try #require(SQLiteMLIndexStore(url: url))
+        let first = try #require(SQLiteMLIndexStore(url: url, cipher: TestMLVectorCipher()))
         first.upsert([
             record("a0", descriptorV1, [1, 2, 3, 4]),
             record("a1", descriptorV1, [5, 6, 7, 8]),
         ])
         first.close()
 
-        let reopened = try #require(SQLiteMLIndexStore(url: url))
+        let reopened = try #require(SQLiteMLIndexStore(url: url, cipher: TestMLVectorCipher()))
         defer { reopened.close() }
         #expect(reopened.count(for: descriptorV1) == 2)
         #expect(reopened.contains(uid: uid("a0"), descriptor: descriptorV1))
@@ -198,6 +210,50 @@ import PhotosCore
             #expect(results.results.first?.uid == uid("a0"))
             #expect(results.results.first?.score == 1.0)
         }
+    }
+
+    @Test func generationChangesOnlyWhenVectorStateChangesAndSurvivesReopen() throws {
+        let url = makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let cipher = TestMLVectorCipher()
+        let first = try #require(SQLiteMLIndexStore(url: url, cipher: cipher))
+        #expect(first.generation(for: descriptorV1) == 0)
+        first.upsert([record("a0", descriptorV1, [1, 0, 0, 0])])
+        let insertedGeneration = first.generation(for: descriptorV1)
+        #expect(insertedGeneration > 0)
+        first.upsert([record("a0", descriptorV1, [9, 9, 9, 9])])
+        #expect(first.generation(for: descriptorV1) == insertedGeneration)
+        first.close()
+
+        let reopened = try #require(SQLiteMLIndexStore(url: url, cipher: cipher))
+        defer { reopened.close() }
+        #expect(reopened.generation(for: descriptorV1) == insertedGeneration)
+        reopened.remove(uid: uid("a0"), descriptor: descriptorV1)
+        #expect(reopened.generation(for: descriptorV1) > insertedGeneration)
+    }
+
+    @Test func failureStateIsDurableAndSuccessfulEmbeddingClearsIt() throws {
+        let url = makeTempURL()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let cipher = TestMLVectorCipher()
+        let failedUID = uid("failed")
+        let first = try #require(SQLiteMLIndexStore(url: url, cipher: cipher))
+        #expect(first.recordFailures([
+            MLIndexFailureRecord(
+                uid: failedUID,
+                descriptor: descriptorV1,
+                kind: .transient,
+                attempts: 2,
+                updatedAt: Date(timeIntervalSince1970: 10)
+            ),
+        ]))
+        first.close()
+
+        let reopened = try #require(SQLiteMLIndexStore(url: url, cipher: cipher))
+        defer { reopened.close() }
+        #expect(reopened.failureRecords(for: descriptorV1, from: [failedUID])[failedUID]?.attempts == 2)
+        reopened.upsert([record("failed", descriptorV1, [1, 0, 0, 0])])
+        #expect(reopened.failureRecords(for: descriptorV1, from: [failedUID]).isEmpty)
     }
 
     // MARK: - 10. 20k structural smoke (guarded, not a benchmark)

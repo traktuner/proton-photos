@@ -1,31 +1,8 @@
 import Foundation
 import PhotosCore
 
-/// The persistence boundary for ML embeddings.
-///
-/// `MLIndexStore` is the single contract every store implementation (in-memory for tests,
-/// `SQLiteMLIndexStore` for production, eventually an encrypted Proton-synced shard) must
-/// satisfy. Core owns the protocol; hosts pick the concrete persistence.
-///
-/// ## Idempotency contract
-/// Every method is keyed by the composite `(PhotoUID, MLModelDescriptor)`. `upsert` is an
-/// idempotent keyed write with **first-write-wins** semantics: storing the same
-/// `(uid, descriptor)` twice keeps the first record and reports the second as skipped —
-/// no duplicates, no silent overwrite. Records failing dimension validation are rejected
-/// and counted as `permanentFailure`; report partitions always sum to `total`.
-///
-/// ## Batched-read/write seam
-/// Methods accept and return collections rather than singletons so a SQLite implementation
-/// can use a single transaction per batch without changing call sites.
-///
-/// ## Determinism
-/// `allRecords`/`vectorBlock` row order must be deterministic for identical store state —
-/// ranking ties break by row index, so a stable order makes search results reproducible.
-///
-/// ## Concurrency
-/// Implementations must be `Sendable` and callable off the main actor. Synchronization is
-/// implementation-specific (`NSLock`, actor, serialized SQLite handle) and must not leak
-/// through the protocol.
+/// Batched persistence boundary for ML embeddings and failure state. Keys are
+/// `(PhotoUID, MLModelDescriptor)`, writes are first-write-wins, and reads are deterministic.
 public protocol MLIndexStore: Sendable {
     /// Insert embeddings for a single model epoch. Idempotent per `(uid, descriptor)`;
     /// first write wins. Dimension-mismatched records are rejected (`permanentFailure`).
@@ -60,6 +37,15 @@ public protocol MLIndexStore: Sendable {
 
     /// Total record count for a model epoch.
     func count(for descriptor: MLModelDescriptor) -> Int
+
+    /// Monotonic epoch generation. Search engines use it to invalidate packed vector snapshots.
+    func generation(for descriptor: MLModelDescriptor) -> UInt64
+
+    /// Persist retry/permanent failure state independently from embeddings.
+    @discardableResult
+    func recordFailures(_ records: [MLIndexFailureRecord]) -> Bool
+    func failureRecords(for descriptor: MLModelDescriptor, from uids: [PhotoUID]) -> [PhotoUID: MLIndexFailureRecord]
+    func clearFailures(for descriptor: MLModelDescriptor, uids: [PhotoUID])
 }
 
 extension MLIndexStore {
@@ -67,6 +53,16 @@ extension MLIndexStore {
     /// rows straight from disk into the packed buffer without materializing records.
     public func vectorBlock(for descriptor: MLModelDescriptor) -> MLVectorBlock {
         MLVectorBlock(descriptor: descriptor, records: allRecords(for: descriptor))
+    }
+
+    public func coverage(for descriptor: MLModelDescriptor, allAssets: [PhotoUID]) -> MLIndexCoverage {
+        let uniqueAssets = Array(Set(allAssets))
+        let indexed = indexedUIDs(for: descriptor, from: uniqueAssets)
+        let failures = failureRecords(for: descriptor, from: uniqueAssets)
+        let permanent = failures.values.reduce(into: 0) { count, failure in
+            if failure.kind == .permanent, !indexed.contains(failure.uid) { count += 1 }
+        }
+        return MLIndexCoverage(total: uniqueAssets.count, indexed: indexed.count, permanentlyUnindexable: permanent)
     }
 }
 
@@ -79,6 +75,8 @@ extension MLIndexStore {
 /// must layer that policy above the store.
 public final class InMemoryMLIndexStore: MLIndexStore, @unchecked Sendable {
     private var recordsByDescriptor: [MLModelDescriptor: [PhotoUID: MLEmbeddingRecord]] = [:]
+    private var failuresByDescriptor: [MLModelDescriptor: [PhotoUID: MLIndexFailureRecord]] = [:]
+    private var generations: [MLModelDescriptor: UInt64] = [:]
     private let lock = NSLock()
 
     public init() {}
@@ -104,6 +102,8 @@ public final class InMemoryMLIndexStore: MLIndexStore, @unchecked Sendable {
                 skipped += 1
             } else {
                 recordsByDescriptor[record.descriptor, default: [:]][record.uid] = record
+                failuresByDescriptor[record.descriptor]?.removeValue(forKey: record.uid)
+                generations[record.descriptor, default: 0] &+= 1
                 indexed += 1
             }
         }
@@ -148,19 +148,55 @@ public final class InMemoryMLIndexStore: MLIndexStore, @unchecked Sendable {
     public func remove(uid: PhotoUID, descriptor: MLModelDescriptor) {
         lock.lock()
         defer { lock.unlock() }
-        recordsByDescriptor[descriptor]?.removeValue(forKey: uid)
+        if recordsByDescriptor[descriptor]?.removeValue(forKey: uid) != nil {
+            generations[descriptor, default: 0] &+= 1
+        }
     }
 
     public func removeAll(for descriptor: MLModelDescriptor) {
         lock.lock()
         defer { lock.unlock() }
-        recordsByDescriptor.removeValue(forKey: descriptor)
+        let changed = recordsByDescriptor.removeValue(forKey: descriptor) != nil
+        failuresByDescriptor.removeValue(forKey: descriptor)
+        if changed { generations[descriptor, default: 0] &+= 1 }
     }
 
     public func count(for descriptor: MLModelDescriptor) -> Int {
         lock.lock()
         defer { lock.unlock() }
         return recordsByDescriptor[descriptor]?.count ?? 0
+    }
+
+    public func generation(for descriptor: MLModelDescriptor) -> UInt64 {
+        lock.withLock { generations[descriptor] ?? 0 }
+    }
+
+    @discardableResult
+    public func recordFailures(_ records: [MLIndexFailureRecord]) -> Bool {
+        lock.withLock {
+            for record in records where recordsByDescriptor[record.descriptor]?[record.uid] == nil {
+                failuresByDescriptor[record.descriptor, default: [:]][record.uid] = record
+            }
+            return true
+        }
+    }
+
+    public func failureRecords(
+        for descriptor: MLModelDescriptor,
+        from uids: [PhotoUID]
+    ) -> [PhotoUID: MLIndexFailureRecord] {
+        lock.withLock {
+            guard let bucket = failuresByDescriptor[descriptor] else { return [:] }
+            return Dictionary(uniqueKeysWithValues: uids.compactMap { uid in
+                bucket[uid].map { (uid, $0) }
+            })
+        }
+    }
+
+    public func clearFailures(for descriptor: MLModelDescriptor, uids: [PhotoUID]) {
+        lock.withLock {
+            for uid in uids { failuresByDescriptor[descriptor]?.removeValue(forKey: uid) }
+        }
     }
 
     private static func uidOrder(_ a: PhotoUID, _ b: PhotoUID) -> Bool {

@@ -9,9 +9,7 @@ import MLSearchCore
 /// by `descriptor.identifier` only: the artifact for a new model version replaces the old
 /// one at build time, and the descriptor's `version` gates re-indexing, not file naming.
 ///
-/// No model artifact is committed yet (license spike pending), so production currently
-/// resolves to `.missing`. Once an artifact ships, the inference engine loads it via
-/// `MLModel(contentsOf:configuration:)` with `CoreMLComputePolicy.default` (Neural Engine).
+/// No model artifact is committed yet; device benchmarking and app-size policy still gate it.
 public struct BundleMLModelLocator: MLModelLocator, @unchecked Sendable {
     // Bundle is not Sendable by declaration, but resource lookup is documented thread-safe.
     private let bundle: Bundle

@@ -17,12 +17,10 @@ import PhotosCore
         enum Script { case permanent, transientOnce }
         private let lock = NSLock()
         private var scripts: [PhotoUID: Script]
-        private let cancelCurrentTaskAfter: Int?
         private(set) var embedCalls: [PhotoUID] = []
 
-        init(scripts: [PhotoUID: Script] = [:], cancelCurrentTaskAfter: Int? = nil) {
+        init(scripts: [PhotoUID: Script] = [:]) {
             self.scripts = scripts
-            self.cancelCurrentTaskAfter = cancelCurrentTaskAfter
         }
 
         func callCount(for uid: PhotoUID) -> Int {
@@ -34,10 +32,6 @@ import PhotosCore
         func embed(uid: PhotoUID, descriptor: MLModelDescriptor) async -> MLEmbeddingOutcome {
             lock.withLock {
                 embedCalls.append(uid)
-                if let threshold = cancelCurrentTaskAfter, embedCalls.count == threshold {
-                    // Deterministic mid-pass cancellation: cancel the task running the pass.
-                    withUnsafeCurrentTask { $0?.cancel() }
-                }
                 switch scripts[uid] {
                 case .permanent:
                     return .permanentFailure(reason: "scripted")
@@ -76,23 +70,22 @@ import PhotosCore
         #expect(embedder.totalCalls == 10)
     }
 
-    @Test func gateStopIsChunkDurableAndResumes() async {
+    @Test func gateStopPersistsPartialChunkAndResumes() async {
         let store = InMemoryMLIndexStore()
+        let gate = LockedGate(remainingAssets: 4)
         let embedder = ScriptedEmbedder()
-        // Gate allows exactly one chunk, then closes.
-        let opens = LockedCounter()
         let runner = MLIndexRunner(
             store: store,
             embedder: embedder,
-            configuration: .init(chunkSize: 4),
-            shouldContinue: { opens.next() < 1 }
+            configuration: .init(chunkSize: 10),
+            shouldContinue: { gate.consumePermission() }
         )
         let assets = (0..<10).map { uid("a\($0)") }
 
         let first = await runner.runPass(allAssets: assets, descriptor: descriptor)
         #expect(!first.ranToCompletion)
         #expect(first.report.indexed == 4)
-        #expect(store.count(for: descriptor) == 4) // first chunk persisted before the stop
+        #expect(store.count(for: descriptor) == 4) // partial chunk persisted before the stop
         #expect(first.progress.phase == .idle)      // never a false "completed"
         #expect(!first.progress.isComplete)
 
@@ -124,8 +117,9 @@ import PhotosCore
         #expect(first.progress.phase == .idle) // transient pending → not complete
         #expect(!first.progress.isComplete)
 
-        // Next pass: caller carries the permanent set; only the transient asset retries.
-        let second = await runner.runPass(allAssets: assets, descriptor: descriptor, permanentFailures: first.newPermanentFailures)
+        // Failure state is durable in the store; a fresh pass skips permanent failures and retries
+        // only transient ones without the caller carrying an in-memory side channel.
+        let second = await runner.runPass(allAssets: assets, descriptor: descriptor)
         #expect(second.ranToCompletion)
         #expect(second.report.indexed == 1)
         #expect(second.newPermanentFailures.isEmpty)
@@ -137,19 +131,22 @@ import PhotosCore
         #expect(second.progress.phase == .completed)
     }
 
-    @Test func cancellationStopsBetweenChunks() async {
+    @Test func cancellationStopsBeforeStartingAnotherAsset() async {
         let store = InMemoryMLIndexStore()
-        // The 3rd embed call (inside the 2nd chunk) cancels the pass's own task; the runner
-        // must finish that chunk durably, then stop at the next gate check.
-        let embedder = ScriptedEmbedder(cancelCurrentTaskAfter: 3)
-        let runner = MLIndexRunner(store: store, embedder: embedder, configuration: .init(chunkSize: 2))
+        let embedder = CancellationBarrierEmbedder(stopAtCall: 3)
+        let runner = MLIndexRunner(store: store, embedder: embedder, configuration: .init(chunkSize: 32))
         let assets = (0..<50).map { uid("a\($0)") }
 
-        let outcome = await runner.runPass(allAssets: assets, descriptor: descriptor)
+        let pass = Task { await runner.runPass(allAssets: assets, descriptor: descriptor) }
+        await embedder.waitUntilBlocked()
+        pass.cancel()
+        await embedder.resume()
+        let outcome = await pass.value
 
         #expect(!outcome.ranToCompletion)
-        #expect(outcome.report.indexed == 4) // two complete chunks, nothing torn
-        #expect(store.count(for: descriptor) == 4)
+        #expect(outcome.report.indexed == 3)
+        #expect(store.count(for: descriptor) == 3)
+        #expect(await embedder.totalCalls == 3)
         #expect(outcome.progress.phase == .idle)
         #expect(!outcome.progress.isComplete)
     }
@@ -173,14 +170,57 @@ import PhotosCore
     }
 }
 
+private actor CancellationBarrierEmbedder: MLAssetEmbedder {
+    private let stopAtCall: Int
+    private var calls = 0
+    private var blocked = false
+    private var blockedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var resumeContinuation: CheckedContinuation<Void, Never>?
+
+    init(stopAtCall: Int) {
+        self.stopAtCall = stopAtCall
+    }
+
+    var totalCalls: Int { calls }
+
+    func embed(uid: PhotoUID, descriptor: MLModelDescriptor) async -> MLEmbeddingOutcome {
+        calls += 1
+        if calls == stopAtCall {
+            blocked = true
+            blockedWaiters.forEach { $0.resume() }
+            blockedWaiters.removeAll()
+            await withCheckedContinuation { resumeContinuation = $0 }
+        }
+        var vector = ContiguousArray<Float32>(repeating: 0, count: descriptor.embeddingDimension)
+        vector[0] = 1
+        return .embedded(vector)
+    }
+
+    func waitUntilBlocked() async {
+        if blocked { return }
+        await withCheckedContinuation { blockedWaiters.append($0) }
+    }
+
+    func resume() {
+        resumeContinuation?.resume()
+        resumeContinuation = nil
+    }
+}
+
 /// Minimal thread-safe helpers for scripting gates and capturing callbacks in tests.
-private final class LockedCounter: @unchecked Sendable {
+private final class LockedGate: @unchecked Sendable {
     private let lock = NSLock()
-    private var value = 0
-    func next() -> Int {
+    private var remainingAssets: Int
+
+    init(remainingAssets: Int) {
+        self.remainingAssets = remainingAssets
+    }
+
+    func consumePermission() -> Bool {
         lock.withLock {
-            defer { value += 1 }
-            return value
+            guard remainingAssets > 0 else { return false }
+            remainingAssets -= 1
+            return true
         }
     }
 }

@@ -385,6 +385,29 @@ public actor ThumbnailFeedCore {
         return nil
     }
 
+    /// Cache-only decode for low-priority consumers such as local ML indexing.
+    ///
+    /// Disk I/O, decryption and image decode run away from the serial feed actor, so indexing
+    /// cannot delay visible-grid scheduling. One-shot ML decodes do not enter the grid's decoded
+    /// LRU or emit redraw callbacks. A miss never starts a network request; the caller can retry
+    /// after the normal thumbnail crawl has populated the encrypted disk tier.
+    public nonisolated func backgroundCachedDecoded(for uid: PhotoUID) async -> DecodedThumbnail? {
+        if let image = decoded.image(for: uid) { return image }
+
+        let cache = self.cache
+        let maxPixels = configuration.targetPixels
+        let result = await Task.detached(priority: .utility) { () -> (dataPresent: Bool, image: DecodedThumbnail?) in
+            guard let data = cache.diskData(for: uid) else { return (false, nil) }
+            return (true, ThumbnailImageDecoder.downsample(data, maxPixelSize: maxPixels))
+        }.value
+        guard result.dataPresent else {
+            diskPresence.set(uid, present: false)
+            return nil
+        }
+        diskPresence.set(uid, present: true)
+        return result.image
+    }
+
     public nonisolated func memoryDecoded(for uid: PhotoUID) -> DecodedThumbnail? {
         decoded.image(for: uid)
     }

@@ -708,6 +708,22 @@ struct ThumbnailFeedCoreTests {
         #expect(feed.memoryDecoded(for: uid) != nil)               // the off-render warm fills the RAM tier
     }
 
+    @Test func backgroundCachedDecodeNeverStartsNetworkWork() async {
+        let present = Self.uid("background-cache-hit")
+        let missing = Self.uid("background-cache-miss")
+        let cache = Self.cache("background-cache")
+        cache.storeToDisk(Self.pngData(width: 24, height: 12), for: present)
+        let loader = RecordingLoader(payloads: [missing: Self.pngData(width: 8, height: 8)])
+        let feed = ThumbnailFeedCore(cache: cache, loader: loader, configuration: Self.configuration())
+
+        let decoded = await feed.backgroundCachedDecoded(for: present)
+        #expect(decoded?.pixelWidth == 16)
+        #expect(decoded?.pixelHeight == 8)
+        #expect(feed.memoryDecoded(for: present) == nil)
+        #expect(await feed.backgroundCachedDecoded(for: missing) == nil)
+        #expect(await loader.requestCount() == 0)
+    }
+
     @Test func diskHitsDoNotBecomeDownloads() async throws {
         let uids = (0 ..< 3).map { Self.uid("disk-hit-\($0)") }
         let cache = Self.cache("diskhits")

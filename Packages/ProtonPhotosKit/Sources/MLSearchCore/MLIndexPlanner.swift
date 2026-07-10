@@ -64,21 +64,7 @@ public struct MLIndexPlan: Sendable {
     public var isComplete: Bool { toIndex.isEmpty }
 }
 
-/// Pure, side-effect-free index planner.
-///
-/// `MLIndexPlanner` computes, given the full set of known assets and the current store state
-/// for a target model, exactly which assets need embedding this pass. It is the single source
-/// of truth for idempotent scheduling: re-running it on the same inputs produces the same plan,
-/// and once an asset is indexed it is never planned again (until the model version changes).
-///
-/// ## Complexity
-/// `plan(...)` is **O(n)** over assets: one pass to partition, using a `Set` for the
-/// already-indexed membership check (O(1) amortized). No sorting, no heap.
-///
-/// ## Chunking
-/// `chunked(plan:maxChunkSize:)` splits a plan's `toIndex` into independent chunks so an
-/// indexing actor can bound memory/CPU per pass without re-planning. Each chunk is a
-/// standalone `MLIndexPlan` referencing the same model epoch.
+/// O(n), side-effect-free planner for idempotent model-epoch indexing.
 public enum MLIndexPlanner {
     /// Partition `allAssets` into an idempotent plan for `descriptor`.
     ///
@@ -86,26 +72,30 @@ public enum MLIndexPlanner {
     ///   - allAssets: every asset UID known to the host (typically the timeline's complete set).
     ///   - descriptor: the target model epoch.
     ///   - store: the current index state.
-    ///   - permanentFailures: assets previously marked permanently unindexable (carried across passes).
     /// - Returns: a plan where `toIndex` excludes already-indexed and permanent-failure assets.
     public static func plan(
         allAssets: [PhotoUID],
         descriptor: MLModelDescriptor,
-        store: MLIndexStore,
-        permanentFailures: Set<PhotoUID> = []
+        store: MLIndexStore
     ) -> MLIndexPlan {
         // Single O(n) pass: build the indexed set once, then partition.
         let indexedSet = store.indexedUIDs(for: descriptor, from: allAssets)
+        let storedFailures = store.failureRecords(for: descriptor, from: allAssets)
         
+        let permanentCount = storedFailures.values.reduce(into: 0) { count, failure in
+            if failure.kind == .permanent { count += 1 }
+        }
+        var seen: Set<PhotoUID> = []
+        seen.reserveCapacity(allAssets.count)
         var toIndex: [PhotoUID] = []
         var skippedIndexed: [PhotoUID] = []
         var skippedPermanent: [PhotoUID] = []
-        toIndex.reserveCapacity(allAssets.count)
-        skippedIndexed.reserveCapacity(allAssets.count)
-        skippedPermanent.reserveCapacity(allAssets.count)
+        toIndex.reserveCapacity(max(0, allAssets.count - indexedSet.count - permanentCount))
+        skippedIndexed.reserveCapacity(indexedSet.count)
+        skippedPermanent.reserveCapacity(permanentCount)
         
-        for uid in allAssets {
-            if permanentFailures.contains(uid) {
+        for uid in allAssets where seen.insert(uid).inserted {
+            if storedFailures[uid]?.kind == .permanent {
                 skippedPermanent.append(uid)
             } else if indexedSet.contains(uid) {
                 skippedIndexed.append(uid)

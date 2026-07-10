@@ -1,16 +1,22 @@
 import Testing
 import Foundation
+import CoreGraphics
 import CoreML
+import CryptoKit
 import PhotosCore
 import MLSearchCore
 @testable import MLSearchAppleAdapter
 
-/// Architecture/compute-policy tests for `MLSearchAppleAdapter`.
-///
-/// Real model files aren't committed yet (license spike pending), so these tests exercise the
-/// compute-policy surface, the model locator, and the Accelerate-backed scoring kernel
-/// (which is independent of any model artifact). They do NOT instantiate a real CoreML model.
+/// Adapter tests that do not require a model artifact. A local opt-in smoke covers the real model.
 @Suite struct MLSearchAppleAdapterTests {
+    private struct FixedImageSource: CoreMLImageSource {
+        let image: CoreMLSourceImage
+
+        func image(for uid: PhotoUID) async -> CoreMLImageSourceOutcome {
+            .image(image)
+        }
+    }
+
     private let descriptor = MLModelDescriptor(identifier: "mobileclip-s0", version: 1, embeddingDimension: 4)
     private func uid(_ id: String) -> PhotoUID { PhotoUID(volumeID: "vol1", nodeID: id) }
 
@@ -20,6 +26,129 @@ import MLSearchCore
             block.append(uid: uid(id), vector: ContiguousArray(vector))
         }
         return block
+    }
+
+    @Test func tinyCLIPTokenizerMatchesReferenceVectors() throws {
+        let tokenizer = try CLIPBPETokenizer.bundledTinyCLIP()
+
+        let english = try tokenizer.tokenize("a photo of trees")
+        #expect(Array(english.inputIDs.prefix(6)) == [49_406, 320, 1_125, 539, 4_682, 49_407])
+        #expect(english.endTokenIndex == 5)
+        #expect(english.inputIDs.count == 77)
+
+        let german = try tokenizer.tokenize("Bäume")
+        #expect(Array(german.inputIDs.prefix(6)) == [49_406, 65, 10_896, 84, 614, 49_407])
+        #expect(german.endTokenIndex == 5)
+    }
+
+    @Test func tinyCLIPTokenizerNormalizesWhitespaceAndTruncatesSafely() throws {
+        let tokenizer = try CLIPBPETokenizer.bundledTinyCLIP()
+        let normalized = try tokenizer.tokenize("  A\nphoto\tOF trees  ")
+        let reference = try tokenizer.tokenize("a photo of trees")
+        #expect(normalized == reference)
+
+        let long = try tokenizer.tokenize(String(repeating: "trees ", count: 200))
+        #expect(long.inputIDs.count == 77)
+        #expect(long.endTokenIndex == 76)
+        #expect(long.inputIDs[76] == CLIPBPETokenizer.endTokenID)
+    }
+
+    @Test func coreMLTextInputsMarkOnlyTheSemanticEndToken() throws {
+        let tokenized = MLTokenizedText(inputIDs: [49_406, 320, 49_407, 49_407], endTokenIndex: 2)
+        let inputs = try CoreMLArrayCodec.textInputs(tokenized)
+
+        #expect((0..<4).map { inputs.ids[$0].int32Value } == [49_406, 320, 49_407, 49_407])
+        #expect((0..<4).map { inputs.endMask[$0].floatValue } == [0, 0, 1, 0])
+    }
+
+    @Test func coreMLArrayCodecReadsSupportedPrecisions() throws {
+        let float32 = try MLMultiArray(shape: [3], dataType: .float32)
+        float32[0] = 0.25
+        float32[1] = -0.5
+        float32[2] = 1
+        #expect(try CoreMLArrayCodec.float32Values(from: float32) == [0.25, -0.5, 1])
+
+        let float16 = try MLMultiArray(shape: [2], dataType: .float16)
+        float16[0] = 0.5
+        float16[1] = -1
+        #expect(try CoreMLArrayCodec.float32Values(from: float16) == [0.5, -1])
+
+        let double = try MLMultiArray(shape: [2], dataType: .double)
+        double[0] = 0.75
+        double[1] = -0.25
+        #expect(try CoreMLArrayCodec.float32Values(from: double) == [0.75, -0.25])
+    }
+
+    @Test func float16BitConversionIsArchitectureIndependent() {
+        #expect(CoreMLArrayCodec.float32(fromIEEE754Half: 0x3c00) == 1)
+        #expect(CoreMLArrayCodec.float32(fromIEEE754Half: 0xc000) == -2)
+        #expect(abs(CoreMLArrayCodec.float32(fromIEEE754Half: 0x0001) - 0.000000059604645) < 1e-12)
+        #expect(CoreMLArrayCodec.float32(fromIEEE754Half: 0x7c00).isInfinite)
+    }
+
+    @Test func cachedThumbnailSourceReturnsImageWithoutOwningFetchPolicy() async throws {
+        let context = try #require(CGContext(
+            data: nil,
+            width: 2,
+            height: 2,
+            bitsPerComponent: 8,
+            bytesPerRow: 8,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let image = try #require(context.makeImage())
+        let hit = CachedThumbnailMLImageSource(load: { _ in CoreMLSourceImage(cgImage: image) })
+        let miss = CachedThumbnailMLImageSource(load: { _ in nil })
+
+        guard case .image(let loaded) = await hit.image(for: uid("hit")) else {
+            Issue.record("Expected cached image")
+            return
+        }
+        #expect(loaded.cgImage.width == 2)
+        guard case .transientFailure = await miss.image(for: uid("miss")) else {
+            Issue.record("A cache miss must remain retryable")
+            return
+        }
+    }
+
+    @Test func optionalRealTinyCLIPRuntimeSmoke() async throws {
+        guard let modelPath = ProcessInfo.processInfo.environment["PROTON_PHOTOS_TINYCLIP_MODEL"] else { return }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let context = try #require(CGContext(
+            data: nil,
+            width: 224,
+            height: 224,
+            bitsPerComponent: 8,
+            bytesPerRow: 224 * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.setFillColor(CGColor(red: 0.1, green: 0.7, blue: 0.2, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 224, height: 224))
+        let image = try #require(context.makeImage())
+        let descriptor = MLModelDescriptor(identifier: "tinyclip-39m", version: 1, embeddingDimension: 512)
+        let encoder = try await CoreMLDualEncoder(
+            modelURL: URL(fileURLWithPath: modelPath),
+            descriptor: descriptor,
+            imageSource: FixedImageSource(image: CoreMLSourceImage(cgImage: image)),
+            tokenizer: CLIPBPETokenizer.bundledTinyCLIP()
+        )
+
+        let imageOutcome = await encoder.embed(uid: uid("runtime"), descriptor: descriptor)
+        guard case .embedded(let imageEmbedding) = imageOutcome else {
+            Issue.record("Expected image embedding")
+            return
+        }
+        let textEmbedding = try await encoder.encode(text: "a photo of trees", descriptor: descriptor)
+        let secondImageOutcome = await encoder.embed(uid: uid("runtime-again"), descriptor: descriptor)
+        #expect(imageEmbedding.count == 512)
+        #expect(textEmbedding.count == 512)
+        #expect(imageEmbedding.allSatisfy { $0.isFinite })
+        #expect(textEmbedding.allSatisfy { $0.isFinite })
+        guard case .embedded = secondImageOutcome else {
+            Issue.record("Expected image model to reload after text inference")
+            return
+        }
     }
 
     // MARK: - Compute policy
@@ -92,6 +221,87 @@ import MLSearchCore
         }
         #expect(url.lastPathComponent == "\(descriptor.identifier).mlmodelc")
         #expect(status.isAvailable)
+    }
+
+    @Test func vectorCipherRoundTripsAndBindsAccountAssetAndEpoch() throws {
+        let key = SymmetricKey(size: .bits256)
+        let cipher = CryptoKitMLVectorCipher(key: key, accountUID: "account-a")
+        let context = MLVectorCipherContext(uid: uid("a0"), descriptor: descriptor)
+        let plaintext = Data("private embedding".utf8)
+        let ciphertext = try cipher.seal(plaintext, context: context)
+
+        #expect(ciphertext != plaintext)
+        #expect(try cipher.open(ciphertext, context: context) == plaintext)
+        #expect(throws: (any Error).self) {
+            _ = try cipher.open(
+                ciphertext,
+                context: MLVectorCipherContext(uid: uid("different"), descriptor: descriptor)
+            )
+        }
+        let otherAccount = CryptoKitMLVectorCipher(key: key, accountUID: "account-b")
+        #expect(throws: (any Error).self) {
+            _ = try otherAccount.open(ciphertext, context: context)
+        }
+    }
+
+    @Test func indexKeyDerivationIsStableAndAccountScoped() {
+        let a1 = MLSearchKeyDerivation.localIndexKey(accountUID: "a", keyPassword: "secret")
+        let a2 = MLSearchKeyDerivation.localIndexKey(accountUID: "a", keyPassword: "secret")
+        let b = MLSearchKeyDerivation.localIndexKey(accountUID: "b", keyPassword: "secret")
+        #expect(a1.withUnsafeBytes { Data($0) } == a2.withUnsafeBytes { Data($0) })
+        #expect(a1.withUnsafeBytes { Data($0) } != b.withUnsafeBytes { Data($0) })
+    }
+
+    @Test func sqliteStoreRejectsWrongAccountCipher() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ml-encrypted-store-\(UUID().uuidString)", isDirectory: true)
+        let url = root.appendingPathComponent(SQLiteMLIndexStore.databaseFileName)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let key = SymmetricKey(size: .bits256)
+        let correct = CryptoKitMLVectorCipher(key: key, accountUID: "account-a")
+        let store = try #require(SQLiteMLIndexStore(url: url, cipher: correct))
+        store.upsert([
+            MLEmbeddingRecord(uid: uid("a0"), descriptor: descriptor, vector: [1, 0, 0, 0]),
+        ])
+        store.close()
+
+        let wrong = CryptoKitMLVectorCipher(key: key, accountUID: "account-b")
+        let wrongStore = try #require(SQLiteMLIndexStore(url: url, cipher: wrong))
+        #expect(wrongStore.count(for: descriptor) == 1)
+        #expect(wrongStore.allRecords(for: descriptor).isEmpty)
+        #expect(wrongStore.vectorBlock(for: descriptor).isEmpty)
+        wrongStore.close()
+
+        let reopened = try #require(SQLiteMLIndexStore(url: url, cipher: correct))
+        #expect(reopened.allRecords(for: descriptor).first?.vector == ContiguousArray([1, 0, 0, 0]))
+        reopened.close()
+    }
+
+    @Test(.timeLimit(.minutes(1))) func encryptedStoreTwentyThousandRowSmoke() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ml-encrypted-smoke-\(UUID().uuidString)", isDirectory: true)
+        let url = root.appendingPathComponent(SQLiteMLIndexStore.databaseFileName)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cipher = CryptoKitMLVectorCipher(key: SymmetricKey(size: .bits256), accountUID: "smoke")
+        let store = try #require(SQLiteMLIndexStore(url: url, cipher: cipher))
+        defer { store.close() }
+        let smokeDescriptor = MLModelDescriptor(identifier: "smoke", version: 1, embeddingDimension: 64)
+
+        for batch in 0..<20 {
+            let records = (0..<1_000).map { offset -> MLEmbeddingRecord in
+                let index = batch * 1_000 + offset
+                var vector = ContiguousArray<Float32>(repeating: 0, count: 64)
+                vector[index % 64] = 1
+                return MLEmbeddingRecord(
+                    uid: PhotoUID(volumeID: "v", nodeID: String(format: "%06d", index)),
+                    descriptor: smokeDescriptor,
+                    vector: vector
+                )
+            }
+            #expect(store.upsert(records).indexed == records.count)
+        }
+
+        #expect(store.vectorBlock(for: smokeDescriptor).count == 20_000)
     }
 
     // MARK: - Accelerate scoring kernel

@@ -58,6 +58,18 @@ import PhotosCore
         #expect(plan.isComplete)
     }
 
+    @Test func plannerDeduplicatesHostAssetListWithoutChangingOrder() {
+        let store = InMemoryMLIndexStore()
+        let plan = MLIndexPlanner.plan(
+            allAssets: [uid("a0"), uid("a1"), uid("a0"), uid("a2"), uid("a1")],
+            descriptor: descriptorV1,
+            store: store
+        )
+
+        #expect(plan.toIndex.map(\.nodeID) == ["a0", "a1", "a2"])
+        #expect(plan.totalAssets == 3)
+    }
+
     // MARK: - 2. Model version change creates a new indexing epoch
 
     @Test func modelVersionChangeCreatesNewEpoch() {
@@ -91,12 +103,13 @@ import PhotosCore
     @Test func permanentFailureDoesNotBlockOthers() {
         let store = InMemoryMLIndexStore()
         let assets = [uid("a0"), uid("a1"), uid("a2")]
-        let permanentFailures: Set<PhotoUID> = [uid("a1")]
+        store.recordFailures([
+            MLIndexFailureRecord(uid: uid("a1"), descriptor: descriptorV1, kind: .permanent, attempts: 1),
+        ])
         let plan = MLIndexPlanner.plan(
             allAssets: assets,
             descriptor: descriptorV1,
-            store: store,
-            permanentFailures: permanentFailures
+            store: store
         )
         #expect(plan.toIndex.map(\.nodeID).sorted() == ["a0", "a2"])
         #expect(plan.skippedPermanentFailure.count == 1)
@@ -106,15 +119,17 @@ import PhotosCore
     @Test func failedAssetExcludedFromBatchUpsert() {
         let store = InMemoryMLIndexStore()
         let assets = [uid("a0"), uid("a1"), uid("a2")]
-        let permFailures: Set<PhotoUID> = [uid("a1")]
-        let plan = MLIndexPlanner.plan(allAssets: assets, descriptor: descriptorV1, store: store, permanentFailures: permFailures)
+        store.recordFailures([
+            MLIndexFailureRecord(uid: uid("a1"), descriptor: descriptorV1, kind: .permanent, attempts: 1),
+        ])
+        let plan = MLIndexPlanner.plan(allAssets: assets, descriptor: descriptorV1, store: store)
         // Simulate embedding only the planned-to-index assets.
         let records = plan.toIndex.map { record($0.nodeID, descriptorV1, [1, 0, 0, 0]) }
         let report = store.upsert(records)
         #expect(report.indexed == 2)
         #expect(store.count(for: descriptorV1) == 2)
         // Re-plan: only the failed one stays excluded, the rest converge.
-        let replan = MLIndexPlanner.plan(allAssets: assets, descriptor: descriptorV1, store: store, permanentFailures: permFailures)
+        let replan = MLIndexPlanner.plan(allAssets: assets, descriptor: descriptorV1, store: store)
         #expect(replan.toIndex.isEmpty)
         #expect(replan.skippedAlreadyIndexed.count == 2)
         #expect(replan.skippedPermanentFailure.count == 1)

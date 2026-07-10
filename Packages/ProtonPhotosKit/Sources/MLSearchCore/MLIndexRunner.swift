@@ -24,32 +24,14 @@ public struct MLIndexPassOutcome: Sendable {
     /// task cancelled). A stopped pass is safe: every finished chunk is already persisted,
     /// so the next pass resumes from store state with no duplicates.
     public let ranToCompletion: Bool
-    /// Assets the embedder declared permanently unindexable this pass. The caller feeds these
-    /// into future `plan` calls (and persists them; durable failure storage is a later slice).
+    /// Assets newly persisted as permanently unindexable this pass.
     public let newPermanentFailures: Set<PhotoUID>
     /// Progress snapshot at the end of the pass.
     public let progress: MLIndexProgress
 }
 
-/// Drives one model epoch from "assets known" to "assets embedded": plan → chunk →
-/// embed (injected) → upsert (injected store) → report, with a durable commit per chunk.
-///
-/// ## Restart safety
-/// The runner keeps no state of its own. Progress is derived from the store on every pass
-/// (`MLIndexPlanner.plan` skips already-indexed assets), each chunk is upserted before the
-/// next begins, and upserts are idempotent first-write-wins. An app kill, background
-/// expiration, or gate stop between chunks loses at most one chunk of compute.
-///
-/// ## Gating
-/// `shouldContinue` is consulted before every chunk. The host wires it to its scheduling
-/// reality (thermal state, Low Power Mode, memory pressure, BG-task expiration, user pause) —
-/// Core does not read platform signals. `Task` cancellation is honored at the same boundary.
-///
-/// ## Memory
-/// Peak transient footprint is one chunk of embeddings (`chunkSize × dimension × 4 B`,
-/// ~128 KiB at 64 × 512d) plus whatever the embedder holds for a single asset. Assets embed
-/// sequentially: on-device the encoder saturates the ANE per image, so concurrency here would
-/// only add memory, not throughput.
+/// Chunk-durable, idempotent indexing runner. Platform scheduling enters through
+/// `shouldContinue`; Core never reads thermal, power or background state directly.
 public actor MLIndexRunner {
     public struct Configuration: Sendable {
         /// Assets per durable commit. Smaller = finer resume granularity, more transactions.
@@ -65,19 +47,22 @@ public actor MLIndexRunner {
     private let configuration: Configuration
     private let shouldContinue: @Sendable () -> Bool
     private let onProgress: (@Sendable (MLIndexProgress) -> Void)?
+    private let now: @Sendable () -> Date
 
     public init(
         store: any MLIndexStore,
         embedder: any MLAssetEmbedder,
         configuration: Configuration = Configuration(),
         shouldContinue: @escaping @Sendable () -> Bool = { true },
-        onProgress: (@Sendable (MLIndexProgress) -> Void)? = nil
+        onProgress: (@Sendable (MLIndexProgress) -> Void)? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.store = store
         self.embedder = embedder
         self.configuration = configuration
         self.shouldContinue = shouldContinue
         self.onProgress = onProgress
+        self.now = now
     }
 
     /// Run one catch-up pass for `descriptor` over the host's full asset set.
@@ -86,14 +71,12 @@ public actor MLIndexRunner {
     /// after a crash (plans from store state). Returns when the plan drains or the gate closes.
     public func runPass(
         allAssets: [PhotoUID],
-        descriptor: MLModelDescriptor,
-        permanentFailures: Set<PhotoUID> = []
+        descriptor: MLModelDescriptor
     ) async -> MLIndexPassOutcome {
         let plan = MLIndexPlanner.plan(
             allAssets: allAssets,
             descriptor: descriptor,
-            store: store,
-            permanentFailures: permanentFailures
+            store: store
         )
 
         var progress = MLIndexProgress(
@@ -110,40 +93,98 @@ public actor MLIndexRunner {
         var completed = true
 
         for chunk in MLIndexPlanner.chunked(plan: plan, maxChunkSize: configuration.chunkSize) where !chunk.toIndex.isEmpty {
-            guard shouldContinue(), !Task.isCancelled else {
-                completed = false
-                break
-            }
-
             var records: [MLEmbeddingRecord] = []
+            var failureRecords: [MLIndexFailureRecord] = []
+            var chunkPermanentUIDs: Set<PhotoUID> = []
             records.reserveCapacity(chunk.toIndex.count)
+            failureRecords.reserveCapacity(chunk.toIndex.count)
             var chunkPermanent = 0
             var chunkTransient = 0
+            let previousFailures = store.failureRecords(for: descriptor, from: chunk.toIndex)
+            var processedCount = 0
+            var stopAfterCommit = false
 
             for uid in chunk.toIndex {
-                switch await embedder.embed(uid: uid, descriptor: descriptor) {
+                guard shouldContinue(), !Task.isCancelled else {
+                    completed = false
+                    stopAfterCommit = true
+                    break
+                }
+
+                let outcome = await embedder.embed(uid: uid, descriptor: descriptor)
+                processedCount += 1
+                switch outcome {
                 case .embedded(let vector):
-                    records.append(MLEmbeddingRecord(uid: uid, descriptor: descriptor, vector: vector))
-                case .permanentFailure:
-                    newPermanent.insert(uid)
+                    guard vector.count == descriptor.embeddingDimension,
+                          let normalized = MLVectorNormalization.normalized(vector) else {
+                        chunkPermanentUIDs.insert(uid)
+                        chunkPermanent += 1
+                        failureRecords.append(MLIndexFailureRecord(
+                            uid: uid,
+                            descriptor: descriptor,
+                            kind: .permanent,
+                            reason: "invalid embedding",
+                            attempts: 1,
+                            updatedAt: now()
+                        ))
+                        continue
+                    }
+                    records.append(MLEmbeddingRecord(uid: uid, descriptor: descriptor, vector: normalized))
+                case .permanentFailure(let reason):
+                    chunkPermanentUIDs.insert(uid)
                     chunkPermanent += 1
+                    failureRecords.append(MLIndexFailureRecord(
+                        uid: uid,
+                        descriptor: descriptor,
+                        kind: .permanent,
+                        reason: reason,
+                        attempts: 1,
+                        updatedAt: now()
+                    ))
                 case .transientFailure:
                     chunkTransient += 1
+                    let attempts = previousFailures[uid]?.attempts ?? 0
+                    failureRecords.append(MLIndexFailureRecord(
+                        uid: uid,
+                        descriptor: descriptor,
+                        kind: .transient,
+                        attempts: attempts + 1,
+                        updatedAt: now()
+                    ))
+                }
+                // Cancellation may arrive while CoreML is executing. Persist this completed
+                // asset, then return without starting another inference.
+                if Task.isCancelled {
+                    completed = false
+                    stopAfterCommit = true
+                    break
                 }
             }
 
+            guard processedCount > 0 else { break }
+
             // Durable commit before the next chunk: this is the resume point.
             let stored = store.upsert(records)
+            let storedUIDs = Array(store.indexedUIDs(for: descriptor, from: records.map(\.uid)))
+            store.clearFailures(for: descriptor, uids: storedUIDs)
+            let failuresPersisted = store.recordFailures(failureRecords)
+            if failuresPersisted {
+                newPermanent.formUnion(chunkPermanentUIDs)
+            } else {
+                completed = false
+            }
             let chunkReport = MLIndexBatchReport(
-                total: chunk.toIndex.count,
+                total: processedCount,
                 indexed: stored.indexed,
                 skippedAlreadyIndexed: stored.skippedAlreadyIndexed,
-                permanentFailure: chunkPermanent + stored.permanentFailure,
-                transientFailure: chunkTransient + stored.transientFailure
+                permanentFailure: (failuresPersisted ? chunkPermanent : 0) + stored.permanentFailure,
+                transientFailure: (failuresPersisted ? chunkTransient : failureRecords.count) + stored.transientFailure
             )
             aggregate = aggregate.merge(chunkReport)
             progress.apply(chunkReport)
             onProgress?(progress)
+
+            if stopAfterCommit { break }
         }
 
         if progress.phase == .indexing {

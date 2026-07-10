@@ -301,6 +301,166 @@
         "de": { "stringUnit": { "state": "translated", "value": "Alles in Ordnung." } }
       }
     },
+    "mlsearch.status_disabled": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: feature is off.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Off" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Aus" } }
+      }
+    },
+    "mlsearch.status_not_installed": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: selected model is not installed yet.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Model not installed" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modell nicht installiert" } }
+      }
+    },
+    "mlsearch.status_not_downloadable": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: no hosted download exists for the selected model yet.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No download available yet" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Noch kein Download verfügbar" } }
+      }
+    },
+    "mlsearch.status_downloading": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: model download is running.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Downloading model" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modell wird geladen" } }
+      }
+    },
+    "mlsearch.status_verifying": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: downloaded model is being checked.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Checking download" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Download wird geprüft" } }
+      }
+    },
+    "mlsearch.status_installing": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: verified model is being installed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Installing model" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modell wird installiert" } }
+      }
+    },
+    "mlsearch.status_preparing": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: model is being prepared for use.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Preparing model" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modell wird vorbereitet" } }
+      }
+    },
+    "mlsearch.status_indexing": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: photos are being indexed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Indexing photos" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Fotos werden indexiert" } }
+      }
+    },
+    "mlsearch.status_ready": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: ready, indexing not yet complete.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ready" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Bereit" } }
+      }
+    },
+    "mlsearch.status_complete": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: every photo is indexed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "All photos indexed" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Alle Fotos indexiert" } }
+      }
+    },
+    "mlsearch.status_switching": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: switching to another model.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Switching model" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modell wird gewechselt" } }
+      }
+    },
+    "mlsearch.status_deleting": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: local search data is being removed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Removing search data" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Suchdaten werden entfernt" } }
+      }
+    },
+    "mlsearch.status_failed_download": {
+      "extractionState": "manual",
+      "comment": "Smart Search error: the model download failed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Download failed" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Download fehlgeschlagen" } }
+      }
+    },
+    "mlsearch.status_failed_verification": {
+      "extractionState": "manual",
+      "comment": "Smart Search error: the download did not match its checksum.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Download could not be verified" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Download konnte nicht geprüft werden" } }
+      }
+    },
+    "mlsearch.status_failed_installation": {
+      "extractionState": "manual",
+      "comment": "Smart Search error: installing the model failed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Installation failed" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Installation fehlgeschlagen" } }
+      }
+    },
+    "mlsearch.status_failed_model": {
+      "extractionState": "manual",
+      "comment": "Smart Search error: the installed model failed to load.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Model could not be loaded" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modell konnte nicht geladen werden" } }
+      }
+    },
+    "mlsearch.status_failed_storage": {
+      "extractionState": "manual",
+      "comment": "Smart Search error: the local index database is unavailable.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Search index unavailable" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Suchindex nicht verfügbar" } }
+      }
+    },
+    "mlsearch.indexed_count %lld %lld": {
+      "extractionState": "manual",
+      "comment": "Indexing detail. First number: indexed photos, second: total photos.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld of %lld photos indexed" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld von %lld Fotos indexiert" } }
+      }
+    },
+    "mlsearch.privacy_note": {
+      "extractionState": "manual",
+      "comment": "Privacy statement shown in Smart Search settings.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Smart Search runs on this device. Your photos and searches never leave it." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Die intelligente Suche läuft auf diesem Gerät. Deine Fotos und Suchen verlassen es nicht." } }
+      }
+    },
+    "mlsearch.developer_model_note": {
+      "extractionState": "manual",
+      "comment": "Warning under developer-only models in the model picker.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "For development only. This model may not ship in the app." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Nur für die Entwicklung. Dieses Modell darf nicht in der App ausgeliefert werden." } }
+      }
+    },
     "albumsync.phase_idle": {
       "extractionState": "manual",
       "comment": "Album sync status: nothing running yet for this album.",

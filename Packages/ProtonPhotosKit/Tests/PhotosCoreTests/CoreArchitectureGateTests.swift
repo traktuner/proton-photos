@@ -126,9 +126,13 @@ final class CoreArchitectureGateTests: XCTestCase {
         // embedding store (same allowance as PhotosCore/UploadCore stores). CoreML/Vision/
         // UIKit/AppKit/SwiftUI/Photos/SDK are banned so a Core bug in search/indexing is
         // fixable once for every platform.
+        // CryptoKit: streaming SHA-256 verification of downloaded model artifacts (same
+        // universal-crypto allowance as MediaByteCache). Observation: the shared @Observable
+        // Smart Search controller both platform Settings surfaces bind to (same allowance as
+        // MediaLocationCore).
         CoreTargetRule(
             name: "MLSearchCore",
-            allowedImports: ["Foundation", "PhotosCore", "SQLite3"],
+            allowedImports: ["CryptoKit", "Foundation", "Observation", "PhotosCore", "SQLite3"],
             expectedDependencies: ["PhotosCore"],
             extraForbiddenTokens: ["CoreML", "Vision", "NaturalLanguage", "MLModel"]
         ),
@@ -2261,14 +2265,17 @@ final class CoreArchitectureGateTests: XCTestCase {
 
         if let targetLine = manifestLine(forTarget: "MLSearchAppleAdapter", in: manifest) {
             let dependencies = Set(dependencies(inTargetLine: targetLine))
-            if dependencies != ["MLSearchCore", "PhotosCore"] {
-                violations.append("MLSearchAppleAdapter: dependencies \(dependencies.sorted()) != [MLSearchCore, PhotosCore]")
+            if dependencies != ["MLSearchCore", "MediaFeedCore", "PhotosCore"] {
+                violations.append("MLSearchAppleAdapter: dependencies \(dependencies.sorted()) != [MLSearchCore, MediaFeedCore, PhotosCore]")
             }
         } else {
             violations.append("MLSearchAppleAdapter: missing Package.swift target declaration")
         }
 
-        let allowedImports: Set<String> = ["CoreML", "Accelerate", "CoreGraphics", "Foundation", "MLSearchCore", "PhotosCore"]
+        let allowedImports: Set<String> = [
+            "CoreML", "Accelerate", "CoreGraphics", "CryptoKit", "Foundation", "ImageIO",
+            "MLSearchCore", "MediaFeedCore", "PhotosCore", "Vision",
+        ]
         let forbiddenImports: Set<String> = ["UIKit", "AppKit", "SwiftUI", "Photos", "ProtonDriveSDK", "ProtonCore"]
 
         let files = try swiftFiles(in: adapterRoot)
@@ -2292,8 +2299,8 @@ final class CoreArchitectureGateTests: XCTestCase {
             MLSearchAppleAdapter boundary regressed:
             \(violations.joined(separator: "\n"))
 
-            The shared Apple adapter may import CoreML/Accelerate/CoreGraphics/Foundation + MLSearchCore +
-            PhotosCore only. UIKit/AppKit/SwiftUI/Photos/SDK imports belong in higher-level platform targets.
+            The shared Apple adapter may import Apple ML/image frameworks + MLSearchCore + MediaFeedCore + PhotosCore only.
+            UIKit/AppKit/SwiftUI/Photos/SDK imports belong in higher-level platform targets.
             """
         )
     }

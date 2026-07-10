@@ -197,10 +197,9 @@ let package = Package(
         .target(name: "MLSearchCore", dependencies: ["PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "MLSearchCoreTests", dependencies: ["MLSearchCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
         // MLSearchAppleAdapter: shared Apple adapter (macOS/iOS/iPadOS). May import CoreML/Accelerate/
-        // CoreGraphics/Foundation. Owns the CoreML model loading facade, compute unit policy (.cpuAndNeuralEngine),
-        // Accelerate-backed vector scoring implementation, and model availability/diagnostic surface.
-        // Stubs compile and will be wired to generated model classes in Stage 1B (license-permitting).
-        .target(name: "MLSearchAppleAdapter", dependencies: ["MLSearchCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
+        // CoreGraphics/Foundation and MediaFeedCore. Owns cache-only image sourcing, CoreML model loading,
+        // compute policy (.cpuAndNeuralEngine), Accelerate scoring, and the shared Apple runtime factory.
+        .target(name: "MLSearchAppleAdapter", dependencies: ["MLSearchCore", "MediaFeedCore", "PhotosCore"], resources: [.process("Resources")], swiftSettings: disableDynamicActorIsolation),
         .testTarget(name: "MLSearchAppleAdapterTests", dependencies: ["MLSearchAppleAdapter", "MLSearchCore", "PhotosCore"], swiftSettings: disableDynamicActorIsolation),
     ]
 )
