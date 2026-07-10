@@ -261,7 +261,11 @@ final class OfflineLibraryManager {
     /// streamed video blocks - leaving the state as if freshly signed in (the account key is kept, so the grid
     /// simply re-crawls). Never called implicitly - only from the explicit "Delete Offline Cache…" button.
     func deleteOfflineCache() async {
-        await cache.clear()
+        if let feed {
+            await feed.clearCacheAndRestartPrefetch()
+        } else {
+            await cache.clear()
+        }
         await previewCache.clear()
         await originalsCache.clear()
         VideoByteRangeCache.shared.clearAll()   // also drop streamed video blocks

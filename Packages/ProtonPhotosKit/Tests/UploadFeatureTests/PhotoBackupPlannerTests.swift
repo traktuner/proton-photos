@@ -93,6 +93,26 @@ final class PhotoBackupPlannerTests: XCTestCase {
         XCTAssertEqual(plan.pairedVideo?.uploadFilename, "IMG_2000.MOV")
     }
 
+    func testCatalogRoundTripRetainsExternalIdentityForProofReplay() throws {
+        var asset = info(
+            modified: Date(timeIntervalSince1970: 1_700_000_100.1234),
+            resources: [.init(role: .originalPhoto, originalFilename: "IMG_1.HEIC")]
+        )
+        asset.cloudIdentifier = "icloud-asset"
+        let entry = PhotoLibraryCatalogMapper.entry(for: asset, observedAt: Date())
+        let replayed = PhotoLibraryCatalogMapper.info(for: entry)
+        let candidate = try XCTUnwrap(PhotoBackupAssetPlanner.candidate(for: replayed))
+
+        XCTAssertEqual(candidate.snapshot.externalIdentity?.identifier, "icloud-asset")
+        XCTAssertEqual(
+            candidate.snapshot.externalIdentity,
+            UploadBackupExternalIdentity(
+                identifier: "icloud-asset",
+                modificationDate: Date(timeIntervalSince1970: 1_700_000_100.1234)
+            )
+        )
+    }
+
     // MARK: Edit evidence (safe over cheap)
 
     func testUneditedAssetGetsStableFingerprintEvidence() {
@@ -138,7 +158,7 @@ final class PhotoBackupPlannerTests: XCTestCase {
 
     // MARK: Metadata-only drift skips export entirely (preflight round trip)
 
-    func testMetadataOnlyChangeClassifiesAlreadyBackedUpWithoutRecheck() async {
+    func testMetadataOnlyChangeClassifiesAlreadyBackedUpWithoutRecheck() async throws {
         final class MemoryStore: UploadBackupStateStore, @unchecked Sendable {
             private let lock = NSLock()
             private var rows: [UploadSourceIdentity: [UploadBackupRevision: UploadBackupAssetRecord]] = [:]
@@ -148,8 +168,9 @@ final class PhotoBackupPlannerTests: XCTestCase {
             func hasAnyRecord(for source: UploadSourceIdentity) -> Bool {
                 lock.withLock { !(rows[source]?.isEmpty ?? true) }
             }
-            func upsert(_ record: UploadBackupAssetRecord) {
+            func upsert(_ record: UploadBackupAssetRecord) -> Bool {
                 lock.withLock { rows[record.source, default: [:]][record.revision] = record }
+                return true
             }
             func count() -> Int { lock.withLock { rows.values.reduce(0) { $0 + $1.count } } }
         }
@@ -162,9 +183,9 @@ final class PhotoBackupPlannerTests: XCTestCase {
 
         let index = UploadBackupPreflightIndex(store: MemoryStore())
         let originalSnapshot = PhotoBackupAssetPlanner.candidate(for: original)!.snapshot
-        await index.markBackedUp(originalSnapshot)
+        try await index.markBackedUp(originalSnapshot)
 
-        let decision = await index.classify(PhotoBackupAssetPlanner.candidate(for: favorited)!.snapshot)
+        let decision = try await index.classify(PhotoBackupAssetPlanner.candidate(for: favorited)!.snapshot)
         XCTAssertEqual(decision, .alreadyBackedUp,
                        "a favorite toggle must not export, hash, or query anything")
     }

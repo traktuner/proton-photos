@@ -7,10 +7,9 @@ import PhotosCore
 ///
 /// The row is at most: an icon, a headline (the phase), one subtitle line, and a progress bar.
 /// Design contract:
-/// - The headline tells the truth about the phase, and the single distinction that MUST always be
-///   right is checking vs uploading. It is driven by whether bytes are ACTUALLY moving
-///   (`uploadingItemName`), never by a count heuristic - so it can never claim "backing up" while it
-///   is only hashing/checking, nor hide a real upload behind "checking".
+/// - Every active phase uses one stable "Backup in progress" headline. The subtitle carries only
+///   durable counts plus an explicitly labelled per-file percentage while bytes actually move, so
+///   fast checking/uploading alternation never makes the row flicker or misstate overall progress.
 /// - The subtitle is one line: "<backed up> of <total>", and ONLY while a real byte transfer is in
 ///   flight it appends the current file's upload percentage ("· 43 %"). No filename is ever shown -
 ///   a filename next to "backing up" reads as a promise the item is safe when it is only mid-check.
@@ -75,14 +74,11 @@ public struct BackupStatusPresentation: Sendable, Equatable {
 
         switch status.phase {
         case .scanning:
-            self.init(headlineKey: "backup.phase_scanning", isActive: true, accessory: .activity,
+            self.init(headlineKey: "backup.status_active", isActive: true, accessory: .activity,
                       progressFraction: nil, backedUp: status.backedUp, total: status.totalConsidered ?? 0)
 
         case .checking, .uploading:
-            // The one distinction that must always be right: bytes actually moving => "backing up".
-            // No attention line mid-run - failures self-heal on the next pass; only the terminal
-            // needsAttention state surfaces what genuinely couldn't be backed up.
-            self.init(headlineKey: uploadingNow ? "backup.phase_uploading" : "backup.phase_checking",
+            self.init(headlineKey: "backup.status_active",
                       isActive: true, accessory: .activity,
                       progressFraction: status.fractionCompleted,
                       backedUp: status.backedUp, total: status.totalConsidered ?? 0,
@@ -117,6 +113,7 @@ public struct BackupStatusPresentation: Sendable, Equatable {
 
     public var localizedHeadline: String {
         switch headlineKey {
+        case "backup.status_active": return L10n.string("backup.status_active")
         case "backup.phase_scanning": return L10n.string("backup.phase_scanning")
         case "backup.phase_checking": return L10n.string("backup.phase_checking")
         case "backup.phase_uploading": return L10n.string("backup.phase_uploading")

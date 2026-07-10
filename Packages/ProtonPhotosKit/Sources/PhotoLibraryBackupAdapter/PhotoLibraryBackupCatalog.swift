@@ -41,8 +41,8 @@ public struct PhotoLibraryBackupCatalog: UploadBackupAssetCatalog {
                     }
                     let upperBound = min(index + chunkSize, total)
                     autoreleasepool {
-                        for position in index ..< upperBound {
-                            let info = PhotoKitAssetMapper.info(for: fetchResult.object(at: position))
+                        let assets = (index ..< upperBound).map { fetchResult.object(at: $0) }
+                        for info in PhotoKitAssetMapper.infos(for: assets) {
                             if let candidate = PhotoBackupAssetPlanner.candidate(for: info) {
                                 continuation.yield(candidate)
                             }

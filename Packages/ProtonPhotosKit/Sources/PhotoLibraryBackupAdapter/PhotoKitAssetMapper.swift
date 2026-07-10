@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// `PHAssetResource.assetResources(for:)` is synchronous and never triggers downloads.
 enum PhotoKitAssetMapper {
 
-    static func info(for asset: PHAsset) -> PhotoBackupAssetInfo {
+    static func info(for asset: PHAsset, cloudIdentifier: String? = nil) -> PhotoBackupAssetInfo {
         let resources = PHAssetResource.assetResources(for: asset).map { resource in
             PhotoBackupAssetInfo.Resource(
                 role: role(for: resource.type),
@@ -23,8 +23,23 @@ enum PhotoKitAssetMapper {
             durationSeconds: asset.duration,
             isLivePhoto: asset.mediaSubtypes.contains(.photoLive),
             isVideo: asset.mediaType == .video,
-            resources: resources
+            resources: resources,
+            cloudIdentifier: cloudIdentifier
         )
+    }
+
+    /// Maps a PhotoKit chunk with one cloud-identifier query instead of one query per asset.
+    static func infos(for assets: [PHAsset]) -> [PhotoBackupAssetInfo] {
+        guard !assets.isEmpty else { return [] }
+        let identifiers = assets.map(\.localIdentifier)
+        let mappings = PHPhotoLibrary.shared().cloudIdentifierMappings(
+            forLocalIdentifiers: identifiers
+        )
+        return assets.map { asset in
+            let cloudIdentifier = mappings[asset.localIdentifier]
+                .flatMap { try? $0.get().stringValue }
+            return info(for: asset, cloudIdentifier: cloudIdentifier)
+        }
     }
 
     static func role(for type: PHAssetResourceType) -> PhotoBackupAssetInfo.Resource.Role {

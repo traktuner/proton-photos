@@ -32,7 +32,7 @@ echo "Preflight: generating Xcode project"
 xcodegen generate >/dev/null
 
 echo "Preflight: building ProtonPhotosMobile shell for generic iOS"
-SKIP_XCODEGEN=1 ./scripts/verify-ios-app-shell.sh
+SKIP_XCODEGEN=1 bash ./scripts/verify-ios-app-shell.sh
 
 SIGNING_IDENTITY_HASH="${PROTONPHOTOS_CODE_SIGN_IDENTITY:-}"
 SIGNING_IDENTITY_NAME=""

@@ -357,6 +357,8 @@ private struct AlbumLinkResponse: Decodable {
 /// than failing the whole batch decode (same posture as the trash listing DTO).
 struct AlbumPhotoLinkBody: Decodable {
     let linkID: String?
+    let state: Int?
+    let type: Int?
     let name: String?
     let nodeKey: String?
     let nodePassphrase: String?
@@ -371,7 +373,7 @@ struct AlbumPhotoLinkBody: Decodable {
         enum CodingKeys: String, CodingKey { case activeRevision = "ActiveRevision" }
     }
     enum CodingKeys: String, CodingKey {
-        case linkID = "LinkID", name = "Name", nodeKey = "NodeKey",
+        case linkID = "LinkID", state = "State", type = "Type", name = "Name", nodeKey = "NodeKey",
              nodePassphrase = "NodePassphrase", xAttr = "XAttr", fileProperties = "FileProperties"
     }
 }

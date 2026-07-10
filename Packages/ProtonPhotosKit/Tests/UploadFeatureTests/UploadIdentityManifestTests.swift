@@ -222,6 +222,295 @@ final class UploadIdentityManifestTests: XCTestCase {
         XCTAssertEqual(reopened.count(), 0, "a newer on-disk schema must reset the (rehashable) manifest")
     }
 
+    func testRemoteContentIndexAndCheckpointSurviveReopen() throws {
+        let url = tempDir.appendingPathComponent(UploadIdentityManifestStore.databaseFileName)
+        let checkpoint = UploadRemoteContentIndexCheckpoint(
+            eventID: "event-100",
+            refreshedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let records = [
+            UploadRemoteContentIndexRecord(
+                contentHash: "content-a",
+                hashKeyEpoch: "epoch-1",
+                remoteLinkID: "link-a"
+            ),
+            UploadRemoteContentIndexRecord(
+                contentHash: "content-b",
+                hashKeyEpoch: "epoch-1",
+                remoteLinkID: "link-b"
+            )
+        ]
+
+        do {
+            let store = try XCTUnwrap(UploadIdentityManifestStore(url: url))
+            XCTAssertTrue(store.replaceRemoteContentIndex(
+                records,
+                unresolvedRemoteLinkIDs: [],
+                hashKeyEpoch: "epoch-1",
+                checkpoint: checkpoint
+            ))
+            store.close()
+        }
+
+        let reopened = try XCTUnwrap(UploadIdentityManifestStore(url: url))
+        XCTAssertEqual(
+            reopened.remoteContentRecord(contentHash: "content-a", hashKeyEpoch: "epoch-1"),
+            records[0]
+        )
+        XCTAssertEqual(reopened.remoteContentIndexCheckpoint(hashKeyEpoch: "epoch-1"), checkpoint)
+        XCTAssertNil(reopened.remoteContentRecord(contentHash: "content-a", hashKeyEpoch: "epoch-2"))
+        XCTAssertNil(reopened.remoteContentIndexCheckpoint(hashKeyEpoch: "epoch-2"))
+        XCTAssertFalse(reopened.hasUnresolvedRemoteContent(hashKeyEpoch: "epoch-1"))
+    }
+
+    func testRemoteAssetProofSurvivesReopenAndRelatedEventInvalidatesWholeCompound() throws {
+        let url = tempDir.appendingPathComponent(UploadIdentityManifestStore.databaseFileName)
+        let identity = UploadBackupExternalIdentity(
+            identifier: "icloud-asset",
+            modificationDate: Date(timeIntervalSince1970: 1_700_000_000.123)
+        )
+        let proof = UploadRemoteAssetIndexRecord(
+            externalIdentity: identity,
+            resourceCount: 2,
+            remoteLinkIDs: ["primary", "paired"],
+            hashKeyEpoch: "epoch-1"
+        )
+        let checkpoint = UploadRemoteContentIndexCheckpoint(
+            eventID: "event-100",
+            refreshedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+
+        do {
+            let store = try XCTUnwrap(UploadIdentityManifestStore(url: url))
+            XCTAssertTrue(store.replaceRemoteContentIndex(
+                [],
+                remoteAssetRecords: [proof],
+                unresolvedRemoteLinkIDs: [],
+                hashKeyEpoch: "epoch-1",
+                checkpoint: checkpoint
+            ))
+            store.close()
+        }
+
+        let reopened = try XCTUnwrap(UploadIdentityManifestStore(url: url))
+        XCTAssertTrue(reopened.hasRemoteAssetIndexCheckpoint(hashKeyEpoch: "epoch-1"))
+        XCTAssertEqual(
+            reopened.remoteAssetRecords(for: [identity], hashKeyEpoch: "epoch-1")[identity],
+            proof
+        )
+
+        XCTAssertTrue(reopened.applyRemoteContentIndexChanges(
+            upserting: [],
+            upsertingRemoteAssetRecords: [],
+            unresolvedRemoteLinkIDs: [],
+            removingRemoteLinkIDs: ["paired"],
+            hashKeyEpoch: "epoch-1",
+            checkpoint: UploadRemoteContentIndexCheckpoint(
+                eventID: "event-101",
+                refreshedAt: Date(timeIntervalSince1970: 1_700_000_200)
+            )
+        ))
+        XCTAssertNil(reopened.remoteAssetRecords(for: [identity], hashKeyEpoch: "epoch-1")[identity])
+    }
+
+    func testMalformedRemoteAssetProofRollsBackWithCheckpoint() throws {
+        let store = try makeStore()
+        let identity = UploadBackupExternalIdentity(
+            identifier: "icloud-asset",
+            modificationDate: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let malformed = UploadRemoteAssetIndexRecord(
+            externalIdentity: identity,
+            resourceCount: 2,
+            remoteLinkIDs: ["only-one-link"],
+            hashKeyEpoch: "epoch-1"
+        )
+        XCTAssertFalse(store.replaceRemoteContentIndex(
+            [],
+            remoteAssetRecords: [malformed],
+            unresolvedRemoteLinkIDs: [],
+            hashKeyEpoch: "epoch-1",
+            checkpoint: UploadRemoteContentIndexCheckpoint(
+                eventID: "event-bad",
+                refreshedAt: Date()
+            )
+        ))
+        XCTAssertFalse(store.hasRemoteAssetIndexCheckpoint(hashKeyEpoch: "epoch-1"))
+        XCTAssertTrue(store.remoteAssetRecords(for: [identity], hashKeyEpoch: "epoch-1").isEmpty)
+    }
+
+    func testRemoteContentDeltaRemovesOnlyChangedLinkAndAdvancesCheckpoint() throws {
+        let store = try makeStore()
+        let initialCheckpoint = UploadRemoteContentIndexCheckpoint(
+            eventID: "event-100",
+            refreshedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        XCTAssertTrue(store.replaceRemoteContentIndex(
+            [
+                UploadRemoteContentIndexRecord(
+                    contentHash: "shared-content",
+                    hashKeyEpoch: "epoch-1",
+                    remoteLinkID: "link-a"
+                ),
+                UploadRemoteContentIndexRecord(
+                    contentHash: "shared-content",
+                    hashKeyEpoch: "epoch-1",
+                    remoteLinkID: "link-b"
+                )
+            ],
+            unresolvedRemoteLinkIDs: [],
+            hashKeyEpoch: "epoch-1",
+            checkpoint: initialCheckpoint
+        ))
+
+        let nextCheckpoint = UploadRemoteContentIndexCheckpoint(
+            eventID: "event-101",
+            refreshedAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        let replacement = UploadRemoteContentIndexRecord(
+            contentHash: "replacement-content",
+            hashKeyEpoch: "epoch-1",
+            remoteLinkID: "link-a"
+        )
+        XCTAssertTrue(store.applyRemoteContentIndexChanges(
+            upserting: [replacement],
+            unresolvedRemoteLinkIDs: [],
+            removingRemoteLinkIDs: ["link-a"],
+            hashKeyEpoch: "epoch-1",
+            checkpoint: nextCheckpoint
+        ))
+
+        XCTAssertEqual(
+            store.remoteContentRecord(contentHash: "shared-content", hashKeyEpoch: "epoch-1")?.remoteLinkID,
+            "link-b",
+            "removing one remote link must preserve another valid copy of the same bytes"
+        )
+        XCTAssertEqual(
+            store.remoteContentRecord(contentHash: "replacement-content", hashKeyEpoch: "epoch-1"),
+            replacement
+        )
+        XCTAssertEqual(store.remoteContentIndexCheckpoint(hashKeyEpoch: "epoch-1"), nextCheckpoint)
+    }
+
+    func testInvalidRemoteContentDeltaRollsBackRowsAndCheckpoint() throws {
+        let store = try makeStore()
+        let initial = UploadRemoteContentIndexRecord(
+            contentHash: "content-a",
+            hashKeyEpoch: "epoch-1",
+            remoteLinkID: "link-a"
+        )
+        let initialCheckpoint = UploadRemoteContentIndexCheckpoint(
+            eventID: "event-100",
+            refreshedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        XCTAssertTrue(store.replaceRemoteContentIndex(
+            [initial],
+            unresolvedRemoteLinkIDs: [],
+            hashKeyEpoch: "epoch-1",
+            checkpoint: initialCheckpoint
+        ))
+
+        let validPrefix = UploadRemoteContentIndexRecord(
+            contentHash: "content-b",
+            hashKeyEpoch: "epoch-1",
+            remoteLinkID: "link-b"
+        )
+        let invalidTail = UploadRemoteContentIndexRecord(
+            contentHash: "",
+            hashKeyEpoch: "epoch-1",
+            remoteLinkID: "link-c"
+        )
+        XCTAssertFalse(store.applyRemoteContentIndexChanges(
+            upserting: [validPrefix, invalidTail],
+            unresolvedRemoteLinkIDs: [],
+            removingRemoteLinkIDs: ["link-a"],
+            hashKeyEpoch: "epoch-1",
+            checkpoint: UploadRemoteContentIndexCheckpoint(
+                eventID: "event-101",
+                refreshedAt: Date(timeIntervalSince1970: 1_700_000_100)
+            )
+        ))
+
+        XCTAssertEqual(
+            store.remoteContentRecord(contentHash: "content-a", hashKeyEpoch: "epoch-1"),
+            initial
+        )
+        XCTAssertNil(store.remoteContentRecord(contentHash: "content-b", hashKeyEpoch: "epoch-1"))
+        XCTAssertEqual(store.remoteContentIndexCheckpoint(hashKeyEpoch: "epoch-1"), initialCheckpoint)
+    }
+
+    func testLocalRemoteContentUpsertDoesNotMoveServerCheckpoint() throws {
+        let store = try makeStore()
+        let checkpoint = UploadRemoteContentIndexCheckpoint(
+            eventID: "event-100",
+            refreshedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        XCTAssertTrue(store.replaceRemoteContentIndex(
+            [],
+            unresolvedRemoteLinkIDs: [],
+            hashKeyEpoch: "epoch-1",
+            checkpoint: checkpoint
+        ))
+
+        let uploaded = UploadRemoteContentIndexRecord(
+            contentHash: "new-upload",
+            hashKeyEpoch: "epoch-1",
+            remoteLinkID: "link-new"
+        )
+        XCTAssertTrue(store.upsertRemoteContentRecord(uploaded))
+        XCTAssertEqual(
+            store.remoteContentRecord(contentHash: "new-upload", hashKeyEpoch: "epoch-1"),
+            uploaded
+        )
+        XCTAssertEqual(
+            store.remoteContentIndexCheckpoint(hashKeyEpoch: "epoch-1"),
+            checkpoint,
+            "a local upload is not proof that every remote event has been consumed"
+        )
+    }
+
+    func testUnresolvedRemoteLinksPersistAndDeltaCanResolveThem() throws {
+        let url = tempDir.appendingPathComponent(UploadIdentityManifestStore.databaseFileName)
+        let firstCheckpoint = UploadRemoteContentIndexCheckpoint(
+            eventID: "event-100",
+            refreshedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        do {
+            let store = try XCTUnwrap(UploadIdentityManifestStore(url: url))
+            XCTAssertTrue(store.replaceRemoteContentIndex(
+                [],
+                unresolvedRemoteLinkIDs: ["legacy-link"],
+                hashKeyEpoch: "epoch-1",
+                checkpoint: firstCheckpoint
+            ))
+            XCTAssertTrue(store.hasUnresolvedRemoteContent(hashKeyEpoch: "epoch-1"))
+            store.close()
+        }
+
+        let reopened = try XCTUnwrap(UploadIdentityManifestStore(url: url))
+        XCTAssertTrue(reopened.hasUnresolvedRemoteContent(hashKeyEpoch: "epoch-1"))
+        let resolved = UploadRemoteContentIndexRecord(
+            contentHash: "legacy-content",
+            hashKeyEpoch: "epoch-1",
+            remoteLinkID: "legacy-link"
+        )
+        XCTAssertTrue(reopened.applyRemoteContentIndexChanges(
+            upserting: [resolved],
+            unresolvedRemoteLinkIDs: [],
+            removingRemoteLinkIDs: ["legacy-link"],
+            hashKeyEpoch: "epoch-1",
+            checkpoint: UploadRemoteContentIndexCheckpoint(
+                eventID: "event-101",
+                refreshedAt: Date(timeIntervalSince1970: 1_700_000_100)
+            )
+        ))
+        XCTAssertFalse(reopened.hasUnresolvedRemoteContent(hashKeyEpoch: "epoch-1"))
+        XCTAssertEqual(
+            reopened.remoteContentRecord(contentHash: "legacy-content", hashKeyEpoch: "epoch-1"),
+            resolved
+        )
+    }
+
     // MARK: - Cache validity policy
 
     private func descriptor(

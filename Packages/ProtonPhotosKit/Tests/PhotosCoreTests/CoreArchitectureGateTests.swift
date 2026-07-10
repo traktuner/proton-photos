@@ -53,7 +53,9 @@ final class CoreArchitectureGateTests: XCTestCase {
         ),
         CoreTargetRule(
             name: "MediaFeedCore",
-            allowedImports: ["Foundation", "MediaByteCache", "MediaDecodingCore", "PhotosCore"],
+            // CryptoKit hashes coverage identifiers before they reach disk; it is universal
+            // Apple-platform infrastructure, not platform UI or hardware policy.
+            allowedImports: ["CryptoKit", "Foundation", "MediaByteCache", "MediaDecodingCore", "PhotosCore"],
             expectedDependencies: ["MediaByteCache", "MediaDecodingCore", "PhotosCore"],
             extraForbiddenTokens: []
         ),

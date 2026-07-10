@@ -79,10 +79,19 @@ public final class PhotoLibraryChangeMonitor: NSObject, PHPhotoLibraryChangeObse
             var changed: Set<String> = []
             var deleted: Set<String> = []
             for change in try library.fetchPersistentChanges(since: previous) {
-                guard let details = try? change.changeDetails(for: .asset) else { continue }
-                changed.formUnion(details.insertedLocalIdentifiers)
-                changed.formUnion(details.updatedLocalIdentifiers)
-                deleted.formUnion(details.deletedLocalIdentifiers)
+                do {
+                    let details = try change.changeDetails(for: .asset)
+                    changed.formUnion(details.insertedLocalIdentifiers)
+                    changed.formUnion(details.updatedLocalIdentifiers)
+                    deleted.formUnion(details.deletedLocalIdentifiers)
+                } catch {
+                    // Advancing past one unreadable history entry could permanently miss an asset.
+                    // Fall back to the stable full scan and commit the token only after that succeeds.
+                    return PreparedChangeSet(
+                        changes: ChangeSet(changedIdentifiers: [], deletedIdentifiers: [], requiresFullRescan: true),
+                        commitToken: currentToken
+                    )
+                }
             }
             changed.subtract(deleted)
             return PreparedChangeSet(

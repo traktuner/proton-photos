@@ -40,7 +40,12 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         LibraryDatabaseLocation.purgeAccountData(uid: uid, in: policy.libraryDatabaseBaseDirectory)
     }
 
-    init(session: ProtonSession, store: SessionKeychainStore, policy: ProtonDriveBackendPolicy) async throws {
+    init(
+        session: ProtonSession,
+        store: SessionKeychainStore,
+        policy: ProtonDriveBackendPolicy,
+        deviceIdentityStore: DeviceIdentityKeychainStore = DeviceIdentityKeychainStore()
+    ) async throws {
         let driveSession = DriveSession(
             session: session,
             store: store,
@@ -95,9 +100,13 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
 
         // Keep decrypted SDK secret material in memory only. Node metadata may be cached on disk for
         // startup speed, but share/node/content keys are re-derived on cold start instead of persisted.
+        let uploadClientUID = UploadClientIdentity.make(
+            accountUID: session.uid,
+            deviceIdentifier: deviceIdentityStore.loadOrCreate()
+        )
         let config = ProtonDriveClientConfiguration(
             baseURL: "https://drive-api.proton.me/",   // trailing slash required by the C# core
-            clientUID: session.uid,
+            clientUID: uploadClientUID,
             entityCachePath: caches.appendingPathComponent("entities.sqlite").path
         )
 
@@ -598,7 +607,11 @@ extension DriveSDKBridge: PhotoUploading {
             DebugLog.log("[Dedupe] manifest store unavailable - uploads disabled")
             return DedupeUnavailableIdentityResolver()
         }
-        let service = ProtonUploadDedupeService(session: driveSession, crypto: crypto) { [self] in
+        let service = ProtonUploadDedupeService(
+            session: driveSession,
+            crypto: crypto,
+            contentIndexStore: store
+        ) { [self] in
             try await photosShareContext()
         }
         return UploadDedupePipeline(store: store, checker: service)

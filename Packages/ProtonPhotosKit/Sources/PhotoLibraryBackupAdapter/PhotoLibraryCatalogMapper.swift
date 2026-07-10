@@ -14,6 +14,7 @@ public enum PhotoLibraryCatalogMapper {
     public static func entry(for info: PhotoBackupAssetInfo, observedAt: Date) -> PhotoLibraryCatalogEntry {
         PhotoLibraryCatalogEntry(
             localIdentifier: info.localIdentifier,
+            cloudIdentifier: info.cloudIdentifier,
             creationDate: info.creationDate,
             modificationDate: info.modificationDate,
             pixelWidth: info.pixelWidth,
@@ -33,6 +34,30 @@ public enum PhotoLibraryCatalogMapper {
             metadataRevision: PhotoBackupAssetPlanner.metadataRevision(for: info).rawValue,
             firstSeenAt: observedAt,
             lastSeenAt: observedAt
+        )
+    }
+
+    /// Rehydrates the pure planning input from the durable inventory. This never reads PhotoKit or
+    /// media bytes; it is used only to replay an incomplete queue after launch or an app upgrade.
+    public static func info(for entry: PhotoLibraryCatalogEntry) -> PhotoBackupAssetInfo {
+        PhotoBackupAssetInfo(
+            localIdentifier: entry.localIdentifier,
+            creationDate: entry.creationDate,
+            modificationDate: entry.modificationDate,
+            pixelWidth: entry.pixelWidth,
+            pixelHeight: entry.pixelHeight,
+            durationSeconds: entry.durationSeconds,
+            isLivePhoto: entry.isLivePhoto,
+            isVideo: entry.mediaKind == .video,
+            resources: entry.resources.map {
+                PhotoBackupAssetInfo.Resource(
+                    role: PhotoBackupAssetInfo.Resource.Role(rawValue: $0.role) ?? .other,
+                    originalFilename: $0.originalFilename,
+                    mimeType: $0.mimeType,
+                    ordinal: $0.ordinal
+                )
+            },
+            cloudIdentifier: entry.cloudIdentifier
         )
     }
 }

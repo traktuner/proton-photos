@@ -21,8 +21,9 @@ final class FolderBackupIntegrationTests: XCTestCase {
             lock.withLock { !(rows[source]?.isEmpty ?? true) }
         }
 
-        func upsert(_ record: UploadBackupAssetRecord) {
+        func upsert(_ record: UploadBackupAssetRecord) -> Bool {
             lock.withLock { rows[record.source, default: [:]][record.revision] = record }
+            return true
         }
 
         func count() -> Int {

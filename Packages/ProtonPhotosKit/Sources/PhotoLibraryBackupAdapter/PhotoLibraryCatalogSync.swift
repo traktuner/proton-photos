@@ -12,11 +12,31 @@ public protocol PhotoLibraryAssetEnumerator: Sendable {
     /// yielded chunk is at most `chunkSize` assets so transient PhotoKit objects and catalog writes
     /// stay bounded on 20k+ libraries.
     func infoChunks(identifiers: [String]?, startOffset: Int, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error>
+    /// Cheap full-library identifier snapshot. Production reads only `localIdentifier`; source
+    /// metadata and resources are materialized later in bounded chunks from the durable snapshot.
+    func identifierChunks(chunkSize: Int) -> AsyncThrowingStream<[String], any Error>
 }
 
 public extension PhotoLibraryAssetEnumerator {
     func infoChunks(identifiers: [String]?, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
         infoChunks(identifiers: identifiers, startOffset: 0, chunkSize: chunkSize)
+    }
+
+    func identifierChunks(chunkSize: Int) -> AsyncThrowingStream<[String], any Error> {
+        let source = infoChunks(identifiers: nil, startOffset: 0, chunkSize: chunkSize)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await chunk in source {
+                        continuation.yield(chunk.map(\.localIdentifier))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 }
 
@@ -50,13 +70,36 @@ public struct PhotoKitAssetEnumerator: PhotoLibraryAssetEnumerator {
                     }
                     let upperBound = min(index + chunkSize, total)
                     autoreleasepool {
-                        var chunk: [PhotoBackupAssetInfo] = []
-                        chunk.reserveCapacity(upperBound - index)
-                        for position in index ..< upperBound {
-                            chunk.append(PhotoKitAssetMapper.info(for: fetchResult.object(at: position)))
-                        }
+                        let assets = (index ..< upperBound).map { fetchResult.object(at: $0) }
+                        let chunk = PhotoKitAssetMapper.infos(for: assets)
                         continuation.yield(chunk)
                     }
+                    index = upperBound
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    public func identifierChunks(chunkSize: Int) -> AsyncThrowingStream<[String], any Error> {
+        let chunkSize = max(1, chunkSize)
+        return AsyncThrowingStream { continuation in
+            let task = Task.detached(priority: .utility) {
+                let options = PHFetchOptions()
+                options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+                let result = PHAsset.fetchAssets(with: options)
+                var index = 0
+                while index < result.count {
+                    if Task.isCancelled {
+                        continuation.finish(throwing: CancellationError())
+                        return
+                    }
+                    let upperBound = min(index + chunkSize, result.count)
+                    let identifiers = autoreleasepool {
+                        (index ..< upperBound).map { result.object(at: $0).localIdentifier }
+                    }
+                    continuation.yield(identifiers)
                     index = upperBound
                 }
                 continuation.finish()
@@ -105,6 +148,9 @@ public struct PhotoLibraryCatalogSync: Sendable {
     /// targeted incremental scan (missing requested ids are marked removed). Returns the final tally.
     @discardableResult
     public func run(engine: any UploadBackupCandidateEnqueueing, identifiers: [String]? = nil) async throws -> PhotoLibraryCatalogProgress {
+        guard store.isOperational() else {
+            throw UploadError.backend("Photo library catalog is unavailable")
+        }
         let observedAt = now()
         var progress = PhotoLibraryCatalogProgress()
 
@@ -113,41 +159,100 @@ public struct PhotoLibraryCatalogSync: Sendable {
             var seen: Set<String>? = []
             for try await chunk in enumerator.infoChunks(identifiers: identifiers, startOffset: 0, chunkSize: chunkSize) {
                 try Task.checkCancellation()
-                await ingest(chunk, observedAt: observedAt, engine: engine, progress: &progress, seen: &seen)
+                try await ingest(chunk, observedAt: observedAt, engine: engine, progress: &progress, seen: &seen)
             }
             let missing = Set(identifiers).subtracting(seen ?? [])
             if !missing.isEmpty {
-                progress.removed += store.markRemoved(Array(missing), removedAt: observedAt)
+                let result = store.markRemoved(Array(missing), removedAt: observedAt)
+                guard result.succeeded else {
+                    throw UploadError.backend("Photo library removals could not be saved")
+                }
+                progress.removed += result.affectedRows
             }
             onProgress?(progress)
             return progress
         }
 
-        // --- Full library scan: RESUMABLE across interruptions. ---
-        // A full scan of a large library rarely finishes in one foreground/BG window. Resume the
-        // in-progress epoch (continue from its cursor) or start a fresh one. Crucially the removal
-        // sweep uses the EPOCH START as its cutoff — never this single run's clock — so assets
-        // observed by an EARLIER run of the same epoch are not falsely swept as removed when a later
-        // run finally reaches the end. Enumeration is newest-first; a resumed run skips `cursor`
-        // already-observed assets.
-        let resume = store.fullScanProgress()
-        let epochStart = resume?.epochStart ?? observedAt
-        var cursor = resume?.cursor ?? 0
-        if resume == nil {
-            store.recordFullScanProgress(PhotoLibraryFullScanProgress(epochStart: epochStart, cursor: 0))
+        // --- Full library scan: stable and resumable across interruptions. ---
+        // A numeric cursor over a live PHFetchResult is unsafe: deleting an earlier item shifts an
+        // unseen item behind the cursor. Persist the epoch's identifiers first, then resolve that
+        // immutable list in chunks. New assets are handled independently by persistent changes.
+        let existingProgress = store.fullScanProgress()
+        guard store.isOperational() else {
+            throw UploadError.backend("Photo library scan state is unavailable")
         }
-        var noSeen: Set<String>?
-        for try await chunk in enumerator.infoChunks(identifiers: nil, startOffset: cursor, chunkSize: chunkSize) {
+        if existingProgress == nil {
+            guard store.beginFullScanSnapshot(epochStart: observedAt) else {
+                throw UploadError.backend("Photo library scan snapshot could not be started")
+            }
+            do {
+                for try await identifiers in enumerator.identifierChunks(chunkSize: chunkSize) {
+                    try Task.checkCancellation()
+                    guard store.appendFullScanSnapshotIdentifiers(identifiers) else {
+                        throw UploadError.backend("Photo library scan snapshot could not be saved")
+                    }
+                }
+                guard store.finishFullScanSnapshot() else {
+                    throw UploadError.backend("Photo library scan snapshot could not be published")
+                }
+            } catch {
+                _ = store.clearFullScanResumePoint()
+                throw error
+            }
+        }
+
+        guard let resume = store.fullScanProgress() else {
+            throw UploadError.backend("Photo library scan snapshot is unavailable")
+        }
+        guard store.isOperational() else {
+            throw UploadError.backend("Photo library scan state is unavailable")
+        }
+        let epochStart = resume.epochStart
+        let total = store.fullScanSnapshotCount()
+        guard store.isOperational() else {
+            throw UploadError.backend("Photo library scan snapshot could not be read")
+        }
+        var cursor = resume.cursor
+        while cursor < total {
             try Task.checkCancellation()
-            await ingest(chunk, observedAt: observedAt, engine: engine, progress: &progress, seen: &noSeen)
-            cursor += chunk.count
-            // Persist the frontier: an interruption after this chunk resumes here, not at zero.
-            store.recordFullScanProgress(PhotoLibraryFullScanProgress(epochStart: epochStart, cursor: cursor))
+            let identifiers = store.fullScanSnapshotIdentifiers(startingAt: cursor, limit: chunkSize)
+            guard store.isOperational() else {
+                throw UploadError.backend("Photo library scan snapshot could not be read")
+            }
+            guard !identifiers.isEmpty else {
+                _ = store.clearFullScanResumePoint()
+                throw UploadError.backend("Photo library scan snapshot is incomplete")
+            }
+
+            var seen: Set<String>? = []
+            for try await chunk in enumerator.infoChunks(identifiers: identifiers, startOffset: 0, chunkSize: chunkSize) {
+                try Task.checkCancellation()
+                try await ingest(chunk, observedAt: observedAt, engine: engine, progress: &progress, seen: &seen)
+            }
+            let missing = Set(identifiers).subtracting(seen ?? [])
+            if !missing.isEmpty {
+                let result = store.markRemoved(Array(missing), removedAt: observedAt)
+                guard result.succeeded else {
+                    throw UploadError.backend("Photo library removals could not be saved")
+                }
+                progress.removed += result.affectedRows
+            }
+            cursor += identifiers.count
+            guard store.recordFullScanProgress(PhotoLibraryFullScanProgress(epochStart: epochStart, cursor: cursor)) else {
+                throw UploadError.backend("Photo library scan progress could not be saved")
+            }
+            onProgress?(progress)
         }
 
         // The enumeration ran to the end (across however many resumed runs) → the epoch is complete.
-        progress.removed += store.sweepRemoved(notSeenAfter: epochStart, removedAt: observedAt)
-        store.completeFullScan()
+        let sweep = store.sweepRemoved(notSeenAfter: epochStart, removedAt: observedAt)
+        guard sweep.succeeded else {
+            throw UploadError.backend("Photo library removal sweep could not be saved")
+        }
+        progress.removed += sweep.affectedRows
+        guard store.completeFullScan() else {
+            throw UploadError.backend("Photo library scan could not be completed")
+        }
         onProgress?(progress)
         return progress
     }
@@ -160,21 +265,30 @@ public struct PhotoLibraryCatalogSync: Sendable {
         engine: any UploadBackupCandidateEnqueueing,
         progress: inout PhotoLibraryCatalogProgress,
         seen: inout Set<String>?
-    ) async {
+    ) async throws {
         let entries = chunk.map { PhotoLibraryCatalogMapper.entry(for: $0, observedAt: observedAt) }
-        for (info, entry) in zip(chunk, entries) {
+        let changes = store.classifyBatch(entries)
+        guard store.isOperational(), changes.count == entries.count else {
+            throw UploadError.backend("Photo library catalog classification was incomplete")
+        }
+        var candidates: [UploadBackupAssetCandidate] = []
+        candidates.reserveCapacity(entries.count)
+        for (info, change) in zip(chunk, changes) {
             progress.scanned += 1
             if seen != nil { seen!.insert(info.localIdentifier) }
-            switch store.classify(entry) {
+            switch change {
             case .inserted: progress.discovered += 1
             case .changed: progress.changed += 1
             case .unchanged: continue
             }
             if let candidate = PhotoBackupAssetPlanner.candidate(for: info) {
-                await engine.enqueue(candidate)
+                candidates.append(candidate)
             }
         }
-        store.upsertBatch(entries)
+        _ = try await engine.enqueueBatch(candidates)
+        guard store.upsertBatch(entries) else {
+            throw UploadError.backend("Photo library catalog could not be updated")
+        }
         onProgress?(progress)
     }
 }

@@ -55,6 +55,9 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
     /// Secondary filenames per source id - resolved entries become Live-Photo-style compounds.
     private var secondaryNames: [String: [String]] = [:]
     private var metadataByIdentifier: [String: [PhotoUploadAdditionalMetadata]] = [:]
+    private var deferredIdentifiers: Set<String> = []
+    private var mismatchOnceIdentifiers: Set<String> = []
+    private var materializeCounts: [String: Int] = [:]
 
     func setSecondaries(_ names: [String], for identifier: String) {
         lock.withLock { secondaryNames[identifier] = names }
@@ -62,6 +65,17 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
 
     func setAdditionalMetadata(_ metadata: [PhotoUploadAdditionalMetadata], for identifier: String) {
         lock.withLock { metadataByIdentifier[identifier] = metadata }
+    }
+
+    func setDeferredMaterialization(for identifier: String, mismatchOnce: Bool = false) {
+        lock.withLock {
+            deferredIdentifiers.insert(identifier)
+            if mismatchOnce { mismatchOnceIdentifiers.insert(identifier) }
+        }
+    }
+
+    func materializeCount(for identifier: String) -> Int {
+        lock.withLock { materializeCounts[identifier] ?? 0 }
     }
 
     init(defaultModified: Date) {
@@ -113,6 +127,7 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
             let modified = lock.withLock { modifiedOverrides[id] } ?? defaultModified
             let secondaries = lock.withLock { secondaryNames[id] } ?? []
             let additionalMetadata = lock.withLock { metadataByIdentifier[id] } ?? []
+            let isDeferred = lock.withLock { deferredIdentifiers.contains(id) }
             let snapshot = UploadBackupAssetSnapshot(
                 source: entry.source,
                 revision: UploadBackupRevision(date: modified),
@@ -124,8 +139,30 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
                 fileURL: URL(fileURLWithPath: entry.source.identifier),
                 filename: entry.originalFilename,
                 fileSize: entry.byteCount ?? 1,
-                modificationDate: modified
+                modificationDate: modified,
+                precomputedSHA1Digest: isDeferred ? Self.digest(seed: entry.source.identifier) : nil
             )
+            let materialize: (@Sendable () async throws -> UploadResourceDescriptor)?
+            if isDeferred {
+                materialize = { @Sendable [self] in
+                    let shouldMismatch = lock.withLock {
+                        materializeCounts[id, default: 0] += 1
+                        return mismatchOnceIdentifiers.remove(id) != nil
+                    }
+                    return UploadResourceDescriptor(
+                        source: entry.source,
+                        fileURL: URL(fileURLWithPath: entry.source.identifier + ".materialized"),
+                        filename: entry.originalFilename,
+                        fileSize: entry.byteCount ?? 1,
+                        modificationDate: modified,
+                        precomputedSHA1Digest: shouldMismatch
+                            ? Data(repeating: 0xFF, count: 20)
+                            : Self.digest(seed: entry.source.identifier)
+                    )
+                }
+            } else {
+                materialize = nil
+            }
             return BackupResolvedResource(
                 candidate: UploadBackupAssetCandidate(
                     snapshot: snapshot,
@@ -152,9 +189,16 @@ final class ScriptedBackupResolver: BackupResourceResolving, @unchecked Sendable
                         mediaType: "video/quicktime",
                         additionalMetadata: additionalMetadata
                     )
-                }
+                },
+                materialize: materialize
             )
         }
+    }
+
+    private static func digest(seed: String) -> Data {
+        var digest = Data(repeating: 0, count: 20)
+        for (index, byte) in seed.utf8.enumerated() { digest[index % 20] ^= byte }
+        return digest
     }
 }
 
@@ -179,9 +223,10 @@ final class SpyQueueStore: UploadBackupSyncQueueStore, @unchecked Sendable {
         self.log = log
     }
 
-    func upsert(_ entry: UploadBackupSyncQueueEntry) {
+    @discardableResult
+    func upsert(_ entry: UploadBackupSyncQueueEntry) -> Bool {
         log.append("queue.upsert:\(entry.state.rawValue)")
-        inner.upsert(entry)
+        return inner.upsert(entry)
     }
 
     func entry(for source: UploadSourceIdentity, revision: UploadBackupRevision) -> UploadBackupSyncQueueEntry? {
@@ -189,6 +234,8 @@ final class SpyQueueStore: UploadBackupSyncQueueStore, @unchecked Sendable {
     }
 
     func nextRunnable(limit: Int) -> [UploadBackupSyncQueueEntry] { inner.nextRunnable(limit: limit) }
+
+    func nextRunnableDate() -> Date? { inner.nextRunnableDate() }
 
     func claimRunnable(limit: Int, claimedAt: Date) -> [UploadBackupSyncQueueEntry] {
         log.append("queue.claimRunnable")
@@ -205,6 +252,7 @@ final class SpyQueueStore: UploadBackupSyncQueueStore, @unchecked Sendable {
         return inner.requeueStaleActive(before: cutoff, updatedAt: updatedAt)
     }
 
+    @discardableResult
     func updateState(
         source: UploadSourceIdentity,
         revision: UploadBackupRevision,
@@ -212,10 +260,10 @@ final class SpyQueueStore: UploadBackupSyncQueueStore, @unchecked Sendable {
         attempts: Int?,
         lastError: String?,
         updatedAt: Date
-    ) {
+    ) -> Bool {
         log.append("queue.state:\(state.rawValue)")
-        inner.updateState(source: source, revision: revision, state: state,
-                          attempts: attempts, lastError: lastError, updatedAt: updatedAt)
+        return inner.updateState(source: source, revision: revision, state: state,
+                                 attempts: attempts, lastError: lastError, updatedAt: updatedAt)
     }
 
     func summary() -> UploadBackupSyncQueueSummary { inner.summary() }
@@ -245,10 +293,10 @@ final class SpyIdentityResolver: UploadIdentityResolving, @unchecked Sendable {
         identity: UploadIdentity,
         remoteVolumeID: String,
         remoteLinkID: String
-    ) async {
+    ) async throws {
         log.append("manifest.recordUploaded")
-        await inner.recordUploaded(descriptor, identity: identity,
-                                   remoteVolumeID: remoteVolumeID, remoteLinkID: remoteLinkID)
+        try await inner.recordUploaded(descriptor, identity: identity,
+                                       remoteVolumeID: remoteVolumeID, remoteLinkID: remoteLinkID)
     }
 
     func invalidateCachedRemoteState() async {
@@ -324,8 +372,9 @@ final class BackupSyncRunnerTests: XCTestCase {
             lock.withLock { !(rows[source]?.isEmpty ?? true) }
         }
 
-        func upsert(_ record: UploadBackupAssetRecord) {
+        func upsert(_ record: UploadBackupAssetRecord) -> Bool {
             lock.withLock { rows[record.source, default: [:]][record.revision] = record }
+            return true
         }
 
         func count() -> Int {
@@ -357,6 +406,19 @@ final class BackupSyncRunnerTests: XCTestCase {
 
     // MARK: Disk-space pressure is retryable, never a permanent failure
 
+    func testUnavailableQueueStartsNoWorkAndCannotLookDrained() async throws {
+        _ = seedEntry("must-remain-pending.heic")
+        queueStore.close()
+
+        let runner = makeRunner()
+        let progress = await runner.runUntilDrained()
+        let queueIsOperational = await runner.isQueueOperational()
+
+        XCTAssertFalse(queueIsOperational)
+        XCTAssertFalse(progress.isRunning)
+        XCTAssertTrue(uploader.requests.isEmpty, "a failed queue read must never start an upload")
+    }
+
     func testDiskPressureNeverBurnsRetryBudgetAndRecovers() async throws {
         // More consecutive disk-pressure failures than the park threshold (maxAttempts: 4). A
         // budget-consuming error would park as .failed after 4; disk pressure must not - it is not
@@ -371,6 +433,18 @@ final class BackupSyncRunnerTests: XCTestCase {
         XCTAssertEqual(uploader.requests.count, 1)
         XCTAssertEqual(progress.failed, 0)
         XCTAssertEqual(resolver.resolveCount(for: entry.source.identifier), 8, "7 pressure failures, then success")
+    }
+
+    func testPersistedRetryDelaySurvivesRunnerRecreation() async throws {
+        let entry = seedEntry("resume-after-backoff.jpg", ageSeconds: -30)
+
+        let runner = makeRunner()
+        let progress = await runner.runUntilDrained()
+
+        XCTAssertEqual(try XCTUnwrap(clock.sleeps.first), 30, accuracy: 0.001)
+        XCTAssertEqual(state(of: entry), .completed)
+        XCTAssertEqual(progress.uploaded, 1)
+        XCTAssertEqual(uploader.requests.count, 1)
     }
 
     func testSustainedDiskPressureEndsPassRunnableNotFailed() async throws {
@@ -466,10 +540,14 @@ final class BackupSyncRunnerTests: XCTestCase {
     /// The (nameHash, contentHash) pair the pipeline will compute for a standard resolved entry.
     private func expectedHashes(id: String) -> (nameHash: String, contentHash: String) {
         let path = URL(fileURLWithPath: "/backup/\(id)").standardizedFileURL.path
+        return ("nh(\(id))", expectedContentHash(path: path))
+    }
+
+    private func expectedContentHash(path: String) -> String {
         var digest = Data(repeating: 0, count: 20)
         for (i, byte) in path.utf8.enumerated() { digest[i % 20] ^= byte }
         let hex = UploadContentSHA1.hexString(digest: digest)
-        return ("nh(\(id))", "ch(\(hex))")
+        return "ch(\(hex))"
     }
 
     private func state(of entry: UploadBackupSyncQueueEntry) -> UploadBackupSyncQueueState? {
@@ -570,6 +648,52 @@ final class BackupSyncRunnerTests: XCTestCase {
             revision: UploadBackupRevision(date: resolver.defaultModified)
         )
         XCTAssertEqual(record?.isComplete, true)
+    }
+
+    func testActiveDuplicateNeverMaterializesDeferredBytes() async throws {
+        let entry = seedEntry("deferred-duplicate.jpg")
+        resolver.setDeferredMaterialization(for: entry.source.identifier)
+        let hashes = expectedHashes(id: "deferred-duplicate.jpg")
+        checker.remoteItemsByNameHash[hashes.nameHash] = [RemotePhotoDuplicate(
+            nameHash: hashes.nameHash,
+            contentHash: hashes.contentHash,
+            linkState: .active,
+            linkID: "remote-deferred"
+        )]
+
+        let progress = await makeRunner().runUntilDrained()
+
+        XCTAssertEqual(state(of: entry), .alreadyBackedUp)
+        XCTAssertEqual(resolver.materializeCount(for: entry.source.identifier), 0,
+                       "hash-only PhotoKit probes must not create temp files for known duplicates")
+        XCTAssertTrue(uploader.requests.isEmpty)
+        XCTAssertEqual(progress.backedUp, 1)
+    }
+
+    func testNewDeferredResourceMaterializesExactlyOnceBeforeUpload() async throws {
+        let entry = seedEntry("deferred-new.jpg")
+        resolver.setDeferredMaterialization(for: entry.source.identifier)
+
+        let progress = await makeRunner().runUntilDrained()
+
+        XCTAssertEqual(state(of: entry), .completed)
+        XCTAssertEqual(resolver.materializeCount(for: entry.source.identifier), 1)
+        XCTAssertEqual(uploader.requests.count, 1)
+        XCTAssertTrue(uploader.requests[0].fileURL.path.hasSuffix(".materialized"))
+        XCTAssertEqual(progress.uploaded, 1)
+    }
+
+    func testDeferredResourceChangeIsRehashedBeforeAnyUpload() async throws {
+        let entry = seedEntry("deferred-changing.jpg")
+        resolver.setDeferredMaterialization(for: entry.source.identifier, mismatchOnce: true)
+
+        let progress = await makeRunner().runUntilDrained()
+
+        XCTAssertEqual(resolver.materializeCount(for: entry.source.identifier), 2,
+                       "a changed export must be discarded and freshly resolved")
+        XCTAssertEqual(uploader.requests.count, 1, "stale hash identity must never reach the uploader")
+        XCTAssertEqual(state(of: entry), .completed)
+        XCTAssertEqual(progress.uploaded, 1)
     }
 
     // MARK: 5. Trashed/deleted remote duplicates are NOT backed up
@@ -734,6 +858,45 @@ final class BackupSyncRunnerTests: XCTestCase {
         _ = await runner.runUntilDrained()
 
         XCTAssertEqual(uploader.requests.map(\.additionalMetadata), [[metadata], [metadata]])
+    }
+
+    func testTrashedSecondaryNeverMarksLivePhotoBackedUp() async throws {
+        let entry = seedEntry("live.heic")
+        resolver.setSecondaries(["live.mov"], for: entry.source.identifier)
+        checker.remoteItemsByNameHash["nh(live.mov)"] = [RemotePhotoDuplicate(
+            nameHash: "nh(live.mov)",
+            contentHash: expectedContentHash(path: "/backup/live.heic#live.mov"),
+            linkState: .trashed,
+            linkID: "trashed-paired"
+        )]
+
+        let progress = await makeRunner().runUntilDrained()
+
+        XCTAssertEqual(uploader.requests.map(\.name), ["live.heic"])
+        XCTAssertEqual(state(of: entry), .skippedRemoteDeletion)
+        XCTAssertEqual(progress.backedUp, 0)
+        XCTAssertNil(stateStore.record(
+            for: entry.source,
+            revision: UploadBackupRevision(date: resolver.defaultModified)
+        ))
+    }
+
+    func testDraftSecondaryParksLivePhotoInsteadOfClaimingSuccess() async throws {
+        let entry = seedEntry("live.heic")
+        resolver.setSecondaries(["live.mov"], for: entry.source.identifier)
+        checker.remoteItemsByNameHash["nh(live.mov)"] = [RemotePhotoDuplicate(
+            nameHash: "nh(live.mov)",
+            contentHash: nil,
+            linkState: .draft,
+            linkID: "draft-paired"
+        )]
+
+        let progress = await makeRunner().runUntilDrained()
+
+        XCTAssertEqual(uploader.requests.map(\.name), ["live.heic"])
+        XCTAssertEqual(state(of: entry), .blockedByDraft)
+        XCTAssertEqual(progress.backedUp, 0)
+        XCTAssertEqual(progress.blocked, 1)
     }
 
     func testPairedVideoFailureRetriesWithoutReuploadingPrimary() async throws {

@@ -310,14 +310,15 @@ public final class TimelineViewModel {
             // Every `await` below re-checks this so the views stay married to the sidebar selection.
             guard filter == .all else { return }
             if let cached, !cached.isEmpty {
-                await applyAllContent(Self.deduplicatedSections(cached))
+                let sections = await Self.deduplicateOffMain(cached)
+                await applyAllContent(sections)
             } else if case .loaded = state {} else {
                 state = .loading
             }
         }
 
         do {
-            let sections = Self.deduplicatedSections(try await repository.loadTimeline())
+            let sections = await Self.deduplicateOffMain(try await repository.loadTimeline())
             guard filter == .all else { return }   // route switched mid-fetch - keep the new route, not All Photos
             // Only swap the grid if the library actually changed - otherwise keep the shown view (and the
             // user's scroll position) untouched.
@@ -359,7 +360,7 @@ public final class TimelineViewModel {
         let before = allItems.count
         let f = filter   // the route this refresh is for
         do {
-            let sections = Self.deduplicatedSections(try await freshSectionsForCurrentFilter())
+            let sections = await Self.deduplicateOffMain(try await freshSectionsForCurrentFilter())
             guard filter == f else {   // a sidebar switch landed mid-refresh - don't clobber the new route
                 return TimelineRefreshResult(
                     uploadedUID: uploadedUID, foundItem: nil,
@@ -439,6 +440,12 @@ public final class TimelineViewModel {
             guard !items.isEmpty else { return nil }
             return TimelineSection(id: section.id, date: section.date, title: section.title, items: items)
         }
+    }
+
+    private static func deduplicateOffMain(_ sections: [TimelineSection]) async -> [TimelineSection] {
+        await Task.detached(priority: .userInitiated) {
+            Self.deduplicatedSections(sections)
+        }.value
     }
 
     private nonisolated static func describe(_ filter: PhotoFilter) -> String {

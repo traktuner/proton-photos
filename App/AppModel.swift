@@ -72,6 +72,7 @@ final class AppModel {
 
     private let sessionStore: SessionKeychainStore
     private let authController: ProtonAuthController
+    private let photoBackupScheduler = MacPhotoBackupScheduler()
     private var backendTask: Task<Void, Never>?
 
     init() {
@@ -109,6 +110,7 @@ final class AppModel {
         backupController?.stopSync()
         backupController = nil
         photoBackupController?.stopSync()
+        photoBackupScheduler.invalidate()
         photoBackupController = nil
         albumSyncController?.stopSync()
         albumSyncController = nil
@@ -155,7 +157,7 @@ final class AppModel {
                 )
                 facade = client
                 backupController = FolderBackupController(facade: client)
-                photoBackupController = PhotoLibraryBackupController(
+                let photoBackup = PhotoLibraryBackupController(
                     configuration: .init(
                         accountDataDirectory: client.accountDataDirectory,
                         databasePolicy: client.accountDatabasePolicy
@@ -163,6 +165,8 @@ final class AppModel {
                     identityResolver: client.uploadIdentityResolver,
                     uploader: client.photoUploader
                 )
+                photoBackupController = photoBackup
+                photoBackupScheduler.configure(controller: photoBackup)
                 let albumSync = AlbumSyncController(
                     configuration: .init(
                         accountDataDirectory: client.accountDataDirectory,

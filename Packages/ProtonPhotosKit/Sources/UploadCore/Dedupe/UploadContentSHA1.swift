@@ -81,9 +81,9 @@ public enum UploadContentSHA1 {
     }
 }
 
-/// Incremental SHA-1 accumulator for sources that produce bytes while writing them somewhere else -
-/// the seam a future iOS `PhotoKitUploadSource` uses to hash a PHAsset resource in the SAME pass
-/// that streams it into a temp upload file (never reading the bytes twice).
+/// Incremental SHA-1 accumulator for streamed sources. PhotoKit uses it during hash-only preflight,
+/// then rehashes only the small subset materialized for upload so source drift cannot upload bytes
+/// under a stale identity.
 public final class UploadSHA1Accumulator {
     private var hasher = Insecure.SHA1()
 

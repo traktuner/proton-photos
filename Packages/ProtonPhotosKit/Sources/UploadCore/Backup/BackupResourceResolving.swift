@@ -7,15 +7,25 @@ public struct BackupSecondaryResource: Sendable {
     public let descriptor: UploadResourceDescriptor
     public let mediaType: String
     public let additionalMetadata: [PhotoUploadAdditionalMetadata]
+    /// Optional deferred materialization. PhotoKit can hash originals in place for dedupe and only
+    /// export bytes when Core has proven an upload is necessary. File-backed sources leave this nil.
+    public let materialize: (@Sendable () async throws -> UploadResourceDescriptor)?
 
     public init(
         descriptor: UploadResourceDescriptor,
         mediaType: String,
-        additionalMetadata: [PhotoUploadAdditionalMetadata] = []
+        additionalMetadata: [PhotoUploadAdditionalMetadata] = [],
+        materialize: (@Sendable () async throws -> UploadResourceDescriptor)? = nil
     ) {
         self.descriptor = descriptor
         self.mediaType = mediaType
         self.additionalMetadata = additionalMetadata
+        self.materialize = materialize
+    }
+
+    public func materializedDescriptor() async throws -> UploadResourceDescriptor {
+        guard let materialize else { return descriptor }
+        return try await materialize()
     }
 }
 
@@ -37,6 +47,9 @@ public struct BackupResolvedResource: Sendable {
     /// Secondary resources of the compound, uploaded after the primary settles. Empty for plain
     /// files and non-Live photo-library assets.
     public let secondaries: [BackupSecondaryResource]
+    /// Optional deferred materialization for the primary resource. The descriptor already carries
+    /// its streamed digest and byte count, so dedupe never needs a temp file for known duplicates.
+    public let materialize: (@Sendable () async throws -> UploadResourceDescriptor)?
     /// Releases any temporary exports this resource materialized (e.g. PhotoKit originals streamed
     /// into the temp store). The runner calls it once the entry settles - success, park, or revert -
     /// so exports are freed per item instead of piling up until the whole pass ends. `nil` when the
@@ -50,6 +63,7 @@ public struct BackupResolvedResource: Sendable {
         additionalMetadata: [PhotoUploadAdditionalMetadata] = [],
         captureDate: Date,
         secondaries: [BackupSecondaryResource] = [],
+        materialize: (@Sendable () async throws -> UploadResourceDescriptor)? = nil,
         cleanup: (@Sendable () -> Void)? = nil
     ) {
         self.candidate = candidate
@@ -58,7 +72,13 @@ public struct BackupResolvedResource: Sendable {
         self.additionalMetadata = additionalMetadata
         self.captureDate = captureDate
         self.secondaries = secondaries
+        self.materialize = materialize
         self.cleanup = cleanup
+    }
+
+    public func materializedDescriptor() async throws -> UploadResourceDescriptor {
+        guard let materialize else { return descriptor }
+        return try await materialize()
     }
 }
 

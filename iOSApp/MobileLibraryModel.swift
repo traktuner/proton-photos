@@ -166,10 +166,11 @@ final class MobileLibraryModel {
     /// re-downloaded. Only the app's own cache directory is touched - never anything outside it.
     func clearCache() async {
         guard let cache = thumbnailCache else { return }
-        await cache.clear()
-        if let feed = thumbnailFeed, !items.isEmpty {
-            await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
+        if let feed = thumbnailFeed {
+            await feed.clearCacheAndRestartPrefetch()
             startBackgroundActivityMonitorIfNeeded()
+        } else {
+            await cache.clear()
         }
     }
 
@@ -405,16 +406,18 @@ final class MobileLibraryModel {
                 // content, which lifts the overlay onto real thumbnails (never a blank grid).
                 if let cached = await backend.cachedTimeline() {
                     try Task.checkCancellation()   // a newer session may have superseded us during the await
-                    await applyItems(cached, cached: true)
-                    await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
-                    startBackgroundActivityMonitorIfNeeded()
+                    if await applyItems(cached, cached: true) {
+                        await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
+                        startBackgroundActivityMonitorIfNeeded()
+                    }
                 }
 
                 let refreshed = try await backend.loadTimeline()
                 try Task.checkCancellation()
-                await applyItems(refreshed, cached: false)
-                await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
-                startBackgroundActivityMonitorIfNeeded()
+                if await applyItems(refreshed, cached: false) {
+                    await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
+                    startBackgroundActivityMonitorIfNeeded()
+                }
             } catch is CancellationError {
                 // A newer session/configuration replaced this task.
             } catch {
@@ -427,17 +430,20 @@ final class MobileLibraryModel {
     /// finished value on it. For a large library this keeps the O(n log n) sort off the main thread entirely,
     /// so a timeline load/refresh never blocks menu/tab interaction. A newer session that superseded us while
     /// the sort ran drops the result (the cancellation check), never clobbering the newer state.
-    private func applyItems(_ sections: [TimelineSection], cached: Bool) async {
+    @discardableResult
+    private func applyItems(_ sections: [TimelineSection], cached: Bool) async -> Bool {
         let token = loadToken
         let prepared = await Task.detached(priority: .userInitiated) {
             TimelineSnapshot(sections: sections)
         }.value
         // Publish only if THIS load is still the current one: not cancelled, and no newer load/teardown
         // bumped the token while we sorted off-main.
-        guard !Task.isCancelled, token == loadToken else { return }
-        snapshot = prepared
+        guard !Task.isCancelled, token == loadToken else { return false }
+        let changed = prepared != snapshot
+        if changed { snapshot = prepared }
         apply(.inventoryResolved(count: prepared.count, cached: cached))
         armFirstContentGuardIfNeeded()
+        return changed
     }
 
     private func apply(_ event: LibraryLoadEvent) {

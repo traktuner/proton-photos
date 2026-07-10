@@ -94,8 +94,140 @@ private final class Counter: @unchecked Sendable {
     func value() -> Int { lock.withLock { count } }
 }
 
+private final class BlockingCoverageStore: ThumbnailCoverageCheckpointStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var didEnter = false
+    let release = DispatchSemaphore(value: 0)
+
+    func loadPresent(_ candidates: [PhotoUID], for key: String) -> Set<PhotoUID> {
+        lock.withLock { didEnter = true }
+        release.wait()
+        return []
+    }
+
+    var hasEntered: Bool { lock.withLock { didEnter } }
+
+    func recordPresent(_ uids: [PhotoUID], for key: String) {}
+    func recordMissing(_ uids: [PhotoUID], for key: String) {}
+}
+
+private final class RecordingCoverageStore: ThumbnailCoverageCheckpointStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var present: Set<PhotoUID> = []
+    private var presentWrites = 0
+
+    func loadPresent(_ candidates: [PhotoUID], for key: String) -> Set<PhotoUID> {
+        lock.withLock { present.intersection(candidates) }
+    }
+
+    func recordPresent(_ uids: [PhotoUID], for key: String) {
+        guard !uids.isEmpty else { return }
+        lock.withLock {
+            present.formUnion(uids)
+            presentWrites += 1
+        }
+    }
+
+    func recordMissing(_ uids: [PhotoUID], for key: String) {
+        lock.withLock { present.subtract(uids) }
+    }
+
+    var snapshot: Set<PhotoUID> { lock.withLock { present } }
+    var writeCount: Int { lock.withLock { presentWrites } }
+}
+
 @Suite("MediaFeedCore")
 struct ThumbnailFeedCoreTests {
+    @Test func coverageCheckpointStoresOnlyOpaqueIdentifiers() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("thumbnail-coverage-opaque-\(UUID().uuidString)", isDirectory: true)
+        let uid = PhotoUID(volumeID: "sensitive-volume-id", nodeID: "sensitive-node-id")
+        let store = FileThumbnailCoverageCheckpointStore(directory: directory, scope: "account-A")
+        store.recordPresent([uid], for: "thumbnail-coverage-v1")
+
+        let file = try #require(FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ).first)
+        let text = try String(contentsOf: file, encoding: .utf8)
+        #expect(!text.contains(uid.volumeID))
+        #expect(!text.contains(uid.nodeID))
+        #expect(!text.contains(Data(uid.volumeID.utf8).base64EncodedString()))
+        #expect(!text.contains(Data(uid.nodeID.utf8).base64EncodedString()))
+        #expect(store.loadPresent([uid], for: "thumbnail-coverage-v1") == [uid])
+    }
+
+    @Test func coverageCheckpointWritesAreCoalescedAndFlushedAtCompletion() async throws {
+        let uids = (0 ..< 260).map { Self.uid("checkpoint-coalesce-\($0)") }
+        let cache = Self.cache("checkpoint-coalesce")
+        for uid in uids { cache.storeToDisk(Self.pngData(width: 8, height: 8), for: uid) }
+        let store = RecordingCoverageStore()
+        let feed = ThumbnailFeedCore(
+            cache: cache,
+            loader: RecordingLoader(),
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 4),
+            coverageStore: store
+        )
+
+        await feed.startPrefetch(uids)
+        try await Self.waitUntil { await feed.prefetchStatus().diskCoverageVerified }
+
+        #expect(store.snapshot == Set(uids))
+        #expect(store.writeCount <= 3)
+        await feed.stopPrefetch()
+    }
+
+    @Test func checkpointBootstrapDoesNotBlockVisibleDiskDecode() async throws {
+        let uid = Self.uid("bootstrap-visible")
+        let cache = Self.cache("bootstrap-visible")
+        cache.storeToDisk(Self.pngData(width: 24, height: 24), for: uid)
+        let coverage = BlockingCoverageStore()
+        let feed = ThumbnailFeedCore(
+            cache: cache,
+            loader: RecordingLoader(),
+            configuration: Self.configuration(),
+            coverageStore: coverage
+        )
+
+        let bootstrap = Task { await feed.startPrefetch([uid]) }
+        try await Self.waitUntil { coverage.hasEntered }
+        #expect(coverage.hasEntered)
+
+        let warm = await feed.warmDecoded(
+            [ThumbnailRequest(uid: uid)],
+            priority: .visibleNow,
+            limit: 1
+        )
+        #expect(warm.decodedFromDisk == 1)
+
+        coverage.release.signal()
+        await bootstrap.value
+        await feed.stopPrefetch()
+    }
+
+    @Test func stoppedCheckpointBootstrapCannotRestartOldCrawl() async throws {
+        let uid = Self.uid("bootstrap-stale")
+        let coverage = BlockingCoverageStore()
+        let loader = RecordingLoader(payloads: [uid: Self.pngData(width: 8, height: 8)])
+        let feed = ThumbnailFeedCore(
+            cache: Self.cache("bootstrap-stale"),
+            loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 1),
+            coverageStore: coverage
+        )
+
+        let bootstrap = Task { await feed.startPrefetch([uid]) }
+        try await Self.waitUntil { coverage.hasEntered }
+        #expect(coverage.hasEntered)
+        await feed.stopPrefetch()
+        coverage.release.signal()
+        await bootstrap.value
+        try await Task.sleep(for: .milliseconds(100))
+
+        #expect(await loader.requestCount() == 0)
+        #expect(await feed.prefetchStatus().currentQueueLength == 0)
+    }
+
     @Test func diskOnlyBytesWarmIntoDecodedRamWithoutNetwork() async throws {
         let uid = Self.uid("disk-only")
         let cache = Self.cache("disk")
@@ -592,6 +724,30 @@ struct ThumbnailFeedCoreTests {
         #expect(await loader.requestCount() == 0)
     }
 
+    @Test func removedValidatedBlobFallsBackToNetwork() async throws {
+        let uid = Self.uid("validated-then-removed")
+        let cache = Self.cache("validated-then-removed")
+        cache.storeToDisk(Self.pngData(width: 8, height: 8), for: uid)
+        #expect(cache.hasUsableDiskData(uid))
+        try FileManager.default.removeItem(at: cache.diskURL(for: uid))
+
+        let loader = RecordingLoader(payloads: [uid: Self.pngData(width: 16, height: 16)])
+        let feed = ThumbnailFeedCore(
+            cache: cache,
+            loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 1)
+        )
+
+        let warm = await feed.warmDecoded(
+            [ThumbnailRequest(uid: uid)],
+            priority: .visibleNow,
+            limit: 1
+        )
+        #expect(warm.queuedNetwork == 1)
+        try await Self.waitUntil { await loader.requestCount() == 1 }
+        #expect(await loader.fetched(uid))
+    }
+
     @Test func diskHitOnlyCrawlPersistsCheckpointForRelaunch() async throws {
         // When a whole crawl is already on disk, no network batch runs. The checkpoint still must advance to
         // the end, otherwise the next app launch reports the full library as pending previews and counts down
@@ -700,6 +856,32 @@ struct ThumbnailFeedCoreTests {
         await afterClearFeed.stopPrefetch()
     }
 
+    @Test func liveCacheClearRestartsCurrentCrawlWithoutStaleCoverage() async throws {
+        let uids = (0 ..< 4).map { Self.uid("live-clear-\($0)") }
+        let cache = Self.cache("live-clear")
+        let loader = RecordingLoader(
+            payloads: Dictionary(uniqueKeysWithValues: uids.map { ($0, Self.pngData(width: 8, height: 8)) })
+        )
+        let feed = ThumbnailFeedCore(
+            cache: cache,
+            loader: loader,
+            configuration: Self.configuration(downloadConcurrencyLimit: 1, batchSize: 2),
+            coverageStore: Self.checkpointStore(for: cache)
+        )
+
+        await feed.startPrefetch(uids)
+        try await Self.waitUntil { await feed.prefetchStatus().diskCoverageVerified }
+        #expect(await loader.requestCount() == uids.count)
+
+        await feed.clearCacheAndRestartPrefetch()
+        try await Self.waitUntil { await loader.requestCount() == uids.count * 2 }
+        try await Self.waitUntil { await feed.prefetchStatus().diskCoverageVerified }
+
+        for uid in uids { #expect(cache.hasUsableDiskData(uid)) }
+        #expect(await feed.prefetchStatus().diskFileCount == uids.count)
+        await feed.stopPrefetch()
+    }
+
     @Test func implausibleCoverageCheckpointFallsBackToDiskVerification() async throws {
         let present = Self.uid("implausible-present")
         let missing = Self.uid("implausible-missing")
@@ -783,6 +965,29 @@ struct ThumbnailFeedCoreTests {
         await feed.requestPriority(uid, priority: .visibleNow)
         try await Task.sleep(for: .milliseconds(200))
         #expect(await loader.requestCount() == 1)
+    }
+
+    @Test func timedOutSDKLoaderKeepsItsConcurrencySlotUntilItReturns() async throws {
+        let uids = (0 ..< 6).map { Self.uid("timeout-bound-\($0)") }
+        let loader = RecordingLoader(delayMilliseconds: 1_000)
+        let feed = ThumbnailFeedCore(
+            cache: Self.cache("timeout-bound"),
+            loader: loader,
+            configuration: Self.configuration(
+                downloadConcurrencyLimit: 1,
+                batchSize: 1,
+                crawlBackoffSeconds: 0,
+                downloadTimeoutSeconds: 0.1
+            )
+        )
+
+        await feed.startPrefetch(uids)
+        try await Self.waitUntil { await feed.prefetchStatus().failedTimeout == 1 }
+        try await Task.sleep(for: .milliseconds(350))
+
+        #expect(await loader.requestCount() == 1)
+        #expect(await feed.prefetchStatus().downloadsInFlight == 1)
+        await feed.stopPrefetch()
     }
 
     @Test func prefetchStaysPausedDuringInteraction() async throws {
@@ -969,6 +1174,7 @@ struct ThumbnailFeedCorePlatformPurityTests {
     ]
 
     private static let allowedFrameworkImports: Set<String> = [
+        "CryptoKit",
         "Foundation",
         "MediaByteCache",
         "MediaDecodingCore",

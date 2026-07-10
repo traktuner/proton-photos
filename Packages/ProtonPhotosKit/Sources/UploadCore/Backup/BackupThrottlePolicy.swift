@@ -20,6 +20,9 @@ public enum BackupThermalLevel: Int, Sendable, Comparable, Equatable {
 public struct BackupThrottleInputs: Sendable, Equatable {
     public var thermalLevel: BackupThermalLevel
     public var isLowPowerMode: Bool
+    /// False when there is currently no usable network path. The runner waits without spending an
+    /// item's retry budget and resumes from the durable queue as soon as the path returns.
+    public var isNetworkAvailable: Bool
     /// Low Data Mode / constrained path - treat like low power.
     public var isNetworkConstrained: Bool
     /// Cellular/hotspot - keep going, but single-file.
@@ -28,11 +31,13 @@ public struct BackupThrottleInputs: Sendable, Equatable {
     public init(
         thermalLevel: BackupThermalLevel = .nominal,
         isLowPowerMode: Bool = false,
+        isNetworkAvailable: Bool = true,
         isNetworkConstrained: Bool = false,
         isNetworkExpensive: Bool = false
     ) {
         self.thermalLevel = thermalLevel
         self.isLowPowerMode = isLowPowerMode
+        self.isNetworkAvailable = isNetworkAvailable
         self.isNetworkConstrained = isNetworkConstrained
         self.isNetworkExpensive = isNetworkExpensive
     }
@@ -57,7 +62,8 @@ public struct BackupThrottlePolicy: Sendable, Equatable {
     }
 
     public func maxConcurrentItems(for inputs: BackupThrottleInputs) -> Int {
-        governor.budget(
+        guard inputs.isNetworkAvailable else { return 0 }
+        return governor.budget(
             for: .userInitiatedBackup,
             signals: LibraryWorkloadSignals(
                 thermalLevel: inputs.thermalLevel.libraryLevel,

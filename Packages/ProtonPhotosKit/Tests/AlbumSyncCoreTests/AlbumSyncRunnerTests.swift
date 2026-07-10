@@ -277,6 +277,23 @@ private func link(_ id: String, trashed: Bool = false) -> AlbumSyncRemoteLink {
         await gate.open()
         _ = try await first.value
     }
+
+    @Test func unavailableMappingStorePreventsRemoteWork() async throws {
+        let store = makeStore()
+        store.close()
+        let (runner, remote, backup, _) = makeRunner(
+            contents: ["local-1": ["a"]],
+            links: ["a": link("l-a")],
+            store: store
+        )
+
+        await #expect(throws: AlbumSyncError.mappingStoreUnavailable) {
+            try await runner.sync(album: album)
+        }
+        #expect(remote.createdNames.isEmpty)
+        #expect(remote.attachedBatches.isEmpty)
+        #expect(backup.runs.isEmpty)
+    }
 }
 
 /// Suspends backup until the test opens the gate - lets tests pin "while a sync is running" states.
@@ -318,6 +335,33 @@ private final class ProgressBox: @unchecked Sendable {
 }
 
 @Suite struct AlbumSyncMappingStoreTests {
+    @Test func closeMakesReadsAndWritesFailClosed() {
+        let store = makeStore()
+        store.close()
+
+        #expect(!store.isOperational())
+        #expect(store.mapping(localAlbumID: "L1") == nil)
+        #expect(store.allMappings().isEmpty)
+        #expect(!store.addSelection(AlbumSyncSelection(localAlbumID: "L1", title: "A", addedAt: Date())))
+        #expect(!store.upsert(AlbumSyncMapping(
+            localAlbumID: "L1",
+            remoteAlbumID: "R1",
+            title: "A",
+            createdAt: Date()
+        )))
+    }
+
+    @Test func invalidDatabaseIsNeverDeletedAndRecreated() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("album-sync-corrupt-\(UUID().uuidString).sqlite")
+        let original = Data("not-a-sqlite-database".utf8)
+        try original.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        #expect(AlbumSyncMappingStore(url: url) == nil)
+        #expect(try Data(contentsOf: url) == original)
+    }
+
     @Test func selectionRoundTripKeepsMappingOnDeselect() throws {
         let store = makeStore()
         store.addSelection(AlbumSyncSelection(localAlbumID: "L1", title: "Urlaub", addedAt: Date(timeIntervalSinceReferenceDate: 10)))

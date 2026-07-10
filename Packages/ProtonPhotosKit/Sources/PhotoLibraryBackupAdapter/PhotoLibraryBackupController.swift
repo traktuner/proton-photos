@@ -66,7 +66,12 @@ public final class PhotoLibraryBackupController {
 
     /// False when the dedupe manifest, backup stores, or execution lock could not open - backup
     /// then refuses to run rather than risking duplicate uploads or multiple drainers.
-    public var isAvailable: Bool { runner != nil && lockStore != nil }
+    public var isAvailable: Bool {
+        runner != nil
+            && lockStore != nil
+            && queueStore?.isOperational() == true
+            && catalogStore?.isOperational() == true
+    }
 
     private let engine: UploadBackupSyncEngine?
     private let runner: BackupSyncRunner?
@@ -147,36 +152,36 @@ public final class PhotoLibraryBackupController {
         self.stateStore = stateStore
         // Catalog + lock are independent of the upload composition: they open even before an
         // identity resolver exists, so inventory/ownership survive a partial account bring-up.
-        catalogStore = PhotoLibraryCatalogManifestStore(
+        let catalogStore = PhotoLibraryCatalogManifestStore(
             url: directory.appendingPathComponent(Self.catalogDatabaseFileName),
             policy: configuration.databasePolicy
         )
+        self.catalogStore = catalogStore
         lockStore = BackupExecutionLockManifestStore(
             url: directory.appendingPathComponent(Self.lockDatabaseFileName),
             policy: configuration.databasePolicy,
             leaseInterval: Self.lockLease
         )
 
-        if let queueStore, let stateStore, let identityResolver {
+        if let queueStore, let stateStore, let catalogStore, let identityResolver {
             let preflight = UploadBackupPreflightIndex(store: stateStore)
-            engine = UploadBackupSyncEngine(preflight: preflight, queue: queueStore)
+            engine = UploadBackupSyncEngine(
+                preflight: preflight,
+                queue: queueStore,
+                remoteProofResolver: identityResolver
+            )
             runner = BackupSyncRunner(
                 queue: queueStore,
                 preflight: preflight,
-                resolver: PhotoLibraryResourceResolver(tempStore: tempStore),
+                resolver: PhotoLibraryResourceResolver(
+                    tempStore: tempStore,
+                    cloudIdentifierProvider: { localIdentifier in
+                        catalogStore.entry(for: localIdentifier)?.cloudIdentifier
+                    }
+                ),
                 identityResolver: identityResolver,
                 uploader: uploader,
-                throttleInputs: {
-                    let process = ProcessInfo.processInfo
-                    let level: BackupThermalLevel = switch process.thermalState {
-                    case .nominal: .nominal
-                    case .fair: .fair
-                    case .serious: .serious
-                    case .critical: .critical
-                    @unknown default: .serious
-                    }
-                    return BackupThrottleInputs(thermalLevel: level, isLowPowerMode: process.isLowPowerModeEnabled)
-                }
+                throttleInputs: { AppleBackupRuntimeSignals.current() }
             )
         } else {
             engine = nil
@@ -226,6 +231,8 @@ public final class PhotoLibraryBackupController {
     public func disableBackup() {
         isEnabled = false
         defaults.set(false, forKey: Self.enabledDefaultsKey)
+        isUserPaused = false
+        defaults.set(false, forKey: Self.userPausedDefaultsKey)
         pendingSyncAfterStop = false
         changeDebounceTask?.cancel()
         changeDebounceTask = nil
@@ -316,7 +323,13 @@ public final class PhotoLibraryBackupController {
     /// draining: a crashed/expired owner's stale lock is reaped here, and a live lock held by a
     /// different run makes this call stand down instead of starting a second drainer.
     private func startSync(owner: BackupExecutionOwner) {
-        guard isEnabled, !isUserPaused, accessState.allowsBackup, !isSyncing, let engine, let runner else { return }
+        guard isEnabled, !isUserPaused, accessState.allowsBackup, !isSyncing,
+              let engine, let runner, let queueStore, let catalogStore else { return }
+        guard queueStore.isOperational(), catalogStore.isOperational() else {
+            lastMessage = L10n.string("backup.error_local_state_unavailable")
+            refreshFromQueue()
+            return
+        }
         guard let lockStore else {
             lastMessage = L10n.string("backup.error_execution_lock_unavailable")
             refreshFromQueue()
@@ -350,7 +363,7 @@ public final class PhotoLibraryBackupController {
         // never has to tap "back up now" for a transient failure to be retried.
         if !didAutoRetryFailedThisLaunch {
             didAutoRetryFailedThisLaunch = true
-            queueStore?.requeueFailed(updatedAt: Date())
+            queueStore.requeueFailed(updatedAt: Date())
         }
 
         autoResumeTask?.cancel(); autoResumeTask = nil   // a pass is starting; the timer's job is done
@@ -366,7 +379,7 @@ public final class PhotoLibraryBackupController {
 
         // The task inherits the main actor, but all heavy phases (`scan`, `runUntilDrained`) are
         // awaits onto other actors/off-actor structs - the main thread stays free for UI.
-        syncTask = Task { [weak self, monitor, tempStore, engine, runner, catalogStore] in
+        syncTask = Task { [weak self, monitor, tempStore, engine, runner, queueStore, catalogStore] in
             // The INDEX (scan) and the RECONCILE (drain → upload) run as two INDEPENDENT loops, not
             // one serial pass. The reconcile loop runs CONCURRENTLY with the scan and starts by
             // draining whatever is already runnable — so a large backlog from an earlier pass uploads
@@ -374,14 +387,20 @@ public final class PhotoLibraryBackupController {
             // interrupted, or resuming scan can therefore NEVER block uploads. Only the reconcile loop
             // drives the runner (the two never overlap); the queue store they share is transaction-safe.
             // This is the structural guarantee that "a backup must not block itself".
+            self?.beginScanPhase()
             let scanDone = BackupScanSignal()
             async let reconcile: Void = Self.reconcileWhileScanning(runner: runner, scanDone: scanDone)
-
-            self?.beginScanPhase()
-            let preparedChanges = monitor.prepareChanges()
             do {
+                try await Self.replayCatalogIfQueueNeedsRecovery(
+                    catalogStore: catalogStore,
+                    queueStore: queueStore,
+                    engine: engine
+                )
+                let preparedChanges = await Self.prepareChangesOffMainActor(monitor)
                 try await self?.runScanPass(engine: engine, catalogStore: catalogStore, changes: preparedChanges.changes)
                 monitor.commit(preparedChanges)
+            } catch is CancellationError {
+                // The one-shot completion signal below releases the reconcile loop cleanly.
             } catch {
                 self?.reportSyncMessage((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
             }
@@ -394,6 +413,49 @@ public final class PhotoLibraryBackupController {
         }
     }
 
+    /// Replays durable inventory only when the queue has fewer rows than the catalog. This rebuilds
+    /// a reset or partially populated queue without paying a full-catalog classification on every
+    /// pass that merely has outstanding work. Reconcile already runs concurrently, so recovery never
+    /// blocks an existing backlog. No PhotoKit fetch or original-resource read occurs here.
+    private nonisolated static func replayCatalogIfQueueNeedsRecovery(
+        catalogStore: PhotoLibraryCatalogManifestStore,
+        queueStore: UploadBackupSyncQueueManifestStore,
+        engine: UploadBackupSyncEngine
+    ) async throws {
+        let queueCount = queueStore.count()
+        guard queueStore.isOperational(), catalogStore.isOperational() else {
+            throw UploadError.backend(L10n.string("backup.error_local_state_unavailable"))
+        }
+        let catalogCount = catalogStore.snapshot().present
+        guard catalogStore.isOperational() else {
+            throw UploadError.backend(L10n.string("backup.error_local_state_unavailable"))
+        }
+        guard queueCount < catalogCount else { return }
+
+        var cursor: String?
+        while true {
+            try Task.checkCancellation()
+            let entries = catalogStore.presentEntries(afterLocalIdentifier: cursor, limit: 500)
+            guard catalogStore.isOperational() else {
+                throw UploadError.backend(L10n.string("backup.error_local_state_unavailable"))
+            }
+            guard !entries.isEmpty else { return }
+            let candidates = entries.compactMap {
+                PhotoBackupAssetPlanner.candidate(for: PhotoLibraryCatalogMapper.info(for: $0))
+            }
+            _ = try await engine.enqueueBatch(candidates)
+            cursor = entries.last?.localIdentifier
+        }
+    }
+
+    private nonisolated static func prepareChangesOffMainActor(
+        _ monitor: PhotoLibraryChangeMonitor
+    ) async -> PhotoLibraryChangeMonitor.PreparedChangeSet {
+        await Task.detached(priority: .utility) {
+            monitor.prepareChanges()
+        }.value
+    }
+
     /// The reconcile loop: repeatedly drains runnable queue rows to the backend until the index scan
     /// has signalled completion AND nothing runnable remains. Runs concurrently with the scan, so a
     /// slow or resuming scan never delays uploads. Static + the heavy work is on the runner actor, so
@@ -401,6 +463,7 @@ public final class PhotoLibraryBackupController {
     private static func reconcileWhileScanning(runner: BackupSyncRunner, scanDone: BackupScanSignal) async {
         while !Task.isCancelled {
             await runner.runUntilDrained()
+            guard await runner.isQueueOperational() else { return }
             if await scanDone.isDone() {
                 // The scan may have enqueued rows between our last claim and its done-signal; one more
                 // drain guarantees they upload before we return.
@@ -413,52 +476,41 @@ public final class PhotoLibraryBackupController {
         }
     }
 
-    /// Runs the scan phase for this pass. Prefers the persistent catalog driver (writes durable
-    /// queue rows before advancing the catalog, and skips unchanged assets on repeat passes); falls
-    /// back to the direct streaming enumeration only if the catalog store failed to open. `nonisolated`
-    /// so the SQLite/PhotoKit work runs off the main actor.
+    /// Runs the scan phase through the persistent catalog driver. `nonisolated` keeps SQLite and
+    /// PhotoKit enumeration off the main actor.
     private nonisolated func runScanPass(
         engine: UploadBackupSyncEngine,
-        catalogStore: PhotoLibraryCatalogManifestStore?,
+        catalogStore: PhotoLibraryCatalogManifestStore,
         changes: PhotoLibraryChangeMonitor.ChangeSet
     ) async throws {
-        if let catalogStore {
-            let sync = PhotoLibraryCatalogSync(
-                store: catalogStore,
-                onProgress: { [weak self] progress in
-                    Task { @MainActor in self?.lastCatalogProgress = progress }
-                }
-            )
-            let needsFullScan = changes.requiresFullRescan || !catalogStore.hasCompletedFullScan()
-
-            // Fast-path recently added/changed assets FIRST, every pass — even mid-backfill. A photo
-            // saved by another app (e.g. a WhatsApp image) or edited WHILE the initial full scan is
-            // still running must not wait for that scan to finish: the change token names it, so
-            // enqueue it now and let the concurrent reconcile upload it. Skipped only when the token is
-            // untrusted (requiresFullRescan) — then its id list is unreliable and the full scan covers it.
-            if !changes.requiresFullRescan {
-                let targeted = Array(Set(changes.changedIdentifiers + changes.deletedIdentifiers))
-                if !targeted.isEmpty {
-                    _ = try await sync.run(engine: engine, identifiers: targeted)
-                }
+        let sync = PhotoLibraryCatalogSync(
+            store: catalogStore,
+            onProgress: { [weak self] progress in
+                Task { @MainActor in self?.lastCatalogProgress = progress }
             }
-
-            if needsFullScan {
-                // A lost/expired token means we can no longer trust an in-progress epoch's frontier to
-                // have covered every change, so re-observe the whole library from the start. Otherwise
-                // resume: the full scan is resumable and marks itself complete only when it reaches the
-                // library's end (across however many interrupted runs), so it never restarts needlessly.
-                if changes.requiresFullRescan {
-                    catalogStore.clearFullScanResumePoint()
-                }
-                _ = try await sync.run(engine: engine, identifiers: nil)
-            }
-            return
+        )
+        let needsFullScan = changes.requiresFullRescan || !catalogStore.hasCompletedFullScan()
+        guard catalogStore.isOperational() else {
+            throw UploadError.backend(L10n.string("backup.error_local_state_unavailable"))
         }
-        // Catalog unavailable: there is no durable proof that we know the full library, so prefer a
-        // complete pass. This is slower only in the degraded path, but avoids silently backing up a
-        // PhotoKit delta as if it were the entire library.
-        _ = try await engine.scan(PhotoLibraryBackupCatalog())
+
+        // Fast-path recently added/changed assets FIRST, every pass - even mid-backfill. A photo
+        // saved by another app or edited while the initial full scan runs must not wait for it.
+        if !changes.requiresFullRescan {
+            let targeted = Array(Set(changes.changedIdentifiers + changes.deletedIdentifiers))
+            if !targeted.isEmpty {
+                _ = try await sync.run(engine: engine, identifiers: targeted)
+            }
+        }
+
+        if needsFullScan {
+            if changes.requiresFullRescan {
+                guard catalogStore.clearFullScanResumePoint() else {
+                    throw UploadError.backend("Photo library scan state could not be reset")
+                }
+            }
+            _ = try await sync.run(engine: engine, identifiers: nil)
+        }
     }
 
     private func resumeEnabledBackupAfterLaunch() {
@@ -520,6 +572,10 @@ public final class PhotoLibraryBackupController {
     private func scheduleChangeDrivenSync() {
         guard isEnabled else { return }
         if isSyncing {
+            // Keep a follow-up pass armed until the targeted change is durably consumed. The active
+            // pass can finish during the debounce window; without this guard that one notification
+            // would be cancelled at teardown and wait until a later launch.
+            pendingSyncAfterStop = true
             // A pass is already running: enqueue the newly-changed assets IMMEDIATELY into the durable
             // queue so the concurrent reconcile loop picks them up THIS pass, instead of waiting for
             // the next one. (Before this, the guard bailed and a photo taken mid-backup sat unbacked
@@ -650,6 +706,10 @@ public final class PhotoLibraryBackupController {
         let shouldRestart = pendingSyncAfterStop && isEnabled && accessState.allowsBackup
         pendingSyncAfterStop = false
         refreshFromQueue()
+        guard queueStore?.isOperational() == true, catalogStore?.isOperational() == true else {
+            lastMessage = L10n.string("backup.error_local_state_unavailable")
+            return
+        }
         if shouldRestart { syncNow() } else { scheduleAutoResumeIfOutstanding() }
     }
 
@@ -659,7 +719,9 @@ public final class PhotoLibraryBackupController {
     /// user pauses. This is why the queue never just sits at "Wartet auf Fortsetzung".
     private func scheduleAutoResumeIfOutstanding() {
         autoResumeTask?.cancel(); autoResumeTask = nil
-        guard isEnabled, !isUserPaused, accessState.allowsBackup, !isSyncing else { return }
+        guard isEnabled, !isUserPaused, accessState.allowsBackup, !isSyncing,
+              queueStore?.isOperational() == true,
+              catalogStore?.isOperational() == true else { return }
         let p = currentQueueProgress()
         guard p.waiting + p.checking + p.uploading + p.blocked > 0 else { return }   // nothing left → don't loop
         autoResumeTask = Task { @MainActor [weak self] in

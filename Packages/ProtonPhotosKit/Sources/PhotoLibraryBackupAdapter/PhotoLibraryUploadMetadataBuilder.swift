@@ -4,7 +4,10 @@ import Photos
 import UploadCore
 
 enum PhotoLibraryUploadMetadataBuilder {
-    static func metadata(for asset: PHAsset) throws -> [PhotoUploadAdditionalMetadata] {
+    static func metadata(
+        for asset: PHAsset,
+        cloudIdentifier cachedCloudIdentifier: String? = nil
+    ) throws -> [PhotoUploadAdditionalMetadata] {
         let captureDate = asset.creationDate ?? asset.modificationDate
         let modificationDate = asset.modificationDate ?? asset.creationDate
         let location = location(from: asset.location)
@@ -14,7 +17,7 @@ enum PhotoLibraryUploadMetadataBuilder {
             height: asset.pixelHeight > 0 ? asset.pixelHeight : nil,
             duration: asset.mediaType == .video ? asset.duration : nil
         )
-        let iOSPhotos = cloudIdentifier(for: asset).map {
+        let iOSPhotos = (cachedCloudIdentifier ?? resolveCloudIdentifier(for: asset)).map {
             PhotoUploadMetadataEncoder.IOSPhotos(
                 iCloudID: $0,
                 modificationTime: modificationDate.map(format)
@@ -36,7 +39,7 @@ enum PhotoLibraryUploadMetadataBuilder {
         )
     }
 
-    private static func cloudIdentifier(for asset: PHAsset) -> String? {
+    private static func resolveCloudIdentifier(for asset: PHAsset) -> String? {
         let mapping = PHPhotoLibrary.shared().cloudIdentifierMappings(forLocalIdentifiers: [asset.localIdentifier])
         return try? mapping[asset.localIdentifier]?.get().stringValue
     }

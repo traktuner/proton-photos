@@ -76,32 +76,122 @@ public final class UploadBackupStateManifestStore: UploadBackupStateStore, @unch
         }
     }
 
-    public func upsert(_ record: UploadBackupAssetRecord) {
-        lock.withLock {
-            var stmt: OpaquePointer?
+    public func lookupBatch(_ snapshots: [UploadBackupAssetSnapshot]) -> [UploadBackupStateLookup] {
+        guard !snapshots.isEmpty else { return [] }
+        return lock.withLock {
+            var recordStmt: OpaquePointer?
+            var anyStmt: OpaquePointer?
             guard sqlite3_prepare_v2(
                 db,
                 """
-                INSERT INTO backup_asset_state(
-                  source_kind, source_id, resource, revision_us, resource_count,
-                  pending_resources, updated_at
-                ) VALUES(?,?,?,?,?,?,?)
-                ON CONFLICT(source_kind, source_id, resource, revision_us) DO UPDATE SET
-                  resource_count=excluded.resource_count,
-                  pending_resources=excluded.pending_resources,
-                  updated_at=excluded.updated_at;
+                SELECT resource_count, pending_resources, updated_at
+                FROM backup_asset_state
+                WHERE source_kind=? AND source_id=? AND resource=? AND revision_us=?;
                 """,
-                -1, &stmt, nil
-            ) == SQLITE_OK else { return }
+                -1, &recordStmt, nil
+            ) == SQLITE_OK,
+            sqlite3_prepare_v2(
+                db,
+                """
+                SELECT 1 FROM backup_asset_state
+                WHERE source_kind=? AND source_id=? AND resource=? LIMIT 1;
+                """,
+                -1, &anyStmt, nil
+            ) == SQLITE_OK else {
+                sqlite3_finalize(recordStmt)
+                sqlite3_finalize(anyStmt)
+                return snapshots.map { _ in
+                    UploadBackupStateLookup(
+                        succeeded: false,
+                        directRecord: nil,
+                        hasAnyRecord: false,
+                        editRecord: nil
+                    )
+                }
+            }
+            defer {
+                sqlite3_finalize(recordStmt)
+                sqlite3_finalize(anyStmt)
+            }
+
+            return snapshots.map { snapshot in
+                let directResult = readRecord(
+                    statement: recordStmt,
+                    source: snapshot.source,
+                    revision: snapshot.revision
+                )
+                guard case let .value(direct) = directResult else {
+                    return Self.failedLookup
+                }
+
+                let hasAny: Bool
+                if direct != nil {
+                    hasAny = true
+                } else {
+                    guard case let .value(foundAny) = readAny(statement: anyStmt, source: snapshot.source) else {
+                        return Self.failedLookup
+                    }
+                    hasAny = foundAny
+                }
+
+                let editRecord: UploadBackupAssetRecord?
+                if case let .revision(editRevision) = snapshot.editRevision {
+                    guard case let .value(record) = readRecord(
+                        statement: recordStmt,
+                        source: snapshot.source,
+                        revision: editRevision
+                    ) else {
+                        return Self.failedLookup
+                    }
+                    editRecord = record
+                } else {
+                    editRecord = nil
+                }
+                return UploadBackupStateLookup(
+                    directRecord: direct,
+                    hasAnyRecord: hasAny,
+                    editRecord: editRecord
+                )
+            }
+        }
+    }
+
+    @discardableResult
+    public func upsert(_ record: UploadBackupAssetRecord) -> Bool {
+        lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, Self.upsertSQL, -1, &stmt, nil) == SQLITE_OK else { return false }
             defer { sqlite3_finalize(stmt) }
-            bindText(stmt, 1, record.source.kind.rawValue)
-            bindText(stmt, 2, record.source.identifier)
-            bindText(stmt, 3, record.source.resource.rawValue)
-            sqlite3_bind_int64(stmt, 4, record.revision.rawValue)
-            sqlite3_bind_int(stmt, 5, Int32(record.resourceCount))
-            sqlite3_bind_int(stmt, 6, Int32(record.pendingResourceCount))
-            sqlite3_bind_double(stmt, 7, record.updatedAt.timeIntervalSince1970)
-            _ = sqlite3_step(stmt)
+            bind(record, to: stmt)
+            return sqlite3_step(stmt) == SQLITE_DONE
+        }
+    }
+
+    @discardableResult
+    public func upsertBatch(_ records: [UploadBackupAssetRecord]) -> Bool {
+        guard !records.isEmpty else { return true }
+        return lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, Self.upsertSQL, -1, &stmt, nil) == SQLITE_OK,
+                  sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+                sqlite3_finalize(stmt)
+                return false
+            }
+            defer { sqlite3_finalize(stmt) }
+            for record in records {
+                sqlite3_reset(stmt)
+                sqlite3_clear_bindings(stmt)
+                bind(record, to: stmt)
+                guard sqlite3_step(stmt) == SQLITE_DONE else {
+                    sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                    return false
+                }
+            }
+            guard sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return false
+            }
+            return true
         }
     }
 
@@ -114,12 +204,80 @@ public final class UploadBackupStateManifestStore: UploadBackupStateStore, @unch
         }
     }
 
+    private enum ReadResult<Value> {
+        case value(Value)
+        case failed
+    }
+
+    private static let failedLookup = UploadBackupStateLookup(
+        succeeded: false,
+        directRecord: nil,
+        hasAnyRecord: false,
+        editRecord: nil
+    )
+
+    private func readRecord(
+        statement: OpaquePointer?,
+        source: UploadSourceIdentity,
+        revision: UploadBackupRevision
+    ) -> ReadResult<UploadBackupAssetRecord?> {
+        sqlite3_reset(statement)
+        sqlite3_clear_bindings(statement)
+        bindText(statement, 1, source.kind.rawValue)
+        bindText(statement, 2, source.identifier)
+        bindText(statement, 3, source.resource.rawValue)
+        sqlite3_bind_int64(statement, 4, revision.rawValue)
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE { return .value(nil) }
+        guard result == SQLITE_ROW else { return .failed }
+        return .value(UploadBackupAssetRecord(
+            source: source,
+            revision: revision,
+            resourceCount: Int(sqlite3_column_int(statement, 0)),
+            pendingResourceCount: Int(sqlite3_column_int(statement, 1)),
+            updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
+        ))
+    }
+
+    private func readAny(statement: OpaquePointer?, source: UploadSourceIdentity) -> ReadResult<Bool> {
+        sqlite3_reset(statement)
+        sqlite3_clear_bindings(statement)
+        bindText(statement, 1, source.kind.rawValue)
+        bindText(statement, 2, source.identifier)
+        bindText(statement, 3, source.resource.rawValue)
+        let result = sqlite3_step(statement)
+        if result == SQLITE_ROW { return .value(true) }
+        if result == SQLITE_DONE { return .value(false) }
+        return .failed
+    }
+
     private static func openVerified(url: URL, policy: LibraryDatabasePolicy) -> OpaquePointer? {
         if let handle = openOnce(url: url, policy: policy) { return handle }
         for suffix in ["", "-wal", "-shm"] {
             try? FileManager.default.removeItem(at: URL(fileURLWithPath: url.path + suffix))
         }
         return openOnce(url: url, policy: policy)
+    }
+
+    private static let upsertSQL = """
+        INSERT INTO backup_asset_state(
+          source_kind, source_id, resource, revision_us, resource_count,
+          pending_resources, updated_at
+        ) VALUES(?,?,?,?,?,?,?)
+        ON CONFLICT(source_kind, source_id, resource, revision_us) DO UPDATE SET
+          resource_count=excluded.resource_count,
+          pending_resources=excluded.pending_resources,
+          updated_at=excluded.updated_at;
+        """
+
+    private func bind(_ record: UploadBackupAssetRecord, to stmt: OpaquePointer?) {
+        bindText(stmt, 1, record.source.kind.rawValue)
+        bindText(stmt, 2, record.source.identifier)
+        bindText(stmt, 3, record.source.resource.rawValue)
+        sqlite3_bind_int64(stmt, 4, record.revision.rawValue)
+        sqlite3_bind_int(stmt, 5, Int32(record.resourceCount))
+        sqlite3_bind_int(stmt, 6, Int32(record.pendingResourceCount))
+        sqlite3_bind_double(stmt, 7, record.updatedAt.timeIntervalSince1970)
     }
 
     private static func openOnce(url: URL, policy: LibraryDatabasePolicy) -> OpaquePointer? {

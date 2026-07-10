@@ -60,7 +60,11 @@ final class FolderBackupController {
         // Backup REQUIRES the shared dedupe pipeline: without it every sync pass would re-upload.
         if let queueStore, let stateStore, let identityResolver = facade.uploadIdentityResolver {
             let preflight = UploadBackupPreflightIndex(store: stateStore)
-            engine = UploadBackupSyncEngine(preflight: preflight, queue: queueStore)
+            engine = UploadBackupSyncEngine(
+                preflight: preflight,
+                queue: queueStore,
+                remoteProofResolver: identityResolver
+            )
             runner = BackupSyncRunner(
                 queue: queueStore,
                 preflight: preflight,

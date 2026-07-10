@@ -95,7 +95,7 @@ public final class AlbumSyncController {
 
     /// False when the mapping store or the dedupe manifest could not open - sync then refuses to
     /// run rather than risking duplicate albums or duplicate uploads.
-    public var isAvailable: Bool { runner != nil }
+    public var isAvailable: Bool { runner != nil && mappingStore?.isOperational() == true }
 
     /// The ids currently in the persisted selection (for pre-checking the picker).
     public var selectedAlbumIDs: Set<String> { Set(selectedAlbums.map(\.id)) }
@@ -206,15 +206,28 @@ public final class AlbumSyncController {
     /// Applies the picker result: `ids` becomes the new selection. Removed albums keep their
     /// Proton mapping (re-selecting reuses the same remote album); nothing remote is touched.
     public func applySelection(_ ids: Set<String>) {
-        guard let mappingStore else { return }
+        guard let mappingStore, mappingStore.isOperational() else {
+            reportMappingStoreUnavailable()
+            return
+        }
         let current = selectedAlbumIDs
         let byID = Dictionary(availableAlbums.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for added in ids.subtracting(current) {
             guard let album = byID[added] else { continue }
-            mappingStore.addSelection(AlbumSyncSelection(localAlbumID: album.id, title: album.title, addedAt: Date()))
+            guard mappingStore.addSelection(AlbumSyncSelection(
+                localAlbumID: album.id,
+                title: album.title,
+                addedAt: Date()
+            )) else {
+                reportMappingStoreUnavailable()
+                break
+            }
         }
         for removed in current.subtracting(ids) {
-            mappingStore.removeSelection(localAlbumID: removed)
+            guard mappingStore.removeSelection(localAlbumID: removed) else {
+                reportMappingStoreUnavailable()
+                break
+            }
             openConflicts[removed] = nil
         }
         reloadSelection()
@@ -223,7 +236,10 @@ public final class AlbumSyncController {
 
     /// The row's ✕: stop syncing this album. Keeps the mapping - never touches Proton.
     public func removeFromSelection(_ albumID: String) {
-        mappingStore?.removeSelection(localAlbumID: albumID)
+        guard mappingStore?.removeSelection(localAlbumID: albumID) == true else {
+            reportMappingStoreUnavailable()
+            return
+        }
         openConflicts[albumID] = nil
         queuedAlbumIDs.removeAll { $0 == albumID }
         if pendingConflict?.album.id == albumID { pendingConflict = nil }
@@ -255,12 +271,16 @@ public final class AlbumSyncController {
         pendingConflict = nil
         openConflicts[conflict.album.id] = nil
         if let remoteAlbumID, let mappingStore {
-            mappingStore.upsert(AlbumSyncMapping(
+            guard mappingStore.upsert(AlbumSyncMapping(
                 localAlbumID: conflict.album.id,
                 remoteAlbumID: remoteAlbumID,
                 title: conflict.album.title,
                 createdAt: Date()
-            ))
+            )) else {
+                reportMappingStoreUnavailable()
+                reloadSelection()
+                return
+            }
             enqueue([conflict.album.id])
         }
         reloadSelection()
@@ -446,5 +466,9 @@ public final class AlbumSyncController {
         if snapshot.phase == .completed || snapshot.phase == .needsAttention {
             reloadSelection()
         }
+    }
+
+    private func reportMappingStoreUnavailable() {
+        lastMessage = AlbumSyncError.mappingStoreUnavailable.errorDescription
     }
 }

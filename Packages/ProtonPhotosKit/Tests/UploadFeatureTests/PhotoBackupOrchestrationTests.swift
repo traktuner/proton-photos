@@ -415,7 +415,7 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
             originalFilename: "IMG_A.HEIC",
             byteCount: 100
         )
-        await engine.enqueue(candidate)
+        try await engine.enqueue(candidate)
 
         // A must still be `completed` (terminal success), NOT `discovered`.
         let entry = queue.entry(for: candidate.snapshot.source, revision: candidate.snapshot.revision)
@@ -460,7 +460,7 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
             originalFilename: "IMG_A.HEIC",
             byteCount: 100
         )
-        await engine.enqueue(candidate)
+        try await engine.enqueue(candidate)
 
         // A must STILL be `checking` — the upsert was a no-op on state because checking is protected.
         XCTAssertEqual(queue.entry(for: source, revision: revision)?.state, .checking,
@@ -515,31 +515,45 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         /// When set, the stream yields at most this many assets and then throws — simulating a full
         /// scan interrupted (app backgrounded / cancelled) before it could reach the library's end.
         var throwAfter: Int? {
-            get { lock.withLock { _throwAfter } }
-            set { lock.withLock { _throwAfter = newValue } }
+            get { lock.withLock { remainingBeforeThrow } }
+            set { lock.withLock { remainingBeforeThrow = newValue } }
         }
-        private var _throwAfter: Int?
+        private var remainingBeforeThrow: Int?
 
         func infoChunks(identifiers: [String]?, startOffset: Int, chunkSize: Int) -> AsyncThrowingStream<[PhotoBackupAssetInfo], any Error> {
             onEnumerationStart?()
             let all = infos
             let selectedAll = identifiers.map { ids in all.filter { Set(ids).contains($0.localIdentifier) } } ?? all
             let selected = Array(selectedAll.dropFirst(max(0, startOffset)))   // resume point
-            let limit = throwAfter
+            let (allowedCount, shouldThrow) = lock.withLock { () -> (Int, Bool) in
+                guard let remainingBeforeThrow else { return (selected.count, false) }
+                let allowed = min(max(0, remainingBeforeThrow), selected.count)
+                self.remainingBeforeThrow = remainingBeforeThrow - allowed
+                return (allowed, allowed < selected.count)
+            }
             return AsyncThrowingStream { continuation in
                 var index = 0
-                var yielded = 0
-                while index < selected.count {
-                    let upper = min(index + max(1, chunkSize), selected.count)
-                    if let limit, yielded + (upper - index) > limit {
-                        // Yield up to the limit, then interrupt before the rest of the library.
-                        let cut = index + max(0, limit - yielded)
-                        if cut > index { continuation.yield(Array(selected[index ..< cut])) }
-                        continuation.finish(throwing: CancellationError())
-                        return
-                    }
+                while index < allowedCount {
+                    let upper = min(index + max(1, chunkSize), allowedCount)
                     continuation.yield(Array(selected[index ..< upper]))
-                    yielded += upper - index
+                    index = upper
+                }
+                if shouldThrow {
+                    continuation.finish(throwing: CancellationError())
+                    return
+                }
+                continuation.finish()
+            }
+        }
+
+        func identifierChunks(chunkSize: Int) -> AsyncThrowingStream<[String], any Error> {
+            onEnumerationStart?()
+            let identifiers = infos.map(\.localIdentifier)
+            return AsyncThrowingStream { continuation in
+                var index = 0
+                while index < identifiers.count {
+                    let upper = min(index + max(1, chunkSize), identifiers.count)
+                    continuation.yield(Array(identifiers[index ..< upper]))
                     index = upper
                 }
                 continuation.finish()
@@ -557,8 +571,9 @@ final class PhotoBackupOrchestrationTests: XCTestCase {
         func hasAnyRecord(for source: UploadSourceIdentity) -> Bool {
             lock.withLock { !(rows[source]?.isEmpty ?? true) }
         }
-        func upsert(_ record: UploadBackupAssetRecord) {
+        func upsert(_ record: UploadBackupAssetRecord) -> Bool {
             lock.withLock { rows[record.source, default: [:]][record.revision] = record }
+            return true
         }
         func count() -> Int {
             lock.withLock { rows.values.reduce(0) { $0 + $1.count } }

@@ -41,19 +41,17 @@ final class BackupThrottlePolicyTests: XCTestCase {
         XCTAssertEqual(policy.maxConcurrentItems(for: .init(isLowPowerMode: true)), 1)
         XCTAssertEqual(policy.maxConcurrentItems(for: .init(isNetworkConstrained: true)), 1)
         XCTAssertEqual(policy.maxConcurrentItems(for: .init(isNetworkExpensive: true)), 1)
+        XCTAssertEqual(policy.maxConcurrentItems(for: .init(isNetworkAvailable: false)), 0)
     }
 
-    func testThermalPressureDoesNotReduceBackupConcurrency() {
+    func testThermalPressureKeepsProgressButReducesConcurrentHeavyWork() {
         let policy = BackupThrottlePolicy(baseConcurrency: 6)
 
-        // Thermal state must NOT lower backup throughput: the OS manages its own thermal
-        // throttling, and the app self-slowing only adds wall-clock latency.
         XCTAssertEqual(policy.maxConcurrentItems(for: .init(thermalLevel: .nominal)), 6)
         XCTAssertEqual(policy.maxConcurrentItems(for: .init(thermalLevel: .fair)), 6)
-        XCTAssertEqual(policy.maxConcurrentItems(for: .init(thermalLevel: .serious)), 6,
-                       "serious thermal must not reduce backup concurrency")
-        XCTAssertEqual(policy.maxConcurrentItems(for: .init(thermalLevel: .critical)), 6,
-                       "critical thermal must not pause backup")
+        XCTAssertEqual(policy.maxConcurrentItems(for: .init(thermalLevel: .serious)), 2)
+        XCTAssertEqual(policy.maxConcurrentItems(for: .init(thermalLevel: .critical)), 1,
+                       "critical thermal still makes forward progress without six concurrent exports")
     }
 
     func testBaseConcurrencyIsAtLeastOne() {
@@ -67,17 +65,16 @@ final class LibraryWorkloadGovernorPolicyTests: XCTestCase {
         let policy = LibraryWorkloadGovernorPolicy()
 
         XCTAssertEqual(policy.budget(for: .userInitiatedBackup, baseConcurrency: 2).maxConcurrentItems, 2)
-        // Thermal state no longer reduces backup concurrency (OS manages thermal itself).
         XCTAssertEqual(policy.budget(
             for: .userInitiatedBackup,
             signals: LibraryWorkloadSignals(thermalLevel: .serious),
-            baseConcurrency: 2
+            baseConcurrency: 6
         ).maxConcurrentItems, 2)
         XCTAssertEqual(policy.budget(
             for: .userInitiatedBackup,
             signals: LibraryWorkloadSignals(thermalLevel: .critical),
-            baseConcurrency: 2
-        ).maxConcurrentItems, 2)
+            baseConcurrency: 6
+        ).maxConcurrentItems, 1)
     }
 
     func testBackgroundLocationYieldsToVisibleMediaAndActiveTransfers() {

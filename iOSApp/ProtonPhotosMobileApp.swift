@@ -1,5 +1,6 @@
 import BackgroundTasks
 import DesignSystemCore
+import Foundation
 import Metal
 import os
 import PhotoLibraryBackupAdapter
@@ -38,7 +39,12 @@ struct ProtonPhotosMobileApp: App {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {
-                        Self.schedulePhotoBackupTask()
+                        if let controller = Self.currentPhotoBackup(), controller.isEnabled {
+                            PhotoBackupBackgroundGrace.shared.begin(controller: controller)
+                            Self.schedulePhotoBackupTask()
+                        }
+                    } else if phase == .active {
+                        PhotoBackupBackgroundGrace.shared.end()
                     }
                 }
         }
@@ -59,9 +65,10 @@ struct ProtonPhotosMobileApp: App {
                 task.setTaskCompleted(success: false)
                 return
             }
+            let completion = PhotoBackupTaskCompletion(task: processingTask)
             let work = Task { @MainActor in
                 guard let controller = currentPhotoBackup(), controller.isEnabled else {
-                    processingTask.setTaskCompleted(success: true)
+                    completion.finish(success: true)
                     return
                 }
                 // Every queue transition is checkpointed - expiration simply stops the pass and
@@ -69,10 +76,15 @@ struct ProtonPhotosMobileApp: App {
                 // recorded on the durable execution lock so a foreground run can recover it if this
                 // window is killed mid-pass.
                 await controller.backgroundCatchUp(owner: .iOSBackgroundTask)
+                guard !Task.isCancelled else {
+                    completion.finish(success: false)
+                    return
+                }
                 schedulePhotoBackupTask()    // keep future windows coming while work may remain
-                processingTask.setTaskCompleted(success: true)
+                completion.finish(success: true)
             }
             processingTask.expirationHandler = {
+                completion.finish(success: false)
                 Task { @MainActor in
                     currentPhotoBackup()?.stopSync()
                 }
@@ -88,6 +100,25 @@ struct ProtonPhotosMobileApp: App {
         // artificially constrain throughput beyond what the system permits.
         request.requiresExternalPower = false
         try? BGTaskScheduler.shared.submit(request)
+    }
+}
+
+private final class PhotoBackupTaskCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private let task: BGProcessingTask
+    private var didFinish = false
+
+    init(task: BGProcessingTask) {
+        self.task = task
+    }
+
+    func finish(success: Bool) {
+        let shouldFinish = lock.withLock {
+            guard !didFinish else { return false }
+            didFinish = true
+            return true
+        }
+        if shouldFinish { task.setTaskCompleted(success: success) }
     }
 }
 
