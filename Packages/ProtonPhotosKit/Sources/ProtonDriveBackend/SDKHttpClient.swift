@@ -6,11 +6,11 @@ import ProtonDriveSDK
 final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
     private let driveSession: DriveSession
     private let urlSession: URLSession
-    private let rateLimit: RateLimitGate
+    private let requestGovernor: ProtonRequestGovernor
 
-    init(driveSession: DriveSession, rateLimit: RateLimitGate) {
+    init(driveSession: DriveSession, requestGovernor: ProtonRequestGovernor) {
         self.driveSession = driveSession
-        self.rateLimit = rateLimit
+        self.requestGovernor = requestGovernor
         let cfg = URLSessionConfiguration.default
         cfg.requestCachePolicy = .reloadIgnoringLocalCacheData
         self.urlSession = URLSession(configuration: cfg)
@@ -33,7 +33,12 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         applyAuthAndHeaders(&req, headers: headers)
         if !content.isEmpty { req.httpBody = content }
 
-        let result = await perform(req, retryOn401: true)
+        let result = await perform(
+            req,
+            scope: .api,
+            retryOn401: true,
+            retryOn429: Self.canRetryAfterRateLimit(method: method)
+        )
         switch result {
         case let .success(resp) where resp.statusCode >= 400:
             DebugLog.log("driveApi \(method) \(url.absoluteString) -> \(resp.statusCode)")
@@ -67,16 +72,26 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
 
         let streamError = ErrorBox()
         content.onStreamError = { streamError.set($0) }
-        // Begin the SDK → output-stream pump (schedules on the main run loop).
+        let permit: ProtonRequestGovernor.Permit
+        do {
+            permit = try await requestGovernor.acquire(scope: .storageUpload)
+        } catch {
+            return .failure(error as NSError)
+        }
+        // Do not start producing encrypted bytes until block storage admits this request.
         await MainActor.run { content.openOutputStream() }
 
-        await rateLimit.waitIfNeeded()
         do {
             let (data, response) = try await urlSession.data(for: req)
             guard let http = response as? HTTPURLResponse else {
+                await requestGovernor.finish(permit, statusCode: nil)
                 return .failure(NSError(domain: "ProtonPhotos.SDKHttpClient", code: -6))
             }
-            if http.statusCode == 429 { rateLimit.penalize(seconds: Self.retryAfter(http)) }
+            await requestGovernor.finish(
+                permit,
+                statusCode: http.statusCode,
+                retryAfter: ProtonRetryAfter.seconds(from: http)
+            )
             if http.statusCode >= 400 {
                 DebugLog.log("uploadStorage \(method) -> \(http.statusCode)")
             }
@@ -84,6 +99,7 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
                 data: data, headers: Self.headerPairs(http), statusCode: http.statusCode
             ))
         } catch {
+            await requestGovernor.finish(permit, statusCode: nil)
             // Prefer a stream-side error (encryption/producer) over the generic transport error.
             return .failure((streamError.value ?? error) as NSError)
         }
@@ -106,57 +122,106 @@ final class SDKHttpClient: HttpClientProtocol, @unchecked Sendable {
         applyHeaders(&req, headers: headers)   // storage URLs are pre-signed; no auth headers
         if !content.isEmpty { req.httpBody = content }
 
-        await rateLimit.waitIfNeeded()
+        let permit: ProtonRequestGovernor.Permit
+        do {
+            permit = try await requestGovernor.acquire(scope: .storageDownload)
+        } catch {
+            return .failure(error as NSError)
+        }
         do {
             let (bytes, response) = try await urlSession.bytes(for: req)
             guard let http = response as? HTTPURLResponse else {
+                await requestGovernor.finish(permit, statusCode: nil)
                 return .failure(NSError(domain: "ProtonPhotos.SDKHttpClient", code: -4))
             }
-            if http.statusCode == 429 { rateLimit.penalize(seconds: Self.retryAfter(http)) }
+            if !(200 ... 399).contains(http.statusCode) {
+                await requestGovernor.finish(
+                    permit,
+                    statusCode: http.statusCode,
+                    retryAfter: ProtonRetryAfter.seconds(from: http)
+                )
+                return .success(HttpClientStream(
+                    source: .stream(downloadStreamCreator(bytes)),
+                    headers: Self.headerPairs(http),
+                    statusCode: http.statusCode
+                ))
+            }
+            let completion = StreamPermitCompletion(governor: requestGovernor, permit: permit)
+            let stream = PermitFinishingAsyncSequence(
+                source: downloadStreamCreator(bytes),
+                completion: completion,
+                successStatusCode: http.statusCode
+            )
             return .success(HttpClientStream(
-                source: .stream(downloadStreamCreator(bytes)),
+                source: .stream(AnyAsyncSequence(stream)),
                 headers: Self.headerPairs(http),
                 statusCode: http.statusCode
             ))
         } catch {
+            await requestGovernor.finish(permit, statusCode: nil)
             return .failure(error as NSError)
         }
     }
 
     // MARK: - Helpers
 
-    private func perform(_ request: URLRequest, retryOn401: Bool, retryOn429: Bool = true) async -> Result<HttpClientResponse, NSError> {
-        await rateLimit.waitIfNeeded()
+    private func perform(
+        _ request: URLRequest,
+        scope: ProtonRequestScope,
+        retryOn401: Bool,
+        retryOn429: Bool
+    ) async -> Result<HttpClientResponse, NSError> {
+        let permit: ProtonRequestGovernor.Permit
+        do {
+            permit = try await requestGovernor.acquire(scope: scope)
+        } catch {
+            return .failure(error as NSError)
+        }
         do {
             let (data, response) = try await urlSession.data(for: request)
             guard let http = response as? HTTPURLResponse else {
+                await requestGovernor.finish(permit, statusCode: nil)
                 return .failure(NSError(domain: "ProtonPhotos.SDKHttpClient", code: -1))
             }
+            await requestGovernor.finish(
+                permit,
+                statusCode: http.statusCode,
+                retryAfter: ProtonRetryAfter.seconds(from: http)
+            )
             if http.statusCode == 429 {
-                rateLimit.penalize(seconds: Self.retryAfter(http))
                 if retryOn429 {
-                    await rateLimit.waitIfNeeded()
-                    return await perform(request, retryOn401: retryOn401, retryOn429: false)
+                    return await perform(
+                        request,
+                        scope: scope,
+                        retryOn401: retryOn401,
+                        retryOn429: false
+                    )
                 }
             }
             if http.statusCode == 401, retryOn401, await driveSession.refreshToken() {
                 var retry = request
                 for (k, v) in driveSession.authHeaders() { retry.setValue(v, forHTTPHeaderField: k) }
-                return await perform(retry, retryOn401: false)
+                return await perform(
+                    retry,
+                    scope: scope,
+                    retryOn401: false,
+                    retryOn429: retryOn429
+                )
             }
             return .success(HttpClientResponse(
                 data: data, headers: Self.headerPairs(http), statusCode: http.statusCode
             ))
         } catch {
+            await requestGovernor.finish(permit, statusCode: nil)
             return .failure(error as NSError)
         }
     }
 
-    private static func retryAfter(_ http: HTTPURLResponse) -> Double {
-        if let value = http.value(forHTTPHeaderField: "Retry-After"), let seconds = Double(value) {
-            return seconds
+    private static func canRetryAfterRateLimit(method: String) -> Bool {
+        switch method.uppercased() {
+        case "GET", "HEAD": true
+        default: false
         }
-        return 10
     }
 
     private func applyAuthAndHeaders(_ req: inout URLRequest, headers: [(String, [String])]) {
@@ -225,4 +290,63 @@ private final class ErrorBox: @unchecked Sendable {
     private var _value: Error?
     func set(_ error: Error) { lock.withLock { if _value == nil { _value = error } } }
     var value: Error? { lock.withLock { _value } }
+}
+
+private struct PermitFinishingAsyncSequence: AsyncSequence {
+    typealias Element = UInt8
+
+    struct Iterator: AsyncIteratorProtocol {
+        var source: AnyAsyncIterator<UInt8>
+        let completion: StreamPermitCompletion
+        let successStatusCode: Int
+
+        mutating func next() async throws -> UInt8? {
+            do {
+                let value = try await source.next()
+                if value == nil { completion.finish(statusCode: successStatusCode) }
+                return value
+            } catch {
+                completion.finish(statusCode: nil)
+                throw error
+            }
+        }
+    }
+
+    let source: AnyAsyncSequence<UInt8>
+    let completion: StreamPermitCompletion
+    let successStatusCode: Int
+
+    func makeAsyncIterator() -> Iterator {
+        Iterator(
+            source: source.makeAsyncIterator(),
+            completion: completion,
+            successStatusCode: successStatusCode
+        )
+    }
+}
+
+private final class StreamPermitCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+    private let governor: ProtonRequestGovernor
+    private let permit: ProtonRequestGovernor.Permit
+
+    init(governor: ProtonRequestGovernor, permit: ProtonRequestGovernor.Permit) {
+        self.governor = governor
+        self.permit = permit
+    }
+
+    func finish(statusCode: Int?) {
+        let shouldFinish = lock.withLock {
+            guard !completed else { return false }
+            completed = true
+            return true
+        }
+        guard shouldFinish else { return }
+        Task { await governor.finish(permit, statusCode: statusCode) }
+    }
+
+    deinit {
+        finish(statusCode: nil)
+    }
 }

@@ -461,7 +461,10 @@ extension DriveSession {
     func fetchPhotoLinksMetadata(shareID: String, linkIDs: [String]) async throws -> [AlbumPhotoLinkBody] {
         guard !linkIDs.isEmpty else { return [] }
         let data = try await send(
-            "/drive/shares/\(shareID)/links/fetch_metadata", method: "POST", body: ["LinkIDs": linkIDs]
+            "/drive/shares/\(shareID)/links/fetch_metadata",
+            method: "POST",
+            body: ["LinkIDs": linkIDs],
+            retryOnRateLimit: true
         )
         return (try JSONDecoder().decode(AlbumLinksMetadataResponse.self, from: data)).links ?? []
     }

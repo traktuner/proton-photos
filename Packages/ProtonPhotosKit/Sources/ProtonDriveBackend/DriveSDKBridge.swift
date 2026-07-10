@@ -10,10 +10,10 @@ import UploadCore
 ///
 /// Everything SDK-specific is isolated here so feature modules stay SDK-agnostic and new SDK
 /// capabilities (albums, sharing, upload) can be added without touching the UI layer.
-actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader, FullMediaProvider, VideoStreamProvider, PhotoMetadataProvider, BurstGroupProvider, PhotoLibraryProvider, FavoritesProvider, TrashProvider, LibraryStatsProvider {
+actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader, PriorityThumbnailBatchLoader, FullMediaProvider, VideoStreamProvider, PhotoMetadataProvider, BurstGroupProvider, PhotoLibraryProvider, FavoritesProvider, TrashProvider, LibraryStatsProvider {
     private let photosClient: ProtonPhotosClient
     private let driveSession: DriveSession
-    private let rateLimit = RateLimitGate()
+    private let requestGovernor = ProtonRequestGovernor()
     private var photosRoot: SDKNodeUid?
     private var photosShareID: String?
     /// App-owned SQLite timeline metadata store (`library-v1.sqlite`, PhotosCore). The bridge is
@@ -50,7 +50,8 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
             session: session,
             store: store,
             config: .externalDriveProtonPhotos,
-            accountCacheDirectory: policy.sdkCacheDirectory
+            accountCacheDirectory: policy.sdkCacheDirectory,
+            requestGovernor: requestGovernor
         )
         self.driveSession = driveSession
 
@@ -112,7 +113,7 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
 
         self.photosClient = try await ProtonPhotosClient(
             configuration: config,
-            httpClient: SDKHttpClient(driveSession: driveSession, rateLimit: rateLimit),
+            httpClient: SDKHttpClient(driveSession: driveSession, requestGovernor: requestGovernor),
             accountClient: accountClient,
             logCallback: { _ in },
             featureFlagProviderCallback: { _, completion in completion(false) },
@@ -219,33 +220,49 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
         for uids: [PhotoUID],
         onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
     ) async -> ThumbnailBatchLoadResult {
+        await loadThumbnails(
+            for: uids,
+            priority: .nearViewportScrollAhead,
+            onLoaded: onLoaded
+        )
+    }
+
+    func loadThumbnails(
+        for uids: [PhotoUID],
+        priority: ThumbnailPriority,
+        onLoaded: @Sendable @escaping (PhotoUID, Data) -> Void
+    ) async -> ThumbnailBatchLoadResult {
         let sdkUids = uids.map { SDKNodeUid(volumeID: $0.volumeID, nodeID: $0.nodeID) }
         let failures = BatchFailureBox()
+        let priorityScope = await requestGovernor.beginPriorityScope(priority.requestPriority)
         do {
-            try await photosClient.downloadThumbnails(
-                photoUids: sdkUids,
-                type: .thumbnail,
-                cancellationToken: UUID(),
-                onThumbnailDownloaded: { result in
-                    switch result {
-                    case let .success(item?):
-                        let uid = PhotoUID(volumeID: item.fileUid.volumeID, nodeID: item.fileUid.nodeID)
-                        switch item.result {
-                        case let .success(data):
-                            onLoaded(uid, data)
+            try await ProtonRequestContext.$priority.withValue(priority.requestPriority) {
+                try await photosClient.downloadThumbnails(
+                    photoUids: sdkUids,
+                    type: .thumbnail,
+                    cancellationToken: UUID(),
+                    onThumbnailDownloaded: { result in
+                        switch result {
+                        case let .success(item?):
+                            let uid = PhotoUID(volumeID: item.fileUid.volumeID, nodeID: item.fileUid.nodeID)
+                            switch item.result {
+                            case let .success(data):
+                                onLoaded(uid, data)
+                            case let .failure(error):
+                                failures.recordItem(uid, reason: error.localizedDescription)
+                            }
+                        case .success(nil):
+                            break
                         case let .failure(error):
-                            failures.recordItem(uid, reason: error.localizedDescription)
+                            failures.recordStream(error.localizedDescription)
                         }
-                    case .success(nil):
-                        break   // yield without an attributable item (unparseable uid) - nothing to record
-                    case let .failure(error):
-                        failures.recordStream(error.localizedDescription)
                     }
-                }
-            )
+                )
+            }
         } catch {
             failures.recordStream((error as? LocalizedError)?.errorDescription ?? "\(error)")
         }
+        await requestGovernor.endPriorityScope(priorityScope)
         let result = failures.result
         if result != .delivered {
             let sample = result.itemErrors.first.map { "\($0.key.nodeID.prefix(8))…: \($0.value)" } ?? "-"
@@ -268,16 +285,25 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
     private func singleThumbnail(_ uid: PhotoUID, type: ThumbnailData.ThumbnailType) async throws -> Data {
         let sdkUid = SDKNodeUid(volumeID: uid.volumeID, nodeID: uid.nodeID)
         let box = DataBox()
-        try await photosClient.downloadThumbnails(
-            photoUids: [sdkUid],
-            type: type,
-            cancellationToken: UUID(),
-            onThumbnailDownloaded: { result in
-                if case let .success(item?) = result, case let .success(data) = item.result {
-                    box.set(data)
-                }
+        let priorityScope = await requestGovernor.beginPriorityScope(.immediate)
+        do {
+            try await ProtonRequestContext.$priority.withValue(.immediate) {
+                try await photosClient.downloadThumbnails(
+                    photoUids: [sdkUid],
+                    type: type,
+                    cancellationToken: UUID(),
+                    onThumbnailDownloaded: { result in
+                        if case let .success(item?) = result, case let .success(data) = item.result {
+                            box.set(data)
+                        }
+                    }
+                )
             }
-        )
+        } catch {
+            await requestGovernor.endPriorityScope(priorityScope)
+            throw error
+        }
+        await requestGovernor.endPriorityScope(priorityScope)
         guard let data = box.value else { throw CocoaError(.fileReadUnknown) }
         return data
     }
@@ -572,6 +598,17 @@ actor DriveSDKBridge: PhotosRepository, ThumbnailProvider, ThumbnailBatchLoader,
                 )
             }
         return BurstGroupResolver.memberLookup(candidates: candidates)
+    }
+}
+
+private extension ThumbnailPriority {
+    var requestPriority: ProtonRequestPriority {
+        switch self {
+        case .visibleNow: .immediate
+        case .zoomAnchorAndFocusRow: .userInitiated
+        case .likelyZoomOutTargetCoverage, .nearViewportScrollAhead: .foregroundPrefetch
+        case .idleLibraryCrawl: .maintenance
+        }
     }
 }
 
