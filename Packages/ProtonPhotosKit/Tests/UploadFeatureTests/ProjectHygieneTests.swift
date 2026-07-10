@@ -347,7 +347,9 @@ final class ProjectHygieneTests: XCTestCase {
             contentsOf: repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Sources/PhotoLibraryBackupAdapter/PhotoLibraryBackupController.swift"),
             encoding: .utf8
         )
-        XCTAssertTrue(controller.contains("let preparedChanges = monitor.prepareChanges()"))
+        XCTAssertTrue(controller.contains("let preparedChanges = await Self.prepareChangesOffMainActor(monitor)"))
+        XCTAssertTrue(controller.contains("monitor.prepareChanges()"),
+                      "the off-main helper must still prepare the durable PhotoKit change set")
         XCTAssertTrue(controller.contains("monitor.commit(preparedChanges)"))
         XCTAssertTrue(controller.contains("L10n.string(\"backup.error_execution_lock_unavailable\")"))
         XCTAssertFalse(controller.contains("degrade to unlocked"),
