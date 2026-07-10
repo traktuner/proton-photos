@@ -2,6 +2,23 @@ import Foundation
 import Observation
 import PhotosCore
 
+/// Owns the filesystem-access lifetime of a user-picked artifact URL. The default begins/ends
+/// the URL's security scope; tests inject counters to prove the scope outlives the install.
+public struct MLScopedArtifactAccess: Sendable {
+    public let begin: @Sendable (URL) -> Bool
+    public let end: @Sendable (URL) -> Void
+
+    public init(begin: @escaping @Sendable (URL) -> Bool, end: @escaping @Sendable (URL) -> Void) {
+        self.begin = begin
+        self.end = end
+    }
+
+    public static let securityScoped = MLScopedArtifactAccess(
+        begin: { $0.startAccessingSecurityScopedResource() },
+        end: { $0.stopAccessingSecurityScopedResource() }
+    )
+}
+
 /// Main-actor observation surface over `MLSmartSearchLifecycle` — the ONE settings view model
 /// both platforms bind to. Views read published state and call intents; every decision stays
 /// in the lifecycle actor, and no lifecycle work runs on the main actor (intents hop straight
@@ -13,10 +30,12 @@ public final class MLSmartSearchController {
     public private(set) var presentation = MLSmartSearchPresentation(snapshot: .disabled)
 
     @ObservationIgnored private let lifecycle: MLSmartSearchLifecycle
+    @ObservationIgnored private let artifactAccess: MLScopedArtifactAccess
     @ObservationIgnored private var observationTask: Task<Void, Never>?
 
-    public init(lifecycle: MLSmartSearchLifecycle) {
+    public init(lifecycle: MLSmartSearchLifecycle, artifactAccess: MLScopedArtifactAccess = .securityScoped) {
         self.lifecycle = lifecycle
+        self.artifactAccess = artifactAccess
         observationTask = Task { [weak self, lifecycle] in
             await lifecycle.start()
             for await snapshot in await lifecycle.snapshots() {
@@ -54,8 +73,16 @@ public final class MLSmartSearchController {
         Task { await lifecycle.disableAndPurge() }
     }
 
+    /// Install a developer-provided artifact from a user-picked URL. The controller — not any
+    /// view — owns the filesystem-access lifetime: the security scope stays open until copy,
+    /// validation and installation have fully completed inside the lifecycle actor.
     public func installDeveloperModel(from url: URL, for id: MLModelID) {
-        Task { await lifecycle.installDeveloperModel(from: url, for: id) }
+        let access = artifactAccess
+        Task { [lifecycle] in
+            let accessing = access.begin(url)
+            defer { if accessing { access.end(url) } }
+            await lifecycle.installDeveloperModel(from: url, for: id)
+        }
     }
 
     public func noteLibraryChanged() {

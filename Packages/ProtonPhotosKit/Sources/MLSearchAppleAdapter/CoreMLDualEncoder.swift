@@ -34,8 +34,24 @@ public struct CoreMLDualEncoderSchema: Sendable, Equatable {
     public var endTokenMaskInput = "eot_mask"
     public var embeddingOutput = "embedding"
     public var contextLength = CLIPBPETokenizer.contextLength
+    /// Expected square input side of the image encoder; `nil` skips the size check (tests
+    /// with synthetic models). Catalog-driven sessions always set it.
+    public var imagePixelSide: Int?
 
     public init() {}
+
+    /// The schema is DATA bound to the catalog entry — one generic dual-encoder runtime,
+    /// no per-model code paths.
+    public init(contract: MLModelRuntimeContract) {
+        self.imageFunction = contract.imageFunctionName
+        self.textFunction = contract.textFunctionName
+        self.imageInput = contract.imageInputName
+        self.tokenInput = contract.tokenInputName
+        self.endTokenMaskInput = contract.endTokenMaskInputName
+        self.embeddingOutput = contract.embeddingOutputName
+        self.contextLength = contract.textContextLength
+        self.imagePixelSide = contract.imagePixelSide
+    }
 }
 
 public enum CoreMLDualEncoderError: Error, Equatable {
@@ -161,6 +177,14 @@ public actor CoreMLDualEncoder: MLAssetEmbedder, MLTextQueryEncoder {
               imageInput.type == .image,
               let imageConstraint = imageInput.imageConstraint else {
             throw CoreMLDualEncoderError.invalidModelSchema(schema.imageInput)
+        }
+        if let side = schema.imagePixelSide {
+            guard imageConstraint.pixelsWide == side, imageConstraint.pixelsHigh == side else {
+                throw CoreMLDualEncoderError.invalidModelSchema(
+                    "\(schema.imageInput) expects \(side)x\(side), artifact is "
+                        + "\(imageConstraint.pixelsWide)x\(imageConstraint.pixelsHigh)"
+                )
+            }
         }
 
         guard let tokenDescription = textDescription.inputDescriptionsByName[schema.tokenInput],

@@ -60,7 +60,8 @@ import Testing
     private func entry(
         id: String,
         plan: MLModelDownloadPlan?,
-        track: MLModelReleaseTrack = .production
+        track: MLModelReleaseTrack = .production,
+        license: MLModelLicense = .mit
     ) -> MLModelCatalogEntry {
         MLModelCatalogEntry(
             id: MLModelID(id),
@@ -69,7 +70,7 @@ import Testing
             descriptor: MLModelDescriptor(identifier: id, version: 1, embeddingDimension: 4),
             tokenizerID: "test-tokenizer",
             preprocessingID: "test-preprocessing",
-            license: .mit,
+            license: license,
             releaseTrack: track,
             estimatedInstalledBytes: 100,
             downloadPlan: plan
@@ -240,6 +241,34 @@ import Testing
                 .appendingPathComponent("Weights/weight.bin")
         )
         #expect(installer.anyInstalledRecord(for: testEntry) == nil)
+    }
+
+    @Test func researchOnlyLicenseIsTechnicallyBlockedFromDownload() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = MLModelInstallLayout(rootDirectory: root)
+        let payload = Data("research-weights".utf8)
+        let url = URL(string: "https://example.test/research.bin")!
+        // A download plan misconfigured onto research-only weights must stay inert: the
+        // license is a hard gate at the transfer boundary, not a data annotation.
+        let testEntry = entry(
+            id: "model-research",
+            plan: plan(files: [("weights.bin", payload, url)]),
+            license: .appleAMLR
+        )
+        #expect(!testEntry.isDownloadable)
+        let transport = ScriptedTransport(payloads: [url: payload])
+        let installer = MLModelInstaller(layout: layout, transport: transport)
+
+        do {
+            _ = try await installer.install(testEntry) { _ in }
+            Issue.record("install must fail on a research-only license")
+        } catch let error as MLModelInstallError {
+            #expect(error == .licenseProhibitsDistribution)
+        }
+        #expect(transport.downloadCount(url) == 0, "no byte of research-only weights may be fetched")
+        #expect(installer.anyInstalledRecord(for: testEntry) == nil)
+        #expect(!FileManager.default.fileExists(atPath: layout.modelDirectory(for: testEntry.id).path))
     }
 
     @Test func uninstallRemovesEveryRevision() async throws {

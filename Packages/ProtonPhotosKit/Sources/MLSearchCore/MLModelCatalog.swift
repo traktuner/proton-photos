@@ -89,6 +89,61 @@ public struct MLModelDownloadPlan: Sendable, Equatable, Codable {
     public var totalByteCount: Int64 { items.reduce(0) { $0 + $1.artifact.byteCount } }
 }
 
+/// Catalog-bound CoreML runtime contract: the exact function names, feature names, text
+/// context length and image input size a model artifact must expose. The adapter validates a
+/// loaded artifact against this contract BEFORE any session activates — a mismatching artifact
+/// is a `modelLoad` failure, never undefined inference. Data, not code: new CLIP-family models
+/// ship as catalog entries with their own contract values, without per-model runtime branches.
+public struct MLModelRuntimeContract: Sendable, Equatable, Codable {
+    /// Multi-function model: function computing image embeddings.
+    public var imageFunctionName: String
+    /// Multi-function model: function computing text embeddings.
+    public var textFunctionName: String
+    public var imageInputName: String
+    public var tokenInputName: String
+    public var endTokenMaskInputName: String
+    public var embeddingOutputName: String
+    /// Fixed token count of the text encoder input; the tokenizer must produce exactly this.
+    public var textContextLength: Int
+    /// Square input side (pixels) the image encoder expects; the artifact's image constraint
+    /// must match exactly (preprocessing recipe identity lives in `preprocessingID`).
+    public var imagePixelSide: Int
+
+    public init(
+        imageFunctionName: String,
+        textFunctionName: String,
+        imageInputName: String,
+        tokenInputName: String,
+        endTokenMaskInputName: String,
+        embeddingOutputName: String,
+        textContextLength: Int,
+        imagePixelSide: Int
+    ) {
+        self.imageFunctionName = imageFunctionName
+        self.textFunctionName = textFunctionName
+        self.imageInputName = imageInputName
+        self.tokenInputName = tokenInputName
+        self.endTokenMaskInputName = endTokenMaskInputName
+        self.embeddingOutputName = embeddingOutputName
+        self.textContextLength = textContextLength
+        self.imagePixelSide = imagePixelSide
+    }
+
+    /// The CLIP dual-encoder convention our converted artifacts follow (77-token context).
+    public static func clipDualEncoder(imagePixelSide: Int) -> MLModelRuntimeContract {
+        MLModelRuntimeContract(
+            imageFunctionName: "image",
+            textFunctionName: "text",
+            imageInputName: "image",
+            tokenInputName: "input_ids",
+            endTokenMaskInputName: "eot_mask",
+            embeddingOutputName: "embedding",
+            textContextLength: 77,
+            imagePixelSide: imagePixelSide
+        )
+    }
+}
+
 /// One selectable Smart Search model. Immutable: changing any compatibility-relevant property
 /// (tokenizer, preprocessing, weights revision, dimension) requires bumping the descriptor
 /// version, which retires every existing embedding for the old epoch deterministically.
@@ -106,6 +161,8 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
     public let tokenizerID: String
     /// Stable preprocessing identity (resize/crop/normalization recipe).
     public let preprocessingID: String
+    /// CoreML runtime contract the installed artifact must satisfy before activation.
+    public let runtimeContract: MLModelRuntimeContract
     public let license: MLModelLicense
     public let releaseTrack: MLModelReleaseTrack
     /// Approximate installed size for UI, before an installation exists. Actual installed
@@ -122,6 +179,7 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
         descriptor: MLModelDescriptor,
         tokenizerID: String,
         preprocessingID: String,
+        runtimeContract: MLModelRuntimeContract = .clipDualEncoder(imagePixelSide: 224),
         license: MLModelLicense,
         releaseTrack: MLModelReleaseTrack,
         estimatedInstalledBytes: Int64,
@@ -133,15 +191,20 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
         self.descriptor = descriptor
         self.tokenizerID = tokenizerID
         self.preprocessingID = preprocessingID
+        self.runtimeContract = runtimeContract
         self.license = license
         self.releaseTrack = releaseTrack
         self.estimatedInstalledBytes = estimatedInstalledBytes
         self.downloadPlan = downloadPlan
     }
 
-    /// A model is downloadable only with a pinned plan AND a license permitting distribution
-    /// to this installation. Developer-only models install from local artifacts instead.
-    public var isDownloadable: Bool { downloadPlan != nil }
+    /// A model is downloadable only with a pinned plan AND a license that permits both
+    /// redistributing the weights to end users and using them in the product. A plan on a
+    /// restrictively licensed entry is a configuration bug and stays technically inert.
+    /// Developer-only models install from local artifacts instead.
+    public var isDownloadable: Bool {
+        downloadPlan != nil && license.allowsRedistribution && license.allowsProductUse
+    }
 }
 
 /// The immutable set of models this build can offer.
@@ -159,8 +222,15 @@ public struct MLModelCatalog: Sendable, Equatable {
         entries.first { $0.id == id }
     }
 
+    /// Entries this environment may select. Release builds require the production track AND a
+    /// license permitting product use — a mislabeled entry (production track, research-only
+    /// license) is unselectable, not merely a data note. Developer environments additionally
+    /// see developer-only entries (local-artifact installs; still never downloadable without
+    /// a redistribution-clean license).
     public func selectableEntries(allowsDeveloperModels: Bool) -> [MLModelCatalogEntry] {
-        allowsDeveloperModels ? entries : entries.filter { $0.releaseTrack == .production }
+        allowsDeveloperModels
+            ? entries
+            : entries.filter { $0.releaseTrack == .production && $0.license.allowsProductUse }
     }
 }
 
@@ -178,6 +248,7 @@ extension MLModelCatalogEntry {
         descriptor: MLModelDescriptor(identifier: "tinyclip-vit-40m-32-text-19m", version: 1, embeddingDimension: 512),
         tokenizerID: "clip-bpe-77",
         preprocessingID: "clip-centercrop-224",
+        runtimeContract: .clipDualEncoder(imagePixelSide: 224),
         license: .mit,
         releaseTrack: .production,
         estimatedInstalledBytes: 130_000_000,
@@ -195,6 +266,7 @@ extension MLModelCatalogEntry {
         descriptor: MLModelDescriptor(identifier: "mobileclip-s2", version: 1, embeddingDimension: 512),
         tokenizerID: "clip-bpe-77",
         preprocessingID: "clip-centercrop-256",
+        runtimeContract: .clipDualEncoder(imagePixelSide: 256),
         license: .appleAMLR,
         releaseTrack: .developerOnly,
         estimatedInstalledBytes: 200_000_000,

@@ -65,10 +65,10 @@ public struct SmartSearchSettingsSection: View {
             isPresented: $pickingDeveloperArtifact,
             allowedContentTypes: [.folder]
         ) { result in
+            // No filesystem lifecycle in the view: the shared controller opens the security
+            // scope and holds it until copy + validation + install have completed.
             if case .success(let url) = result, let selected = controller.snapshot.selectedModelID {
-                let accessing = url.startAccessingSecurityScopedResource()
                 controller.installDeveloperModel(from: url, for: selected)
-                if accessing { url.stopAccessingSecurityScopedResource() }
             }
         }
     }

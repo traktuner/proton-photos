@@ -117,8 +117,31 @@ import Testing
 
     private final class InMemoryStoreProvider: MLIndexStoreProvider, @unchecked Sendable {
         let store = InMemoryMLIndexStore()
+        private let lock = NSLock()
+        private var closes = 0
         func openStore() -> (any MLIndexStore)? { store }
-        func closeStore() {}
+        func closeStore() { lock.withLock { closes += 1 } }
+        var closeCount: Int { lock.withLock { closes } }
+    }
+
+    /// File-backed state store whose saves can be scripted to fail (journal-write faults).
+    private final class FlakyStateStore: MLSmartSearchStateStore, @unchecked Sendable {
+        struct WriteFailure: Error {}
+        private let backing: FileMLSmartSearchStateStore
+        private let lock = NSLock()
+        private var failing = false
+
+        init(layout: MLModelInstallLayout) {
+            backing = FileMLSmartSearchStateStore(layout: layout)
+        }
+
+        func setFailing(_ value: Bool) { lock.withLock { failing = value } }
+        func load() -> MLSmartSearchPersistentState? { backing.load() }
+        func save(_ state: MLSmartSearchPersistentState) throws {
+            if lock.withLock({ failing }) { throw WriteFailure() }
+            try backing.save(state)
+        }
+        func clear() { backing.clear() }
     }
 
     private final class MutableAssets: @unchecked Sendable {
@@ -166,7 +189,7 @@ import Testing
     private struct Harness {
         let lifecycle: MLSmartSearchLifecycle
         let layout: MLModelInstallLayout
-        let stateStore: FileMLSmartSearchStateStore
+        let stateStore: any MLSmartSearchStateStore
         let transport: ScriptedTransport
         let provider: ScriptedRuntimeProvider
         let storeProvider: InMemoryStoreProvider
@@ -181,7 +204,8 @@ import Testing
         failFirst: [URL: Int] = [:],
         allowsDeveloperModels: Bool = true,
         root: URL? = nil,
-        retryDelay: Duration = .seconds(60)
+        retryDelay: Duration = .seconds(60),
+        stateStoreOverride: (any MLSmartSearchStateStore)? = nil
     ) throws -> Harness {
         let rootDir = root ?? FileManager.default.temporaryDirectory
             .appendingPathComponent("ml-lifecycle-tests-\(UUID().uuidString)", isDirectory: true)
@@ -192,7 +216,7 @@ import Testing
         let storeProvider = InMemoryStoreProvider()
         let mutableAssets = MutableAssets(assets)
         let governor = ToggleGovernor()
-        let stateStore = FileMLSmartSearchStateStore(layout: layout)
+        let stateStore = stateStoreOverride ?? FileMLSmartSearchStateStore(layout: layout)
         let lifecycle = MLSmartSearchLifecycle(
             dependencies: .init(
                 catalog: catalog,
@@ -607,7 +631,7 @@ import Testing
         try FileManager.default.createDirectory(at: layout.temporaryDirectory, withIntermediateDirectories: true)
         try Data("partial".utf8).write(to: layout.downloadFileURL(sha256: "deadbeef"))
         let stateStore = FileMLSmartSearchStateStore(layout: layout)
-        stateStore.save(MLSmartSearchPersistentState(isEnabled: true, selectedModelID: MLModelID("model-a")))
+        try stateStore.save(MLSmartSearchPersistentState(isEnabled: true, selectedModelID: MLModelID("model-a")))
 
         let payload = Data("model-a-bytes".utf8)
         let (entryA, urlA) = downloadableEntry(id: "model-a", payload: payload)
@@ -652,7 +676,7 @@ import Testing
 
         // Simulate a crash mid-purge: journal written, files still present.
         let stateStore = FileMLSmartSearchStateStore(layout: layout)
-        stateStore.save(MLSmartSearchPersistentState(
+        try stateStore.save(MLSmartSearchPersistentState(
             isEnabled: false,
             selectedModelID: entryA.id,
             pendingOperation: .purge
@@ -683,7 +707,7 @@ import Testing
         let installer = MLModelInstaller(layout: layout, transport: installTransport)
         _ = try await installer.install(entryA) { _ in }
         #expect(installTransport.downloadCount == 1)
-        FileMLSmartSearchStateStore(layout: layout).save(
+        try FileMLSmartSearchStateStore(layout: layout).save(
             MLSmartSearchPersistentState(isEnabled: true, selectedModelID: entryA.id, activatedRevision: nil)
         )
 
@@ -711,7 +735,7 @@ import Testing
         let installer = MLModelInstaller(layout: layout, transport: transport)
         _ = try await installer.install(entryA) { _ in }
         _ = try await installer.install(entryB) { _ in }
-        FileMLSmartSearchStateStore(layout: layout).save(MLSmartSearchPersistentState(
+        try FileMLSmartSearchStateStore(layout: layout).save(MLSmartSearchPersistentState(
             isEnabled: true,
             selectedModelID: entryB.id,
             activatedRevision: nil,
@@ -807,5 +831,293 @@ import Testing
         await #expect(throws: MLSmartSearchQueryError.unavailable) {
             _ = try await harness.lifecycle.search("query", limit: 5)
         }
+    }
+
+    // MARK: - Journal-write failures (state persistence is error-visible)
+
+    private func makeFlakyHarness(
+        catalog: MLModelCatalog,
+        payloads: [URL: Data],
+        assets: [PhotoUID]
+    ) throws -> (Harness, FlakyStateStore) {
+        let rootDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ml-lifecycle-tests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: rootDir, withIntermediateDirectories: true)
+        let flaky = FlakyStateStore(layout: MLModelInstallLayout(rootDirectory: rootDir))
+        let harness = try makeHarness(
+            catalog: catalog,
+            payloads: payloads,
+            assets: assets,
+            root: rootDir,
+            stateStoreOverride: flaky
+        )
+        return (harness, flaky)
+    }
+
+    private func waitForStorageFailure(_ harness: Harness) async -> Bool {
+        await waitUntil {
+            if case .failed(let failure) = await harness.lifecycle.currentSnapshot().phase {
+                return failure.kind == .storage && failure.isRetryable
+            }
+            return false
+        }
+    }
+
+    @Test func failedEnableJournalWriteIsHonestAndRetryable() async throws {
+        let payload = Data("model-a-bytes".utf8)
+        let (entryA, urlA) = downloadableEntry(id: "model-a", payload: payload)
+        let assets = (0..<3).map { uid("asset-\($0)") }
+        let (harness, flaky) = try makeFlakyHarness(
+            catalog: MLModelCatalog(entries: [entryA]),
+            payloads: [urlA: payload],
+            assets: assets
+        )
+        defer { try? FileManager.default.removeItem(at: harness.layout.rootDirectory) }
+
+        await harness.lifecycle.start()
+        flaky.setFailing(true)
+        await harness.lifecycle.setEnabled(true)
+
+        // The failed journal write is visible and retryable — and no download started on top
+        // of an unpersisted enable.
+        #expect(await waitForStorageFailure(harness))
+        #expect(harness.transport.downloadCount == 0)
+        #expect(flaky.load() == nil)
+
+        flaky.setFailing(false)
+        await harness.lifecycle.retry()
+        #expect(await waitForCompleteIndex(harness, total: assets.count))
+        #expect(flaky.load()?.isEnabled == true)
+    }
+
+    @Test func failedSwitchJournalKeepsOldModelServing() async throws {
+        let payloadA = Data("model-a-bytes".utf8)
+        let payloadB = Data("model-b-bytes".utf8)
+        let (entryA, urlA) = downloadableEntry(id: "model-a", payload: payloadA)
+        let (entryB, urlB) = downloadableEntry(id: "model-b", payload: payloadB)
+        let assets = (0..<4).map { uid("asset-\($0)") }
+        let (harness, flaky) = try makeFlakyHarness(
+            catalog: MLModelCatalog(entries: [entryA, entryB]),
+            payloads: [urlA: payloadA, urlB: payloadB],
+            assets: assets
+        )
+        defer { try? FileManager.default.removeItem(at: harness.layout.rootDirectory) }
+
+        await harness.lifecycle.start()
+        await harness.lifecycle.setEnabled(true)
+        #expect(await waitForCompleteIndex(harness, total: assets.count))
+
+        // The switch journal cannot be written: the switch must never have happened.
+        flaky.setFailing(true)
+        await harness.lifecycle.select(entryB.id)
+
+        #expect(await waitForStorageFailure(harness))
+        let snapshot = await harness.lifecycle.currentSnapshot()
+        #expect(snapshot.selectedModelID == entryA.id)
+        #expect(flaky.load()?.selectedModelID == entryA.id)
+        #expect(flaky.load()?.pendingOperation == nil)
+        // Old epoch still queryable — nothing was retired on an unjournaled switch.
+        let results = try await harness.lifecycle.search("anything", limit: 3)
+        #expect(results.descriptor == entryA.descriptor)
+        #expect(harness.storeProvider.store.count(for: entryA.descriptor) == assets.count)
+
+        flaky.setFailing(false)
+        await harness.lifecycle.retry()
+        #expect(await waitForCompleteIndex(harness, total: assets.count))
+        #expect(await harness.lifecycle.currentSnapshot().selectedModelID == entryA.id)
+    }
+
+    @Test func failedPurgeJournalDeletesNothingAndRetryCompletesThePurge() async throws {
+        let payload = Data("model-a-bytes".utf8)
+        let (entryA, urlA) = downloadableEntry(id: "model-a", payload: payload)
+        let assets = (0..<3).map { uid("asset-\($0)") }
+        let (harness, flaky) = try makeFlakyHarness(
+            catalog: MLModelCatalog(entries: [entryA]),
+            payloads: [urlA: payload],
+            assets: assets
+        )
+        defer { try? FileManager.default.removeItem(at: harness.layout.rootDirectory) }
+
+        await harness.lifecycle.start()
+        await harness.lifecycle.setEnabled(true)
+        #expect(await waitForCompleteIndex(harness, total: assets.count))
+
+        flaky.setFailing(true)
+        await harness.lifecycle.disableAndPurge()
+
+        // Unjournaled purge must not delete a single file — a crash here would otherwise
+        // leave an untracked half-purge.
+        #expect(await waitForStorageFailure(harness))
+        #expect(FileManager.default.fileExists(atPath: harness.layout.rootDirectory.path))
+        #expect(FileManager.default.fileExists(atPath: harness.layout.modelDirectory(for: entryA.id).path))
+        #expect(flaky.load()?.isEnabled == true)
+
+        flaky.setFailing(false)
+        await harness.lifecycle.retry()
+        #expect(await harness.lifecycle.currentSnapshot().phase == .disabled)
+        #expect(!FileManager.default.fileExists(atPath: harness.layout.rootDirectory.path))
+    }
+
+    // MARK: - Ordered shutdown
+
+    @Test func shutdownClosesStoreStopsIndexingAndRefusesNewWork() async throws {
+        let payload = Data("model-a-bytes".utf8)
+        let (entryA, urlA) = downloadableEntry(id: "model-a", payload: payload)
+        let assets = (0..<6).map { uid("asset-\($0)") }
+        let harness = try makeHarness(catalog: MLModelCatalog(entries: [entryA]), payloads: [urlA: payload], assets: assets)
+        defer { try? FileManager.default.removeItem(at: harness.layout.rootDirectory) }
+
+        await harness.lifecycle.start()
+        await harness.lifecycle.setEnabled(true)
+        #expect(await waitForCompleteIndex(harness, total: assets.count))
+        let sessionsBefore = harness.provider.builtCount
+
+        await harness.lifecycle.shutdown()
+
+        // Store handle closed (SQLite/WAL in production), and every subsequent intent is a
+        // no-op: no new sessions, no downloads, queries honestly unavailable.
+        #expect(harness.storeProvider.closeCount == 1)
+        await harness.lifecycle.setEnabled(true)
+        await harness.lifecycle.select(entryA.id)
+        await harness.lifecycle.retry()
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(harness.provider.builtCount == sessionsBefore)
+        await #expect(throws: MLSmartSearchQueryError.unavailable) {
+            _ = try await harness.lifecycle.search("query", limit: 3)
+        }
+        // Idempotent.
+        await harness.lifecycle.shutdown()
+        #expect(harness.storeProvider.closeCount == 1)
+    }
+
+    @Test func shutdownAwaitsTheRunningIndexPassBeforeReturning() async throws {
+        /// Session whose index pass blocks until released — stands in for CoreML mid-inference.
+        final class BlockingIndexSession: MLSmartSearchSession, @unchecked Sendable {
+            let descriptor: MLModelDescriptor
+            private let lock = NSLock()
+            private var releaseIndex: CheckedContinuation<Void, Never>?
+            private var released = false
+            private(set) var indexStarted = false
+
+            init(descriptor: MLModelDescriptor) { self.descriptor = descriptor }
+
+            func index(_ assets: [PhotoUID]) async -> MLIndexPassOutcome {
+                lock.withLock { indexStarted = true }
+                await withCheckedContinuation { continuation in
+                    let alreadyReleased = lock.withLock {
+                        if released { return true }
+                        releaseIndex = continuation
+                        return false
+                    }
+                    if alreadyReleased { continuation.resume() }
+                }
+                return MLIndexPassOutcome(
+                    report: MLIndexBatchReport(),
+                    ranToCompletion: false,
+                    newPermanentFailures: [],
+                    progress: MLIndexProgress(phase: .idle, descriptor: descriptor)
+                )
+            }
+
+            func release() {
+                let continuation = lock.withLock {
+                    released = true
+                    let c = releaseIndex
+                    releaseIndex = nil
+                    return c
+                }
+                continuation?.resume()
+            }
+
+            var started: Bool { lock.withLock { indexStarted } }
+
+            func search(_ text: String, limit: Int) async throws -> MLSearchResults {
+                MLSearchResults(descriptor: descriptor, queryText: text, results: [])
+            }
+            func coverage(for assets: [PhotoUID]) async -> MLIndexCoverage {
+                MLIndexCoverage(total: assets.count, indexed: 0, permanentlyUnindexable: 0)
+            }
+            func releaseMemory() async {}
+            func shutdown() async {}
+        }
+
+        let payload = Data("model-a-bytes".utf8)
+        let (entryA, urlA) = downloadableEntry(id: "model-a", payload: payload)
+        let harness = try makeHarness(catalog: MLModelCatalog(entries: [entryA]), payloads: [urlA: payload], assets: [uid("a")])
+        defer { try? FileManager.default.removeItem(at: harness.layout.rootDirectory) }
+
+        let blocking = BlockingIndexSession(descriptor: entryA.descriptor)
+        harness.provider.sessionOverride = { _ in blocking }
+
+        await harness.lifecycle.start()
+        await harness.lifecycle.setEnabled(true)
+        #expect(await waitUntil { blocking.started })
+
+        let done = Completion()
+        let shutdownTask = Task { [lifecycle = harness.lifecycle] in
+            await lifecycle.shutdown()
+            done.mark()
+        }
+        // The index pass is still blocked: shutdown MUST NOT complete yet (this is exactly
+        // the sign-out/purge race — deleting files under a running pass).
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(!done.isDone)
+
+        blocking.release()
+        await shutdownTask.value
+        #expect(done.isDone)
+        #expect(harness.storeProvider.closeCount == 1)
+    }
+
+    private final class Completion: @unchecked Sendable {
+        private let lock = NSLock()
+        private var done = false
+        func mark() { lock.withLock { done = true } }
+        var isDone: Bool { lock.withLock { done } }
+    }
+
+    // MARK: - License gates
+
+    @Test func researchOnlyLicenseIsUnselectableAndNeverDownloadsInRelease() async throws {
+        let payload = Data("research-bytes".utf8)
+        let url = URL(string: "https://example.test/research/weights.bin")!
+        // Mislabeled entry: production track, research-only license, hosted plan. The license
+        // must win everywhere: not listed, not auto-selected, never downloaded.
+        let entry = MLModelCatalogEntry(
+            id: MLModelID("model-research"),
+            displayName: "model-research",
+            family: "Test",
+            descriptor: MLModelDescriptor(identifier: "model-research", version: 1, embeddingDimension: 4),
+            tokenizerID: "t",
+            preprocessingID: "p",
+            license: .appleAMLR,
+            releaseTrack: .production,
+            estimatedInstalledBytes: 1,
+            downloadPlan: MLModelDownloadPlan(revision: "rev1", items: [
+                .init(url: url, artifact: MLModelArtifactSpec(relativePath: "weights.bin", sha256: sha256(payload), byteCount: Int64(payload.count))),
+            ])
+        )
+        #expect(!entry.isDownloadable)
+        let harness = try makeHarness(
+            catalog: MLModelCatalog(entries: [entry]),
+            payloads: [url: payload],
+            assets: [uid("a")],
+            allowsDeveloperModels: false
+        )
+        defer { try? FileManager.default.removeItem(at: harness.layout.rootDirectory) }
+
+        await harness.lifecycle.start()
+        await harness.lifecycle.setEnabled(true)
+        try? await Task.sleep(for: .milliseconds(100))
+
+        let snapshot = await harness.lifecycle.currentSnapshot()
+        #expect(snapshot.availableModels.isEmpty)
+        #expect(snapshot.selectedModelID == nil)
+        #expect(harness.transport.downloadCount == 0)
+
+        await harness.lifecycle.select(entry.id)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await harness.lifecycle.currentSnapshot().selectedModelID == nil)
+        #expect(harness.transport.downloadCount == 0)
     }
 }

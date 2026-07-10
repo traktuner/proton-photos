@@ -90,6 +90,9 @@ public actor MLSmartSearchLifecycle {
     private var observers: [UUID: AsyncStream<MLSmartSearchSnapshot>.Continuation] = [:]
     private var kickWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var started = false
+    /// Terminal: set by `shutdown()`. Every intent becomes a no-op, so a host tearing the
+    /// session down can never race new lifecycle work against its account purge.
+    private var isShutDown = false
 
     public init(dependencies: Dependencies, configuration: Configuration = Configuration()) {
         self.deps = dependencies
@@ -138,7 +141,7 @@ public actor MLSmartSearchLifecycle {
 
     /// Restore persisted state, finish any journaled operation, and resume work. Idempotent.
     public func start() async {
-        guard !started else { return }
+        guard !started, !isShutDown else { return }
         started = true
         persistent = deps.stateStore.load() ?? MLSmartSearchPersistentState()
 
@@ -148,7 +151,7 @@ public actor MLSmartSearchLifecycle {
             await performPurge()
             return
         case .switchModel(let from, let to):
-            completeSwitchCleanup(from: from, to: to)
+            guard await completeSwitchCleanup(from: from, to: to) else { return }
         case nil:
             break
         }
@@ -161,21 +164,34 @@ public actor MLSmartSearchLifecycle {
         await activateSelectedModel()
     }
 
-    /// Cancel background work before process exit or session teardown. Chunk-durable indexing
-    /// and the journaled install/switch/purge steps make sudden termination safe; this just
-    /// stops new work (and releases the parked indexing loop's reference to this actor).
-    public func prepareForTermination() async {
-        indexTask?.cancel()
-        kick()
-        if let selectedID = persistent.selectedModelID {
-            await deps.installer.cancelInstall(of: selectedID)
+    /// Ordered, awaitable session teardown — the ONE shutdown path both platforms call before
+    /// account purge or sign-out. When this returns, no Smart Search work is running and no
+    /// file handle into the Smart Search root remains open:
+    /// 1. new work is refused (every intent no-ops),
+    /// 2. in-flight installs are cancelled AND awaited,
+    /// 3. the indexing task is cancelled AND awaited,
+    /// 4. the inference session is shut down (model residency released),
+    /// 5. the SQLite index store (and its WAL) is closed.
+    /// Chunk-durable indexing and the journaled install/switch/purge steps additionally make
+    /// SUDDEN termination safe; this method is for deliberate teardown, where the caller is
+    /// about to delete the files underneath us.
+    public func shutdown() async {
+        guard !isShutDown else { return }
+        isShutDown = true
+        await deps.installer.cancelAllInstalls()
+        await stopIndexing()
+        await teardownSession()
+        deps.storeProvider.closeStore()
+        for continuation in observers.values {
+            continuation.finish()
         }
+        observers = [:]
     }
 
     // MARK: - Intents
 
     public func setEnabled(_ enabled: Bool) async {
-        guard enabled != persistent.isEnabled else { return }
+        guard !isShutDown, enabled != persistent.isEnabled else { return }
         if enabled {
             persistent.isEnabled = true
             if persistent.selectedModelID == nil {
@@ -183,7 +199,9 @@ public actor MLSmartSearchLifecycle {
                     .selectableEntries(allowsDeveloperModels: deps.allowsDeveloperModels)
                     .first(where: { $0.releaseTrack == .production })?.id
             }
-            save()
+            // A failed enable-write stops here with an honest, retryable failure phase — the
+            // in-memory intent stays, so `retry()` re-persists and activates.
+            guard persistState() else { return }
             await activateSelectedModel()
         } else {
             await performPurge()
@@ -193,19 +211,18 @@ public actor MLSmartSearchLifecycle {
     /// Explicit full disable + purge (same as `setEnabled(false)`, exposed for the destructive
     /// confirmation flow).
     public func disableAndPurge() async {
+        guard !isShutDown else { return }
         await performPurge()
     }
 
     /// Select a model. Same selection is a no-op; a different model runs the transactional
     /// switch (download new → journal → retire old epoch → activate → clean reindex).
     public func select(_ id: MLModelID) async {
-        guard persistent.isEnabled else { return }
+        guard !isShutDown, persistent.isEnabled else { return }
         guard id != persistent.selectedModelID else { return }
-        guard let target = deps.catalog.entry(for: id),
-              deps.allowsDeveloperModels || target.releaseTrack == .production else { return }
+        guard let target = deps.catalog.entry(for: id), isSelectable(target) else { return }
 
         let previousID = persistent.selectedModelID
-        let previousEntry = previousID.flatMap { deps.catalog.entry(for: $0) }
         switchInProgress = true
         defer { switchInProgress = false }
 
@@ -227,39 +244,50 @@ public actor MLSmartSearchLifecycle {
             guard await downloadAndInstall(target) != nil else { return }
         }
 
-        // 2. Journal the switch, then retire the old epoch. From this point the old model
-        //    never serves again, even across a crash.
+        // 2. Journal the switch BEFORE touching shared state. If the journal write fails, the
+        //    switch never happened: revert in memory and keep the current model serving.
         persistent.pendingOperation = .switchModel(from: previousID, to: id)
         persistent.selectedModelID = id
         persistent.activatedRevision = nil
-        save()
+        guard persistState() else {
+            persistent.pendingOperation = nil
+            persistent.selectedModelID = previousID
+            return
+        }
         phase = .switchingModel(to: id)
         emit()
 
+        // 3. Retire the old epoch, commit the journal, then activate the new epoch from a
+        //    clean slate. One ordered, idempotent path — identical to crash recovery.
         await stopIndexing()
         await teardownSession()
-        if let previousEntry {
-            deps.storeProvider.openStore()?.removeAll(for: previousEntry.descriptor)
-            await deps.installer.uninstall(previousEntry)
-        }
-        persistent.pendingOperation = nil
-        save()
-
-        // 3. Activate the new epoch and reindex from a clean slate.
+        guard await completeSwitchCleanup(from: previousID, to: id) else { return }
         await activateSelectedModel()
     }
 
-    /// Retry after a retryable failure (download, model load, storage).
+    /// Retry after a retryable failure (download, model load, storage). A storage failure may
+    /// have interrupted a journaled operation — recovery re-runs that operation (idempotent)
+    /// instead of blindly re-activating over it.
     public func retry() async {
-        guard persistent.isEnabled, case .failed(let failure) = phase, failure.isRetryable else { return }
-        await activateSelectedModel()
+        guard !isShutDown, persistent.isEnabled || persistent.pendingOperation == .purge,
+              case .failed(let failure) = phase, failure.isRetryable else { return }
+        switch persistent.pendingOperation {
+        case .purge:
+            await performPurge()
+        case .switchModel(let from, let to):
+            guard await completeSwitchCleanup(from: from, to: to) else { return }
+            await activateSelectedModel()
+        case nil:
+            await activateSelectedModel()
+        }
     }
 
     /// Install a developer-provided local model artifact for `id` (developer environments
     /// only). The artifact is hashed, staged and installed with the same guarantees as a
     /// download.
     public func installDeveloperModel(from artifactDirectory: URL, for id: MLModelID) async {
-        guard deps.allowsDeveloperModels,
+        guard !isShutDown,
+              deps.allowsDeveloperModels,
               persistent.isEnabled,
               let entry = deps.catalog.entry(for: id) else { return }
         phase = .installing
@@ -302,7 +330,7 @@ public actor MLSmartSearchLifecycle {
     /// Epoch-guarded semantic query against the active model. Results from a superseded model
     /// generation are discarded, never returned.
     public func search(_ text: String, limit: Int = 50) async throws -> MLSearchResults {
-        guard persistent.isEnabled, let session, lastCoverage.indexed > 0 else {
+        guard !isShutDown, persistent.isEnabled, let session, lastCoverage.indexed > 0 else {
             throw MLSmartSearchQueryError.unavailable
         }
         let generation = sessionGeneration
@@ -315,11 +343,19 @@ public actor MLSmartSearchLifecycle {
 
     // MARK: - Activation
 
+    /// A model may be selected/activated in this environment: developer environments see every
+    /// entry; release environments require the production track AND a product-usable license.
+    private func isSelectable(_ entry: MLModelCatalogEntry) -> Bool {
+        deps.allowsDeveloperModels
+            || (entry.releaseTrack == .production && entry.license.allowsProductUse)
+    }
+
     private func activateSelectedModel() async {
-        guard persistent.isEnabled,
+        guard !isShutDown,
+              persistent.isEnabled,
               let selectedID = persistent.selectedModelID,
               let entry = deps.catalog.entry(for: selectedID),
-              deps.allowsDeveloperModels || entry.releaseTrack == .production else {
+              isSelectable(entry) else {
             phase = .disabled
             emit()
             return
@@ -374,7 +410,9 @@ public actor MLSmartSearchLifecycle {
             activeModel = installed
             sessionGeneration &+= 1
             persistent.activatedRevision = record.revision
-            save()
+            // Not a journal write: on failure the next launch falls back to any verified
+            // installed revision, so activation proceeds (persistState surfaced the error).
+            _ = persistState()
             startIndexingLoop()
         } catch {
             phase = .failed(MLSmartSearchFailure(
@@ -411,15 +449,21 @@ public actor MLSmartSearchLifecycle {
                 return nil
             }
             let kind: MLSmartSearchFailure.Kind
+            var isRetryable = true
             switch error {
             case .checksumMismatch, .sizeMismatch, .unsafeArtifactPath:
                 kind = .verification
             case .artifactMissing, .installRecordUnreadable, .notDownloadable:
                 kind = .installation
+            case .licenseProhibitsDistribution:
+                // Retrying cannot change the license — this stays blocked until the catalog
+                // ships an entry whose weights are legally distributable.
+                kind = .installation
+                isRetryable = false
             case .cancelled:
                 kind = .download
             }
-            phase = .failed(MLSmartSearchFailure(kind: kind, isRetryable: true, debugDescription: String(describing: error)))
+            phase = .failed(MLSmartSearchFailure(kind: kind, isRetryable: isRetryable, debugDescription: String(describing: error)))
             emit()
             return nil
         } catch {
@@ -584,41 +628,66 @@ public actor MLSmartSearchLifecycle {
         lastCoverage = MLIndexCoverage(total: 0, indexed: 0, permanentlyUnindexable: 0)
     }
 
-    /// Journal cleanup for a switch interrupted by a crash: the old epoch's vectors and
-    /// artifacts must be gone before the new model may activate. Idempotent.
-    private func completeSwitchCleanup(from: MLModelID?, to: MLModelID) {
+    /// Journaled switch cleanup, shared verbatim by the live switch path and crash recovery:
+    /// retire the old epoch's vectors, remove the old artifacts (awaited, never fire-and-
+    /// forget), THEN commit the journal. Idempotent — re-running after any interruption
+    /// converges to the same state. Returns `false` when the journal commit could not be
+    /// persisted; the pending operation stays journaled (and in memory) so `retry()` or the
+    /// next `start()` finishes it.
+    @discardableResult
+    private func completeSwitchCleanup(from: MLModelID?, to: MLModelID) async -> Bool {
         if let from, let previousEntry = deps.catalog.entry(for: from) {
             deps.storeProvider.openStore()?.removeAll(for: previousEntry.descriptor)
-            Task { await deps.installer.uninstall(previousEntry) }
+            await deps.installer.uninstall(previousEntry)
         }
         persistent.selectedModelID = to
         persistent.activatedRevision = nil
         persistent.pendingOperation = nil
-        save()
+        guard persistState() else {
+            // Keep the journal in memory too: retry/start re-run this exact cleanup.
+            persistent.pendingOperation = .switchModel(from: from, to: to)
+            return false
+        }
+        return true
     }
 
     /// Full disable: stop everything, close every handle, delete every Smart Search artifact,
     /// return to the clean disabled state. Idempotent and journaled (a crash mid-purge
     /// completes on next start).
     private func performPurge() async {
-        // Journal first: any crash from here on re-runs the purge.
+        // Journal first: any crash from here on re-runs the purge. If the journal itself
+        // cannot be written, the purge does NOT start silently — the failure phase is honest
+        // and `retry()` re-attempts the whole purge.
         persistent.pendingOperation = .purge
         persistent.isEnabled = false
-        save()
+        guard persistState() else { return }
 
         phase = .deleting
         emit()
 
-        if let selectedID = persistent.selectedModelID {
-            await deps.installer.cancelInstall(of: selectedID)
-        }
+        await deps.installer.cancelAllInstalls()
         await stopIndexing()
         await teardownSession()
         deps.storeProvider.closeStore()
 
         // Everything Smart Search owns lives under the layout root — one recursive delete is
         // the provably complete purge (index DB + WAL/SHM, models, temp files, state).
-        try? FileManager.default.removeItem(at: deps.layout.rootDirectory)
+        do {
+            try FileManager.default.removeItem(at: deps.layout.rootDirectory)
+        } catch let error as NSError
+            where error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
+            // Already gone — purge is idempotent.
+        } catch {
+            // Files may remain: stay journaled (state file might survive inside the root) and
+            // report a retryable storage failure instead of pretending the purge completed.
+            phase = .failed(MLSmartSearchFailure(
+                kind: .storage,
+                isRetryable: true,
+                debugDescription: "purge failed: \(String(describing: error))"
+            ))
+            emit()
+            return
+        }
 
         // No persisted state left: a relaunch loads the default disabled state.
         persistent = MLSmartSearchPersistentState()
@@ -626,7 +695,21 @@ public actor MLSmartSearchLifecycle {
         emit()
     }
 
-    private func save() {
-        deps.stateStore.save(persistent)
+    /// Persist the current state. On failure: emit an honest, retryable `.failed(.storage)`
+    /// phase and return `false` — callers must not continue a multi-step operation whose
+    /// journal never became durable.
+    private func persistState() -> Bool {
+        do {
+            try deps.stateStore.save(persistent)
+            return true
+        } catch {
+            phase = .failed(MLSmartSearchFailure(
+                kind: .storage,
+                isRetryable: true,
+                debugDescription: "state write failed: \(String(describing: error))"
+            ))
+            emit()
+            return false
+        }
     }
 }

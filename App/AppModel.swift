@@ -49,6 +49,8 @@ final class AppModel {
     /// and timeline exist; every lifecycle decision stays in MLSearchCore.
     private(set) var smartSearch: MLSmartSearchController?
     @ObservationIgnored private var smartSearchMemoryRegistration: MemoryPressureRegistration?
+    /// The most recent ordered Smart Search shutdown; sign-out awaits it before purging.
+    @ObservationIgnored private var smartSearchShutdownTask: Task<Void, Never>?
     /// True once the signed-in library has finished its first load (loaded / empty / failed). Drives the
     /// launch veil, which lifts only after the real grid is ready to be revealed. Reset on sign-out and on a
     /// fresh backend build so a new session shows the veil again.
@@ -115,10 +117,10 @@ final class AppModel {
     func signOut() {
         backendTask?.cancel()
         backend = .idle
-        // Smart Search state lives inside the account container purged below. Stop its
-        // background work explicitly: a parked indexing loop would otherwise keep the
-        // lifecycle actor (and its store handle) alive past sign-out.
-        stopSmartSearch()
+        // Smart Search state lives inside the account container purged below. The purge MUST
+        // NOT race the lifecycle: the awaited shared shutdown below stops indexing/installs
+        // and closes the index SQLite (incl. WAL) before any account file is deleted.
+        let smartSearchShutdown = stopSmartSearch()
         backupController?.stopSync()
         backupController = nil
         photoBackupController?.stopSync()
@@ -129,36 +131,53 @@ final class AppModel {
         albumCatalogRevision = 0
         facade = nil
         libraryReady = false
-        // FULL PURGE: sign-out must leave nothing tied to the account on disk. Erase the encrypted
-        // thumbnail/preview/originals blobs + their account cache key and the streamed video blocks, the
-        // encrypted account-data cache, AND the SDK metadata SQLite stores (entities + timeline). The
-        // Settings "Delete Offline Cache" button is deliberately NARROWER (cached media only, keeps the key,
-        // stays signed in) - do not converge the two.
-        OfflineLibraryManager.shared.purgeOnSignOut()
-        if let session = authController.currentSession {
-            ProtonDriveBackendFactory.purgeLocalAccountData(
-                uid: session.uid,
-                policy: .standard(libraryDatabasePolicy: ProtonDriveBackendPolicy.desktopLibraryDatabasePolicy)
-            )
+        let session = authController.currentSession
+        Task { [weak self] in
+            // Ordered teardown, shared with iOS via MLSmartSearchLifecycle.shutdown(): no new
+            // work → installs cancelled+awaited → index task awaited → inference session
+            // closed → SQLite/WAL closed. Only then may the account purge touch the disk.
+            await smartSearchShutdown?.value
+            guard let self else { return }
+            // FULL PURGE: sign-out must leave nothing tied to the account on disk. Erase the encrypted
+            // thumbnail/preview/originals blobs + their account cache key and the streamed video blocks, the
+            // encrypted account-data cache, AND the SDK metadata SQLite stores (entities + timeline). The
+            // Settings "Delete Offline Cache" button is deliberately NARROWER (cached media only, keeps the key,
+            // stays signed in) - do not converge the two.
+            OfflineLibraryManager.shared.purgeOnSignOut()
+            if let session {
+                ProtonDriveBackendFactory.purgeLocalAccountData(
+                    uid: session.uid,
+                    policy: .standard(libraryDatabasePolicy: ProtonDriveBackendPolicy.desktopLibraryDatabasePolicy)
+                )
+            }
+            // Nuke EVERY account container (backup queue/state/dedup-manifest/catalog for all uids), not
+            // just the current session's: past sign-ins otherwise leave orphaned containers behind, and a
+            // stale backup state forces the next login to re-verify the whole library. Same shared code as iOS.
+            BackupLocalDataPurge.purgeAllLocalAccountData()
+            self.apply(self.authController.signOut(), prepareBackendOnSignedIn: false)
         }
-        // Nuke EVERY account container (backup queue/state/dedup-manifest/catalog for all uids), not
-        // just the current session's: past sign-ins otherwise leave orphaned containers behind, and a
-        // stale backup state forces the next login to re-verify the whole library. Same shared code as iOS.
-        BackupLocalDataPurge.purgeAllLocalAccountData()
-        apply(authController.signOut(), prepareBackendOnSignedIn: false)
     }
 
     func retryBackend() {
         if case let .signedIn(session) = auth { prepareBackend(session) }
     }
 
-    private func stopSmartSearch() {
-        if let lifecycle = smartSearch?.lifecycleActor {
-            Task { await lifecycle.prepareForTermination() }
-        }
+    /// Stop Smart Search and return the ordered-shutdown task. Consecutive stops chain, so a
+    /// later awaiter always sees every previous lifecycle fully torn down.
+    @discardableResult
+    private func stopSmartSearch() -> Task<Void, Never>? {
+        let lifecycle = smartSearch?.lifecycleActor
         smartSearch = nil
         smartSearchMemoryRegistration?.end()
         smartSearchMemoryRegistration = nil
+        guard let lifecycle else { return smartSearchShutdownTask }
+        let previous = smartSearchShutdownTask
+        let task = Task {
+            await previous?.value
+            await lifecycle.shutdown()
+        }
+        smartSearchShutdownTask = task
+        return task
     }
 
     /// Builds the Smart Search stack once the account feed and timeline exist (MainView calls

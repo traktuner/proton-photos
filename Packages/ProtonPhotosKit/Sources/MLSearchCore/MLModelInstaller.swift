@@ -22,6 +22,9 @@ public enum MLModelInstallError: Error, Equatable {
     case artifactMissing(String)
     case installRecordUnreadable
     case notDownloadable
+    /// The entry's weight license forbids redistribution or product use — downloading it into
+    /// a user installation is technically blocked, whatever the catalog data says elsewhere.
+    case licenseProhibitsDistribution
     case cancelled
 }
 
@@ -86,10 +89,15 @@ public struct MLModelTransferProgress: Sendable, Equatable {
 /// - **Single-flight.** Concurrent install requests for the same model await one task.
 /// - **Traversal-proof.** Artifact relative paths are validated before any filesystem use.
 public actor MLModelInstaller {
+    private struct InFlightInstall {
+        let token = UUID()
+        let task: Task<MLModelInstallRecord, Error>
+    }
+
     private let layout: MLModelInstallLayout
     private let transport: any MLModelArtifactTransport
     private let now: @Sendable () -> Date
-    private var inFlight: [MLModelID: Task<MLModelInstallRecord, Error>] = [:]
+    private var inFlight: [MLModelID: InFlightInstall] = [:]
 
     public init(
         layout: MLModelInstallLayout,
@@ -135,9 +143,15 @@ public actor MLModelInstaller {
         onProgress: @escaping @Sendable (MLModelTransferProgress) -> Void
     ) async throws -> MLModelInstallRecord {
         guard let plan = entry.downloadPlan else { throw MLModelInstallError.notDownloadable }
+        // License is a hard technical gate, enforced at the transfer boundary: research-only
+        // weights (no redistribution / no product use) can never be fetched into a user
+        // installation, even if a download plan was misconfigured onto such an entry.
+        guard entry.license.allowsRedistribution, entry.license.allowsProductUse else {
+            throw MLModelInstallError.licenseProhibitsDistribution
+        }
 
         if let existing = inFlight[entry.id] {
-            return try await existing.value
+            return try await existing.task.value
         }
         if let installed = installedRecord(for: entry, revision: plan.revision) {
             return installed
@@ -146,7 +160,7 @@ public actor MLModelInstaller {
         let layout = self.layout
         let transport = self.transport
         let now = self.now
-        let task = Task {
+        let install = InFlightInstall(task: Task {
             try await Self.performInstall(
                 entry: entry,
                 plan: plan,
@@ -155,10 +169,15 @@ public actor MLModelInstaller {
                 now: now,
                 onProgress: onProgress
             )
+        })
+        inFlight[entry.id] = install
+        // Clear only OUR entry: a cancel + fresh install may have replaced it while we awaited.
+        defer {
+            if inFlight[entry.id]?.token == install.token {
+                inFlight[entry.id] = nil
+            }
         }
-        inFlight[entry.id] = task
-        defer { inFlight[entry.id] = nil }
-        return try await task.value
+        return try await install.task.value
     }
 
     /// Install `entry` by copying a developer-provided local artifact directory. Checksums are
@@ -211,17 +230,33 @@ public actor MLModelInstaller {
     }
 
     /// Remove every installed revision of `entry` (used after model switches and on purge).
-    public func uninstall(_ entry: MLModelCatalogEntry) {
-        inFlight[entry.id]?.cancel()
-        inFlight[entry.id] = nil
+    /// Awaits any in-flight install of the same entry first, so a racing installer task can
+    /// never recreate files after the removal.
+    public func uninstall(_ entry: MLModelCatalogEntry) async {
+        await cancelInstall(of: entry.id)
         try? FileManager.default.removeItem(at: layout.modelDirectory(for: entry.id))
     }
 
-    /// Cancel an in-flight install, if any. Partial downloads stay in `tmp/` for a later
-    /// resume/restart; they are never loadable and vanish on purge.
-    public func cancelInstall(of id: MLModelID) {
-        inFlight[id]?.cancel()
-        inFlight[id] = nil
+    /// Cancel an in-flight install, if any, and WAIT for its task to finish unwinding.
+    /// Awaiting matters: callers (shutdown, purge) delete the install root next, and a
+    /// still-running install task would otherwise recreate `tmp/` after the delete. Partial
+    /// downloads stay in `tmp/` for a later resume/restart; they are never loadable.
+    public func cancelInstall(of id: MLModelID) async {
+        guard let install = inFlight[id] else { return }
+        install.task.cancel()
+        _ = try? await install.task.value
+        if inFlight[id]?.token == install.token {
+            inFlight[id] = nil
+        }
+    }
+
+    /// Cancel and await every in-flight install (session shutdown / purge).
+    public func cancelAllInstalls() async {
+        let installs = Array(inFlight.values)
+        for install in installs { install.task.cancel() }
+        for install in installs { _ = try? await install.task.value }
+        let cancelledTokens = Set(installs.map(\.token))
+        inFlight = inFlight.filter { !cancelledTokens.contains($0.value.token) }
     }
 
     // MARK: - Install pipeline (static: no actor hops during I/O)

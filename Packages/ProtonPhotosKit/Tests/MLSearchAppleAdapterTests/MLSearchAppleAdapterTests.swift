@@ -151,6 +151,57 @@ import MLSearchCore
         }
     }
 
+    // MARK: - Catalog-bound runtime contract
+
+    @Test func encoderSchemaIsBuiltFromTheCatalogContract() {
+        var contract = MLModelRuntimeContract.clipDualEncoder(imagePixelSide: 256)
+        contract.imageFunctionName = "img_fn"
+        contract.textFunctionName = "txt_fn"
+        contract.imageInputName = "pixels"
+        contract.tokenInputName = "tokens"
+        contract.endTokenMaskInputName = "mask"
+        contract.embeddingOutputName = "vec"
+        contract.textContextLength = 64
+
+        let schema = CoreMLDualEncoderSchema(contract: contract)
+        #expect(schema.imageFunction == "img_fn")
+        #expect(schema.textFunction == "txt_fn")
+        #expect(schema.imageInput == "pixels")
+        #expect(schema.tokenInput == "tokens")
+        #expect(schema.endTokenMaskInput == "mask")
+        #expect(schema.embeddingOutput == "vec")
+        #expect(schema.contextLength == 64)
+        #expect(schema.imagePixelSide == 256)
+    }
+
+    @Test func bundledTokenizerSatisfiesTheBuiltInContracts() throws {
+        let tokenizer = try CLIPBPETokenizer.bundledTinyCLIP()
+        #expect(tokenizer.contextLength == MLModelCatalogEntry.tinyCLIPVit40M.runtimeContract.textContextLength)
+        #expect(tokenizer.contextLength == MLModelCatalogEntry.appleMobileCLIPS2Developer.runtimeContract.textContextLength)
+        #expect(MLModelCatalogEntry.tinyCLIPVit40M.runtimeContract.imagePixelSide == 224)
+        #expect(MLModelCatalogEntry.appleMobileCLIPS2Developer.runtimeContract.imagePixelSide == 256)
+    }
+
+    @Test func builtInCatalogEnforcesLicenseGates() {
+        // TinyCLIP: MIT (redistribution + product use), but no hosted CoreML artifact exists
+        // (verified 2026-07: upstream ships PyTorch/safetensors only) — so no download plan,
+        // not downloadable, production-selectable.
+        let tinyCLIP = MLModelCatalogEntry.tinyCLIPVit40M
+        #expect(tinyCLIP.license.allowsRedistribution && tinyCLIP.license.allowsProductUse)
+        #expect(tinyCLIP.downloadPlan == nil)
+        #expect(!tinyCLIP.isDownloadable)
+
+        // MobileCLIP-S2: weights are Apple AMLR (research-only, no product use) — never
+        // downloadable, never selectable outside developer environments, even if someone
+        // attached a download plan by mistake.
+        let mobileCLIP = MLModelCatalogEntry.appleMobileCLIPS2Developer
+        #expect(!mobileCLIP.license.allowsRedistribution && !mobileCLIP.license.allowsProductUse)
+        #expect(!mobileCLIP.isDownloadable)
+
+        let releaseSelectable = MLModelCatalog.builtIn.selectableEntries(allowsDeveloperModels: false)
+        #expect(releaseSelectable.map(\.id) == [tinyCLIP.id])
+    }
+
     // MARK: - Compute policy
 
     @Test func defaultPolicyIsCpuAndNeuralEngine() {

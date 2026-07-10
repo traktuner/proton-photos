@@ -65,6 +65,9 @@ final class MobileLibraryModel {
     /// The ordered items, for the grid and callers that pass the whole list (e.g. the viewer pager). Reads
     /// register a dependency on `snapshot`, so a timeline change invalidates only views that read items.
     var items: [PhotoItem] { snapshot.items }
+    /// The loaded timeline sections, kept for the shared section-based search filter
+    /// (`TimelineSearch`) so the mobile search path uses EXACTLY the macOS filter semantics.
+    private(set) var sections: [TimelineSection] = []
     private(set) var thumbnailFeed: UIKitThumbnailFeed?
     /// True while the background thumbnail crawl is still filling the library AFTER the grid became
     /// presentable - drives the small persistent top-left indicator. Deliberately NOT part of
@@ -123,6 +126,8 @@ final class MobileLibraryModel {
     private var firstContentGuard: Task<Void, Never>?
     private var backgroundActivityTask: Task<Void, Never>?
     @ObservationIgnored private var smartSearchMemoryRegistration: MemoryPressureRegistration?
+    /// The most recent ordered Smart Search shutdown; teardown awaits it before the sign-out purge.
+    @ObservationIgnored private var smartSearchShutdownTask: Task<Void, Never>?
 
     /// Safety net: if the grid never reports a first drawn frame (e.g. every visible thumbnail is unfetchable),
     /// the loading overlay must still lift onto whatever the grid shows rather than hang forever.
@@ -298,15 +303,24 @@ final class MobileLibraryModel {
         }
     }
 
-    /// Stops Smart Search background work and drops the stack: a parked indexing loop would
-    /// otherwise keep the lifecycle actor (and its store handle) alive past this session.
-    private func stopSmartSearch() {
-        if let lifecycle = smartSearch?.lifecycleActor {
-            Task { await lifecycle.prepareForTermination() }
-        }
+    /// Stops Smart Search and returns the ordered-shutdown task (same shared
+    /// `MLSmartSearchLifecycle.shutdown()` as macOS): a parked indexing loop or open index DB
+    /// handle must never outlive this session. Consecutive stops chain, so awaiting the
+    /// returned task always covers every previous lifecycle too.
+    @discardableResult
+    private func stopSmartSearch() -> Task<Void, Never>? {
+        let lifecycle = smartSearch?.lifecycleActor
         smartSearch = nil
         smartSearchMemoryRegistration?.end()
         smartSearchMemoryRegistration = nil
+        guard let lifecycle else { return smartSearchShutdownTask }
+        let previous = smartSearchShutdownTask
+        let task = Task {
+            await previous?.value
+            await lifecycle.shutdown()
+        }
+        smartSearchShutdownTask = task
+        return task
     }
 
     private func teardown() {
@@ -328,8 +342,9 @@ final class MobileLibraryModel {
         albumSync = nil
         albumCatalogRevision = 0
         snapshot = TimelineSnapshot()
+        sections = []
         thumbnailFeed = nil
-        stopSmartSearch()
+        let smartSearchShutdown = stopSmartSearch()
         thumbnailCache = nil
         originalsCache?.clearAndForgetKey()   // sign-out purges decrypted-originals blobs + the account key
         originalsCache = nil
@@ -337,10 +352,14 @@ final class MobileLibraryModel {
         locationCrawlStarted = false
         locationIndex.replaceAll([])
         locationIndex.updateScanProgress(PhotoLocationScanProgress())
-        Task { [locationCrawl] in await locationCrawl.cancel() }
-        // Purges ONLY when an explicit sign-out armed it (never on a transient session re-check), and
-        // only now that backup is stopped and the session-scoped stores above are released.
-        BackupLocalDataPurge.purgeIfSignOutRequested()
+        Task { [locationCrawl] in
+            // Purges ONLY when an explicit sign-out armed it (never on a transient session
+            // re-check) - and only AFTER the awaited Smart Search shutdown closed its index
+            // DB and stopped indexing/installs, so the purge never races open handles.
+            await smartSearchShutdown?.value
+            await locationCrawl.cancel()
+            BackupLocalDataPurge.purgeIfSignOutRequested()
+        }
     }
 
     private func start(session: ProtonSession, store: SessionKeychainStore) {
@@ -360,6 +379,7 @@ final class MobileLibraryModel {
         albumSync?.stopSync()
         albumSync = nil
         snapshot = TimelineSnapshot()
+        sections = []
         thumbnailFeed = nil
         stopSmartSearch()
         loadState = .preparingInventory
@@ -493,6 +513,7 @@ final class MobileLibraryModel {
         let changed = prepared != snapshot
         if changed {
             snapshot = prepared
+            self.sections = sections
             // New/removed assets flow into the Smart Search index on its next background pass.
             smartSearch?.noteLibraryChanged()
         }

@@ -11,5 +11,8 @@ public struct MLTokenizedText: Sendable, Equatable {
 }
 
 public protocol MLTextTokenizer: Sendable {
+    /// Fixed token count this tokenizer produces. Sessions must refuse to start when it does
+    /// not match the catalog entry's runtime contract.
+    var contextLength: Int { get }
     func tokenize(_ text: String) throws -> MLTokenizedText
 }

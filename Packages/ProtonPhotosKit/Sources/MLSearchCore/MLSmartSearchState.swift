@@ -119,9 +119,14 @@ public struct MLSmartSearchPersistentState: Sendable, Equatable, Codable {
 }
 
 /// Persistence seam for `MLSmartSearchPersistentState`.
+///
+/// `save` is the journal write for every multi-step lifecycle operation (enable, disable,
+/// switch, purge). It must be atomic and MUST surface failures: a silently lost journal write
+/// would let a crash resume into a state the user never confirmed. The lifecycle turns a
+/// thrown save into an honest, retryable `.failed(.storage)` phase.
 public protocol MLSmartSearchStateStore: Sendable {
     func load() -> MLSmartSearchPersistentState?
-    func save(_ state: MLSmartSearchPersistentState)
+    func save(_ state: MLSmartSearchPersistentState) throws
     /// Remove the persisted state entirely (final purge step).
     func clear()
 }
@@ -139,13 +144,13 @@ public struct FileMLSmartSearchStateStore: MLSmartSearchStateStore {
         return try? JSONDecoder().decode(MLSmartSearchPersistentState.self, from: data)
     }
 
-    public func save(_ state: MLSmartSearchPersistentState) {
-        guard let data = try? JSONEncoder().encode(state) else { return }
-        try? FileManager.default.createDirectory(
+    public func save(_ state: MLSmartSearchPersistentState) throws {
+        let data = try JSONEncoder().encode(state)
+        try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        try? data.write(to: fileURL, options: .atomic)
+        try data.write(to: fileURL, options: .atomic)
     }
 
     public func clear() {

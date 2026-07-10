@@ -34,6 +34,8 @@ public final class CLIPBPETokenizer: MLTextTokenizer, @unchecked Sendable {
     public static let startTokenID: Int32 = 49_406
     public static let endTokenID: Int32 = 49_407
 
+    public var contextLength: Int { Self.contextLength }
+
     private static let tokenPattern = try! NSRegularExpression(
         pattern: #"<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+"#
     )

@@ -7,6 +7,9 @@ import PhotosCore
 public enum AppleSmartSearchRuntimeError: Error, Equatable {
     case noModelArtifact
     case unsupportedTokenizer(String)
+    /// The catalog-declared runtime contract and the resolved tokenizer disagree — the
+    /// session must not start with mismatched text inputs.
+    case tokenizerContractMismatch(expected: Int, actual: Int)
 }
 
 /// Builds CoreML-backed Smart Search sessions for verified installations.
@@ -31,11 +34,22 @@ public struct AppleSmartSearchRuntimeProvider: MLSmartSearchRuntimeProvider {
     ) async throws -> any MLSmartSearchSession {
         let modelURL = try await Self.loadableModelURL(in: model.installDirectory)
         let tokenizer = try Self.tokenizer(for: model.entry.tokenizerID)
+        // The catalog entry's runtime contract is validated END TO END before activation:
+        // tokenizer identity here, function/input/output names, context length, image size
+        // and embedding dimension inside the encoder against the loaded artifact.
+        let contract = model.entry.runtimeContract
+        guard tokenizer.contextLength == contract.textContextLength else {
+            throw AppleSmartSearchRuntimeError.tokenizerContractMismatch(
+                expected: contract.textContextLength,
+                actual: tokenizer.contextLength
+            )
+        }
         let encoder = try await CoreMLDualEncoder(
             modelURL: modelURL,
             descriptor: model.entry.descriptor,
             imageSource: CachedThumbnailMLImageSource(feed: feed),
-            tokenizer: tokenizer
+            tokenizer: tokenizer,
+            schema: CoreMLDualEncoderSchema(contract: contract)
         )
         return MLSearchService(
             descriptor: model.entry.descriptor,
