@@ -421,6 +421,14 @@
         "de": { "stringUnit": { "state": "translated", "value": "Modell wird geladen" } }
       }
     },
+    "mlsearch.downloaded_bytes %@ %@": {
+      "extractionState": "manual",
+      "comment": "Model download detail. First value: received bytes, second: total bytes.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%@ of %@ downloaded" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%@ von %@ geladen" } }
+      }
+    },
     "mlsearch.status_verifying": {
       "extractionState": "manual",
       "comment": "Smart Search status: downloaded model is being checked.",
@@ -453,12 +461,12 @@
         "de": { "stringUnit": { "state": "translated", "value": "Fotos werden indexiert" } }
       }
     },
-    "mlsearch.status_ready": {
+    "mlsearch.status_waiting": {
       "extractionState": "manual",
-      "comment": "Smart Search status: ready, indexing not yet complete.",
+      "comment": "Smart Search status: indexing is paused and will resume automatically.",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Ready" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Bereit" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Indexing will continue automatically" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Die Indexierung wird automatisch fortgesetzt" } }
       }
     },
     "mlsearch.status_complete": {
@@ -467,6 +475,14 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "All photos indexed" } },
         "de": { "stringUnit": { "state": "translated", "value": "Alle Fotos indexiert" } }
+      }
+    },
+    "mlsearch.status_complete_with_skips": {
+      "extractionState": "manual",
+      "comment": "Smart Search status: indexing finished but some assets could not be indexed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Indexing complete" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Indexierung abgeschlossen" } }
       }
     },
     "mlsearch.status_switching": {
@@ -531,6 +547,14 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "%lld of %lld photos indexed" } },
         "de": { "stringUnit": { "state": "translated", "value": "%lld von %lld Fotos indexiert" } }
+      }
+    },
+    "mlsearch.indexed_with_failures %lld %lld %lld": {
+      "extractionState": "manual",
+      "comment": "Index coverage detail. Values: searchable photos, total photos, photos that could not be indexed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "%lld of %lld photos searchable; %lld could not be indexed" } },
+        "de": { "stringUnit": { "state": "translated", "value": "%lld von %lld Fotos durchsuchbar; %lld konnten nicht indexiert werden" } }
       }
     },
     "mlsearch.privacy_note": {

@@ -60,6 +60,10 @@ public final class TimelineViewModel {
     /// Flat, chronological items of the CURRENTLY active route (whole library for `.all`, else the
     /// filtered tag/album/trash set) - backs selection and the upload-found lookup, not viewer paging.
     public private(set) var allItems: [PhotoItem] = []
+    /// Stable identity snapshot of the whole `.all` library. Filter and map routes must never be
+    /// interpreted as asset deletion by consumers such as Smart Search.
+    public private(set) var wholeLibraryUIDs: [PhotoUID] = []
+    public private(set) var wholeLibraryRevision: UInt64 = 0
 
     private let repository: PhotosRepository
     private let library: PhotoLibraryProvider?
@@ -92,6 +96,14 @@ public final class TimelineViewModel {
     /// the whole-library route, which otherwise re-materialized from the repository on every revisit. Kept in
     /// sync by `applyAllContent`, `refreshCurrent`, and `remove`.
     @ObservationIgnored private var allRouteSnapshot: [TimelineSection]?
+
+    private func updateAllRouteSnapshot(_ sections: [TimelineSection]) {
+        allRouteSnapshot = sections
+        let uids = sections.flatMap { $0.items.map(\.uid) }
+        guard uids != wholeLibraryUIDs else { return }
+        wholeLibraryUIDs = uids
+        wholeLibraryRevision &+= 1
+    }
 
     /// Whether `sections` flattens to exactly `items` (same `PhotoItem`s, same order) WITHOUT allocating the
     /// flattened array - the content-equality that lets an unchanged refresh/revisit skip state reassignment
@@ -297,7 +309,7 @@ public final class TimelineViewModel {
             state = sections.isEmpty ? .empty : .loaded(sections)
             // Keep the route's instant-revisit view consistent with the optimistic removal, so returning to
             // it doesn't flash the just-trashed items back in.
-            if filter == .all { allRouteSnapshot = sections } else { filterCache[filter] = sections }
+            if filter == .all { updateAllRouteSnapshot(sections) } else { filterCache[filter] = sections }
         }
     }
 
@@ -347,7 +359,7 @@ public final class TimelineViewModel {
     /// or behind-the-scenes refresh of an UNCHANGED library therefore does no grid rebuild and no prefetch
     /// restart. The `.loaded`/`.empty` guard still lets the FIRST load settle an empty library off `.loading`.
     private func applyAllContent(_ sections: [TimelineSection]) async {
-        allRouteSnapshot = sections
+        updateAllRouteSnapshot(sections)
         let settled: Bool
         switch state {
         case .loaded, .empty: settled = true
@@ -382,6 +394,7 @@ public final class TimelineViewModel {
             // reassign state/allItems, refresh the route cache, or restart the crawl - the grid stays put
             // (scroll + selection preserved). The found-item lookup still runs against the current list.
             if Self.timelineContentUnchanged(sections, vs: allItems) {
+                if f == .all { updateAllRouteSnapshot(sections) }
                 noteRefresh("unchangedSkip")
                 let foundItem = uploadedUID.flatMap { uid in allItems.first { $0.uid == uid } }
                 return TimelineRefreshResult(
@@ -396,7 +409,7 @@ public final class TimelineViewModel {
             let items = sections.flatMap(\.items)
             allItems = items
             state = items.isEmpty ? .empty : .loaded(sections)
-            if f == .all { allRouteSnapshot = sections } else { filterCache[f] = sections }   // keep the route's instant-revisit view fresh
+            if f == .all { updateAllRouteSnapshot(sections) } else { filterCache[f] = sections }   // keep the route's instant-revisit view fresh
             noteRefresh("applied")
             await feed.startPrefetch(ThumbnailCrawlOrder.newestToOldest(items))
             let foundItem = uploadedUID.flatMap { uid in items.first { $0.uid == uid } }

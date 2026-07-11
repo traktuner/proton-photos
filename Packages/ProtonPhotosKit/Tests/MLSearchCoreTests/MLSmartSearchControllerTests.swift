@@ -3,6 +3,58 @@ import PhotosCore
 import Testing
 @testable import MLSearchCore
 
+@Suite struct MLSmartSearchPresentationTests {
+    private let coverage = MLIndexCoverage(total: 100, indexed: 40, permanentlyUnindexable: 2)
+
+    @Test func waitingStateIsHonestAndKeepsDeterminateCoverage() {
+        let presentation = MLSmartSearchPresentation(snapshot: MLSmartSearchSnapshot(
+            isEnabled: true,
+            selectedModelID: nil,
+            phase: .waiting(coverage),
+            installedModelBytes: 0,
+            availableModels: [],
+            isSearchAvailable: true
+        ))
+
+        #expect(presentation.indexedCount == 40)
+        #expect(presentation.totalCount == 100)
+        #expect(presentation.progressFraction == 0.42)
+        #expect(presentation.detailText != nil)
+        #expect(!presentation.isBusy)
+        #expect(presentation.statusText == L10n.string("mlsearch.status_waiting"))
+    }
+
+    @Test func completedCoverageReportsUnindexableAssetsInsteadOfClaimingAllIndexed() {
+        let presentation = MLSmartSearchPresentation(snapshot: MLSmartSearchSnapshot(
+            isEnabled: true,
+            selectedModelID: nil,
+            phase: .ready(MLIndexCoverage(total: 10, indexed: 9, permanentlyUnindexable: 1)),
+            installedModelBytes: 0,
+            availableModels: [],
+            isSearchAvailable: true
+        ))
+
+        #expect(presentation.indexedCount == 9)
+        #expect(presentation.detailText != nil)
+        #expect(presentation.statusText == L10n.string("mlsearch.status_complete_with_skips"))
+    }
+
+    @Test func downloadShowsByteProgress() {
+        let presentation = MLSmartSearchPresentation(snapshot: MLSmartSearchSnapshot(
+            isEnabled: true,
+            selectedModelID: nil,
+            phase: .downloading(MLModelTransferProgress(bytesReceived: 25, totalBytes: 100)),
+            installedModelBytes: 0,
+            availableModels: [],
+            isSearchAvailable: false
+        ))
+
+        #expect(presentation.progressFraction == 0.25)
+        #expect(presentation.detailText != nil)
+        #expect(presentation.isBusy)
+    }
+}
+
 /// Shared controller behavior that platform views rely on: the developer-artifact import owns
 /// the security-scope lifetime (views own no filesystem lifecycle), and the atomic state store
 /// surfaces write failures instead of swallowing them.
@@ -83,7 +135,7 @@ import Testing
             tokenizerID: "t",
             preprocessingID: "p",
             license: .mit,
-            releaseTrack: .developerOnly,
+            releaseTrack: .production,
             estimatedInstalledBytes: 1,
             downloadPlan: nil
         )
@@ -102,8 +154,9 @@ import Testing
 
         // The developer artifact the user "picked".
         let artifact = root.appendingPathComponent("picked-artifact", isDirectory: true)
-        try FileManager.default.createDirectory(at: artifact, withIntermediateDirectories: true)
-        try Data("weights".utf8).write(to: artifact.appendingPathComponent("weights.bin"))
+        let model = artifact.appendingPathComponent("Test.mlmodelc", isDirectory: true)
+        try FileManager.default.createDirectory(at: model, withIntermediateDirectories: true)
+        try Data("weights".utf8).write(to: model.appendingPathComponent("model.bin"))
 
         let recorder = ScopeRecorder()
         let access = MLScopedArtifactAccess(

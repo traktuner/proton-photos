@@ -168,19 +168,62 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
     }
 
     public func remove(uid: PhotoUID, descriptor: MLModelDescriptor) {
+        remove(uids: [uid], descriptor: descriptor)
+    }
+
+    public func remove(uids: [PhotoUID], descriptor: MLModelDescriptor) {
+        guard !uids.isEmpty else { return }
         lock.withLock {
-            var stmt: OpaquePointer?
+            guard sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else { return }
+            var embeddingStmt: OpaquePointer?
             guard sqlite3_prepare_v2(
                 db,
                 "DELETE FROM ml_embeddings WHERE model_identifier=? AND model_version=? AND volume_id=? AND node_id=?;",
-                -1, &stmt, nil
-            ) == SQLITE_OK else { return }
-            defer { sqlite3_finalize(stmt) }
-            bindDescriptor(stmt, descriptor)
-            bindText(stmt, 3, uid.volumeID)
-            bindText(stmt, 4, uid.nodeID)
-            if sqlite3_step(stmt) == SQLITE_DONE, sqlite3_changes(db) > 0 {
-                bumpGenerationLocked(for: descriptor)
+                -1, &embeddingStmt, nil
+            ) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return
+            }
+            defer { sqlite3_finalize(embeddingStmt) }
+            var failureStmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "DELETE FROM ml_failures WHERE model_identifier=? AND model_version=? AND volume_id=? AND node_id=?;",
+                -1, &failureStmt, nil
+            ) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return
+            }
+            defer { sqlite3_finalize(failureStmt) }
+
+            var vectorsChanged = false
+            for uid in Set(uids) {
+                sqlite3_reset(embeddingStmt)
+                sqlite3_clear_bindings(embeddingStmt)
+                bindDescriptor(embeddingStmt, descriptor)
+                bindText(embeddingStmt, 3, uid.volumeID)
+                bindText(embeddingStmt, 4, uid.nodeID)
+                guard sqlite3_step(embeddingStmt) == SQLITE_DONE else {
+                    sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                    return
+                }
+                vectorsChanged = sqlite3_changes(db) > 0 || vectorsChanged
+
+                sqlite3_reset(failureStmt)
+                sqlite3_clear_bindings(failureStmt)
+                bindDescriptor(failureStmt, descriptor)
+                bindText(failureStmt, 3, uid.volumeID)
+                bindText(failureStmt, 4, uid.nodeID)
+                guard sqlite3_step(failureStmt) == SQLITE_DONE else {
+                    sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                    return
+                }
+            }
+
+            guard (!vectorsChanged || bumpGenerationLocked(for: descriptor)),
+                  sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return
             }
         }
     }
@@ -209,13 +252,18 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(
                 db,
-                "SELECT 1 FROM ml_embeddings WHERE model_identifier=? AND model_version=? AND volume_id=? AND node_id=? LIMIT 1;",
+                """
+                SELECT 1 FROM ml_embeddings
+                WHERE model_identifier=? AND model_version=?
+                  AND embedding_dimension=? AND embedding_precision=?
+                  AND volume_id=? AND node_id=? LIMIT 1;
+                """,
                 -1, &stmt, nil
             ) == SQLITE_OK else { return false }
             defer { sqlite3_finalize(stmt) }
-            bindDescriptor(stmt, descriptor)
-            bindText(stmt, 3, uid.volumeID)
-            bindText(stmt, 4, uid.nodeID)
+            bindEpochRead(stmt, descriptor)
+            bindText(stmt, 5, uid.volumeID)
+            bindText(stmt, 6, uid.nodeID)
             return sqlite3_step(stmt) == SQLITE_ROW
         }
     }
@@ -239,13 +287,14 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
                     """
                     SELECT volume_id, node_id FROM ml_embeddings
                     WHERE model_identifier=? AND model_version=?
+                      AND embedding_dimension=? AND embedding_precision=?
                       AND (volume_id, node_id) IN (VALUES \(placeholders));
                     """,
                     -1, &stmt, nil
                 ) == SQLITE_OK else { continue }
                 defer { sqlite3_finalize(stmt) }
-                bindDescriptor(stmt, descriptor)
-                var index: Int32 = 3
+                bindEpochRead(stmt, descriptor)
+                var index: Int32 = 5
                 for uid in chunk {
                     bindText(stmt, index, uid.volumeID)
                     bindText(stmt, index + 1, uid.nodeID)
@@ -267,12 +316,41 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
                 """
                 SELECT volume_id, node_id FROM ml_embeddings
                 WHERE model_identifier=? AND model_version=?
+                  AND embedding_dimension=? AND embedding_precision=?
                 ORDER BY volume_id, node_id;
                 """,
                 -1, &stmt, nil
             ) == SQLITE_OK else { return [] }
             defer { sqlite3_finalize(stmt) }
-            bindDescriptor(stmt, descriptor)
+            bindEpochRead(stmt, descriptor)
+            var uids: [PhotoUID] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                uids.append(PhotoUID(volumeID: columnText(stmt, 0), nodeID: columnText(stmt, 1)))
+            }
+            return uids
+        }
+    }
+
+    public func allTrackedUIDs(for descriptor: MLModelDescriptor) -> [PhotoUID] {
+        lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                """
+                SELECT volume_id, node_id FROM ml_embeddings
+                WHERE model_identifier=? AND model_version=?
+                  AND embedding_dimension=? AND embedding_precision=?
+                UNION
+                SELECT volume_id, node_id FROM ml_failures
+                WHERE model_identifier=? AND model_version=?
+                ORDER BY volume_id, node_id;
+                """,
+                -1, &stmt, nil
+            ) == SQLITE_OK else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            bindEpochRead(stmt, descriptor)
+            bindText(stmt, 5, descriptor.identifier)
+            sqlite3_bind_int64(stmt, 6, Int64(descriptor.version))
             var uids: [PhotoUID] = []
             while sqlite3_step(stmt) == SQLITE_ROW {
                 uids.append(PhotoUID(volumeID: columnText(stmt, 0), nodeID: columnText(stmt, 1)))
@@ -405,27 +483,6 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
         }
     }
 
-    public func clearFailures(for descriptor: MLModelDescriptor, uids: [PhotoUID]) {
-        guard !uids.isEmpty else { return }
-        lock.withLock {
-            var stmt: OpaquePointer?
-            guard sqlite3_prepare_v2(
-                db,
-                "DELETE FROM ml_failures WHERE model_identifier=? AND model_version=? AND volume_id=? AND node_id=?;",
-                -1, &stmt, nil
-            ) == SQLITE_OK else { return }
-            defer { sqlite3_finalize(stmt) }
-            for uid in uids {
-                sqlite3_reset(stmt)
-                sqlite3_clear_bindings(stmt)
-                bindDescriptor(stmt, descriptor)
-                bindText(stmt, 3, uid.volumeID)
-                bindText(stmt, 4, uid.nodeID)
-                _ = sqlite3_step(stmt)
-            }
-        }
-    }
-
     // MARK: - Reads
 
     public func allRecords(for descriptor: MLModelDescriptor) -> [MLEmbeddingRecord] {
@@ -440,27 +497,34 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
                 """,
                 -1, &stmt, nil
             ) == SQLITE_OK else { return [] }
-            defer { sqlite3_finalize(stmt) }
             bindEpochRead(stmt, descriptor)
 
             var records: [MLEmbeddingRecord] = []
+            var invalidUIDs: Set<PhotoUID> = []
             let expectedBytes = descriptor.embeddingDimension * MLFloat16Codec.bytesPerElement
             let expectedSealedBytes = cipher.sealedByteCount(forPlaintextByteCount: expectedBytes)
             while sqlite3_step(stmt) == SQLITE_ROW {
+                let uid = PhotoUID(volumeID: columnText(stmt, 0), nodeID: columnText(stmt, 1))
                 let encryptedBytes = Int(sqlite3_column_bytes(stmt, 2))
-                guard encryptedBytes > 0, let blob = sqlite3_column_blob(stmt, 2) else { continue }
+                guard encryptedBytes > 0, let blob = sqlite3_column_blob(stmt, 2) else {
+                    invalidUIDs.insert(uid)
+                    continue
+                }
                 // Byte-count validation BEFORE any decryption: a truncated/corrupt blob is
                 // skipped for the cost of a length compare, never a crypto operation.
-                if let expectedSealedBytes, encryptedBytes != expectedSealedBytes { continue }
+                if let expectedSealedBytes, encryptedBytes != expectedSealedBytes {
+                    invalidUIDs.insert(uid)
+                    continue
+                }
                 let ciphertext = Data(bytes: blob, count: encryptedBytes)
-                let context = MLVectorCipherContext(
-                    uid: PhotoUID(volumeID: columnText(stmt, 0), nodeID: columnText(stmt, 1)),
-                    descriptor: descriptor
-                )
+                let context = MLVectorCipherContext(uid: uid, descriptor: descriptor)
                 guard let plaintext = try? cipher.open(ciphertext, context: context),
                       let vector = plaintext.withUnsafeBytes({
                           MLFloat16Codec.decodeLittleEndian($0, dimension: descriptor.embeddingDimension)
-                      }) else { continue }
+                      }) else {
+                    invalidUIDs.insert(uid)
+                    continue
+                }
                 let captureTime: Date? = sqlite3_column_type(stmt, 4) == SQLITE_NULL
                     ? nil
                     : Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
@@ -472,6 +536,8 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
                     captureTime: captureTime
                 ))
             }
+            sqlite3_finalize(stmt)
+            deleteInvalidRowsLocked(invalidUIDs, descriptor: descriptor)
             return records
         }
     }
@@ -493,26 +559,37 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
                 """,
                 -1, &stmt, nil
             ) == SQLITE_OK else { return block }
-            defer { sqlite3_finalize(stmt) }
             bindEpochRead(stmt, descriptor)
 
+            var invalidUIDs: Set<PhotoUID> = []
             let expectedBytes = descriptor.embeddingDimension * MLFloat16Codec.bytesPerElement
             let expectedSealedBytes = cipher.sealedByteCount(forPlaintextByteCount: expectedBytes)
             while sqlite3_step(stmt) == SQLITE_ROW {
                 let uid = PhotoUID(volumeID: columnText(stmt, 0), nodeID: columnText(stmt, 1))
                 let encryptedBytes = Int(sqlite3_column_bytes(stmt, 2))
-                guard encryptedBytes > 0, let blob = sqlite3_column_blob(stmt, 2) else { continue }
+                guard encryptedBytes > 0, let blob = sqlite3_column_blob(stmt, 2) else {
+                    invalidUIDs.insert(uid)
+                    continue
+                }
                 // Length check before decryption — corrupt rows never cost a crypto pass.
-                if let expectedSealedBytes, encryptedBytes != expectedSealedBytes { continue }
+                if let expectedSealedBytes, encryptedBytes != expectedSealedBytes {
+                    invalidUIDs.insert(uid)
+                    continue
+                }
                 let ciphertext = Data(bytes: blob, count: encryptedBytes)
                 let context = MLVectorCipherContext(uid: uid, descriptor: descriptor)
                 guard let plaintext = try? cipher.open(ciphertext, context: context),
-                      plaintext.count == expectedBytes else { continue }
+                      plaintext.count == expectedBytes else {
+                    invalidUIDs.insert(uid)
+                    continue
+                }
                 // Widen binary16 → Float32 straight into the packed scoring buffer.
                 _ = plaintext.withUnsafeBytes { raw in
                     block.append(uid: uid, rawLittleEndianFloat16: raw)
                 }
             }
+            sqlite3_finalize(stmt)
+            deleteInvalidRowsLocked(invalidUIDs, descriptor: descriptor)
             return block
         }
     }
@@ -598,13 +675,51 @@ public final class SQLiteMLIndexStore: MLIndexStore, @unchecked Sendable {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(
             db,
-            "SELECT COUNT(*) FROM ml_embeddings WHERE model_identifier=? AND model_version=?;",
+            """
+            SELECT COUNT(*) FROM ml_embeddings
+            WHERE model_identifier=? AND model_version=?
+              AND embedding_dimension=? AND embedding_precision=?;
+            """,
             -1, &stmt, nil
         ) == SQLITE_OK else { return 0 }
         defer { sqlite3_finalize(stmt) }
-        bindDescriptor(stmt, descriptor)
+        bindEpochRead(stmt, descriptor)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
         return Int(sqlite3_column_int64(stmt, 0))
+    }
+
+    private func deleteInvalidRowsLocked(_ uids: Set<PhotoUID>, descriptor: MLModelDescriptor) {
+        guard !uids.isEmpty,
+              sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else { return }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "DELETE FROM ml_embeddings WHERE model_identifier=? AND model_version=? AND volume_id=? AND node_id=?;",
+            -1, &stmt, nil
+        ) == SQLITE_OK else {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var deleted = false
+        for uid in uids {
+            sqlite3_reset(stmt)
+            sqlite3_clear_bindings(stmt)
+            bindDescriptor(stmt, descriptor)
+            bindText(stmt, 3, uid.volumeID)
+            bindText(stmt, 4, uid.nodeID)
+            guard sqlite3_step(stmt) == SQLITE_DONE else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return
+            }
+            deleted = deleted || sqlite3_changes(db) > 0
+        }
+        guard !deleted || bumpGenerationLocked(for: descriptor),
+              sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return
+        }
     }
 
     @discardableResult

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import MLSearchCore
 
 /// Repo gate: model weights and compiled ML artifacts must never be committed. Models are
 /// downloaded (verified, checksummed) or installed from developer-provided local artifacts;
@@ -20,6 +21,7 @@ import Testing
             repoRoot.appendingPathComponent("Packages/ProtonPhotosKit/Tests"),
             repoRoot.appendingPathComponent("App"),
             repoRoot.appendingPathComponent("iOSApp"),
+            repoRoot.appendingPathComponent("Tools"),
         ]
 
         var violations: [String] = []
@@ -39,5 +41,19 @@ import Testing
         }
 
         #expect(violations.isEmpty, "Model weights/compiled artifacts found in the source tree:\n\(violations.joined(separator: "\n"))")
+    }
+
+    @Test func sigLIP2ConversionRecipeMatchesCatalogAndProducesCanonicalDistribution() throws {
+        var repoRoot = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { repoRoot.deleteLastPathComponent() }
+        let scriptURL = repoRoot.appendingPathComponent("Tools/MLModels/SigLIP2/convert_siglip2.py")
+        let script = try String(contentsOf: scriptURL, encoding: .utf8)
+        let entry = MLModelCatalogEntry.sigLIP2Base256
+
+        #expect(script.contains("REVISION = \"\(entry.sourceRevision ?? "")\""))
+        #expect(script.contains("coremlcompiler"))
+        #expect(script.contains("image_coreml_torch_cosine"))
+        #expect(script.contains("artifact-manifest.json"))
+        #expect(!script.contains("/Users/"))
     }
 }

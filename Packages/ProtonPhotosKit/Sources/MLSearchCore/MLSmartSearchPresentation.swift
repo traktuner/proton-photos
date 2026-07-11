@@ -13,7 +13,7 @@ public struct MLSmartSearchPresentation: Sendable, Equatable {
     public let progressFraction: Double?
     public let indexedCount: Int
     public let totalCount: Int
-    public let installedSizeText: String?
+    public let modelSizeText: String?
     public let canRetry: Bool
     public let isBusy: Bool
 
@@ -35,6 +35,11 @@ public struct MLSmartSearchPresentation: Sendable, Equatable {
         case .downloading(let progress):
             status = L10n.string("mlsearch.status_downloading")
             fraction = progress.fraction
+            if let totalBytes = progress.totalBytes, totalBytes > 0 {
+                let received = ByteCountFormatter.string(fromByteCount: progress.bytesReceived, countStyle: .file)
+                let total = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
+                detail = L10n.string("mlsearch.downloaded_bytes \(received) \(total)")
+            }
         case .verifying:
             status = L10n.string("mlsearch.status_verifying")
         case .installing:
@@ -47,16 +52,24 @@ public struct MLSmartSearchPresentation: Sendable, Equatable {
             indexed = progress.indexed + progress.alreadyIndexed
             total = progress.totalAssets
             detail = L10n.string("mlsearch.indexed_count \(indexed) \(total)")
+        case .waiting(let coverage):
+            status = L10n.string("mlsearch.status_waiting")
+            indexed = coverage.indexed
+            total = coverage.total
+            if total > 0 {
+                detail = Self.coverageDetail(coverage)
+                fraction = coverage.accountedFraction
+            }
         case .ready(let coverage):
             indexed = coverage.indexed
             total = coverage.total
-            if coverage.isComplete, coverage.total > 0 {
+            if coverage.permanentlyUnindexable == 0 {
                 status = L10n.string("mlsearch.status_complete")
             } else {
-                status = L10n.string("mlsearch.status_ready")
+                status = L10n.string("mlsearch.status_complete_with_skips")
             }
             if total > 0 {
-                detail = L10n.string("mlsearch.indexed_count \(indexed) \(total)")
+                detail = Self.coverageDetail(coverage)
             }
         case .switchingModel:
             status = L10n.string("mlsearch.status_switching")
@@ -78,8 +91,12 @@ public struct MLSmartSearchPresentation: Sendable, Equatable {
         self.progressFraction = fraction
         self.indexedCount = indexed
         self.totalCount = total
-        self.installedSizeText = snapshot.installedModelBytes > 0
-            ? ByteCountFormatter.string(fromByteCount: snapshot.installedModelBytes, countStyle: .file)
+        let selectedModel = snapshot.availableModels.first { $0.id == snapshot.selectedModelID }
+        let modelBytes = snapshot.installedModelBytes > 0
+            ? snapshot.installedModelBytes
+            : selectedModel?.estimatedInstalledBytes ?? 0
+        self.modelSizeText = modelBytes > 0
+            ? ByteCountFormatter.string(fromByteCount: modelBytes, countStyle: .file)
             : nil
         self.canRetry = retry
         self.isBusy = snapshot.phase.isBusy
@@ -93,5 +110,14 @@ public struct MLSmartSearchPresentation: Sendable, Equatable {
     /// Warning line for developer-only models.
     public static var developerModelNote: String {
         L10n.string("mlsearch.developer_model_note")
+    }
+
+    private static func coverageDetail(_ coverage: MLIndexCoverage) -> String {
+        if coverage.permanentlyUnindexable > 0 {
+            return L10n.string(
+                "mlsearch.indexed_with_failures \(coverage.indexed) \(coverage.total) \(coverage.permanentlyUnindexable)"
+            )
+        }
+        return L10n.string("mlsearch.indexed_count \(coverage.indexed) \(coverage.total)")
     }
 }

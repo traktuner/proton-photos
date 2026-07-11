@@ -209,7 +209,7 @@ import MLSearchCore
         #expect(sigLIP2.descriptor.embeddingDimension == 768)
 
         let releaseSelectable = MLModelCatalog.builtIn.selectableEntries(allowsDeveloperModels: false)
-        #expect(releaseSelectable.map(\.id) == [sigLIP2.id, tinyCLIP.id])
+        #expect(releaseSelectable.isEmpty)
     }
 
     // MARK: - Compute policy
@@ -331,10 +331,11 @@ import MLSearchCore
         #expect(wrongStore.count(for: descriptor) == 1)
         #expect(wrongStore.allRecords(for: descriptor).isEmpty)
         #expect(wrongStore.vectorBlock(for: descriptor).isEmpty)
+        #expect(wrongStore.count(for: descriptor) == 0)
         wrongStore.close()
 
         let reopened = try #require(SQLiteMLIndexStore(url: url, cipher: correct))
-        #expect(reopened.allRecords(for: descriptor).first?.vector == ContiguousArray([1, 0, 0, 0]))
+        #expect(reopened.allRecords(for: descriptor).isEmpty)
         reopened.close()
     }
 

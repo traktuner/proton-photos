@@ -61,7 +61,8 @@ import Testing
         id: String,
         plan: MLModelDownloadPlan?,
         track: MLModelReleaseTrack = .production,
-        license: MLModelLicense = .mit
+        license: MLModelLicense = .mit,
+        qualification: MLModelReleaseQualification? = nil
     ) -> MLModelCatalogEntry {
         MLModelCatalogEntry(
             id: MLModelID(id),
@@ -73,7 +74,8 @@ import Testing
             license: license,
             releaseTrack: track,
             estimatedInstalledBytes: 100,
-            downloadPlan: plan
+            downloadPlan: plan,
+            releaseQualification: qualification
         )
     }
 
@@ -110,6 +112,38 @@ import Testing
         // Second install: already installed, no new download.
         _ = try await installer.install(testEntry) { _ in }
         #expect(transport.downloadCount(url) == 1)
+    }
+
+    @Test func releaseReadinessRequiresEvidenceForExactHostedRevision() {
+        let payload = Data("model".utf8)
+        let url = URL(string: "https://example.test/model.bin")!
+        let hostedPlan = plan(revision: "rev2", files: [("model.bin", payload, url)])
+        let stale = MLModelReleaseQualification(
+            artifactRevision: "rev1",
+            hardwareModel: "oldest-supported-device",
+            osVersion: "test",
+            peakResidentBytes: 1,
+            imageP95Milliseconds: 1,
+            textP95Milliseconds: 1,
+            reachedSeriousThermalState: false,
+            neuralEngineExecutionVerified: true,
+            passed: true
+        )
+        let matching = MLModelReleaseQualification(
+            artifactRevision: "rev2",
+            hardwareModel: "oldest-supported-device",
+            osVersion: "test",
+            peakResidentBytes: 1,
+            imageP95Milliseconds: 1,
+            textP95Milliseconds: 1,
+            reachedSeriousThermalState: false,
+            neuralEngineExecutionVerified: true,
+            passed: true
+        )
+
+        #expect(!entry(id: "missing", plan: hostedPlan).isReleaseReady)
+        #expect(!entry(id: "stale", plan: hostedPlan, qualification: stale).isReleaseReady)
+        #expect(entry(id: "ready", plan: hostedPlan, qualification: matching).isReleaseReady)
     }
 
     @Test func checksumMismatchNeverBecomesInstalled() async throws {
@@ -220,9 +254,10 @@ import Testing
         defer { try? FileManager.default.removeItem(at: root) }
         let layout = MLModelInstallLayout(rootDirectory: root)
         let source = root.appendingPathComponent("dev-artifact", isDirectory: true)
-        try FileManager.default.createDirectory(at: source.appendingPathComponent("Weights"), withIntermediateDirectories: true)
-        try Data("manifest".utf8).write(to: source.appendingPathComponent("Manifest.json"))
-        try Data("weights".utf8).write(to: source.appendingPathComponent("Weights/weight.bin"))
+        let model = source.appendingPathComponent("Test.mlmodelc", isDirectory: true)
+        try FileManager.default.createDirectory(at: model.appendingPathComponent("Weights"), withIntermediateDirectories: true)
+        try Data("manifest".utf8).write(to: model.appendingPathComponent("Manifest.json"))
+        try Data("weights".utf8).write(to: model.appendingPathComponent("Weights/weight.bin"))
         let testEntry = entry(id: "model-dev", plan: nil, track: .developerOnly)
         let installer = MLModelInstaller(layout: layout, transport: ScriptedTransport(payloads: [:]))
 
@@ -238,9 +273,30 @@ import Testing
         // A record whose files were tampered with (size change) is no longer trusted.
         try Data("weights-tampered".utf8).write(
             to: layout.installDirectory(for: testEntry.id, revision: record.revision)
-                .appendingPathComponent("Weights/weight.bin")
+                .appendingPathComponent("Test.mlmodelc/Weights/weight.bin")
         )
         #expect(installer.anyInstalledRecord(for: testEntry) == nil)
+    }
+
+    @Test func localInstallRejectsMultipleModelRepresentations() async throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = root.appendingPathComponent("ambiguous", isDirectory: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("Model.mlmodelc"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("Model.mlpackage"), withIntermediateDirectories: true)
+        try Data("compiled".utf8).write(to: source.appendingPathComponent("Model.mlmodelc/model.bin"))
+        try Data("package".utf8).write(to: source.appendingPathComponent("Model.mlpackage/model.bin"))
+        let installer = MLModelInstaller(
+            layout: MLModelInstallLayout(rootDirectory: root.appendingPathComponent("install")),
+            transport: ScriptedTransport(payloads: [:])
+        )
+
+        await #expect(throws: MLModelInstallError.ambiguousModelArtifact) {
+            _ = try await installer.installFromLocalArtifact(
+                entry(id: "ambiguous", plan: nil, track: .developerOnly),
+                artifactDirectory: source
+            )
+        }
     }
 
     @Test func researchOnlyLicenseIsTechnicallyBlockedFromDownload() async throws {

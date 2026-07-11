@@ -20,6 +20,7 @@ public enum MLModelInstallError: Error, Equatable {
     case sizeMismatch(artifact: String, expected: Int64, actual: Int64)
     case checksumMismatch(artifact: String)
     case artifactMissing(String)
+    case ambiguousModelArtifact
     case installRecordUnreadable
     case notDownloadable
     /// The entry's weight license forbids redistribution or product use — downloading it into
@@ -192,7 +193,7 @@ public actor MLModelInstaller {
             throw MLModelInstallError.artifactMissing(artifactDirectory.lastPathComponent)
         }
         var specs: [MLModelArtifactSpec] = []
-        let files = try Self.regularFiles(under: artifactDirectory)
+        let files = try Self.localInstallFiles(for: entry, under: artifactDirectory)
         guard !files.isEmpty else { throw MLModelInstallError.artifactMissing(artifactDirectory.lastPathComponent) }
         for relativePath in files.sorted() {
             guard MLModelInstallLayout.isSafeRelativePath(relativePath) else {
@@ -417,17 +418,41 @@ public actor MLModelInstaller {
         return (attributes[.size] as? Int64) ?? Int64((attributes[.size] as? Int) ?? 0)
     }
 
-    private static func regularFiles(under root: URL) throws -> [String] {
+    private static func localInstallFiles(for entry: MLModelCatalogEntry, under root: URL) throws -> [String] {
         let fm = FileManager.default
-        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else { return [] }
+        let contents = try fm.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+        let modelRoots = contents.filter { ["mlmodelc", "mlpackage"].contains($0.pathExtension.lowercased()) }
+        guard modelRoots.count == 1, let modelRoot = modelRoots.first else {
+            if modelRoots.isEmpty { throw MLModelInstallError.artifactMissing("*.mlmodelc or *.mlpackage") }
+            throw MLModelInstallError.ambiguousModelArtifact
+        }
+
         var paths: [String] = []
         let rootPath = root.standardizedFileURL.path
+        guard let enumerator = fm.enumerator(at: modelRoot, includingPropertiesForKeys: [.isRegularFileKey]) else {
+            throw MLModelInstallError.artifactMissing(modelRoot.lastPathComponent)
+        }
         for case let fileURL as URL in enumerator {
             let values = try fileURL.resourceValues(forKeys: [.isRegularFileKey])
             guard values.isRegularFile == true else { continue }
             let fullPath = fileURL.standardizedFileURL.path
             guard fullPath.hasPrefix(rootPath + "/") else { continue }
             paths.append(String(fullPath.dropFirst(rootPath.count + 1)))
+        }
+        for relativePath in entry.runtimeResourcePaths {
+            guard MLModelInstallLayout.isSafeRelativePath(relativePath) else {
+                throw MLModelInstallError.unsafeArtifactPath(relativePath)
+            }
+            let fileURL = root.appendingPathComponent(relativePath)
+            let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            guard values?.isRegularFile == true else {
+                throw MLModelInstallError.artifactMissing(relativePath)
+            }
+            paths.append(relativePath)
         }
         return paths
     }

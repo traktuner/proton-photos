@@ -224,13 +224,14 @@ struct MainView: View {
                 routeScrollGeneration += 1
                 Task { await timelineModel.select(newValue) }
             }
-            .onChange(of: timelineModel.allItems.count) { _, count in
-                OfflineLibraryManager.shared.liveAssetCount = count
+            .onChange(of: timelineModel.wholeLibraryRevision) { _, _ in
+                let items = timelineModel.wholeLibraryItemsForViewer
+                OfflineLibraryManager.shared.liveAssetCount = items.count
                 // Kick off the low-priority GPS crawl (once) so the Map's location index fills in behind the
                 // thumbnail crawl.
-                OfflineLibraryManager.shared.startLocationCrawl(items: timelineModel.allItems, metadata: backend)
+                OfflineLibraryManager.shared.startLocationCrawl(items: items, metadata: backend)
                 // New/removed assets flow into the Smart Search index on its next background pass.
-                model.smartSearch?.noteLibraryChanged()
+                model.updateSmartSearchAssets(timelineModel.wholeLibraryUIDs)
             }
             .onDisappear {
                 searchDebounceTask?.cancel()
@@ -723,12 +724,11 @@ struct MainView: View {
     private func attachOfflineManager() {
         let manager = OfflineLibraryManager.shared
         manager.attach(feed: feed, stats: backend)
-        manager.liveAssetCount = timelineModel.allItems.count
-        // Smart Search composition: same account feed, timeline UIDs as the asset universe.
-        let timeline = timelineModel
-        model.configureSmartSearch(feedCore: feed.feedCore) {
-            await MainActor.run { timeline.allItems.map(\.uid) }
-        }
+        manager.liveAssetCount = timelineModel.wholeLibraryUIDs.count
+        model.configureSmartSearch(
+            feedCore: feed.feedCore,
+            assetUIDs: timelineModel.wholeLibraryUIDs
+        )
     }
 
     /// Aspect-fit rect of `image` centred in `size` - the photo's fullscreen frame.

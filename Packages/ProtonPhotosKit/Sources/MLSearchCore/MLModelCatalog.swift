@@ -44,6 +44,42 @@ public enum MLModelReleaseTrack: String, Sendable, Codable {
     case developerOnly
 }
 
+/// Evidence that one immutable artifact revision passed the project's on-device release run.
+/// Values are diagnostic; `passed` is set only after testing the oldest supported iPhone/iPad.
+public struct MLModelReleaseQualification: Sendable, Equatable, Codable {
+    public let artifactRevision: String
+    public let hardwareModel: String
+    public let osVersion: String
+    public let peakResidentBytes: Int64
+    public let imageP95Milliseconds: Double
+    public let textP95Milliseconds: Double
+    public let reachedSeriousThermalState: Bool
+    public let neuralEngineExecutionVerified: Bool
+    public let passed: Bool
+
+    public init(
+        artifactRevision: String,
+        hardwareModel: String,
+        osVersion: String,
+        peakResidentBytes: Int64,
+        imageP95Milliseconds: Double,
+        textP95Milliseconds: Double,
+        reachedSeriousThermalState: Bool,
+        neuralEngineExecutionVerified: Bool,
+        passed: Bool
+    ) {
+        self.artifactRevision = artifactRevision
+        self.hardwareModel = hardwareModel
+        self.osVersion = osVersion
+        self.peakResidentBytes = peakResidentBytes
+        self.imageP95Milliseconds = imageP95Milliseconds
+        self.textP95Milliseconds = textP95Milliseconds
+        self.reachedSeriousThermalState = reachedSeriousThermalState
+        self.neuralEngineExecutionVerified = neuralEngineExecutionVerified
+        self.passed = passed
+    }
+}
+
 /// One file of a model installation, identified by its install-relative path and content hash.
 ///
 /// `relativePath` is validated against path traversal before any filesystem use — see
@@ -171,6 +207,8 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
     public let displayName: String
     /// Model family marker for diagnostics (`"TinyCLIP"`, `"MobileCLIP"`).
     public let family: String
+    /// Immutable upstream weights revision used to produce the artifact, when applicable.
+    public let sourceRevision: String?
     /// The embedding epoch this entry currently produces. `descriptor.version` is the single
     /// invalidation knob: bump it whenever tokenizer/preprocessing/weights change compatibility.
     public let descriptor: MLModelDescriptor
@@ -181,6 +219,9 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
     public let preprocessingID: String
     /// CoreML runtime contract the installed artifact must satisfy before activation.
     public let runtimeContract: MLModelRuntimeContract
+    /// Install-root files required beside the model. Local installs copy only these declared
+    /// sidecars, so conversion work products cannot silently inflate the installed footprint.
+    public let runtimeResourcePaths: [String]
     public let license: MLModelLicense
     public let releaseTrack: MLModelReleaseTrack
     /// Approximate installed size for UI, before an installation exists. Actual installed
@@ -189,31 +230,40 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
     /// Pinned download plan, or `nil` when no immutable hosted artifact exists yet. A `nil`
     /// plan means the model can only be installed from a developer-provided local artifact.
     public let downloadPlan: MLModelDownloadPlan?
+    /// On-device evidence for the exact hosted revision. Absent or stale evidence keeps the
+    /// entry out of Release even when a download plan is accidentally added early.
+    public let releaseQualification: MLModelReleaseQualification?
 
     public init(
         id: MLModelID,
         displayName: String,
         family: String,
+        sourceRevision: String? = nil,
         descriptor: MLModelDescriptor,
         tokenizerID: String,
         preprocessingID: String,
         runtimeContract: MLModelRuntimeContract = .clipDualEncoder(imagePixelSide: 224),
+        runtimeResourcePaths: [String] = [],
         license: MLModelLicense,
         releaseTrack: MLModelReleaseTrack,
         estimatedInstalledBytes: Int64,
-        downloadPlan: MLModelDownloadPlan?
+        downloadPlan: MLModelDownloadPlan?,
+        releaseQualification: MLModelReleaseQualification? = nil
     ) {
         self.id = id
         self.displayName = displayName
         self.family = family
+        self.sourceRevision = sourceRevision
         self.descriptor = descriptor
         self.tokenizerID = tokenizerID
         self.preprocessingID = preprocessingID
         self.runtimeContract = runtimeContract
+        self.runtimeResourcePaths = runtimeResourcePaths
         self.license = license
         self.releaseTrack = releaseTrack
         self.estimatedInstalledBytes = estimatedInstalledBytes
         self.downloadPlan = downloadPlan
+        self.releaseQualification = releaseQualification
     }
 
     /// A model is downloadable only with a pinned plan AND a license that permits both
@@ -222,6 +272,18 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
     /// Developer-only models install from local artifacts instead.
     public var isDownloadable: Bool {
         downloadPlan != nil && license.allowsRedistribution && license.allowsProductUse
+    }
+
+    /// Release builds expose only entries that can actually be installed. A production label
+    /// without an immutable download plan is a staging state, not a user-selectable model.
+    public var isReleaseReady: Bool {
+        guard releaseTrack == .production,
+              isDownloadable,
+              let revision = downloadPlan?.revision,
+              let releaseQualification else { return false }
+        return releaseQualification.artifactRevision == revision
+            && releaseQualification.passed
+            && releaseQualification.neuralEngineExecutionVerified
     }
 }
 
@@ -248,7 +310,7 @@ public struct MLModelCatalog: Sendable, Equatable {
     public func selectableEntries(allowsDeveloperModels: Bool) -> [MLModelCatalogEntry] {
         allowsDeveloperModels
             ? entries
-            : entries.filter { $0.releaseTrack == .production && $0.license.allowsProductUse }
+            : entries.filter(\.isReleaseReady)
     }
 }
 
@@ -263,6 +325,7 @@ extension MLModelCatalogEntry {
         id: MLModelID("tinyclip-vit-40m-32-text-19m"),
         displayName: "TinyCLIP 40M",
         family: "TinyCLIP",
+        sourceRevision: "95ec8197b3f2fe7f747865c61ca556cf0768b2f7",
         descriptor: MLModelDescriptor(identifier: "tinyclip-vit-40m-32-text-19m", version: 1, embeddingDimension: 512),
         tokenizerID: "clip-bpe-77",
         preprocessingID: "clip-centercrop-224",
@@ -293,10 +356,12 @@ extension MLModelCatalogEntry {
         id: MLModelID("siglip2-base-patch16-256"),
         displayName: "SigLIP 2",
         family: "SigLIP2",
+        sourceRevision: "3f9f96cb90da5dbc758b01813f2f6f1aee24c1ab",
         descriptor: MLModelDescriptor(identifier: "siglip2-base-patch16-256", version: 1, embeddingDimension: 768),
         tokenizerID: "gemma-sentencepiece-64",
         preprocessingID: "siglip-resize-256",
         runtimeContract: .siglipDualEncoder(imagePixelSide: 256),
+        runtimeResourcePaths: ["tokenizer.json"],
         license: .apache2,
         releaseTrack: .production,
         estimatedInstalledBytes: 760_000_000,

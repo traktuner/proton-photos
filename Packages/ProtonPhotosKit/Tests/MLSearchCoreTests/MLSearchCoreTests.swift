@@ -26,6 +26,15 @@ import PhotosCore
         MLEmbeddingRecord(uid: uid(id), descriptor: descriptor, vector: ContiguousArray(vector), timestamp: ts)
     }
 
+    @Test func assetUniversePublishesWholeLibrarySnapshots() {
+        let universe = MLAssetUniverse([uid("a0")])
+        let replacement = [uid("a1"), uid("a2")]
+
+        #expect(universe.snapshot() == [uid("a0")])
+        universe.replace(with: replacement)
+        #expect(universe.snapshot() == replacement)
+    }
+
     // MARK: - 1. Idempotent planning: already indexed assets are not planned again
 
     @Test func alreadyIndexedAssetsAreNotPlannedAgain() {
@@ -150,17 +159,6 @@ import PhotosCore
         let planFinal = MLIndexPlanner.plan(allAssets: assets, descriptor: descriptorV1, store: store)
         #expect(planFinal.toIndex.isEmpty)
         #expect(planFinal.isComplete)
-    }
-
-    @Test func transientFailureStatusWillIndexes() {
-        let asset = MLPlannedAsset(uid: uid("a0"), status: .transientFailure(attempts: 2))
-        #expect(asset.willIndex)
-        let permanent = MLPlannedAsset(uid: uid("a1"), status: .permanentFailure(reason: "corrupt"))
-        #expect(!permanent.willIndex)
-        let needs = MLPlannedAsset(uid: uid("a2"), status: .needsIndexing)
-        #expect(needs.willIndex)
-        let done = MLPlannedAsset(uid: uid("a3"), status: .alreadyIndexed)
-        #expect(!done.willIndex)
     }
 
     // MARK: - 5. Index progress is stable and user-readable
@@ -351,30 +349,6 @@ import PhotosCore
         #expect(Set(allUIDs.map(\.nodeID)) == ["a0", "a1"])
         let membership = store.indexedUIDs(for: descriptorV1, from: [uid("a0"), uid("a2"), uid("a1")])
         #expect(membership == Set([uid("a0"), uid("a1")]))
-    }
-
-    // MARK: - Chunking
-
-    @Test func chunkingPreservesOrderAndCoverage() {
-        let store = InMemoryMLIndexStore()
-        let assets = (0..<10).map { uid("a\($0)") }
-        let plan = MLIndexPlanner.plan(allAssets: assets, descriptor: descriptorV1, store: store)
-        let chunks = MLIndexPlanner.chunked(plan: plan, maxChunkSize: 4)
-        #expect(chunks.count == 3) // 4 + 4 + 2
-        #expect(chunks[0].toIndex.count == 4)
-        #expect(chunks[1].toIndex.count == 4)
-        #expect(chunks[2].toIndex.count == 2)
-        let allUIDs = chunks.flatMap(\.toIndex).map(\.nodeID)
-        #expect(allUIDs == (0..<10).map { "a\($0)" })
-    }
-
-    @Test func chunkingEmptyPlanYieldsSingleEmptyChunk() {
-        let store = InMemoryMLIndexStore()
-        store.upsert([record("a0", descriptorV1, [1, 0, 0, 0])])
-        let complete = MLIndexPlanner.plan(allAssets: [uid("a0")], descriptor: descriptorV1, store: store)
-        let chunks = MLIndexPlanner.chunked(plan: complete, maxChunkSize: 10)
-        #expect(chunks.count == 1)
-        #expect(chunks[0].toIndex.isEmpty)
     }
 
     // MARK: - Batch report merging

@@ -85,7 +85,10 @@ public actor MLSemanticSearchEngine {
         // load would briefly double the query cache's peak memory on large libraries.
         cachedBlock = nil
         let block = store.vectorBlock(for: descriptor)
-        cachedBlock = CachedBlock(descriptor: descriptor, generation: generation, block: block)
+        // Loading may self-heal corrupt rows and bump the store generation. Cache against the
+        // post-load generation so the next query does not decrypt the full epoch again.
+        let loadedGeneration = store.generation(for: descriptor)
+        cachedBlock = CachedBlock(descriptor: descriptor, generation: loadedGeneration, block: block)
         return block
     }
 }

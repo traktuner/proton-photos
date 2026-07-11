@@ -28,6 +28,16 @@ public struct MLIndexPassOutcome: Sendable {
     public let newPermanentFailures: Set<PhotoUID>
     /// Progress snapshot at the end of the pass.
     public let progress: MLIndexProgress
+
+    /// Coverage derived from the pass partition. This avoids a second full membership query
+    /// after the planner already classified every asset.
+    public var coverage: MLIndexCoverage {
+        MLIndexCoverage(
+            total: progress.totalAssets,
+            indexed: progress.indexed + progress.alreadyIndexed,
+            permanentlyUnindexable: progress.permanentFailure
+        )
+    }
 }
 
 /// Chunk-durable, idempotent indexing runner. Platform scheduling enters through
@@ -91,20 +101,23 @@ public actor MLIndexRunner {
         var aggregate = MLIndexBatchReport()
         var newPermanent: Set<PhotoUID> = []
         var completed = true
+        var chunkStart = 0
 
-        for chunk in MLIndexPlanner.chunked(plan: plan, maxChunkSize: configuration.chunkSize) where !chunk.toIndex.isEmpty {
+        while chunkStart < plan.toIndex.count {
+            let chunkEnd = min(chunkStart + configuration.chunkSize, plan.toIndex.count)
+            let chunk = plan.toIndex[chunkStart..<chunkEnd]
+            chunkStart = chunkEnd
             var records: [MLEmbeddingRecord] = []
             var failureRecords: [MLIndexFailureRecord] = []
             var chunkPermanentUIDs: Set<PhotoUID> = []
-            records.reserveCapacity(chunk.toIndex.count)
-            failureRecords.reserveCapacity(chunk.toIndex.count)
+            records.reserveCapacity(chunk.count)
+            failureRecords.reserveCapacity(chunk.count)
             var chunkPermanent = 0
             var chunkTransient = 0
-            let previousFailures = store.failureRecords(for: descriptor, from: chunk.toIndex)
             var processedCount = 0
             var stopAfterCommit = false
 
-            for uid in chunk.toIndex {
+            for uid in chunk {
                 guard shouldContinue(), !Task.isCancelled else {
                     completed = false
                     stopAfterCommit = true
@@ -143,14 +156,9 @@ public actor MLIndexRunner {
                     ))
                 case .transientFailure:
                     chunkTransient += 1
-                    let attempts = previousFailures[uid]?.attempts ?? 0
-                    failureRecords.append(MLIndexFailureRecord(
-                        uid: uid,
-                        descriptor: descriptor,
-                        kind: .transient,
-                        attempts: attempts + 1,
-                        updatedAt: now()
-                    ))
+                    // Cache misses and temporary resource pressure are expected during the
+                    // initial crawl. They stay pending in the pass result; persisting them
+                    // would turn every retry into a large write-only SQLite workload.
                 }
                 // Cancellation may arrive while CoreML is executing. Persist this completed
                 // asset, then return without starting another inference.
@@ -165,8 +173,6 @@ public actor MLIndexRunner {
 
             // Durable commit before the next chunk: this is the resume point.
             let stored = store.upsert(records)
-            let storedUIDs = Array(store.indexedUIDs(for: descriptor, from: records.map(\.uid)))
-            store.clearFailures(for: descriptor, uids: storedUIDs)
             let failuresPersisted = store.recordFailures(failureRecords)
             if failuresPersisted {
                 newPermanent.formUnion(chunkPermanentUIDs)
@@ -178,7 +184,9 @@ public actor MLIndexRunner {
                 indexed: stored.indexed,
                 skippedAlreadyIndexed: stored.skippedAlreadyIndexed,
                 permanentFailure: (failuresPersisted ? chunkPermanent : 0) + stored.permanentFailure,
-                transientFailure: (failuresPersisted ? chunkTransient : failureRecords.count) + stored.transientFailure
+                transientFailure: chunkTransient
+                    + (failuresPersisted ? 0 : failureRecords.count)
+                    + stored.transientFailure
             )
             aggregate = aggregate.merge(chunkReport)
             progress.apply(chunkReport)

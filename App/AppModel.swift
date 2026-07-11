@@ -49,6 +49,7 @@ final class AppModel {
     /// and timeline exist; every lifecycle decision stays in MLSearchCore.
     private(set) var smartSearch: MLSmartSearchController?
     @ObservationIgnored private var smartSearchMemoryRegistration: MemoryPressureRegistration?
+    @ObservationIgnored private let smartSearchAssets = MLAssetUniverse()
     /// The most recent ordered Smart Search shutdown; sign-out awaits it before purging.
     @ObservationIgnored private var smartSearchShutdownTask: Task<Void, Never>?
     @ObservationIgnored private let signOutBarrier = AccountSignOutBarrier()
@@ -165,6 +166,7 @@ final class AppModel {
     private func stopSmartSearch() -> Task<Void, Never>? {
         let lifecycle = smartSearch?.lifecycleActor
         smartSearch = nil
+        smartSearchAssets.replace(with: [])
         smartSearchMemoryRegistration?.end()
         smartSearchMemoryRegistration = nil
         guard let lifecycle else { return smartSearchShutdownTask }
@@ -182,11 +184,12 @@ final class AppModel {
     /// lifecycle decision lives in the shared Core actor.
     func configureSmartSearch(
         feedCore: ThumbnailFeedCore,
-        assetsProvider: @escaping @Sendable () async -> [PhotoUID]
+        assetUIDs: [PhotoUID]
     ) {
         guard smartSearch == nil,
               let session = authController.currentSession,
               let facade else { return }
+        smartSearchAssets.replace(with: assetUIDs)
         #if DEBUG
         let allowsDeveloperModels = true
         #else
@@ -197,7 +200,7 @@ final class AppModel {
             accountUID: session.uid,
             keyPassword: session.keyPassword,
             feed: feedCore,
-            assetsProvider: assetsProvider,
+            assetsProvider: { [smartSearchAssets] in smartSearchAssets.snapshot() },
             allowsDeveloperModels: allowsDeveloperModels,
             databasePolicy: facade.accountDatabasePolicy
         )
@@ -209,6 +212,11 @@ final class AppModel {
             guard tier.requiresImmediatePurge else { return }
             Task { await lifecycle.releaseMemory() }
         }
+    }
+
+    func updateSmartSearchAssets(_ uids: [PhotoUID]) {
+        smartSearchAssets.replace(with: uids)
+        smartSearch?.noteLibraryChanged()
     }
 
     private func prepareBackend(_ session: ProtonSession) {

@@ -5,7 +5,8 @@ import PhotosCore
 /// `(PhotoUID, MLModelDescriptor)`, writes are first-write-wins, and reads are deterministic.
 public protocol MLIndexStore: Sendable {
     /// Insert embeddings for a single model epoch. Idempotent per `(uid, descriptor)`;
-    /// first write wins. Dimension-mismatched records are rejected (`permanentFailure`).
+    /// first write wins. A present embedding clears failure state for the same key in the
+    /// same operation. Dimension-mismatched records are rejected (`permanentFailure`).
     @discardableResult
     func upsert(_ records: [MLEmbeddingRecord]) -> MLIndexBatchReport
 
@@ -18,6 +19,10 @@ public protocol MLIndexStore: Sendable {
 
     /// All UIDs indexed under a model epoch (used for coverage / eviction heuristics).
     func allIndexedUIDs(for descriptor: MLModelDescriptor) -> [PhotoUID]
+
+    /// All UIDs with an embedding or persisted failure for an epoch. Used to remove state for
+    /// assets that left the library without scanning vector payloads.
+    func allTrackedUIDs(for descriptor: MLModelDescriptor) -> [PhotoUID]
 
     /// All embeddings for a model epoch, in the store's deterministic order.
     /// Prefer `vectorBlock(for:)` on the query path — it avoids per-record allocations.
@@ -32,6 +37,10 @@ public protocol MLIndexStore: Sendable {
     /// re-embedded (explicit remove-then-upsert is the only reindex path).
     func remove(uid: PhotoUID, descriptor: MLModelDescriptor)
 
+    /// Remove embeddings and failure state for multiple assets in one durable operation.
+    /// Implementations must bump the vector generation at most once for the batch.
+    func remove(uids: [PhotoUID], descriptor: MLModelDescriptor)
+
     /// Drop every record for a model epoch (used when retiring a model version).
     func removeAll(for descriptor: MLModelDescriptor)
 
@@ -45,7 +54,6 @@ public protocol MLIndexStore: Sendable {
     @discardableResult
     func recordFailures(_ records: [MLIndexFailureRecord]) -> Bool
     func failureRecords(for descriptor: MLModelDescriptor, from uids: [PhotoUID]) -> [PhotoUID: MLIndexFailureRecord]
-    func clearFailures(for descriptor: MLModelDescriptor, uids: [PhotoUID])
 }
 
 extension MLIndexStore {
@@ -102,10 +110,10 @@ public final class InMemoryMLIndexStore: MLIndexStore, @unchecked Sendable {
                 skipped += 1
             } else {
                 recordsByDescriptor[record.descriptor, default: [:]][record.uid] = record
-                failuresByDescriptor[record.descriptor]?.removeValue(forKey: record.uid)
                 generations[record.descriptor, default: 0] &+= 1
                 indexed += 1
             }
+            failuresByDescriptor[record.descriptor]?.removeValue(forKey: record.uid)
         }
 
         return MLIndexBatchReport(
@@ -136,6 +144,14 @@ public final class InMemoryMLIndexStore: MLIndexStore, @unchecked Sendable {
         return bucket.keys.sorted(by: Self.uidOrder)
     }
 
+    public func allTrackedUIDs(for descriptor: MLModelDescriptor) -> [PhotoUID] {
+        lock.withLock {
+            let indexed = recordsByDescriptor[descriptor].map { Set($0.keys) } ?? []
+            let failed = failuresByDescriptor[descriptor].map { Set($0.keys) } ?? []
+            return indexed.union(failed).sorted(by: Self.uidOrder)
+        }
+    }
+
     public func allRecords(for descriptor: MLModelDescriptor) -> [MLEmbeddingRecord] {
         lock.lock()
         defer { lock.unlock() }
@@ -146,9 +162,19 @@ public final class InMemoryMLIndexStore: MLIndexStore, @unchecked Sendable {
     }
 
     public func remove(uid: PhotoUID, descriptor: MLModelDescriptor) {
+        remove(uids: [uid], descriptor: descriptor)
+    }
+
+    public func remove(uids: [PhotoUID], descriptor: MLModelDescriptor) {
+        guard !uids.isEmpty else { return }
         lock.lock()
         defer { lock.unlock() }
-        if recordsByDescriptor[descriptor]?.removeValue(forKey: uid) != nil {
+        var vectorsChanged = false
+        for uid in Set(uids) {
+            vectorsChanged = recordsByDescriptor[descriptor]?.removeValue(forKey: uid) != nil || vectorsChanged
+            failuresByDescriptor[descriptor]?.removeValue(forKey: uid)
+        }
+        if vectorsChanged {
             generations[descriptor, default: 0] &+= 1
         }
     }
@@ -190,12 +216,6 @@ public final class InMemoryMLIndexStore: MLIndexStore, @unchecked Sendable {
             return Dictionary(uniqueKeysWithValues: uids.compactMap { uid in
                 bucket[uid].map { (uid, $0) }
             })
-        }
-    }
-
-    public func clearFailures(for descriptor: MLModelDescriptor, uids: [PhotoUID]) {
-        lock.withLock {
-            for uid in uids { failuresByDescriptor[descriptor]?.removeValue(forKey: uid) }
         }
     }
 

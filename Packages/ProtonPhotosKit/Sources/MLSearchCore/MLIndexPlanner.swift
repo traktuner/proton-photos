@@ -1,41 +1,6 @@
 import Foundation
 import PhotosCore
 
-/// Asset status that affects whether the planner schedules (re-)indexing.
-///
-/// - `needsIndexing`: default state — the asset has no usable embedding for the target model.
-/// - `alreadyIndexed`: an embedding exists; the planner skips it (idempotency).
-/// - `permanentFailure`: a prior attempt determined the asset can never be embedded (corrupt,
-///   unsupported media type, unreadable). The planner excludes it from retries so a single
-///   bad asset never blocks the rest of a batch.
-/// - `transientFailure`: a prior attempt failed in a recoverable way (thermal, memory, I/O).
-///   The planner reschedules it so a transient blip doesn't permanently drop the asset.
-public enum MLAssetIndexStatus: Sendable, Equatable {
-    case needsIndexing
-    case alreadyIndexed
-    case permanentFailure(reason: String)
-    case transientFailure(attempts: Int)
-}
-
-/// A planned indexing unit: an asset UID and its scheduling status.
-public struct MLPlannedAsset: Sendable, Equatable {
-    public let uid: PhotoUID
-    public let status: MLAssetIndexStatus
-    
-    public init(uid: PhotoUID, status: MLAssetIndexStatus) {
-        self.uid = uid
-        self.status = status
-    }
-    
-    /// `true` when this asset will actually be sent to the embedder this pass.
-    public var willIndex: Bool {
-        switch status {
-        case .needsIndexing, .transientFailure: return true
-        case .alreadyIndexed, .permanentFailure: return false
-        }
-    }
-}
-
 /// The output of a planning pass.
 ///
 /// Partitions an input asset set into:
@@ -110,32 +75,5 @@ public enum MLIndexPlanner {
             skippedAlreadyIndexed: skippedIndexed,
             skippedPermanentFailure: skippedPermanent
         )
-    }
-    
-    /// Split a plan's `toIndex` work into chunks of at most `maxChunkSize` assets.
-    ///
-    /// Preserves input order. Returns the skipped sets unchanged on every chunk's plan so
-    /// progress aggregation stays simple. An empty `toIndex` yields a single empty chunk so
-    /// callers can always iterate.
-    public static func chunked(plan: MLIndexPlan, maxChunkSize: Int) -> [MLIndexPlan] {
-        precondition(maxChunkSize > 0, "maxChunkSize must be > 0")
-        if plan.toIndex.isEmpty {
-            return [plan]
-        }
-        var chunks: [MLIndexPlan] = []
-        chunks.reserveCapacity((plan.toIndex.count + maxChunkSize - 1) / maxChunkSize)
-        var idx = 0
-        while idx < plan.toIndex.count {
-            let end = min(idx + maxChunkSize, plan.toIndex.count)
-            let slice = Array(plan.toIndex[idx..<end])
-            chunks.append(MLIndexPlan(
-                descriptor: plan.descriptor,
-                toIndex: slice,
-                skippedAlreadyIndexed: plan.skippedAlreadyIndexed,
-                skippedPermanentFailure: plan.skippedPermanentFailure
-            ))
-            idx = end
-        }
-        return chunks
     }
 }

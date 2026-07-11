@@ -117,8 +117,9 @@ import PhotosCore
         #expect(first.progress.phase == .idle) // transient pending → not complete
         #expect(!first.progress.isComplete)
 
-        // Failure state is durable in the store; a fresh pass skips permanent failures and retries
-        // only transient ones without the caller carrying an in-memory side channel.
+        // Permanent failures are durable. Transient misses require no stored side channel:
+        // absence from the index naturally schedules them on the next pass.
+        #expect(store.failureRecords(for: descriptor, from: [flaky]).isEmpty)
         let second = await runner.runPass(allAssets: assets, descriptor: descriptor)
         #expect(second.ranToCompletion)
         #expect(second.report.indexed == 1)

@@ -122,6 +122,10 @@ public final class MLSmartSearchQueryCoordinator {
         self.limit = limit
     }
 
+    deinit {
+        pendingTask?.cancel()
+    }
+
     public func update(query: String) {
         pendingTask?.cancel()
         querySequence &+= 1
@@ -133,6 +137,9 @@ public final class MLSmartSearchQueryCoordinator {
             return
         }
 
+        // Results belong to the exact query that produced them. Showing the previous query's
+        // UIDs while the new query is in flight makes the grid briefly display unrelated media.
+        rankedUIDs = nil
         isSearching = true
         pendingTask = Task { [lifecycle, debounce, limit] in
             try? await Task.sleep(for: debounce)

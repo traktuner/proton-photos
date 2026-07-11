@@ -2,9 +2,7 @@ import MLSearchCore
 import PhotosCore
 import SwiftUI
 
-/// The one Smart Search settings surface, shared verbatim by the macOS Settings tab and the
-/// iOS/iPadOS settings screen. Pure SwiftUI over the shared controller: every wording, state
-/// and confirmation decision lives in Core; hosts only choose the surrounding container.
+/// Shared Smart Search settings for macOS, iOS and iPadOS.
 public struct SmartSearchSettingsSection: View {
     private let controller: MLSmartSearchController
     @State private var pendingModelSwitch: MLModelCatalogEntry?
@@ -16,13 +14,19 @@ public struct SmartSearchSettingsSection: View {
     }
 
     public var body: some View {
+        let hasSelectableModel = !controller.snapshot.availableModels.isEmpty
         Section {
             Toggle(isOn: enabledBinding) {
                 Text(L10n.string("mlsearch.settings_title"))
             }
             .accessibilityIdentifier("smartsearch.toggle")
+            .disabled(!hasSelectableModel)
 
-            if controller.snapshot.isEnabled {
+            if !hasSelectableModel {
+                Text(L10n.string("mlsearch.status_not_downloadable"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if controller.snapshot.isEnabled {
                 modelPicker
                 statusRows
             }
@@ -65,8 +69,7 @@ public struct SmartSearchSettingsSection: View {
             isPresented: $pickingDeveloperArtifact,
             allowedContentTypes: [.folder]
         ) { result in
-            // No filesystem lifecycle in the view: the shared controller opens the security
-            // scope and holds it until copy + validation + install have completed.
+            // The controller keeps the security scope open until installation completes.
             if case .success(let url) = result, let selected = controller.snapshot.selectedModelID {
                 controller.installDeveloperModel(from: url, for: selected)
             }
@@ -80,7 +83,6 @@ public struct SmartSearchSettingsSection: View {
                 if enable {
                     controller.setEnabled(true)
                 } else {
-                    // Disabling deletes local models and the index; always confirm.
                     confirmingDisable = true
                 }
             }
@@ -96,7 +98,6 @@ public struct SmartSearchSettingsSection: View {
                 get: { snapshot.selectedModelID },
                 set: { newValue in
                     guard let newValue, newValue != snapshot.selectedModelID else { return }
-                    // Switching rebuilds local search data; never do it silently.
                     pendingModelSwitch = snapshot.availableModels.first { $0.id == newValue }
                 }
             )
@@ -119,27 +120,36 @@ public struct SmartSearchSettingsSection: View {
     private var statusRows: some View {
         let presentation = controller.presentation
 
-        LabeledContent(L10n.string("mlsearch.status_label")) {
-            Text(presentation.statusText)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: statusSymbolName)
+                    .foregroundStyle(statusColor)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(presentation.statusText)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail = presentation.detailText {
+                        Text(detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            ProgressView(value: presentation.progressFraction ?? 0)
+                .progressViewStyle(.linear)
+                .opacity(presentation.progressFraction == nil ? 0 : 1)
+                .accessibilityHidden(presentation.progressFraction == nil)
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(presentation.statusText))
+        .accessibilityValue(Text(presentation.detailText ?? ""))
 
-        // Stable progress block: one determinate bar with a fixed slot, no spinner churn and
-        // no layout jump between phases.
-        if let fraction = presentation.progressFraction {
-            ProgressView(value: fraction)
-                .progressViewStyle(.linear)
-                .accessibilityLabel(Text(presentation.statusText))
-        }
-        if let detail = presentation.detailText {
-            Text(detail)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-        if let size = presentation.installedSizeText {
+        if let size = presentation.modelSizeText {
             LabeledContent(L10n.string("mlsearch.model_size_label")) {
                 Text(size)
                     .foregroundStyle(.secondary)
@@ -147,20 +157,46 @@ public struct SmartSearchSettingsSection: View {
             }
         }
         if presentation.canRetry {
-            Button(L10n.string("action.retry")) {
+            Button {
                 controller.retry()
+            } label: {
+                Label(L10n.string("action.retry"), systemImage: "arrow.clockwise")
             }
         }
         if showsDeveloperInstall {
-            Button(L10n.string("mlsearch.install_dev_model")) {
+            Button {
                 pickingDeveloperArtifact = true
+            } label: {
+                Label(L10n.string("mlsearch.install_dev_model"), systemImage: "folder.badge.plus")
             }
         }
     }
 
-    /// The local-artifact install path appears only when the environment exposes
-    /// developer-only catalog entries (never in Release builds) and the selected model has no
-    /// hosted download.
+    private var statusSymbolName: String {
+        switch controller.snapshot.phase {
+        case .disabled: "minus.circle"
+        case .notInstalled: "arrow.down.circle"
+        case .downloading: "arrow.down.circle.fill"
+        case .verifying: "checkmark.shield"
+        case .installing: "square.and.arrow.down"
+        case .preparingModel: "cpu"
+        case .indexing: "sparkles"
+        case .waiting: "pause.circle"
+        case .ready: "checkmark.circle.fill"
+        case .switchingModel: "arrow.triangle.2.circlepath"
+        case .deleting: "trash"
+        case .failed: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var statusColor: Color {
+        switch controller.snapshot.phase {
+        case .failed: .orange
+        case .ready: .green
+        default: .secondary
+        }
+    }
+
     private var showsDeveloperInstall: Bool {
         let snapshot = controller.snapshot
         guard snapshot.availableModels.contains(where: { $0.releaseTrack == .developerOnly }) else { return false }

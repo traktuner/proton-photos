@@ -34,7 +34,9 @@ public enum MLSmartSearchPhase: Sendable, Equatable {
     /// Model artifacts installed; the runtime session (CoreML compile/load) is being prepared.
     case preparingModel
     case indexing(MLIndexProgress)
-    /// Installed and idle: indexing is either complete or waiting for resources/new assets.
+    /// Installed but catch-up is paused by resource policy or a transient failure.
+    case waiting(MLIndexCoverage)
+    /// Installed and idle with every asset accounted for.
     case ready(MLIndexCoverage)
     case switchingModel(to: MLModelID)
     case deleting
@@ -44,7 +46,7 @@ public enum MLSmartSearchPhase: Sendable, Equatable {
         switch self {
         case .downloading, .verifying, .installing, .preparingModel, .switchingModel, .deleting:
             return true
-        case .disabled, .notInstalled, .indexing, .ready, .failed:
+        case .disabled, .notInstalled, .indexing, .waiting, .ready, .failed:
             return false
         }
     }

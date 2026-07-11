@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import PhotosCore
 import SQLite3
@@ -26,6 +27,26 @@ import Testing
         var openCount: Int { lock.withLock { opens } }
     }
 
+    private struct AuthenticatingCipher: MLVectorCipher {
+        struct AuthenticationFailed: Error {}
+
+        func seal(_ plaintext: Data, context: MLVectorCipherContext) throws -> Data {
+            plaintext + Data(SHA256.hash(data: plaintext).prefix(16))
+        }
+
+        func open(_ ciphertext: Data, context: MLVectorCipherContext) throws -> Data {
+            guard ciphertext.count >= 16 else { throw AuthenticationFailed() }
+            let plaintext = ciphertext.dropLast(16)
+            let expected = Data(SHA256.hash(data: plaintext).prefix(16))
+            guard Data(ciphertext.suffix(16)) == expected else { throw AuthenticationFailed() }
+            return Data(plaintext)
+        }
+
+        func sealedByteCount(forPlaintextByteCount plaintextByteCount: Int) -> Int? {
+            plaintextByteCount + 16
+        }
+    }
+
     private final class CountingStore: MLIndexStore, @unchecked Sendable {
         private let backing: any MLIndexStore
         private let lock = NSLock()
@@ -39,18 +60,19 @@ import Testing
         func contains(uid: PhotoUID, descriptor: MLModelDescriptor) -> Bool { backing.contains(uid: uid, descriptor: descriptor) }
         func indexedUIDs(for descriptor: MLModelDescriptor, from uids: [PhotoUID]) -> Set<PhotoUID> { backing.indexedUIDs(for: descriptor, from: uids) }
         func allIndexedUIDs(for descriptor: MLModelDescriptor) -> [PhotoUID] { backing.allIndexedUIDs(for: descriptor) }
+        func allTrackedUIDs(for descriptor: MLModelDescriptor) -> [PhotoUID] { backing.allTrackedUIDs(for: descriptor) }
         func allRecords(for descriptor: MLModelDescriptor) -> [MLEmbeddingRecord] { backing.allRecords(for: descriptor) }
         func vectorBlock(for descriptor: MLModelDescriptor) -> MLVectorBlock {
             lock.withLock { blockLoads += 1 }
             return backing.vectorBlock(for: descriptor)
         }
         func remove(uid: PhotoUID, descriptor: MLModelDescriptor) { backing.remove(uid: uid, descriptor: descriptor) }
+        func remove(uids: [PhotoUID], descriptor: MLModelDescriptor) { backing.remove(uids: uids, descriptor: descriptor) }
         func removeAll(for descriptor: MLModelDescriptor) { backing.removeAll(for: descriptor) }
         func count(for descriptor: MLModelDescriptor) -> Int { backing.count(for: descriptor) }
         func generation(for descriptor: MLModelDescriptor) -> UInt64 { backing.generation(for: descriptor) }
         func recordFailures(_ records: [MLIndexFailureRecord]) -> Bool { backing.recordFailures(records) }
         func failureRecords(for descriptor: MLModelDescriptor, from uids: [PhotoUID]) -> [PhotoUID: MLIndexFailureRecord] { backing.failureRecords(for: descriptor, from: uids) }
-        func clearFailures(for descriptor: MLModelDescriptor, uids: [PhotoUID]) { backing.clearFailures(for: descriptor, uids: uids) }
     }
 
     private struct FixedTextEncoder: MLTextQueryEncoder {
@@ -74,7 +96,7 @@ import Testing
         ["", "-wal", "-shm"].reduce(0) { total, suffix in
             let path = url.path + suffix
             let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int64) ?? 0
-            return total + (size ?? 0)
+            return total + size
         }
     }
 
@@ -150,7 +172,7 @@ import Testing
         let sqlite = try #require(SQLiteMLIndexStore(url: url, cipher: TestMLVectorCipher()))
         defer { sqlite.close() }
         let store = CountingStore(sqlite)
-        store.upsert((0..<32).map {
+        _ = store.upsert((0..<32).map {
             MLEmbeddingRecord(uid: uid("a\($0)"), descriptor: descriptor, vector: vector(seed: $0, dimension: 8))
         })
 
@@ -161,7 +183,7 @@ import Testing
         #expect(store.blockLoadCount == 1)
 
         // A vector-state change bumps the generation → exactly one reload.
-        store.upsert([MLEmbeddingRecord(uid: uid("fresh"), descriptor: descriptor, vector: vector(seed: 99, dimension: 8))])
+        _ = store.upsert([MLEmbeddingRecord(uid: uid("fresh"), descriptor: descriptor, vector: vector(seed: 99, dimension: 8))])
         _ = try await engine.search(MLSearchQuery(descriptor: descriptor, queryText: "warm three", limit: 5))
         #expect(store.blockLoadCount == 2)
     }
@@ -248,10 +270,52 @@ import Testing
         #expect(cipher.openCount - opensBefore == 3)
         #expect(store.allRecords(for: descriptor).count == 3)
 
-        // Rebuildable: the runner's remove-then-upsert path restores the row.
-        store.remove(uid: uid("a1"), descriptor: descriptor)
+        // The read purges the invalid derived row. Normal membership now schedules it again.
+        #expect(!store.contains(uid: uid("a1"), descriptor: descriptor))
+        #expect(store.count(for: descriptor) == 3)
         store.upsert([MLEmbeddingRecord(uid: uid("a1"), descriptor: descriptor, vector: vector(seed: 1, dimension: dimension))])
         #expect(store.vectorBlock(for: descriptor).count == 4)
+    }
+
+    @Test func authenticationFailurePurgesRowAndNormalUpsertRebuildsIt() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent(SQLiteMLIndexStore.databaseFileName)
+        let descriptor = MLModelDescriptor(identifier: "fp16-auth-corrupt", version: 1, embeddingDimension: 8)
+        let store = try #require(SQLiteMLIndexStore(url: url, cipher: AuthenticatingCipher()))
+        defer { store.close() }
+        store.upsert((0..<2).map {
+            MLEmbeddingRecord(uid: uid("a\($0)"), descriptor: descriptor, vector: vector(seed: $0, dimension: 8))
+        })
+        let generationBefore = store.generation(for: descriptor)
+
+        var handle: OpaquePointer?
+        #expect(sqlite3_open(url.path, &handle) == SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        var read: OpaquePointer?
+        #expect(sqlite3_prepare_v2(handle, "SELECT vector FROM ml_embeddings WHERE node_id='a1';", -1, &read, nil) == SQLITE_OK)
+        #expect(sqlite3_step(read) == SQLITE_ROW)
+        let byteCount = Int(sqlite3_column_bytes(read, 0))
+        let bytes = try #require(sqlite3_column_blob(read, 0))
+        var corrupted = Data(bytes: bytes, count: byteCount)
+        corrupted[0] ^= 0x01
+        sqlite3_finalize(read)
+        var write: OpaquePointer?
+        #expect(sqlite3_prepare_v2(handle, "UPDATE ml_embeddings SET vector=? WHERE node_id='a1';", -1, &write, nil) == SQLITE_OK)
+        _ = corrupted.withUnsafeBytes {
+            sqlite3_bind_blob(write, 1, $0.baseAddress, Int32($0.count), unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        }
+        #expect(sqlite3_step(write) == SQLITE_DONE)
+        sqlite3_finalize(write)
+
+        #expect(store.vectorBlock(for: descriptor).count == 1)
+        #expect(!store.contains(uid: uid("a1"), descriptor: descriptor))
+        #expect(store.generation(for: descriptor) > generationBefore)
+
+        #expect(store.upsert([
+            MLEmbeddingRecord(uid: uid("a1"), descriptor: descriptor, vector: vector(seed: 1, dimension: 8)),
+        ]).indexed == 1)
+        #expect(store.vectorBlock(for: descriptor).count == 2)
     }
 
     // MARK: - Schema reset

@@ -169,6 +169,34 @@ struct TestMLVectorCipher: MLVectorCipher {
         }
     }
 
+    @Test func batchRemovalUsesOneGenerationAndClearsFailureState() throws {
+        try withStore { store, _ in
+            store.upsert([
+                record("a0", descriptorV1, [1, 0, 0, 0]),
+                record("a1", descriptorV1, [0, 1, 0, 0]),
+                record("keep", descriptorV1, [0, 0, 1, 0]),
+            ])
+            let failed = uid("failed")
+            #expect(store.recordFailures([
+                MLIndexFailureRecord(
+                    uid: failed,
+                    descriptor: descriptorV1,
+                    kind: .permanent,
+                    reason: "unsupported",
+                    attempts: 1
+                ),
+            ]))
+            #expect(Set(store.allTrackedUIDs(for: descriptorV1)) == [uid("a0"), uid("a1"), uid("keep"), failed])
+            let generation = store.generation(for: descriptorV1)
+
+            store.remove(uids: [uid("a0"), uid("a1"), failed], descriptor: descriptorV1)
+
+            #expect(store.generation(for: descriptorV1) == generation + 1)
+            #expect(store.allIndexedUIDs(for: descriptorV1) == [uid("keep")])
+            #expect(store.failureRecords(for: descriptorV1, from: [failed]).isEmpty)
+        }
+    }
+
     @Test func removeAllForDescriptorLeavesOtherEpochsIntact() throws {
         try withStore { store, _ in
             store.upsert([record("a0", descriptorV1, [1, 0, 0, 0])])

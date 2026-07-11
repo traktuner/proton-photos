@@ -15,7 +15,7 @@ use), pinned revision `3f9f96cb90da5dbc758b01813f2f6f1aee24c1ab`, 375M params (i
 93M ≈ 186 MB fp16 for bulk indexing on ANE; text tower ≈ 530 MB fp16, loaded per-query only),
 768-d, 64-token Gemma SentencePiece(BPE) tokenizer, 256px squash-resize, fully static shapes.
 
-Converted locally (`ml-model-spike.noindex/convert_siglip2.py`): multi-function CoreML
+Converted locally (`Tools/MLModels/SigLIP2/convert_siglip2.py`): multi-function CoreML
 package (image+text), fp16, 715 MB; the `nn.MultiheadAttention` MAP pooling head is replaced
 by numerically identical tensor math before tracing (max |Δ| 1.4e-6); CoreML↔torch text
 parity cosine 0.99999. Tokenizer data (`tokenizer.json`) and upstream reference tokenizations
@@ -40,9 +40,10 @@ are negative merge ranks — a unigram/Viterbi reading of the same data is wrong
 caught by the fixtures) reproduces all 20 upstream Python tokenizations exactly, including
 umlauts, ß, truncation and the empty string.
 
-`siglip2-base-patch16-256` is a production catalog entry (Apache-2.0 gates pass); its
-`downloadPlan` stays `nil` until release engineering hosts the converted artifact at an
-immutable URL — same blocker class as TinyCLIP, same drop-in unblock path. Runtime contract
+`siglip2-base-patch16-256` is a production candidate (Apache-2.0 gates pass); its
+`downloadPlan` stays `nil` until release engineering hosts the canonical converted artifact at
+an immutable URL. Release selection additionally requires on-device qualification for that exact
+artifact revision. Runtime contract
 extensions that made this data-driven (no per-model code): optional `endTokenMaskInputName`
 (SigLIP pools internally) and preprocessing-derived crop mode (CLIP center-crop vs SigLIP
 squash-resize).

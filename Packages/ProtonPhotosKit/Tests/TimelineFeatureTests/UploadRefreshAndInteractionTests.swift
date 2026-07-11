@@ -17,12 +17,15 @@ final class UploadRefreshAndInteractionTests: XCTestCase {
 
         await model.load()
         XCTAssertEqual(model.allItems.map(\.uid), [old.uid])
+        let initialRevision = model.wholeLibraryRevision
 
         let result = await model.refreshLibrary()
         XCTAssertEqual(result.timelineCountBefore, 1)
         XCTAssertEqual(result.timelineCountAfter, 2)
         XCTAssertNil(result.errorMessage)
         XCTAssertEqual(model.allItems.map(\.uid), [old.uid, new.uid])
+        XCTAssertEqual(model.wholeLibraryUIDs, [old.uid, new.uid])
+        XCTAssertEqual(model.wholeLibraryRevision, initialRevision + 1)
         XCTAssertEqual(repository.loadCount, 2)
     }
 
@@ -102,8 +105,12 @@ final class UploadRefreshAndInteractionTests: XCTestCase {
         let model = TimelineViewModel(repository: repository, feed: makeFeed(), library: library)
         await model.load()
         XCTAssertEqual(repository.cachedCount, 1)   // first visit consulted the on-disk cache once
+        let wholeLibraryUIDs = model.wholeLibraryUIDs
+        let wholeLibraryRevision = model.wholeLibraryRevision
 
         await model.select(.tag(.raw))   // leave All Photos
+        XCTAssertEqual(model.wholeLibraryUIDs, wholeLibraryUIDs)
+        XCTAssertEqual(model.wholeLibraryRevision, wholeLibraryRevision)
         PhotoDiagnostics.shared.resetForTests()
         await model.select(.all)                                                   // return to All Photos
 

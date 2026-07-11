@@ -1,6 +1,25 @@
 import Foundation
 import PhotosCore
 
+/// Current library identities, published by a host when its timeline changes.
+/// Index retries read the copy-on-write snapshot without hopping to a UI actor.
+public final class MLAssetUniverse: @unchecked Sendable {
+    private let lock = NSLock()
+    private var uids: [PhotoUID]
+
+    public init(_ uids: [PhotoUID] = []) {
+        self.uids = uids
+    }
+
+    public func replace(with uids: [PhotoUID]) {
+        lock.withLock { self.uids = uids }
+    }
+
+    public func snapshot() -> [PhotoUID] {
+        lock.withLock { uids }
+    }
+}
+
 /// One live inference+index session bound to exactly one installed model epoch.
 ///
 /// `MLSearchService` is the canonical implementation; tests inject fakes. A session owns its
@@ -10,7 +29,6 @@ public protocol MLSmartSearchSession: Sendable {
     var descriptor: MLModelDescriptor { get }
     func index(_ assets: [PhotoUID]) async -> MLIndexPassOutcome
     func search(_ text: String, limit: Int) async throws -> MLSearchResults
-    func coverage(for assets: [PhotoUID]) async -> MLIndexCoverage
     func releaseMemory() async
     func shutdown() async
 }
@@ -65,8 +83,7 @@ public struct MLClosureIndexingGovernor: MLIndexingGovernor {
     public func permitsIndexing() -> Bool { permits() }
 }
 
-// `search(_:limit:)`, `index(_:)` and `coverage(for:)` are satisfied by MLSearchService's
-// existing API; only shutdown is new.
+// Search and indexing are satisfied by MLSearchService's existing API; only shutdown is new.
 extension MLSearchService: MLSmartSearchSession {
     public func shutdown() async {
         await releaseMemory()

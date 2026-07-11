@@ -27,9 +27,44 @@ import Testing
         }
     }
 
+    private final class SelfHealingStore: MLIndexStore, @unchecked Sendable {
+        private let backing = InMemoryMLIndexStore()
+        private let invalidUID: PhotoUID
+        private let lock = NSLock()
+        private var didHeal = false
+        private var loads = 0
+
+        init(invalidUID: PhotoUID) { self.invalidUID = invalidUID }
+
+        var blockLoads: Int { lock.withLock { loads } }
+        func upsert(_ records: [MLEmbeddingRecord]) -> MLIndexBatchReport { backing.upsert(records) }
+        func contains(uid: PhotoUID, descriptor: MLModelDescriptor) -> Bool { backing.contains(uid: uid, descriptor: descriptor) }
+        func indexedUIDs(for descriptor: MLModelDescriptor, from uids: [PhotoUID]) -> Set<PhotoUID> { backing.indexedUIDs(for: descriptor, from: uids) }
+        func allIndexedUIDs(for descriptor: MLModelDescriptor) -> [PhotoUID] { backing.allIndexedUIDs(for: descriptor) }
+        func allTrackedUIDs(for descriptor: MLModelDescriptor) -> [PhotoUID] { backing.allTrackedUIDs(for: descriptor) }
+        func allRecords(for descriptor: MLModelDescriptor) -> [MLEmbeddingRecord] { backing.allRecords(for: descriptor) }
+        func vectorBlock(for descriptor: MLModelDescriptor) -> MLVectorBlock {
+            let shouldHeal = lock.withLock {
+                loads += 1
+                if didHeal { return false }
+                didHeal = true
+                return true
+            }
+            if shouldHeal { backing.remove(uid: invalidUID, descriptor: descriptor) }
+            return backing.vectorBlock(for: descriptor)
+        }
+        func remove(uid: PhotoUID, descriptor: MLModelDescriptor) { backing.remove(uid: uid, descriptor: descriptor) }
+        func remove(uids: [PhotoUID], descriptor: MLModelDescriptor) { backing.remove(uids: uids, descriptor: descriptor) }
+        func removeAll(for descriptor: MLModelDescriptor) { backing.removeAll(for: descriptor) }
+        func count(for descriptor: MLModelDescriptor) -> Int { backing.count(for: descriptor) }
+        func generation(for descriptor: MLModelDescriptor) -> UInt64 { backing.generation(for: descriptor) }
+        func recordFailures(_ records: [MLIndexFailureRecord]) -> Bool { backing.recordFailures(records) }
+        func failureRecords(for descriptor: MLModelDescriptor, from uids: [PhotoUID]) -> [PhotoUID: MLIndexFailureRecord] { backing.failureRecords(for: descriptor, from: uids) }
+    }
+
     @Test func normalizesQueryAndRanksSharedIndex() async throws {
         let store = InMemoryMLIndexStore()
-        store.upsert([
+        _ = store.upsert([
             MLEmbeddingRecord(uid: uid("tree"), descriptor: descriptor, vector: [1, 0, 0]),
             MLEmbeddingRecord(uid: uid("water"), descriptor: descriptor, vector: [0, 1, 0]),
         ])
@@ -57,6 +92,24 @@ import Testing
 
         store.upsert([MLEmbeddingRecord(uid: uid("second"), descriptor: descriptor, vector: [1, 0, 0])])
         #expect(try await engine.search(MLSearchQuery(descriptor: descriptor, queryText: "x")).count == 2)
+    }
+
+    @Test func selfHealingLoadCachesThePostRepairGeneration() async throws {
+        let invalid = uid("invalid")
+        let store = SelfHealingStore(invalidUID: invalid)
+        _ = store.upsert([
+            MLEmbeddingRecord(uid: uid("valid"), descriptor: descriptor, vector: [1, 0, 0]),
+            MLEmbeddingRecord(uid: invalid, descriptor: descriptor, vector: [0, 1, 0]),
+        ])
+        let engine = MLSemanticSearchEngine(
+            store: store,
+            encoder: Encoder(vector: [1, 0, 0]),
+            scorer: ReferenceDotProductScorer()
+        )
+
+        #expect(try await engine.search(MLSearchQuery(descriptor: descriptor, queryText: "first")).count == 1)
+        #expect(try await engine.search(MLSearchQuery(descriptor: descriptor, queryText: "second")).count == 1)
+        #expect(store.blockLoads == 1)
     }
 
     @Test func switchingDescriptorDoesNotReusePreviousModelBlock() async throws {

@@ -126,6 +126,7 @@ final class MobileLibraryModel {
     private var firstContentGuard: Task<Void, Never>?
     private var backgroundActivityTask: Task<Void, Never>?
     @ObservationIgnored private var smartSearchMemoryRegistration: MemoryPressureRegistration?
+    @ObservationIgnored private let smartSearchAssets = MLAssetUniverse()
     /// The most recent ordered Smart Search shutdown; teardown awaits it before the sign-out purge.
     @ObservationIgnored private var smartSearchShutdownTask: Task<Void, Never>?
 
@@ -282,14 +283,13 @@ final class MobileLibraryModel {
         #else
         let allowsDeveloperModels = false
         #endif
+        smartSearchAssets.replace(with: items.map(\.uid))
         let lifecycle = AppleSmartSearchBootstrap.makeLifecycle(
             accountDirectory: client.accountDataDirectory,
             accountUID: session.uid,
             keyPassword: session.keyPassword,
             feed: feed.feedCore,
-            assetsProvider: { [weak self] in
-                await MainActor.run { self?.items.map(\.uid) ?? [] }
-            },
+            assetsProvider: { [smartSearchAssets] in smartSearchAssets.snapshot() },
             allowsDeveloperModels: allowsDeveloperModels,
             databasePolicy: client.accountDatabasePolicy
         )
@@ -311,6 +311,7 @@ final class MobileLibraryModel {
     private func stopSmartSearch() -> Task<Void, Never>? {
         let lifecycle = smartSearch?.lifecycleActor
         smartSearch = nil
+        smartSearchAssets.replace(with: [])
         smartSearchMemoryRegistration?.end()
         smartSearchMemoryRegistration = nil
         guard let lifecycle else { return smartSearchShutdownTask }
@@ -514,7 +515,7 @@ final class MobileLibraryModel {
         if changed {
             snapshot = prepared
             self.sections = sections
-            // New/removed assets flow into the Smart Search index on its next background pass.
+            smartSearchAssets.replace(with: prepared.items.map(\.uid))
             smartSearch?.noteLibraryChanged()
         }
         apply(.inventoryResolved(count: prepared.count, cached: cached))

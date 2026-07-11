@@ -214,11 +214,15 @@ public actor MLSmartSearchLifecycle {
     public func setEnabled(_ enabled: Bool) async {
         guard !isShutDown, enabled != persistent.isEnabled else { return }
         if enabled {
+            let selectable = deps.catalog.selectableEntries(allowsDeveloperModels: deps.allowsDeveloperModels)
+            guard let defaultModelID = selectable.first(where: { $0.releaseTrack == .production })?.id else {
+                phase = .notInstalled(downloadable: false)
+                emit()
+                return
+            }
             persistent.isEnabled = true
             if persistent.selectedModelID == nil {
-                persistent.selectedModelID = deps.catalog
-                    .selectableEntries(allowsDeveloperModels: deps.allowsDeveloperModels)
-                    .first(where: { $0.releaseTrack == .production })?.id
+                persistent.selectedModelID = defaultModelID
             }
             // A failed enable-write stops here with an honest, retryable failure phase — the
             // in-memory intent stays, so `retry()` re-persists and activates.
@@ -374,7 +378,7 @@ public actor MLSmartSearchLifecycle {
     /// entry; release environments require the production track AND a product-usable license.
     private func isSelectable(_ entry: MLModelCatalogEntry) -> Bool {
         deps.allowsDeveloperModels
-            || (entry.releaseTrack == .production && entry.license.allowsProductUse)
+            || entry.isReleaseReady
     }
 
     private func activateSelectedModel() async {
@@ -483,7 +487,7 @@ public actor MLSmartSearchLifecycle {
             switch error {
             case .checksumMismatch, .sizeMismatch, .unsafeArtifactPath:
                 kind = .verification
-            case .artifactMissing, .installRecordUnreadable, .notDownloadable:
+            case .artifactMissing, .ambiguousModelArtifact, .installRecordUnreadable, .notDownloadable:
                 kind = .installation
             case .licenseProhibitsDistribution:
                 // Retrying cannot change the license — this stays blocked until the catalog
@@ -537,8 +541,8 @@ public actor MLSmartSearchLifecycle {
     private func runIndexingLoop(generation: UInt64) async {
         while !Task.isCancelled, generation == sessionGeneration, persistent.isEnabled, let session, let activeModel {
             guard deps.governor.permitsIndexing() else {
-                refreshCoverage(descriptor: activeModel.entry.descriptor, assets: nil)
-                setPhaseFromIndexLoop(.ready(lastCoverage))
+                refreshCoverageFromStoreCount(descriptor: activeModel.entry.descriptor)
+                setPhaseFromIndexLoop(.waiting(lastCoverage))
                 await waitForKick(timeout: configuration.indexRetryDelay)
                 continue
             }
@@ -555,15 +559,17 @@ public actor MLSmartSearchLifecycle {
             let outcome = await session.index(assets)
             guard generation == sessionGeneration, !Task.isCancelled else { return }
 
-            removeDeletedAssets(current: assets, descriptor: activeModel.entry.descriptor)
-            refreshCoverage(descriptor: activeModel.entry.descriptor, assets: assets)
-
-            setPhaseFromIndexLoop(.ready(lastCoverage))
+            lastCoverage = outcome.coverage
+            if outcome.ranToCompletion {
+                removeDeletedAssets(current: assets, descriptor: activeModel.entry.descriptor)
+            }
 
             if outcome.ranToCompletion && lastCoverage.isComplete {
+                setPhaseFromIndexLoop(.ready(lastCoverage))
                 // Fully caught up: sleep until the library or conditions change.
                 await waitForKick(timeout: nil)
             } else {
+                setPhaseFromIndexLoop(.waiting(lastCoverage))
                 // Gate closed mid-pass or transient failures remain: retry later, or sooner
                 // when kicked.
                 await waitForKick(timeout: configuration.indexRetryDelay)
@@ -583,23 +589,18 @@ public actor MLSmartSearchLifecycle {
     private func removeDeletedAssets(current: [PhotoUID], descriptor: MLModelDescriptor) {
         guard let store = deps.storeProvider.openStore() else { return }
         let currentSet = Set(current)
-        for uid in store.allIndexedUIDs(for: descriptor) where !currentSet.contains(uid) {
-            store.remove(uid: uid, descriptor: descriptor)
-        }
+        let deleted = store.allTrackedUIDs(for: descriptor).filter { !currentSet.contains($0) }
+        store.remove(uids: deleted, descriptor: descriptor)
     }
 
-    private func refreshCoverage(descriptor: MLModelDescriptor, assets: [PhotoUID]?) {
+    private func refreshCoverageFromStoreCount(descriptor: MLModelDescriptor) {
         guard let store = deps.storeProvider.openStore() else { return }
-        if let assets {
-            lastCoverage = store.coverage(for: descriptor, allAssets: assets)
-        } else {
-            let indexed = store.count(for: descriptor)
-            lastCoverage = MLIndexCoverage(
-                total: max(lastCoverage.total, indexed),
-                indexed: indexed,
-                permanentlyUnindexable: lastCoverage.permanentlyUnindexable
-            )
-        }
+        let indexed = store.count(for: descriptor)
+        lastCoverage = MLIndexCoverage(
+            total: max(lastCoverage.total, indexed),
+            indexed: indexed,
+            permanentlyUnindexable: lastCoverage.permanentlyUnindexable
+        )
     }
 
     // MARK: - Kick / wait

@@ -172,10 +172,6 @@ import Testing
             MLSearchResults(descriptor: descriptor, queryText: text, results: [])
         }
 
-        func coverage(for assets: [PhotoUID]) async -> MLIndexCoverage {
-            MLIndexCoverage(total: assets.count, indexed: 0, permanentlyUnindexable: 0)
-        }
-
         func releaseMemory() async {}
         func shutdown() async { lock.withLock { shutdowns += 1 } }
 
@@ -221,6 +217,17 @@ import Testing
 
     private func downloadableEntry(id: String, payload: Data, track: MLModelReleaseTrack = .production) -> (MLModelCatalogEntry, URL) {
         let url = URL(string: "https://example.test/\(id)/weights.bin")!
+        let qualification = track == .production ? MLModelReleaseQualification(
+            artifactRevision: "rev1",
+            hardwareModel: "test-device",
+            osVersion: "test",
+            peakResidentBytes: 1,
+            imageP95Milliseconds: 1,
+            textP95Milliseconds: 1,
+            reachedSeriousThermalState: false,
+            neuralEngineExecutionVerified: true,
+            passed: true
+        ) : nil
         let entry = MLModelCatalogEntry(
             id: MLModelID(id),
             displayName: id,
@@ -233,7 +240,8 @@ import Testing
             estimatedInstalledBytes: Int64(payload.count),
             downloadPlan: MLModelDownloadPlan(revision: "rev1", items: [
                 .init(url: url, artifact: MLModelArtifactSpec(relativePath: "weights.bin", sha256: sha256(payload), byteCount: Int64(payload.count))),
-            ])
+            ]),
+            releaseQualification: qualification
         )
         return (entry, url)
     }
@@ -487,10 +495,15 @@ import Testing
 
             func index(_ assets: [PhotoUID]) async -> MLIndexPassOutcome {
                 MLIndexPassOutcome(
-                    report: MLIndexBatchReport(),
+                    report: MLIndexBatchReport(total: assets.count, skippedAlreadyIndexed: assets.count),
                     ranToCompletion: true,
                     newPermanentFailures: [],
-                    progress: MLIndexProgress(phase: .completed, descriptor: descriptor)
+                    progress: MLIndexProgress(
+                        phase: .completed,
+                        descriptor: descriptor,
+                        totalAssets: assets.count,
+                        alreadyIndexed: assets.count
+                    )
                 )
             }
 
@@ -516,10 +529,6 @@ import Testing
                     return c
                 }
                 continuation?.resume()
-            }
-
-            func coverage(for assets: [PhotoUID]) async -> MLIndexCoverage {
-                MLIndexCoverage(total: assets.count, indexed: assets.count, permanentlyUnindexable: 0)
             }
 
             func releaseMemory() async {}
@@ -550,15 +559,6 @@ import Testing
         _ = await waitUntil {
             if case .ready = await harness.lifecycle.currentSnapshot().phase { return true }
             return false
-        }
-        // Coverage from BlockingSession never reaches the store; force search availability by
-        // seeding one row for epoch A.
-        harness.storeProvider.store.upsert([
-            MLEmbeddingRecord(uid: assets[0], descriptor: entryA.descriptor, vector: [1, 0, 0, 0]),
-        ])
-        await harness.lifecycle.noteLibraryChanged()
-        _ = await waitUntil {
-            await harness.lifecycle.currentSnapshot().isSearchAvailable
         }
 
         // Old-epoch query in flight…
@@ -613,7 +613,7 @@ import Testing
         await harness.lifecycle.start()
         await harness.lifecycle.setEnabled(true)
         _ = await waitUntil {
-            if case .ready = await harness.lifecycle.currentSnapshot().phase { return true }
+            if case .waiting = await harness.lifecycle.currentSnapshot().phase { return true }
             return false
         }
         try? await Task.sleep(for: .milliseconds(150))
@@ -1143,9 +1143,6 @@ import Testing
             func search(_ text: String, limit: Int) async throws -> MLSearchResults {
                 MLSearchResults(descriptor: descriptor, queryText: text, results: [])
             }
-            func coverage(for assets: [PhotoUID]) async -> MLIndexCoverage {
-                MLIndexCoverage(total: assets.count, indexed: 0, permanentlyUnindexable: 0)
-            }
             func releaseMemory() async {}
             func shutdown() async {}
         }
@@ -1227,6 +1224,26 @@ import Testing
         await harness.lifecycle.select(entry.id)
         try? await Task.sleep(for: .milliseconds(100))
         #expect(await harness.lifecycle.currentSnapshot().selectedModelID == nil)
+        #expect(harness.transport.downloadCount == 0)
+    }
+
+    @Test func unhostedProductionModelCannotEnableInRelease() async throws {
+        let harness = try makeHarness(
+            catalog: MLModelCatalog(entries: [.tinyCLIPVit40M]),
+            payloads: [:],
+            assets: [uid("a")],
+            allowsDeveloperModels: false
+        )
+        defer { try? FileManager.default.removeItem(at: harness.layout.rootDirectory) }
+
+        await harness.lifecycle.start()
+        await harness.lifecycle.setEnabled(true)
+
+        let snapshot = await harness.lifecycle.currentSnapshot()
+        #expect(!snapshot.isEnabled)
+        #expect(snapshot.availableModels.isEmpty)
+        #expect(snapshot.selectedModelID == nil)
+        #expect(snapshot.phase == .notInstalled(downloadable: false))
         #expect(harness.transport.downloadCount == 0)
     }
 }
