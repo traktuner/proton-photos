@@ -3,8 +3,8 @@ import XCTest
 @testable import UploadCore
 
 /// The shared display projection of `BackupStatus`: a compact, honest row - an icon, a phase
-/// headline (checking vs backing up, driven by real byte movement), one subtitle line
-/// ("<n> of <m>" + a live upload %), and an optional attention line. Same model on every platform.
+/// headline, one overall-progress subtitle line ("<n> of <m>"), and an optional attention line.
+/// Same model on every platform.
 final class BackupStatusPresentationTests: XCTestCase {
 
     private func progress(
@@ -33,25 +33,17 @@ final class BackupStatusPresentationTests: XCTestCase {
         let s = status(progress(total: 100, uploadQueued: 5, checking: 1, alreadyBackedUp: 20, isRunning: true))
         let p = BackupStatusPresentation(s)
         XCTAssertEqual(p.headlineKey, "backup.status_active")
-        XCTAssertNil(p.uploadPercent, "no byte transfer => no percentage")
         XCTAssertTrue(p.isActive)
         XCTAssertEqual(p.accessory, .activity)
     }
 
-    func testBackingUpHeadlineOnlyWhenBytesAreActuallyMoving() {
-        // Same big backlog, but one file is genuinely uploading: headline flips to backing up and a
-        // live percentage appears - proving the upload even while the overall pass is mostly checking.
-        var raw = progress(total: 100, uploadQueued: 5, checking: 1, uploading: 1, alreadyBackedUp: 20, isRunning: true)
-        raw.currentUploadingName = "IMG_5560.MOV"
-        raw.currentUploadingFraction = 0.43
+    func testPerFileProgressNeverLeaksIntoOverallSubtitle() {
+        let raw = progress(total: 100, uploadQueued: 5, checking: 1, uploading: 1, alreadyBackedUp: 20, isRunning: true)
         let p = BackupStatusPresentation(status(raw))
         XCTAssertEqual(p.headlineKey, "backup.status_active")
-        XCTAssertEqual(p.uploadPercent, 43)
         let subtitle = try? XCTUnwrap(p.localizedSubtitle)
-        // The per-file percent must appear in the subtitle. (In the SPM test bundle the string catalog
-        // is copied uncompiled, so L10n resolves the key form "...backup.file_upload_percent 43";
-        // in the app build the resolved localized value "...file 43 %" appears. Both contain "43".)
-        XCTAssertEqual(subtitle?.contains("43"), true, "the live percentage proves the upload is moving")
+        XCTAssertEqual(subtitle?.contains("43"), false)
+        XCTAssertEqual(subtitle?.contains("%"), false)
         XCTAssertFalse(subtitle?.contains("IMG_5560.MOV") ?? true, "no filename in the subtitle")
     }
 
@@ -60,7 +52,6 @@ final class BackupStatusPresentationTests: XCTestCase {
         let p = BackupStatusPresentation(s)
         XCTAssertEqual(p.backedUp, 30)
         XCTAssertEqual(p.total, 100)
-        XCTAssertNil(p.uploadPercent)
         let subtitle = try? XCTUnwrap(p.localizedSubtitle)
         XCTAssertEqual(subtitle?.contains("30"), true)
         XCTAssertEqual(subtitle?.contains("100"), true)

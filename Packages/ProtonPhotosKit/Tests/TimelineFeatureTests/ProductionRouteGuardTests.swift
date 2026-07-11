@@ -252,7 +252,7 @@ struct ProductionRouteGuardTests {
         // resize + the native toolbar toggle replace them). The invariants:
         #expect(text.contains("NavigationSplitView("))                   // native split view shell
         #expect(text.contains(".navigationSplitViewColumnWidth("))       // native column-width policy
-        #expect(text.contains(".searchable(text: $searchText"))          // search on the detail toolbar
+        #expect(text.contains(".smartSearchToolbar("))                   // shared, settings-gated native search
         #expect(text.contains("@State private var committedSearchText")) // UI input is debounced before filtering
         #expect(text.contains("Task.sleep(for: .milliseconds(280))"))
         #expect(text.contains("searchText: committedSearchText"))
@@ -282,7 +282,23 @@ struct ProductionRouteGuardTests {
         #expect(frost.contains("NSVisualEffectView()"), "toolbar frost must use public AppKit material, not painted rectangles")
         #expect(frost.contains("blendingMode = .withinWindow"), "frost must sample the Metal grid inside the window")
         #expect(frost.contains("state = .followsWindowActiveState"), "active/inactive toolbar vividness must remain system-driven")
-        #expect(mainView.contains(".searchable(text: $searchText"), "search must remain a native toolbar search field")
+        #expect(mainView.contains(".smartSearchToolbar("), "search must use the shared native toolbar policy")
+        #expect(mainView.contains("snapshot.isEnabled == true"), "macOS search must follow the Settings toggle")
+        let mobileTimeline = try String(
+            contentsOf: Self.repoRoot.appendingPathComponent("iOSApp/MobileTimelineScreen.swift"),
+            encoding: .utf8
+        )
+        #expect(mobileTimeline.contains(".smartSearchToolbar("), "iOS and iPadOS must share the same search policy")
+        #expect(mobileTimeline.contains("snapshot.isEnabled == true"), "mobile search must follow the Settings toggle")
+        let smartSearchToolbar = try String(
+            contentsOf: Self.repoRoot.appendingPathComponent(
+                "Packages/ProtonPhotosKit/Sources/MLSearchFeature/SmartSearchToolbar.swift"
+            ),
+            encoding: .utf8
+        )
+        #expect(smartSearchToolbar.contains("if isEnabled"), "disabled Smart Search must expose no search control")
+        #expect(smartSearchToolbar.contains(".searchToolbarBehavior(.minimize)"),
+                "enabled search should use Apple's compact expanding toolbar treatment")
         #expect(mainView.contains(".confirmationDialog(trashConfirmationTitle"), "destructive trash actions need a native confirmation dialog")
         #expect(!mainView.contains(".toolbarBackground("), "custom toolbar backgrounds box the sidebar and fight Liquid Glass")
         #expect(!mainView.contains("gridToolbarGlassFade"), "old hand-painted toolbar gradient must not return")

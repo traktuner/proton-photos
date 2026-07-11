@@ -345,6 +345,40 @@ final class CrashAfterUploadUploader: PhotoUploading, @unchecked Sendable {
     func cancel(token: UUID) async {}
 }
 
+/// First transfer never completes until cancelled; the retry succeeds. Models an SDK continuation
+/// that otherwise leaves one queue row in `.uploading` forever.
+final class StallOnceUploader: PhotoUploading, @unchecked Sendable {
+    let capabilities = UploadBackendCapabilities.sdkUploader
+    private let lock = NSLock()
+    private var attempts = 0
+    private var cancellationCount = 0
+    private var stalledContinuation: CheckedContinuation<PhotoUID, Error>?
+
+    var uploadAttempts: Int { lock.withLock { attempts } }
+    var cancellations: Int { lock.withLock { cancellationCount } }
+
+    func upload(
+        _ request: PhotoUploadRequest,
+        onProgress: @Sendable @escaping (UploadProgress) -> Void
+    ) async throws -> PhotoUID {
+        let attempt = lock.withLock { attempts += 1; return attempts }
+        onProgress(UploadProgress(phase: .uploading, fraction: 0))
+        if attempt > 1 { return testUID(request.name) }
+        return try await withCheckedThrowingContinuation { continuation in
+            lock.withLock { stalledContinuation = continuation }
+        }
+    }
+
+    func cancel(token: UUID) async {
+        let continuation: CheckedContinuation<PhotoUID, Error>? = lock.withLock {
+            cancellationCount += 1
+            defer { stalledContinuation = nil }
+            return stalledContinuation
+        }
+        continuation?.resume(throwing: CancellationError())
+    }
+}
+
 // MARK: - Tests
 
 final class BackupSyncRunnerTests: XCTestCase {
@@ -491,6 +525,8 @@ final class BackupSyncRunnerTests: XCTestCase {
         // The Proton SDK may surface the same as an NSError in the URL-error domain.
         XCTAssertTrue(BackupSyncRunner.isTransientNetwork(
             NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost)))
+        XCTAssertTrue(BackupSyncRunner.isTransientNetwork(
+            UploadError.transport(code: NSURLErrorTimedOut, message: "timed out")))
         // Item-specific / non-network failures must NOT be treated as transient network.
         XCTAssertFalse(BackupSyncRunner.isTransientNetwork(URLError(.badURL)))
         XCTAssertFalse(BackupSyncRunner.isTransientNetwork(UploadError.backend("server said no")))
@@ -503,6 +539,8 @@ final class BackupSyncRunnerTests: XCTestCase {
         queue: (any UploadBackupSyncQueueStore)? = nil,
         retry: BackupRetryPolicy = BackupRetryPolicy(baseDelay: 1, maxDelay: 64, maxAttempts: 4),
         throttle: BackupThrottlePolicy = BackupThrottlePolicy(baseConcurrency: 2),
+        uploadStallTimeout: TimeInterval = 180,
+        uploadStallPollInterval: TimeInterval = 5,
         throttleInputs: @Sendable @escaping () -> BackupThrottleInputs = { .unconstrained }
     ) -> BackupSyncRunner {
         BackupSyncRunner(
@@ -511,11 +549,34 @@ final class BackupSyncRunnerTests: XCTestCase {
             resolver: resolver,
             identityResolver: identityResolver ?? makePipeline(),
             uploader: uploader ?? self.uploader,
-            configuration: BackupSyncRunner.Configuration(retry: retry, throttle: throttle),
+            configuration: BackupSyncRunner.Configuration(
+                uploadStallTimeout: uploadStallTimeout,
+                uploadStallPollInterval: uploadStallPollInterval,
+                retry: retry,
+                throttle: throttle
+            ),
             throttleInputs: throttleInputs,
             clock: clock,
             now: { [clock] in clock!.now }
         )
+    }
+
+    func testStalledUploadIsCancelledAndRetriedWithoutParkingItem() async throws {
+        let entry = seedEntry("stalled.jpg")
+        let stalledUploader = StallOnceUploader()
+        let runner = makeRunner(
+            uploader: stalledUploader,
+            uploadStallTimeout: 0.05,
+            uploadStallPollInterval: 0.01
+        )
+
+        let progress = await runner.runUntilDrained()
+
+        XCTAssertEqual(stalledUploader.cancellations, 1)
+        XCTAssertEqual(stalledUploader.uploadAttempts, 2)
+        XCTAssertEqual(state(of: entry), .completed)
+        XCTAssertEqual(progress.uploaded, 1)
+        XCTAssertEqual(progress.failed, 0, "a stalled transport is retryable, not an item failure")
     }
 
     private func seedEntry(

@@ -547,6 +547,8 @@ public enum UploadError: LocalizedError, Equatable {
     case unsupportedFile(String)
     case fileMissing(String)
     case permissionDenied(String)
+    /// A retryable URL-transport failure preserved across the SDK boundary.
+    case transport(code: Int, message: String)
     case backend(String)
     case albumStep(String)
     case cancelled
@@ -556,6 +558,7 @@ public enum UploadError: LocalizedError, Equatable {
         case let .unsupportedFile(name): L10n.string("error.upload_unsupported_file \(name)")
         case let .fileMissing(name): L10n.string("error.upload_file_missing \(name)")
         case let .permissionDenied(name): L10n.string("error.upload_permission_denied \(name)")
+        case let .transport(_, message): message
         case let .backend(message): message
         case let .albumStep(message): L10n.string("error.upload_album_step \(message)")
         case .cancelled: L10n.string("error.upload_cancelled")

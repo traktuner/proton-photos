@@ -8,11 +8,10 @@ import PhotosCore
 /// The row is at most: an icon, a headline (the phase), one subtitle line, and a progress bar.
 /// Design contract:
 /// - Every active phase uses one stable "Backup in progress" headline. The subtitle carries only
-///   durable counts plus an explicitly labelled per-file percentage while bytes actually move, so
-///   fast checking/uploading alternation never makes the row flicker or misstate overall progress.
-/// - The subtitle is one line: "<backed up> of <total>", and ONLY while a real byte transfer is in
-///   flight it appends the current file's upload percentage ("· 43 %"). No filename is ever shown -
-///   a filename next to "backing up" reads as a promise the item is safe when it is only mid-check.
+///   the durable overall count, so checking/uploading alternation never makes the row flicker or
+///   mixes per-file and library-wide progress.
+/// - The subtitle is one line: "<backed up> of <total>". No filename or per-file percentage is
+///   shown because either can be mistaken for the overall backup state.
 /// - A separate attention line appears only when something actually needs the user.
 ///
 /// This is pure and time-free; iOS layers `BackupStatusStabilizer` on top for dwell so the headline
@@ -37,11 +36,10 @@ public struct BackupStatusPresentation: Sendable, Equatable {
     public var progressFraction: Double?
 
     // Subtitle inputs kept raw so the localized strings are compiler-checked, not built from a
-    // dynamic key. `backedUp`/`total` render "<n> of <m>"; `uploadPercent` is non-nil ONLY while a
-    // real transfer is moving; `attentionCount` drives the optional attention line.
+    // dynamic key. `backedUp`/`total` render "<n> of <m>"; `attentionCount` drives the optional
+    // attention line.
     public var backedUp: Int
     public var total: Int
-    public var uploadPercent: Int?
     public var attentionCount: Int
 
     public init(
@@ -51,7 +49,6 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         progressFraction: Double?,
         backedUp: Int = 0,
         total: Int = 0,
-        uploadPercent: Int? = nil,
         attentionCount: Int = 0
     ) {
         self.headlineKey = headlineKey
@@ -60,18 +57,12 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         self.progressFraction = progressFraction
         self.backedUp = backedUp
         self.total = total
-        self.uploadPercent = uploadPercent
         self.attentionCount = attentionCount
     }
 
     // MARK: - Mapping from the shared status
 
     public init(_ status: BackupStatus) {
-        let uploadingNow = status.uploadingItemName != nil
-        let percent = uploadingNow
-            ? status.uploadingFraction.map { max(0, min(100, Int(($0 * 100).rounded()))) }
-            : nil
-
         switch status.phase {
         case .scanning:
             self.init(headlineKey: "backup.status_active", isActive: true, accessory: .activity,
@@ -81,8 +72,7 @@ public struct BackupStatusPresentation: Sendable, Equatable {
             self.init(headlineKey: "backup.status_active",
                       isActive: true, accessory: .activity,
                       progressFraction: status.fractionCompleted,
-                      backedUp: status.backedUp, total: status.totalConsidered ?? 0,
-                      uploadPercent: percent)
+                      backedUp: status.backedUp, total: status.totalConsidered ?? 0)
 
         case .paused:
             self.init(headlineKey: "backup.phase_paused", isActive: false, accessory: .paused,
@@ -125,19 +115,10 @@ public struct BackupStatusPresentation: Sendable, Equatable {
         }
     }
 
-    /// "<n> of <m> backed up", plus "· file 43 %" only while a real upload is moving. The per-file
-    /// segment is explicitly labelled ("file"/"Datei") so it can never be mistaken for the overall
-    /// progress bar (which is a separate determinate element below). nil when there is no honest total
-    /// yet (scanning/idle).
+    /// "<n> of <m> backed up". Nil when there is no honest total yet (scanning/idle).
     public var localizedSubtitle: String? {
         guard total > 0 else { return nil }
-        var line = L10n.string("backup.progress_backed_up \(backedUp) \(total)")
-        if let uploadPercent {
-            // Labelled explicitly as the current file's upload so it is unambiguous next to the
-            // overall "<n> of <m>" count and the separate overall progress bar.
-            line += " · " + L10n.string("backup.file_upload_percent \(uploadPercent)")
-        }
-        return line
+        return L10n.string("backup.progress_backed_up \(backedUp) \(total)")
     }
 
     /// Shown only when something actually needs the user; nil otherwise.

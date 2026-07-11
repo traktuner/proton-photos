@@ -1,6 +1,7 @@
 import DesignSystemCore
 import GridCore
 import MLSearchCore
+import MLSearchFeature
 import PhotosCore
 import SwiftUI
 import TimelineCore
@@ -69,7 +70,11 @@ struct MobileTimelineScreen: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbarContent }
                 .toolbar(selectionMode ? .hidden : .automatic, for: .tabBar)
-                .searchable(text: $searchText, prompt: Text("search.prompt \(String(localized: "tab.photos"))"))
+                .smartSearchToolbar(
+                    text: $searchText,
+                    isEnabled: model.smartSearch?.snapshot.isEnabled == true,
+                    prompt: Text("search.prompt \(String(localized: "tab.photos"))")
+                )
                 .onChange(of: searchText) { _, value in scheduleSearchCommit(value) }
                 .onDisappear {
                     searchDebounceTask?.cancel()

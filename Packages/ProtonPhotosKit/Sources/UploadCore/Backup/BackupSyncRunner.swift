@@ -39,6 +39,11 @@ public actor BackupSyncRunner {
         public var staleActiveGrace: TimeInterval
         /// Poll interval while the throttle reports "pause" (thermal critical etc.).
         public var pausedPollInterval: TimeInterval
+        /// Maximum time an upload may emit no backend progress before it is cancelled and retried.
+        /// Total upload duration is unlimited while progress continues.
+        public var uploadStallTimeout: TimeInterval
+        /// Monotonic watchdog cadence. Kept coarse in production to avoid needless wakeups.
+        public var uploadStallPollInterval: TimeInterval
         public var retry: BackupRetryPolicy
         public var throttle: BackupThrottlePolicy
 
@@ -46,12 +51,16 @@ public actor BackupSyncRunner {
             batchSize: Int = 32,
             staleActiveGrace: TimeInterval = 0,
             pausedPollInterval: TimeInterval = 30,
+            uploadStallTimeout: TimeInterval = 180,
+            uploadStallPollInterval: TimeInterval = 5,
             retry: BackupRetryPolicy = BackupRetryPolicy(),
             throttle: BackupThrottlePolicy = BackupThrottlePolicy()
         ) {
             self.batchSize = max(1, batchSize)
             self.staleActiveGrace = max(0, staleActiveGrace)
             self.pausedPollInterval = max(0.01, pausedPollInterval)
+            self.uploadStallTimeout = max(0.01, uploadStallTimeout)
+            self.uploadStallPollInterval = max(0.01, min(uploadStallPollInterval, uploadStallTimeout))
             self.retry = retry
             self.throttle = throttle
         }
@@ -87,14 +96,6 @@ public actor BackupSyncRunner {
     /// Cancellation tokens of uploads currently in flight, so `stop()` can abort transfers.
     private var inFlightTokens: [String: UUID] = [:]
     private var inFlightNames: [String: String] = [:]
-    /// Names of items whose BYTES are moving right now (the `.uploading` step only) - drives the
-    /// honest "wird gesichert: X" line, kept apart from `inFlightNames` (which also covers checking).
-    private var uploadingNames: [String: String] = [:]
-    /// Last upload fraction emitted per item, so the byte-progress callback only pushes a status
-    /// update on a meaningful change (≥1%) instead of on every chunk - keeps the UI live without
-    /// flooding the actor.
-    private var lastEmittedUploadFraction: [String: Double] = [:]
-    private var uploadingByteCounts: [String: Int] = [:]
 
     private var progress = BackupSyncProgress()
     private var onProgress: (@Sendable (BackupSyncProgress) -> Void)?
@@ -533,28 +534,8 @@ public actor BackupSyncRunner {
         guard let persistedState = transition(entry, from: state, to: .uploading) else { return }
         let token = UUID()
         inFlightTokens[key] = token
-        // This item is now genuinely pushing bytes: expose it as the "wird gesichert" name so the UI
-        // can prove a specific file is being backed up (not just checked). emitProgress right away so
-        // the change is visible immediately, not only at the next settle.
-        uploadingNames[key] = entry.originalFilename
-        uploadingByteCounts[key] = Int(descriptor.fileSize)
-        progress.currentUploadingName = entry.originalFilename
-        progress.currentUploadingByteCount = Int(descriptor.fileSize)
-        progress.currentUploadingFraction = 0
-        lastEmittedUploadFraction[key] = 0
-        emitProgress()
         defer {
             inFlightTokens[key] = nil
-            uploadingNames[key] = nil
-            uploadingByteCounts[key] = nil
-            lastEmittedUploadFraction[key] = nil
-            if progress.currentUploadingName == entry.originalFilename {
-                // Hand the live slot to another in-flight upload if there is one, else clear it.
-                progress.currentUploadingName = uploadingNames.values.first
-                let nextKey = uploadingNames.first(where: { $0.value == progress.currentUploadingName })?.key
-                progress.currentUploadingByteCount = nextKey.flatMap { uploadingByteCounts[$0] }
-                progress.currentUploadingFraction = nextKey.flatMap { lastEmittedUploadFraction[$0] }
-            }
         }
 
         let request = PhotoUploadRequest(
@@ -574,12 +555,8 @@ public actor BackupSyncRunner {
         #if DEBUG
         let _tUpload = Date()
         #endif
-        let uploadName = entry.originalFilename
         do {
-            uid = try await uploader.upload(request) { [weak self] itemProgress in
-                guard itemProgress.phase == .uploading else { return }
-                Task { await self?.reportUploadProgress(key: key, name: uploadName, fraction: itemProgress.fraction) }
-            }
+            uid = try await uploadWithWatchdog(request) { _ in }
         } catch {
             // Settle the pipeline's same-content claim (identical items may be waiting on this
             // upload) and drop the cached remote view - the server may have committed the
@@ -771,7 +748,7 @@ public actor BackupSyncRunner {
                     ).applying(identity: result.identity)
                     let uid: PhotoUID
                     do {
-                        uid = try await uploader.upload(request) { _ in }
+                        uid = try await uploadWithWatchdog(request) { _ in }
                     } catch {
                         await identityResolver.uploadDidFail(uploadDescriptor)
                         throw error
@@ -881,7 +858,9 @@ public actor BackupSyncRunner {
         // untouched, and let the pass-level guard end the drain if the volume stays full.
         if Self.isTransientResourcePressure(error) {
             resourcePressureStreak += 1
-            let eligibleAt = now().addingTimeInterval(configuration.retry.delay(afterAttempts: 1))
+            let eligibleAt = now().addingTimeInterval(
+                configuration.retry.delay(afterAttempts: max(1, networkErrorStreak))
+            )
             guard queue.updateState(
                 source: entry.source, revision: entry.revision,
                 state: .discovered, attempts: entry.attempts, lastError: message, updatedAt: eligibleAt
@@ -1063,20 +1042,6 @@ public actor BackupSyncRunner {
     }
     #endif
 
-    /// Byte-progress from an in-flight upload. Only forwarded when this item is still the one being
-    /// shown and the fraction advanced by at least 1% (or completed), so a large video reads as a
-    /// rising percentage rather than a frozen count. Ignores stale callbacks after the item settled.
-    private func reportUploadProgress(key: String, name: String, fraction: Double) {
-        guard uploadingNames[key] == name else { return }   // item already settled/switched away
-        let last = lastEmittedUploadFraction[key] ?? 0
-        guard fraction >= 1 || fraction - last >= 0.01 else { return }
-        lastEmittedUploadFraction[key] = fraction
-        progress.currentUploadingName = name
-        progress.currentUploadingByteCount = uploadingByteCounts[key]
-        progress.currentUploadingFraction = fraction
-        emitProgress()
-    }
-
     /// Errors that reflect a temporary lack of disk space rather than a bad item. These are
     /// retried indefinitely (with backoff) and never parked as `.failed`.
     private static func isTransientResourcePressure(_ error: Error) -> Bool {
@@ -1094,12 +1059,127 @@ public actor BackupSyncRunner {
             NSURLErrorResourceUnavailable, NSURLErrorSecureConnectionFailed, NSURLErrorCannotLoadFromNetwork,
             NSURLErrorInternationalRoamingOff, NSURLErrorDataNotAllowed, NSURLErrorRequestBodyStreamExhausted,
         ]
+        if case let UploadError.transport(code, _) = error, transientCodes.contains(code) { return true }
         if let urlError = error as? URLError, transientCodes.contains(urlError.errorCode) { return true }
         let ns = error as NSError
         return ns.domain == NSURLErrorDomain && transientCodes.contains(ns.code)
     }
 
+    /// Runs one backend transfer with a monotonic inactivity watchdog. This protects the persistent
+    /// queue from an SDK continuation that never completes: a stalled transfer is cancelled and
+    /// returned as a retryable transport timeout, while a slow transfer can run indefinitely as
+    /// long as the backend continues to report progress.
+    private func uploadWithWatchdog(
+        _ request: PhotoUploadRequest,
+        onProgress: @Sendable @escaping (UploadProgress) -> Void
+    ) async throws -> PhotoUID {
+        let activity = BackupUploadActivity()
+        let race = BackupUploadRace()
+        let uploader = uploader
+        let timeout = configuration.uploadStallTimeout
+        let pollInterval = configuration.uploadStallPollInterval
+
+        let uploadTask = Task {
+            do {
+                let uid = try await uploader.upload(request) { progress in
+                    activity.markProgress()
+                    onProgress(progress)
+                }
+                race.resolve(.success(uid))
+            } catch {
+                race.resolve(.failure(error))
+            }
+        }
+        let watchdogTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                guard activity.secondsSinceProgress >= timeout else { continue }
+                if race.resolve(.timedOut) {
+                    await uploader.cancel(token: request.cancellationToken)
+                }
+                return
+            }
+        }
+
+        let resolution = await withTaskCancellationHandler {
+            await race.wait()
+        } onCancel: {
+            uploadTask.cancel()
+            watchdogTask.cancel()
+            if race.resolve(.cancelled) {
+                Task { await uploader.cancel(token: request.cancellationToken) }
+            }
+        }
+        watchdogTask.cancel()
+
+        switch resolution {
+        case let .success(uid):
+            return uid
+        case let .failure(error):
+            throw error
+        case .timedOut:
+            uploadTask.cancel()
+            throw UploadError.transport(
+                code: NSURLErrorTimedOut,
+                message: URLError(.timedOut).localizedDescription
+            )
+        case .cancelled:
+            uploadTask.cancel()
+            throw CancellationError()
+        }
+    }
+
     private static func key(_ entry: UploadBackupSyncQueueEntry) -> String {
         "\(entry.source.kind.rawValue)|\(entry.source.identifier)|\(entry.source.resource.rawValue)|\(entry.revision.rawValue)"
+    }
+}
+
+private final class BackupUploadActivity: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastProgress = ProcessInfo.processInfo.systemUptime
+
+    func markProgress() {
+        lock.withLock { lastProgress = ProcessInfo.processInfo.systemUptime }
+    }
+
+    var secondsSinceProgress: TimeInterval {
+        lock.withLock { max(0, ProcessInfo.processInfo.systemUptime - lastProgress) }
+    }
+}
+
+private enum BackupUploadResolution: @unchecked Sendable {
+    case success(PhotoUID)
+    case failure(Error)
+    case timedOut
+    case cancelled
+}
+
+private final class BackupUploadRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<BackupUploadResolution, Never>?
+    private var resolution: BackupUploadResolution?
+
+    func wait() async -> BackupUploadResolution {
+        await withCheckedContinuation { continuation in
+            let ready: BackupUploadResolution? = lock.withLock {
+                if let resolution { return resolution }
+                self.continuation = continuation
+                return nil
+            }
+            if let ready { continuation.resume(returning: ready) }
+        }
+    }
+
+    @discardableResult
+    func resolve(_ value: BackupUploadResolution) -> Bool {
+        let continuation: CheckedContinuation<BackupUploadResolution, Never>? = lock.withLock {
+            guard resolution == nil else { return nil }
+            resolution = value
+            defer { self.continuation = nil }
+            return self.continuation
+        }
+        continuation?.resume(returning: value)
+        return true
     }
 }

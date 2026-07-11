@@ -14,6 +14,7 @@ import UploadCore
 import UploadFeature
 import MapFeature
 import MLSearchCore
+import MLSearchFeature
 import ProtonDriveBackend
 
 struct MainView: View {
@@ -176,7 +177,12 @@ struct MainView: View {
                     }
                 }
                 .navigationTitle(viewerModel == nil ? title : "")
-                .searchable(text: $searchText, placement: .toolbar, prompt: Text("search.prompt \(title)"))
+                .smartSearchToolbar(
+                    text: $searchText,
+                    isEnabled: model.smartSearch?.snapshot.isEnabled == true,
+                    placement: .toolbar,
+                    prompt: Text("search.prompt \(title)")
+                )
                 .toolbar { toolbarContent }
                 // Native Liquid Glass everywhere: no `.toolbarBackground` style is registered, so both the grid
                 // and the viewer use the system glass bar (registering any style here would replace the adaptive

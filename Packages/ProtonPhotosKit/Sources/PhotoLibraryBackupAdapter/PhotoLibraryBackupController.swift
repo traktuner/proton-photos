@@ -116,9 +116,6 @@ public final class PhotoLibraryBackupController {
     private var lastRunnerItemName: String?
     /// Same caching for the item whose bytes are moving right now, so the "wird gesichert: X" line
     /// survives the DB-truth refresh. nil whenever nothing is mid-transfer.
-    private var lastRunnerUploadingName: String?
-    private var lastRunnerUploadingFraction: Double?
-    private var lastRunnerUploadingByteCount: Int?
 
     /// Platform hook: invoked with `true` when a backup pass is actively running (so the host app may
     /// keep the display awake / request background time) and `false` the moment backup goes idle,
@@ -640,12 +637,7 @@ public final class PhotoLibraryBackupController {
         // Capture the in-flight name unconditionally (even when the throttle below drops this update)
         // so the periodic DB-truth refresh can keep showing a live "Working on <file>" line.
         if let name = snapshot.currentItemName { lastRunnerItemName = name }
-        lastRunnerUploadingName = snapshot.currentUploadingName
-        lastRunnerUploadingFraction = snapshot.currentUploadingFraction
-        lastRunnerUploadingByteCount = snapshot.currentUploadingByteCount
-        
-        // Unify on DB-truth for ALL counts — the runner snapshot's live fields (currentItemName,
-        // uploadingFraction, isRunning) are merged with the durable queue's summary. This eliminates
+        // Unify on DB-truth for all counts while retaining the runner's active state. This eliminates
         // the denominator flip that arose from alternating between the runner's in-memory total
         // (stale/incremental) and the DB-truth summary. The stable denominator changes only when the
         // library actually changes (a new photo enqueued), never by mixing sources.
@@ -700,9 +692,6 @@ public final class PhotoLibraryBackupController {
         updateIdleTimerIfNeeded()
         isScanning = false
         lastRunnerItemName = nil
-        lastRunnerUploadingName = nil
-        lastRunnerUploadingFraction = nil
-        lastRunnerUploadingByteCount = nil
         let shouldRestart = pendingSyncAfterStop && isEnabled && accessState.allowsBackup
         pendingSyncAfterStop = false
         refreshFromQueue()
@@ -756,9 +745,6 @@ public final class PhotoLibraryBackupController {
         return BackupSyncProgress(
             summary: queueStore.summary(),
             currentItemName: isSyncing ? lastRunnerItemName : nil,
-            currentUploadingName: isSyncing ? lastRunnerUploadingName : nil,
-            currentUploadingFraction: isSyncing ? lastRunnerUploadingFraction : nil,
-            currentUploadingByteCount: isSyncing ? lastRunnerUploadingByteCount : nil,
             isRunning: isSyncing
         )
     }

@@ -88,7 +88,7 @@ Build, install, and launch the canonical local app at `/Applications/Proton Phot
 ./scripts/rebuild.sh
 ```
 
-`scripts/rebuild.sh` generates the project, verifies the iOS shell, builds the macOS app, installs it into `/Applications`, registers LaunchServices, and launches it.
+`scripts/rebuild.sh` generates the project, builds and launches the macOS app, then builds, installs, and launches the signed iOS app when Firestarter is available. It does not run tests.
 
 ## Tests
 
@@ -119,4 +119,4 @@ Build the iOS/iPadOS shell target:
 - `Branding` - app icons and shared product assets.
 - `Vendor/sdk-swift` - local Proton Drive SDK checkout.
 - `project.yml` - source of truth for generated Xcode project settings.
-- `scripts/rebuild.sh` - canonical local macOS build/install flow.
+- `scripts/rebuild.sh` - canonical macOS build/install flow with optional Firestarter deployment.

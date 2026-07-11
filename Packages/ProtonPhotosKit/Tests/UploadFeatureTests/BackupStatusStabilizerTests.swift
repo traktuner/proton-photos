@@ -15,10 +15,10 @@ final class BackupStatusStabilizerTests: XCTestCase {
             progressFraction: fraction, backedUp: value, total: total)
     }
 
-    private func uploading(value: Int = 0, total: Int = 100, fraction: Double = 0, percent: Int? = 10) -> BackupStatusPresentation {
+    private func uploading(value: Int = 0, total: Int = 100, fraction: Double = 0) -> BackupStatusPresentation {
         BackupStatusPresentation(
             headlineKey: "backup.phase_uploading", isActive: true, accessory: .activity,
-            progressFraction: fraction, backedUp: value, total: total, uploadPercent: percent)
+            progressFraction: fraction, backedUp: value, total: total)
     }
 
     private func completed() -> BackupStatusPresentation {
@@ -61,13 +61,12 @@ final class BackupStatusStabilizerTests: XCTestCase {
         XCTAssertEqual(backToChecking.wakeAt, t(2.0))
     }
 
-    func testSamePhaseLetsNumbersAndPercentThroughImmediately() {
+    func testSamePhaseLetsOverallProgressThroughImmediately() {
         var s = BackupStatusStabilizer(dwell: 1.0)
-        _ = s.ingest(uploading(value: 5, fraction: 0.05, percent: 40), now: t(0))
-        let updated = s.ingest(uploading(value: 6, fraction: 0.06, percent: 43), now: t(0.1))
+        _ = s.ingest(uploading(value: 5, fraction: 0.05), now: t(0))
+        let updated = s.ingest(uploading(value: 6, fraction: 0.06), now: t(0.1))
         XCTAssertEqual(updated.display.headlineKey, "backup.phase_uploading")
         XCTAssertEqual(updated.display.backedUp, 6, "counts advance without waiting for the dwell")
-        XCTAssertEqual(updated.display.uploadPercent, 43, "the live upload % updates immediately")
         XCTAssertEqual(updated.display.progressFraction, 0.06)
         XCTAssertNil(updated.wakeAt)
     }

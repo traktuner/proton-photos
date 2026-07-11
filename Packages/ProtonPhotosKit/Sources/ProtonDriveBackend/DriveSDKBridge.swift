@@ -706,6 +706,10 @@ extension DriveSDKBridge: PhotoUploading {
             return PhotoUID(volumeID: ids.nodeUid.volumeID, nodeID: ids.nodeUid.nodeID)
         } catch {
             DebugLog.log("[Upload] FAILED file=\(request.name) err=\(error)")
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain {
+                throw UploadError.transport(code: nsError.code, message: nsError.localizedDescription)
+            }
             throw UploadError.backend((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
     }

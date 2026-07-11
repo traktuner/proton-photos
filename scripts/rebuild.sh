@@ -1,88 +1,82 @@
 #!/bin/bash
-# Build the app and install it as the single canonical /Applications/Proton Photos.app, then launch.
-#
-# RULE (do not break): there must always, after every build without exception, be exactly ONE openable
-# Proton Photos.app, and it must live in /Applications - so Spotlight search only ever finds that one.
-# To guarantee it, the build output lives under a `*.noindex` derived-data folder: Spotlight skips any
-# directory whose name ends in `.noindex` (the same reason Xcode's own `Intermediates.noindex` never
-# shows up while `Products` would). So the build product is never indexed, and /Applications is the only
-# bundle Spotlight knows about. Any ad-hoc `xcodebuild` must use this same `-derivedDataPath`.
-#
-# RULE (do not break): the repo lives on a network share (TrueNAS). NOTHING may be built into the
-# repo tree - all build output goes to the local Mac under $PROTONPHOTOS_BUILD_ROOT
-# (default: ~/Developer/xcode/ProtonPhotos). Building into the repo pushes every object file
-# over SMB and must never happen again.
-set -e
-export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+# Build and install the current macOS app. When Firestarter is available, also build, install and
+# launch the signed iOS app. Build products stay on the local Mac because the repo is on TrueNAS.
+set -euo pipefail
+
+export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 cd "$(dirname "$0")/.."
 
 BUILD_ROOT="${PROTONPHOTOS_BUILD_ROOT:-$HOME/Developer/xcode/ProtonPhotos}"
-DD="$BUILD_ROOT/DD.noindex"
-SPM_SCRATCH="$BUILD_ROOT/SPM.noindex"
-mkdir -p "$BUILD_ROOT"
-# Remove legacy in-repo build dirs (pre-NAS layout) so no stale product lingers on the share.
-rm -rf build Packages/ProtonPhotosKit/.build
-find "$HOME/Library/Developer/Xcode/DerivedData" \
-  \( -path "*/Build/Products/*/ProtonPhotos.app" -o -path "*/Build/Products/*/Proton Photos.app" \) \
-  -prune -exec rm -rf {} + 2>/dev/null || true
+MAC_DD="$BUILD_ROOT/DD.noindex"
+IOS_DD="$BUILD_ROOT/DD.device.noindex"
 PROJECT="ProtonPhotos.xcodeproj"
-SCHEME="ProtonPhotos"
+MAC_SCHEME="ProtonPhotos"
+IOS_SCHEME="ProtonPhotosMobile"
+IOS_DEVICE_NAME="${PROTONPHOTOS_IOS_DEVICE_NAME:-Firestarter}"
+IOS_DEVELOPMENT_TEAM="${PROTONPHOTOS_IOS_DEVELOPMENT_TEAM:-587T3YR252}"
+IOS_BUNDLE_ID="me.protonphotos.ios"
 
-echo "Preflight: generating Xcode project"
+mkdir -p "$BUILD_ROOT"
+
+echo "Generating Xcode project"
 xcodegen generate >/dev/null
-
-echo "Preflight: building ProtonPhotosMobile shell for generic iOS"
-SKIP_XCODEGEN=1 bash ./scripts/verify-ios-app-shell.sh
 
 SIGNING_IDENTITY_HASH="${PROTONPHOTOS_CODE_SIGN_IDENTITY:-}"
 SIGNING_IDENTITY_NAME=""
 if [[ -z "$SIGNING_IDENTITY_HASH" ]]; then
-  SIGNING_LINE="$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development:/ { print; exit }')"
-  SIGNING_IDENTITY_HASH="$(awk '{ print $2 }' <<<"$SIGNING_LINE")"
-  SIGNING_IDENTITY_NAME="$(awk -F'"' '{ print $2 }' <<<"$SIGNING_LINE")"
+    SIGNING_LINE="$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development:/ { print; exit }')"
+    SIGNING_IDENTITY_HASH="$(awk '{ print $2 }' <<<"$SIGNING_LINE")"
+    SIGNING_IDENTITY_NAME="$(awk -F'"' '{ print $2 }' <<<"$SIGNING_LINE")"
 fi
 
-SIGN_ARGS=(CODE_SIGNING_ALLOWED=YES)
+MAC_SIGN_ARGS=(CODE_SIGNING_ALLOWED=YES)
 if [[ -n "$SIGNING_IDENTITY_HASH" ]]; then
-  SIGN_ARGS+=(CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$SIGNING_IDENTITY_HASH")
-  if [[ "$SIGNING_IDENTITY_NAME" =~ \(([A-Z0-9]+)\)$ ]]; then
-    SIGN_ARGS+=(DEVELOPMENT_TEAM="${BASH_REMATCH[1]}")
-  fi
-  echo "Signing with: ${SIGNING_IDENTITY_NAME:-$SIGNING_IDENTITY_HASH}"
+    MAC_SIGN_ARGS+=(CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$SIGNING_IDENTITY_HASH")
+    echo "macOS signing: ${SIGNING_IDENTITY_NAME:-$SIGNING_IDENTITY_HASH}"
 else
-  echo "Signing with: Xcode default (no Apple Development identity found)"
+    echo "macOS signing: Xcode default"
 fi
 
-echo "Preflight: validating grid profile configuration"
-plutil -lint Packages/ProtonPhotosKit/Sources/TimelineCore/Resources/GridProfiles.plist >/dev/null
-xcrun swift test --package-path Packages/ProtonPhotosKit --scratch-path "$SPM_SCRATCH" --filter TimelineGridProfileConfigurationTests
+echo "Building macOS app"
+xcodebuild build -project "$PROJECT" -scheme "$MAC_SCHEME" \
+    -destination 'platform=macOS,arch=arm64' -derivedDataPath "$MAC_DD" \
+    -skipPackagePluginValidation -skipMacroValidation "${MAC_SIGN_ARGS[@]}"
 
-echo "Preflight: building $SCHEME scheme for generic macOS"
-xcodebuild build -project "$PROJECT" -scheme "$SCHEME" \
-  -destination 'generic/platform=macOS' -derivedDataPath "$DD" \
-  -skipPackagePluginValidation -skipMacroValidation "${SIGN_ARGS[@]}"
-
-echo "Install build: building $SCHEME for local arm64 launch"
-xcodebuild build -project "$PROJECT" -scheme "$SCHEME" \
-  -destination 'platform=macOS,arch=arm64' -derivedDataPath "$DD" \
-  -skipPackagePluginValidation -skipMacroValidation "${SIGN_ARGS[@]}"
-
-APP="$DD/Build/Products/Debug/Proton Photos.app"
-DST="/Applications/Proton Photos.app"
-LEGACY_DST="/Applications/ProtonPhotos.app"
+MAC_APP="$MAC_DD/Build/Products/Debug/Proton Photos.app"
+MAC_DST="/Applications/Proton Photos.app"
+LEGACY_MAC_DST="/Applications/ProtonPhotos.app"
 
 pkill -9 -f "Proton Photos.app/Contents/MacOS" 2>/dev/null || true
 pkill -9 -f "ProtonPhotos.app/Contents/MacOS" 2>/dev/null || true
 sleep 1
-rm -rf "$DST"
-rm -rf "$LEGACY_DST"
-cp -R "$APP" "$DST"
-xattr -dr com.apple.quarantine "$DST" 2>/dev/null || true
-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DST"
-open "$DST"
-echo "Installed + launched: $DST"
-echo "Spotlight bundles (must be exactly one - /Applications):"
-{
-  mdfind -name "Proton Photos.app" 2>/dev/null
-  mdfind -name "ProtonPhotos.app" 2>/dev/null
-} | grep -Ei "Proton ?Photos.app$" || true
+rm -rf "$MAC_DST" "$LEGACY_MAC_DST"
+cp -R "$MAC_APP" "$MAC_DST"
+xattr -dr com.apple.quarantine "$MAC_DST" 2>/dev/null || true
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$MAC_DST"
+open "$MAC_DST"
+echo "Installed and launched macOS app: $MAC_DST"
+
+IOS_DEVICE_ID="$(
+    xcrun devicectl list devices \
+        --filter "Name = '$IOS_DEVICE_NAME' AND State BEGINSWITH 'available'" \
+        --columns Identifier --hide-default-columns --hide-headers --timeout 5 2>/dev/null \
+        | awk 'NF { print $1; exit }' || true
+)"
+
+if [[ -z "$IOS_DEVICE_ID" ]]; then
+    echo "iOS skipped: $IOS_DEVICE_NAME is not available"
+    exit 0
+fi
+
+echo "Building iOS app for $IOS_DEVICE_NAME ($IOS_DEVICE_ID)"
+xcodebuild build -project "$PROJECT" -scheme "$IOS_SCHEME" \
+    -destination "id=$IOS_DEVICE_ID" -derivedDataPath "$IOS_DD" \
+    -skipPackagePluginValidation -skipMacroValidation -allowProvisioningUpdates \
+    DEVELOPMENT_TEAM="$IOS_DEVELOPMENT_TEAM" CODE_SIGN_STYLE=Automatic
+
+IOS_APP="$IOS_DD/Build/Products/Debug-iphoneos/ProtonPhotosMobile.app"
+echo "Installing iOS app on $IOS_DEVICE_NAME"
+xcrun devicectl device install app --device "$IOS_DEVICE_ID" --timeout 120 "$IOS_APP"
+xcrun devicectl device process launch --device "$IOS_DEVICE_ID" --timeout 30 \
+    --terminate-existing "$IOS_BUNDLE_ID"
+echo "Installed and launched iOS app on $IOS_DEVICE_NAME"
