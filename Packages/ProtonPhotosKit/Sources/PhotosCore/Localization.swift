@@ -38,6 +38,11 @@ public enum L10n {
         String(localized: key, bundle: .module, comment: comment)
     }
 
+    /// Resolves an app-reviewed catalog key selected from runtime metadata.
+    public static func string(dynamicKey key: String) -> String {
+        Bundle.module.localizedString(forKey: key, value: key, table: nil)
+    }
+
     /// The bundle backing the package String Catalog. Exposed for tests/diagnostics (e.g. to assert the
     /// available localizations and the English fallback); not needed for normal lookups, which go through
     /// `string(_:comment:)`.

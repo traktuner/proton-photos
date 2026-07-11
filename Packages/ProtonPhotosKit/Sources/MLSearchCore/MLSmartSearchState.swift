@@ -3,6 +3,7 @@ import Foundation
 /// A user-recoverable Smart Search failure. `isRetryable` gates the UI retry action.
 public struct MLSmartSearchFailure: Sendable, Equatable {
     public enum Kind: String, Sendable, Codable {
+        case catalog
         case download
         case verification
         case installation
@@ -25,6 +26,10 @@ public struct MLSmartSearchFailure: Sendable, Equatable {
 /// The one lifecycle phase machine every platform renders. UI never derives its own lifecycle.
 public enum MLSmartSearchPhase: Sendable, Equatable {
     case disabled
+    /// Refreshing the signed list of downloadable models.
+    case loadingCatalog
+    /// The catalog is ready and the user must choose a model before any download starts.
+    case selectingModel
     /// Enabled with a selected model whose artifacts are not installed (and, when
     /// `downloadable` is false, cannot be fetched automatically).
     case notInstalled(downloadable: Bool)
@@ -44,9 +49,9 @@ public enum MLSmartSearchPhase: Sendable, Equatable {
 
     public var isBusy: Bool {
         switch self {
-        case .downloading, .verifying, .installing, .preparingModel, .switchingModel, .deleting:
+        case .loadingCatalog, .downloading, .verifying, .installing, .preparingModel, .switchingModel, .deleting:
             return true
-        case .disabled, .notInstalled, .indexing, .waiting, .ready, .failed:
+        case .disabled, .selectingModel, .notInstalled, .indexing, .waiting, .ready, .failed:
             return false
         }
     }

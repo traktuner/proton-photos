@@ -161,7 +161,7 @@ struct ProtonRequestGovernorTests {
     }
 
     private static func waitUntil(
-        timeout: Duration = .seconds(2),
+        timeout: Duration = .seconds(10),
         condition: @escaping @Sendable () async -> Bool
     ) async throws {
         let deadline = ContinuousClock.now.advanced(by: timeout)

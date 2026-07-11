@@ -72,7 +72,7 @@ struct MobileTimelineScreen: View {
                 .toolbar(selectionMode ? .hidden : .automatic, for: .tabBar)
                 .smartSearchToolbar(
                     text: $searchText,
-                    isEnabled: model.smartSearch?.snapshot.isEnabled == true,
+                    isEnabled: model.smartSearch?.snapshot.isSearchAvailable == true,
                     prompt: Text("search.prompt \(String(localized: "tab.photos"))")
                 )
                 .onChange(of: searchText) { _, value in scheduleSearchCommit(value) }

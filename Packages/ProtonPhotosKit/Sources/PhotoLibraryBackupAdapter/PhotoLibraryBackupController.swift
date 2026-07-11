@@ -114,6 +114,8 @@ public final class PhotoLibraryBackupController {
     /// every refresh. The runner's in-memory mirror is the only source of the in-flight name, so we
     /// stash it here and fold it into `currentQueueProgress()`. Cleared when a pass ends.
     private var lastRunnerItemName: String?
+    private var lastRemoteIndexPreparation: UploadRemoteIndexPreparationProgress?
+    private var remoteIndexPreparationFailed = false
     /// Same caching for the item whose bytes are moving right now, so the "wird gesichert: X" line
     /// survives the DB-truth refresh. nil whenever nothing is mid-transfer.
 
@@ -637,6 +639,8 @@ public final class PhotoLibraryBackupController {
         // Capture the in-flight name unconditionally (even when the throttle below drops this update)
         // so the periodic DB-truth refresh can keep showing a live "Working on <file>" line.
         if let name = snapshot.currentItemName { lastRunnerItemName = name }
+        lastRemoteIndexPreparation = snapshot.remoteIndexPreparation
+        remoteIndexPreparationFailed = snapshot.remoteIndexPreparationFailed
         // Unify on DB-truth for all counts while retaining the runner's active state. This eliminates
         // the denominator flip that arose from alternating between the runner's in-memory total
         // (stale/incremental) and the DB-truth summary. The stable denominator changes only when the
@@ -692,6 +696,8 @@ public final class PhotoLibraryBackupController {
         updateIdleTimerIfNeeded()
         isScanning = false
         lastRunnerItemName = nil
+        lastRemoteIndexPreparation = nil
+        remoteIndexPreparationFailed = false
         let shouldRestart = pendingSyncAfterStop && isEnabled && accessState.allowsBackup
         pendingSyncAfterStop = false
         refreshFromQueue()
@@ -742,11 +748,14 @@ public final class PhotoLibraryBackupController {
         // misreads an active pass (between micro-batches) as ".waiting" ("Wartet auf Fortsetzung").
         // Fold in the runner's last in-flight name (only while a pass runs) so the DB-derived progress
         // still carries a liveness signal; nil when idle so no stale name lingers.
-        return BackupSyncProgress(
+        var progress = BackupSyncProgress(
             summary: queueStore.summary(),
             currentItemName: isSyncing ? lastRunnerItemName : nil,
             isRunning: isSyncing
         )
+        progress.remoteIndexPreparation = isSyncing ? lastRemoteIndexPreparation : nil
+        progress.remoteIndexPreparationFailed = isSyncing && remoteIndexPreparationFailed
+        return progress
     }
 
     /// Non-secret debugging hint recorded on the lock (platform + pid); never load-bearing.

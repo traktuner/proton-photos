@@ -278,6 +278,10 @@ final class MobileLibraryModel {
     /// Builds the Smart Search stack for this session (composition only; the shared Core actor
     /// owns every lifecycle decision). Same bootstrap as macOS.
     private func configureSmartSearch(session: ProtonSession, client: ProtonClientFacade, feed: UIKitThumbnailFeed) {
+        guard AppleSmartSearchBootstrap.featureAvailability() == .available else {
+            smartSearch = nil
+            return
+        }
         #if DEBUG
         let allowsDeveloperModels = true
         #else

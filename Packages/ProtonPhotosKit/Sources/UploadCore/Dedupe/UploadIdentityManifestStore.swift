@@ -30,7 +30,7 @@ public final class UploadIdentityManifestStore: UploadIdentityStore, UploadRemot
 
     private var db: OpaquePointer?
     private let lock = NSLock()
-    private static let schemaVersion = 4
+    private static let schemaVersion = 6
 
     public init?(url: URL, policy: LibraryDatabasePolicy = .conservative) {
         guard let handle = Self.openVerified(url: url, policy: policy) else { return nil }
@@ -136,13 +136,69 @@ public final class UploadIdentityManifestStore: UploadIdentityStore, UploadRemot
           event_id     TEXT NOT NULL,
           refreshed_at REAL NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS remote_content_build_checkpoint(
+          key_epoch          TEXT PRIMARY KEY,
+          event_id           TEXT NOT NULL,
+          source_fingerprint TEXT NOT NULL,
+          cursor             INTEGER NOT NULL,
+          total              INTEGER NOT NULL,
+          updated_at         REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS remote_content_build_record(
+          key_epoch    TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          remote_link  TEXT NOT NULL,
+          PRIMARY KEY (key_epoch, content_hash, remote_link)
+        );
+        CREATE TABLE IF NOT EXISTS remote_content_build_unresolved(
+          key_epoch   TEXT NOT NULL,
+          remote_link TEXT NOT NULL,
+          PRIMARY KEY (key_epoch, remote_link)
+        );
+        CREATE TABLE IF NOT EXISTS remote_content_build_external(
+          key_epoch   TEXT NOT NULL,
+          remote_link TEXT NOT NULL,
+          external_id TEXT NOT NULL,
+          revision_us INTEGER NOT NULL,
+          PRIMARY KEY (key_epoch, remote_link)
+        );
         """
         guard sqlite3_exec(handle, schema, nil, nil, nil) == SQLITE_OK,
+              ensureRemoteBuildFingerprintColumn(handle),
               verifyAndStampVersion(handle) else {
             sqlite3_close(handle)
             return nil
         }
         return handle
+    }
+
+    private static func ensureRemoteBuildFingerprintColumn(_ handle: OpaquePointer?) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            handle,
+            "PRAGMA table_info(remote_content_build_checkpoint);",
+            -1,
+            &stmt,
+            nil
+        ) == SQLITE_OK else { return false }
+        var hasColumn = false
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let text = sqlite3_column_text(stmt, 1),
+               String(cString: text) == "source_fingerprint" {
+                hasColumn = true
+                break
+            }
+        }
+        sqlite3_finalize(stmt)
+        guard !hasColumn else { return true }
+        return sqlite3_exec(
+            handle,
+            "ALTER TABLE remote_content_build_checkpoint "
+                + "ADD COLUMN source_fingerprint TEXT NOT NULL DEFAULT '';",
+            nil,
+            nil,
+            nil
+        ) == SQLITE_OK
     }
 
     private static func verifyAndStampVersion(_ handle: OpaquePointer?) -> Bool {
@@ -423,6 +479,162 @@ public final class UploadIdentityManifestStore: UploadIdentityStore, UploadRemot
             defer { sqlite3_finalize(stmt) }
             bindText(stmt, 1, hashKeyEpoch)
             return sqlite3_step(stmt) == SQLITE_ROW
+        }
+    }
+
+    public func remoteContentIndexBuildCheckpoint(
+        hashKeyEpoch: String
+    ) -> UploadRemoteContentIndexBuildCheckpoint? {
+        lock.withLock { readBuildCheckpointLocked(hashKeyEpoch: hashKeyEpoch) }
+    }
+
+    public func beginRemoteContentIndexBuild(
+        hashKeyEpoch: String,
+        eventID: String,
+        sourceFingerprint: String,
+        total: Int,
+        updatedAt: Date
+    ) -> UploadRemoteContentIndexBuildCheckpoint? {
+        guard !hashKeyEpoch.isEmpty, !eventID.isEmpty, !sourceFingerprint.isEmpty, total >= 0 else {
+            return nil
+        }
+        return lock.withLock {
+            if let existing = readBuildCheckpointLocked(hashKeyEpoch: hashKeyEpoch),
+               existing.eventID == eventID,
+               existing.sourceFingerprint == sourceFingerprint,
+               existing.total == total,
+               existing.cursor <= total {
+                return existing
+            }
+            guard sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK,
+                  clearRemoteContentBuildLocked(hashKeyEpoch: hashKeyEpoch) else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return nil
+            }
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "INSERT INTO remote_content_build_checkpoint(key_epoch,event_id,source_fingerprint,cursor,total,updated_at) VALUES(?,?,?,0,?,?);",
+                -1, &stmt, nil
+            ) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return nil
+            }
+            bindText(stmt, 1, hashKeyEpoch)
+            bindText(stmt, 2, eventID)
+            bindText(stmt, 3, sourceFingerprint)
+            sqlite3_bind_int64(stmt, 4, Int64(total))
+            sqlite3_bind_double(stmt, 5, updatedAt.timeIntervalSince1970)
+            let wrote = sqlite3_step(stmt) == SQLITE_DONE
+            sqlite3_finalize(stmt)
+            guard wrote, sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return nil
+            }
+            return UploadRemoteContentIndexBuildCheckpoint(
+                eventID: eventID,
+                sourceFingerprint: sourceFingerprint,
+                cursor: 0,
+                total: total,
+                updatedAt: updatedAt
+            )
+        }
+    }
+
+    @discardableResult
+    public func appendRemoteContentIndexBuild(
+        records: [UploadRemoteContentIndexRecord],
+        unresolvedRemoteLinkIDs: [String],
+        externalIdentities: [UploadRemoteExternalIdentityRecord],
+        hashKeyEpoch: String,
+        nextCursor: Int,
+        updatedAt: Date
+    ) -> Bool {
+        guard records.allSatisfy({ $0.hashKeyEpoch == hashKeyEpoch }) else { return false }
+        return lock.withLock {
+            guard let checkpoint = readBuildCheckpointLocked(hashKeyEpoch: hashKeyEpoch),
+                  nextCursor >= checkpoint.cursor, nextCursor <= checkpoint.total,
+                  sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else { return false }
+            let ok = writeBuildContentRecordsLocked(records)
+                && writeBuildUnresolvedLocked(unresolvedRemoteLinkIDs, hashKeyEpoch: hashKeyEpoch)
+                && writeBuildExternalLocked(externalIdentities, hashKeyEpoch: hashKeyEpoch)
+                && updateBuildCursorLocked(
+                    hashKeyEpoch: hashKeyEpoch, nextCursor: nextCursor, updatedAt: updatedAt
+                )
+            guard ok, sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return false
+            }
+            return true
+        }
+    }
+
+    public func stagedRemoteExternalIdentities(
+        hashKeyEpoch: String
+    ) -> [String: UploadBackupExternalIdentity] {
+        lock.withLock {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(
+                db,
+                "SELECT remote_link,external_id,revision_us FROM remote_content_build_external WHERE key_epoch=?;",
+                -1, &stmt, nil
+            ) == SQLITE_OK else { return [:] }
+            defer { sqlite3_finalize(stmt) }
+            bindText(stmt, 1, hashKeyEpoch)
+            var result: [String: UploadBackupExternalIdentity] = [:]
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                guard let link = columnText(stmt, 0), let identifier = columnText(stmt, 1) else { continue }
+                result[link] = UploadBackupExternalIdentity(
+                    identifier: identifier,
+                    revision: UploadBackupRevision(rawValue: sqlite3_column_int64(stmt, 2))
+                )
+            }
+            return result
+        }
+    }
+
+    @discardableResult
+    public func finishRemoteContentIndexBuild(
+        remoteAssetRecords: [UploadRemoteAssetIndexRecord],
+        hashKeyEpoch: String,
+        checkpoint: UploadRemoteContentIndexCheckpoint
+    ) -> Bool {
+        guard remoteAssetRecords.allSatisfy({ $0.hashKeyEpoch == hashKeyEpoch }) else { return false }
+        return lock.withLock {
+            guard let build = readBuildCheckpointLocked(hashKeyEpoch: hashKeyEpoch),
+                  build.cursor == build.total,
+                  sqlite3_exec(db, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else { return false }
+            let statements = [
+                "DELETE FROM remote_content_index WHERE key_epoch=?;",
+                "DELETE FROM remote_content_unresolved WHERE key_epoch=?;",
+            ]
+            var ok = true
+            for sql in statements where ok {
+                var stmt: OpaquePointer?
+                ok = sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK
+                if ok { bindText(stmt, 1, hashKeyEpoch); ok = sqlite3_step(stmt) == SQLITE_DONE }
+                sqlite3_finalize(stmt)
+            }
+            if ok {
+                ok = executeBoundLocked(
+                    "INSERT INTO remote_content_index SELECT key_epoch,content_hash,remote_link FROM remote_content_build_record WHERE key_epoch=?;",
+                    value: hashKeyEpoch
+                ) && executeBoundLocked(
+                    "INSERT INTO remote_content_unresolved SELECT key_epoch,remote_link FROM remote_content_build_unresolved WHERE key_epoch=?;",
+                    value: hashKeyEpoch
+                )
+            }
+            ok = ok
+                && deleteRemoteAssetEpochLocked(hashKeyEpoch: hashKeyEpoch)
+                && writeRemoteAssetRecordsLocked(remoteAssetRecords)
+                && writeRemoteContentCheckpointLocked(checkpoint, hashKeyEpoch: hashKeyEpoch)
+                && writeRemoteAssetCheckpointLocked(checkpoint, hashKeyEpoch: hashKeyEpoch)
+                && clearRemoteContentBuildLocked(hashKeyEpoch: hashKeyEpoch)
+            guard ok, sqlite3_exec(db, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+                sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+                return false
+            }
+            return true
         }
     }
 
@@ -774,6 +986,127 @@ public final class UploadIdentityManifestStore: UploadIdentityStore, UploadRemot
             guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
         }
         return true
+    }
+
+    private func readBuildCheckpointLocked(
+        hashKeyEpoch: String
+    ) -> UploadRemoteContentIndexBuildCheckpoint? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "SELECT event_id,source_fingerprint,cursor,total,updated_at FROM remote_content_build_checkpoint WHERE key_epoch=?;",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, hashKeyEpoch)
+        guard sqlite3_step(stmt) == SQLITE_ROW,
+              let eventID = columnText(stmt, 0),
+              let sourceFingerprint = columnText(stmt, 1) else { return nil }
+        return UploadRemoteContentIndexBuildCheckpoint(
+            eventID: eventID,
+            sourceFingerprint: sourceFingerprint,
+            cursor: Int(sqlite3_column_int64(stmt, 2)),
+            total: Int(sqlite3_column_int64(stmt, 3)),
+            updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
+        )
+    }
+
+    private func clearRemoteContentBuildLocked(hashKeyEpoch: String) -> Bool {
+        for table in [
+            "remote_content_build_record",
+            "remote_content_build_unresolved",
+            "remote_content_build_external",
+            "remote_content_build_checkpoint",
+        ] {
+            guard executeBoundLocked("DELETE FROM \(table) WHERE key_epoch=?;", value: hashKeyEpoch) else {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func executeBoundLocked(_ sql: String, value: String) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        bindText(stmt, 1, value)
+        return sqlite3_step(stmt) == SQLITE_DONE
+    }
+
+    private func writeBuildContentRecordsLocked(_ records: [UploadRemoteContentIndexRecord]) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "INSERT OR REPLACE INTO remote_content_build_record(key_epoch,content_hash,remote_link) VALUES(?,?,?);",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        for record in records {
+            sqlite3_reset(stmt); sqlite3_clear_bindings(stmt)
+            bindText(stmt, 1, record.hashKeyEpoch)
+            bindText(stmt, 2, record.contentHash)
+            bindText(stmt, 3, record.remoteLinkID)
+            guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
+        }
+        return true
+    }
+
+    private func writeBuildUnresolvedLocked(_ linkIDs: [String], hashKeyEpoch: String) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "INSERT OR REPLACE INTO remote_content_build_unresolved(key_epoch,remote_link) VALUES(?,?);",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        for linkID in Set(linkIDs) {
+            guard !linkID.isEmpty else { continue }
+            sqlite3_reset(stmt); sqlite3_clear_bindings(stmt)
+            bindText(stmt, 1, hashKeyEpoch); bindText(stmt, 2, linkID)
+            guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
+        }
+        return true
+    }
+
+    private func writeBuildExternalLocked(
+        _ records: [UploadRemoteExternalIdentityRecord],
+        hashKeyEpoch: String
+    ) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "INSERT OR REPLACE INTO remote_content_build_external(key_epoch,remote_link,external_id,revision_us) VALUES(?,?,?,?);",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        for record in records {
+            guard !record.remoteLinkID.isEmpty, !record.externalIdentity.identifier.isEmpty else { return false }
+            sqlite3_reset(stmt); sqlite3_clear_bindings(stmt)
+            bindText(stmt, 1, hashKeyEpoch)
+            bindText(stmt, 2, record.remoteLinkID)
+            bindText(stmt, 3, record.externalIdentity.identifier)
+            sqlite3_bind_int64(stmt, 4, record.externalIdentity.revision.rawValue)
+            guard sqlite3_step(stmt) == SQLITE_DONE else { return false }
+        }
+        return true
+    }
+
+    private func updateBuildCursorLocked(
+        hashKeyEpoch: String,
+        nextCursor: Int,
+        updatedAt: Date
+    ) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db,
+            "UPDATE remote_content_build_checkpoint SET cursor=?,updated_at=? WHERE key_epoch=?;",
+            -1, &stmt, nil
+        ) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, Int64(nextCursor))
+        sqlite3_bind_double(stmt, 2, updatedAt.timeIntervalSince1970)
+        bindText(stmt, 3, hashKeyEpoch)
+        return sqlite3_step(stmt) == SQLITE_DONE && sqlite3_changes(db) == 1
     }
 
     private func writeRemoteContentCheckpointLocked(

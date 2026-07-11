@@ -55,12 +55,6 @@ public struct MLModelInstallLayout: Sendable, Equatable {
         )
     }
 
-    /// Temp file one artifact downloads into (keyed by content hash: restart-safe and
-    /// collision-free across models).
-    public func downloadFileURL(sha256: String) -> URL {
-        temporaryDirectory.appendingPathComponent("\(safePathComponent(sha256)).download")
-    }
-
     /// `true` iff `path` is a safe install-relative path: non-empty, relative, and free of
     /// `.`/`..` components. Manifest file names must pass this before touching the filesystem.
     public static func isSafeRelativePath(_ path: String) -> Bool {

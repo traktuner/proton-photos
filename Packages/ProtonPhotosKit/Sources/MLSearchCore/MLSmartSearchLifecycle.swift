@@ -35,6 +35,7 @@ public actor MLSmartSearchLifecycle {
 
     public struct Dependencies: Sendable {
         public var catalog: MLModelCatalog
+        public var catalogProvider: any MLModelCatalogProvider
         public var layout: MLModelInstallLayout
         public var stateStore: any MLSmartSearchStateStore
         public var installer: MLModelInstaller
@@ -46,9 +47,13 @@ public actor MLSmartSearchLifecycle {
         /// `false` in Release builds: developer-only catalog entries cannot be listed,
         /// selected, or activated.
         public var allowsDeveloperModels: Bool
+        /// Core-level gate. Hosts may omit UI, but lifecycle work is independently blocked here so
+        /// a platform cannot accidentally activate an unsupported or unlicensed feature.
+        public var featureAvailability: AppFeatureAvailability
 
         public init(
             catalog: MLModelCatalog,
+            catalogProvider: (any MLModelCatalogProvider)? = nil,
             layout: MLModelInstallLayout,
             stateStore: any MLSmartSearchStateStore,
             installer: MLModelInstaller,
@@ -56,9 +61,11 @@ public actor MLSmartSearchLifecycle {
             runtimeProvider: any MLSmartSearchRuntimeProvider,
             assetsProvider: @escaping @Sendable () async -> [PhotoUID],
             governor: any MLIndexingGovernor,
-            allowsDeveloperModels: Bool
+            allowsDeveloperModels: Bool,
+            featureAvailability: AppFeatureAvailability = .available
         ) {
             self.catalog = catalog
+            self.catalogProvider = catalogProvider ?? StaticMLModelCatalogProvider(catalog)
             self.layout = layout
             self.stateStore = stateStore
             self.installer = installer
@@ -67,11 +74,13 @@ public actor MLSmartSearchLifecycle {
             self.assetsProvider = assetsProvider
             self.governor = governor
             self.allowsDeveloperModels = allowsDeveloperModels
+            self.featureAvailability = featureAvailability
         }
     }
 
     private let deps: Dependencies
     private let configuration: Configuration
+    private var catalog: MLModelCatalog
 
     private var persistent = MLSmartSearchPersistentState()
     private var phase: MLSmartSearchPhase = .disabled
@@ -98,6 +107,7 @@ public actor MLSmartSearchLifecycle {
     public init(dependencies: Dependencies, configuration: Configuration = Configuration()) {
         self.deps = dependencies
         self.configuration = configuration
+        self.catalog = dependencies.catalog
     }
 
     // MARK: - Observation
@@ -133,7 +143,7 @@ public actor MLSmartSearchLifecycle {
             selectedModelID: persistent.selectedModelID,
             phase: phase,
             installedModelBytes: activeModel?.record.installedByteCount ?? 0,
-            availableModels: deps.catalog.selectableEntries(allowsDeveloperModels: deps.allowsDeveloperModels),
+            availableModels: catalog.selectableEntries(allowsDeveloperModels: deps.allowsDeveloperModels),
             isSearchAvailable: persistent.isEnabled && session != nil && lastCoverage.indexed > 0
         )
     }
@@ -144,7 +154,13 @@ public actor MLSmartSearchLifecycle {
     public func start() async {
         guard !started, !isShutDown else { return }
         started = true
+        guard deps.featureAvailability == .available else {
+            phase = .disabled
+            emit()
+            return
+        }
         guard restorePersistentState() else { return }
+        if persistent.isEnabled, !(await refreshCatalog()) { return }
         await resumePersistentState()
     }
 
@@ -177,8 +193,13 @@ public actor MLSmartSearchLifecycle {
             break
         }
 
-        guard persistent.isEnabled, persistent.selectedModelID != nil else {
+        guard persistent.isEnabled else {
             phase = .disabled
+            emit()
+            return
+        }
+        guard persistent.selectedModelID != nil else {
+            phase = .selectingModel
             emit()
             return
         }
@@ -212,17 +233,31 @@ public actor MLSmartSearchLifecycle {
     // MARK: - Intents
 
     public func setEnabled(_ enabled: Bool) async {
-        guard !isShutDown, enabled != persistent.isEnabled else { return }
+        guard !isShutDown, deps.featureAvailability == .available,
+              enabled != persistent.isEnabled else { return }
         if enabled {
-            let selectable = deps.catalog.selectableEntries(allowsDeveloperModels: deps.allowsDeveloperModels)
-            guard let defaultModelID = selectable.first(where: { $0.releaseTrack == .production })?.id else {
+            persistent.isEnabled = true
+            guard persistState() else { return }
+            guard await refreshCatalog() else { return }
+            let selectable = catalog.selectableEntries(allowsDeveloperModels: deps.allowsDeveloperModels)
+            guard !selectable.isEmpty else {
+                persistent.isEnabled = false
+                guard persistState() else { return }
                 phase = .notInstalled(downloadable: false)
                 emit()
                 return
             }
-            persistent.isEnabled = true
-            if persistent.selectedModelID == nil {
-                persistent.selectedModelID = defaultModelID
+            guard let selectedID = persistent.selectedModelID,
+                  selectable.contains(where: { $0.id == selectedID }) else {
+                persistent.selectedModelID = selectable.count == 1 ? selectable[0].id : nil
+                guard persistState() else { return }
+                if persistent.selectedModelID == nil {
+                    phase = .selectingModel
+                    emit()
+                    return
+                }
+                await activateSelectedModel()
+                return
             }
             // A failed enable-write stops here with an honest, retryable failure phase — the
             // in-memory intent stays, so `retry()` re-persists and activates.
@@ -245,7 +280,7 @@ public actor MLSmartSearchLifecycle {
     public func select(_ id: MLModelID) async {
         guard !isShutDown, persistent.isEnabled else { return }
         guard id != persistent.selectedModelID else { return }
-        guard let target = deps.catalog.entry(for: id), isSelectable(target) else { return }
+        guard let target = catalog.entry(for: id), isSelectable(target) else { return }
 
         let previousID = persistent.selectedModelID
         switchInProgress = true
@@ -302,6 +337,24 @@ public actor MLSmartSearchLifecycle {
         }
         guard !isShutDown, persistent.isEnabled || persistent.pendingOperation == .purge,
               case .failed(let failure) = phase, failure.isRetryable else { return }
+        if failure.kind == .catalog {
+            guard await refreshCatalog() else { return }
+            await activateSelectedModel()
+            return
+        }
+        if failure.kind == .storage, persistent.isEnabled, persistent.selectedModelID == nil {
+            guard persistState() else { return }
+            let selectable = catalog.selectableEntries(allowsDeveloperModels: deps.allowsDeveloperModels)
+            if selectable.count == 1 {
+                persistent.selectedModelID = selectable[0].id
+                guard persistState() else { return }
+                await activateSelectedModel()
+            } else {
+                phase = .selectingModel
+                emit()
+            }
+            return
+        }
         switch persistent.pendingOperation {
         case .purge:
             await performPurge()
@@ -320,7 +373,7 @@ public actor MLSmartSearchLifecycle {
         guard !isShutDown,
               deps.allowsDeveloperModels,
               persistent.isEnabled,
-              let entry = deps.catalog.entry(for: id) else { return }
+              let entry = catalog.entry(for: id) else { return }
         phase = .installing
         emit()
         do {
@@ -382,12 +435,20 @@ public actor MLSmartSearchLifecycle {
     }
 
     private func activateSelectedModel() async {
-        guard !isShutDown,
-              persistent.isEnabled,
-              let selectedID = persistent.selectedModelID,
-              let entry = deps.catalog.entry(for: selectedID),
-              isSelectable(entry) else {
+        guard !isShutDown, persistent.isEnabled else {
             phase = .disabled
+            emit()
+            return
+        }
+        guard let selectedID = persistent.selectedModelID else {
+            phase = .selectingModel
+            emit()
+            return
+        }
+        guard
+              let entry = catalog.entry(for: selectedID),
+              isSelectable(entry) else {
+            phase = .selectingModel
             emit()
             return
         }
@@ -526,6 +587,11 @@ public actor MLSmartSearchLifecycle {
         guard !switchInProgress else { return }
         guard let activeModel, progress.descriptor == activeModel.entry.descriptor else { return }
         guard case .indexing = phase else { return }
+        lastCoverage = MLIndexCoverage(
+            total: progress.totalAssets,
+            indexed: progress.indexed + progress.alreadyIndexed,
+            permanentlyUnindexable: progress.permanentFailure
+        )
         phase = .indexing(progress)
         emit()
     }
@@ -667,7 +733,7 @@ public actor MLSmartSearchLifecycle {
     /// next `start()` finishes it.
     @discardableResult
     private func completeSwitchCleanup(from: MLModelID?, to: MLModelID) async -> Bool {
-        if let from, let previousEntry = deps.catalog.entry(for: from) {
+        if let from, let previousEntry = catalog.entry(for: from) {
             deps.storeProvider.openStore()?.removeAll(for: previousEntry.descriptor)
             await deps.installer.uninstall(previousEntry)
         }
@@ -738,6 +804,25 @@ public actor MLSmartSearchLifecycle {
                 kind: .storage,
                 isRetryable: true,
                 debugDescription: "state write failed: \(String(describing: error))"
+            ))
+            emit()
+            return false
+        }
+    }
+
+    /// Refreshes only the signed distribution data. Runtime contracts, dimensions and
+    /// licensing remain compiled into the app and are validated by the provider.
+    private func refreshCatalog() async -> Bool {
+        phase = .loadingCatalog
+        emit()
+        do {
+            catalog = try await deps.catalogProvider.catalog()
+            return true
+        } catch {
+            phase = .failed(MLSmartSearchFailure(
+                kind: .catalog,
+                isRetryable: true,
+                debugDescription: String(describing: error)
             ))
             emit()
             return false

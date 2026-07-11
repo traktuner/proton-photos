@@ -85,8 +85,8 @@ public struct MLModelTransferProgress: Sendable, Equatable {
 ///   before the staging directory is promoted; the install directory either contains a complete
 ///   verified set plus `install.json`, or it does not exist.
 /// - **Idempotent.** Installing an already-installed `(model, revision)` returns immediately.
-/// - **Restart-safe.** Partial downloads live in `tmp/` keyed by content hash; interrupted
-///   staging directories are discarded and rebuilt. Nothing in `tmp/` is ever loaded.
+/// - **Restart-safe.** Partial downloads live beside their staging destination and resume in
+///   place. Nothing in `tmp/` is ever loaded.
 /// - **Single-flight.** Concurrent install requests for the same model await one task.
 /// - **Traversal-proof.** Artifact relative paths are validated before any filesystem use.
 public actor MLModelInstaller {
@@ -276,53 +276,61 @@ public actor MLModelInstaller {
         }
         try fm.createDirectory(at: layout.temporaryDirectory, withIntermediateDirectories: true)
 
-        // Download every artifact into hash-keyed temp files.
+        // Download directly into the staging tree. Keeping one resumable partial beside its
+        // final path avoids the previous full-size temp-file + staging-copy peak.
         let totalBytes = plan.totalByteCount
         var completedBytes: Int64 = 0
+        let staging = layout.stagingDirectory(for: entry.id, revision: plan.revision)
+        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         for item in plan.items {
             try Task.checkCancellation()
-            let tempURL = layout.downloadFileURL(sha256: item.artifact.sha256)
-            // A verified temp file from an interrupted earlier attempt is reused as-is;
-            // anything else is (re)downloaded.
-            if verifyFile(at: tempURL, against: item.artifact) != nil {
-                let base = completedBytes
-                do {
-                    try await transport.download(
-                        from: item.url,
-                        to: tempURL,
-                        expectedByteCount: item.artifact.byteCount
-                    ) { received, _ in
-                        onProgress(MLModelTransferProgress(bytesReceived: base + received, totalBytes: totalBytes))
+            let destination = staging.appendingPathComponent(item.artifact.relativePath)
+            let partial = destination.appendingPathExtension("partial")
+            try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+            if verifyFile(at: destination, against: item.artifact) != nil {
+                // An interrupted promotion may have left a complete verified partial.
+                if verifyFile(at: partial, against: item.artifact) == nil {
+                    try? fm.removeItem(at: destination)
+                    try fm.moveItem(at: partial, to: destination)
+                } else {
+                    if (try? fileSize(of: partial)) == item.artifact.byteCount {
+                        try? fm.removeItem(at: partial)
                     }
-                } catch is CancellationError {
-                    throw MLModelInstallError.cancelled
-                }
-                if let failure = verifyFile(at: tempURL, against: item.artifact) {
-                    // Corrupt download: remove so the next attempt restarts cleanly.
-                    try? fm.removeItem(at: tempURL)
-                    throw failure
+                    let base = completedBytes
+                    do {
+                        try await transport.download(
+                            from: item.url,
+                            to: partial,
+                            expectedByteCount: item.artifact.byteCount
+                        ) { received, _ in
+                            onProgress(MLModelTransferProgress(bytesReceived: base + received, totalBytes: totalBytes))
+                        }
+                    } catch is CancellationError {
+                        throw MLModelInstallError.cancelled
+                    }
+                    if let failure = verifyFile(at: partial, against: item.artifact) {
+                        // A completed but invalid transfer must not poison future resumes.
+                        try? fm.removeItem(at: partial)
+                        throw failure
+                    }
+                    try? fm.removeItem(at: destination)
+                    try fm.moveItem(at: partial, to: destination)
                 }
             }
             completedBytes += item.artifact.byteCount
             onProgress(MLModelTransferProgress(bytesReceived: completedBytes, totalBytes: totalBytes))
         }
 
-        // Assemble the staging directory from verified temp files.
         try Task.checkCancellation()
-        let staging = layout.stagingDirectory(for: entry.id, revision: plan.revision)
-        try? fm.removeItem(at: staging)
-        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
         for item in plan.items {
             let destination = staging.appendingPathComponent(item.artifact.relativePath)
-            try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try fm.copyItem(at: layout.downloadFileURL(sha256: item.artifact.sha256), to: destination)
             if let failure = verifyFile(at: destination, against: item.artifact) {
-                try? fm.removeItem(at: staging)
                 throw failure
             }
         }
 
-        let record = try promote(
+        return try promote(
             staging: staging,
             entry: entry,
             revision: plan.revision,
@@ -330,10 +338,6 @@ public actor MLModelInstaller {
             layout: layout,
             installedAt: now()
         )
-        for item in plan.items {
-            try? fm.removeItem(at: layout.downloadFileURL(sha256: item.artifact.sha256))
-        }
-        return record
     }
 
     /// Atomically promote a fully verified staging directory into the install location and

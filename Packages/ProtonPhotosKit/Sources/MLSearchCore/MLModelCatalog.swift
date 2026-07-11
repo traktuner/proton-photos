@@ -44,6 +44,32 @@ public enum MLModelReleaseTrack: String, Sendable, Codable {
     case developerOnly
 }
 
+/// Capabilities are declared by the trusted app catalog. Pipeline stages can therefore validate
+/// model compatibility without family-name switches or platform-specific code.
+public enum MLModelCapability: String, Hashable, Sendable, Codable {
+    case imageEmbedding
+    case textEmbedding
+    case regionDetection
+    case regionEmbedding
+}
+
+/// Localization keys for the model explanation shown by every platform.
+///
+/// The remote catalog controls availability and exact artifact sizes, never product copy. That
+/// keeps descriptions reviewable in the app's string catalog and prevents server content from
+/// becoming an unreviewed UI surface.
+public struct MLModelLocalizedMetadata: Sendable, Equatable {
+    public let summaryKey: String
+    public let strengthsKey: String
+    public let limitationsKey: String
+
+    public init(summaryKey: String, strengthsKey: String, limitationsKey: String) {
+        self.summaryKey = summaryKey
+        self.strengthsKey = strengthsKey
+        self.limitationsKey = limitationsKey
+    }
+}
+
 /// Evidence that one immutable artifact revision passed the project's on-device release run.
 /// Values are diagnostic; `passed` is set only after testing the oldest supported iPhone/iPad.
 public struct MLModelReleaseQualification: Sendable, Equatable, Codable {
@@ -207,6 +233,7 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
     public let displayName: String
     /// Model family marker for diagnostics (`"TinyCLIP"`, `"MobileCLIP"`).
     public let family: String
+    public let capabilities: Set<MLModelCapability>
     /// Immutable upstream weights revision used to produce the artifact, when applicable.
     public let sourceRevision: String?
     /// The embedding epoch this entry currently produces. `descriptor.version` is the single
@@ -224,6 +251,7 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
     public let runtimeResourcePaths: [String]
     public let license: MLModelLicense
     public let releaseTrack: MLModelReleaseTrack
+    public let localizedMetadata: MLModelLocalizedMetadata
     /// Approximate installed size for UI, before an installation exists. Actual installed
     /// size is measured after install.
     public let estimatedInstalledBytes: Int64
@@ -238,6 +266,7 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
         id: MLModelID,
         displayName: String,
         family: String,
+        capabilities: Set<MLModelCapability> = [.imageEmbedding, .textEmbedding],
         sourceRevision: String? = nil,
         descriptor: MLModelDescriptor,
         tokenizerID: String,
@@ -246,6 +275,11 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
         runtimeResourcePaths: [String] = [],
         license: MLModelLicense,
         releaseTrack: MLModelReleaseTrack,
+        localizedMetadata: MLModelLocalizedMetadata = .init(
+            summaryKey: "mlsearch.model_generic_summary",
+            strengthsKey: "mlsearch.model_generic_strengths",
+            limitationsKey: "mlsearch.model_generic_limitations"
+        ),
         estimatedInstalledBytes: Int64,
         downloadPlan: MLModelDownloadPlan?,
         releaseQualification: MLModelReleaseQualification? = nil
@@ -253,6 +287,7 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
         self.id = id
         self.displayName = displayName
         self.family = family
+        self.capabilities = capabilities
         self.sourceRevision = sourceRevision
         self.descriptor = descriptor
         self.tokenizerID = tokenizerID
@@ -261,6 +296,7 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
         self.runtimeResourcePaths = runtimeResourcePaths
         self.license = license
         self.releaseTrack = releaseTrack
+        self.localizedMetadata = localizedMetadata
         self.estimatedInstalledBytes = estimatedInstalledBytes
         self.downloadPlan = downloadPlan
         self.releaseQualification = releaseQualification
@@ -284,6 +320,29 @@ public struct MLModelCatalogEntry: Sendable, Equatable, Identifiable {
         return releaseQualification.artifactRevision == revision
             && releaseQualification.passed
             && releaseQualification.neuralEngineExecutionVerified
+    }
+
+    /// Apply distribution metadata to an app-reviewed model contract. Remote catalog data can
+    /// never replace tokenizer, preprocessing, runtime, license, or release policy.
+    public func withDownloadPlan(_ plan: MLModelDownloadPlan?) -> MLModelCatalogEntry {
+        MLModelCatalogEntry(
+            id: id,
+            displayName: displayName,
+            family: family,
+            capabilities: capabilities,
+            sourceRevision: sourceRevision,
+            descriptor: descriptor,
+            tokenizerID: tokenizerID,
+            preprocessingID: preprocessingID,
+            runtimeContract: runtimeContract,
+            runtimeResourcePaths: runtimeResourcePaths,
+            license: license,
+            releaseTrack: releaseTrack,
+            localizedMetadata: localizedMetadata,
+            estimatedInstalledBytes: estimatedInstalledBytes,
+            downloadPlan: plan,
+            releaseQualification: releaseQualification
+        )
     }
 }
 
@@ -317,10 +376,7 @@ public struct MLModelCatalog: Sendable, Equatable {
 extension MLModelCatalogEntry {
     /// TinyCLIP ViT-40M/32 + 19M text encoder (LAION-400M), MIT-licensed by Microsoft.
     ///
-    /// `downloadPlan` is `nil` until release engineering publishes a converted, checksummed
-    /// CoreML artifact at an immutable URL — the upstream distribution is PyTorch/safetensors,
-    /// which cannot be converted on-device. Until then TinyCLIP installs from a developer
-    /// artifact only; the plan slots in here without touching lifecycle code.
+    /// The signed remote catalog supplies the converted CoreML artifact and its exact size.
     public static let tinyCLIPVit40M = MLModelCatalogEntry(
         id: MLModelID("tinyclip-vit-40m-32-text-19m"),
         displayName: "TinyCLIP 40M",
@@ -332,6 +388,11 @@ extension MLModelCatalogEntry {
         runtimeContract: .clipDualEncoder(imagePixelSide: 224),
         license: .mit,
         releaseTrack: .production,
+        localizedMetadata: .init(
+            summaryKey: "mlsearch.model_tinyclip_summary",
+            strengthsKey: "mlsearch.model_tinyclip_strengths",
+            limitationsKey: "mlsearch.model_tinyclip_limitations"
+        ),
         estimatedInstalledBytes: 130_000_000,
         downloadPlan: nil
     )
@@ -348,10 +409,7 @@ extension MLModelCatalogEntry {
     /// gap ("Bäume", "Berg", "Menschen") closes. Lowercasing is part of the tokenizer
     /// contract (`tokenizer.json`, shipped inside the artifact and hash-verified).
     ///
-    /// `downloadPlan` is `nil` until release engineering hosts the converted multi-function
-    /// CoreML artifact (image+text towers, ~715 MB fp16) at an immutable URL — conversion is
-    /// reproducible via `ml-model-spike.noindex/convert_siglip2.py`. Until then it installs
-    /// from a developer artifact only; the plan slots in without touching lifecycle code.
+    /// The signed remote catalog supplies the converted CoreML artifact, tokenizer, and exact size.
     public static let sigLIP2Base256 = MLModelCatalogEntry(
         id: MLModelID("siglip2-base-patch16-256"),
         displayName: "SigLIP 2",
@@ -364,6 +422,11 @@ extension MLModelCatalogEntry {
         runtimeResourcePaths: ["tokenizer.json"],
         license: .apache2,
         releaseTrack: .production,
+        localizedMetadata: .init(
+            summaryKey: "mlsearch.model_siglip2_summary",
+            strengthsKey: "mlsearch.model_siglip2_strengths",
+            limitationsKey: "mlsearch.model_siglip2_limitations"
+        ),
         estimatedInstalledBytes: 760_000_000,
         downloadPlan: nil
     )
@@ -382,6 +445,11 @@ extension MLModelCatalogEntry {
         runtimeContract: .clipDualEncoder(imagePixelSide: 256),
         license: .appleAMLR,
         releaseTrack: .developerOnly,
+        localizedMetadata: .init(
+            summaryKey: "mlsearch.model_mobileclip_summary",
+            strengthsKey: "mlsearch.model_mobileclip_strengths",
+            limitationsKey: "mlsearch.model_mobileclip_limitations"
+        ),
         estimatedInstalledBytes: 200_000_000,
         downloadPlan: nil
     )

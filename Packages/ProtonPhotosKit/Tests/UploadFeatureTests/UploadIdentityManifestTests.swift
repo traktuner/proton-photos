@@ -263,6 +263,139 @@ final class UploadIdentityManifestTests: XCTestCase {
         XCTAssertFalse(reopened.hasUnresolvedRemoteContent(hashKeyEpoch: "epoch-1"))
     }
 
+    func testInterruptedRemoteContentBuildResumesAndPublishesAtomically() throws {
+        let url = tempDir.appendingPathComponent(UploadIdentityManifestStore.databaseFileName)
+        let epoch = "epoch-resume"
+        let identity = UploadBackupExternalIdentity(identifier: "cloud-1", revision: .init(rawValue: 42))
+
+        do {
+            let store = try XCTUnwrap(UploadIdentityManifestStore(url: url))
+            let start = try XCTUnwrap(store.beginRemoteContentIndexBuild(
+                hashKeyEpoch: epoch, eventID: "event-1", sourceFingerprint: "source-a",
+                total: 2, updatedAt: Date(timeIntervalSince1970: 1)
+            ))
+            XCTAssertEqual(start.cursor, 0)
+            XCTAssertTrue(store.appendRemoteContentIndexBuild(
+                records: [.init(contentHash: "hash-1", hashKeyEpoch: epoch, remoteLinkID: "link-1")],
+                unresolvedRemoteLinkIDs: [],
+                externalIdentities: [.init(remoteLinkID: "link-1", externalIdentity: identity)],
+                hashKeyEpoch: epoch,
+                nextCursor: 1,
+                updatedAt: Date(timeIntervalSince1970: 2)
+            ))
+            XCTAssertNil(store.remoteContentRecord(contentHash: "hash-1", hashKeyEpoch: epoch),
+                         "partial staging must never become live proof")
+            store.close()
+        }
+
+        let reopened = try XCTUnwrap(UploadIdentityManifestStore(url: url))
+        XCTAssertEqual(
+            reopened.beginRemoteContentIndexBuild(
+                hashKeyEpoch: epoch, eventID: "event-1", sourceFingerprint: "source-a",
+                total: 2, updatedAt: Date(timeIntervalSince1970: 3)
+            )?.cursor,
+            1
+        )
+        XCTAssertTrue(reopened.appendRemoteContentIndexBuild(
+            records: [.init(contentHash: "hash-2", hashKeyEpoch: epoch, remoteLinkID: "link-2")],
+            unresolvedRemoteLinkIDs: ["link-2"],
+            externalIdentities: [],
+            hashKeyEpoch: epoch,
+            nextCursor: 2,
+            updatedAt: Date(timeIntervalSince1970: 4)
+        ))
+        XCTAssertEqual(reopened.stagedRemoteExternalIdentities(hashKeyEpoch: epoch)["link-1"], identity)
+        XCTAssertTrue(reopened.finishRemoteContentIndexBuild(
+            remoteAssetRecords: [],
+            hashKeyEpoch: epoch,
+            checkpoint: .init(eventID: "event-1", refreshedAt: Date(timeIntervalSince1970: 5))
+        ))
+        XCTAssertNotNil(reopened.remoteContentRecord(contentHash: "hash-1", hashKeyEpoch: epoch))
+        XCTAssertNotNil(reopened.remoteContentRecord(contentHash: "hash-2", hashKeyEpoch: epoch))
+        XCTAssertTrue(reopened.hasUnresolvedRemoteContent(hashKeyEpoch: epoch))
+        XCTAssertNil(reopened.remoteContentIndexBuildCheckpoint(hashKeyEpoch: epoch))
+    }
+
+    func testChangedRemoteBuildFrontierDiscardsPartialStaging() throws {
+        let store = try makeStore()
+        let epoch = "epoch-reset"
+        XCTAssertNotNil(store.beginRemoteContentIndexBuild(
+            hashKeyEpoch: epoch, eventID: "event-1", sourceFingerprint: "source-a",
+            total: 10, updatedAt: Date()
+        ))
+        XCTAssertTrue(store.appendRemoteContentIndexBuild(
+            records: [.init(contentHash: "old", hashKeyEpoch: epoch, remoteLinkID: "old-link")],
+            unresolvedRemoteLinkIDs: [], externalIdentities: [], hashKeyEpoch: epoch,
+            nextCursor: 5, updatedAt: Date()
+        ))
+        let restarted = store.beginRemoteContentIndexBuild(
+            hashKeyEpoch: epoch, eventID: "event-2", sourceFingerprint: "source-b",
+            total: 3, updatedAt: Date()
+        )
+        XCTAssertEqual(restarted?.eventID, "event-2")
+        XCTAssertEqual(restarted?.cursor, 0)
+        XCTAssertTrue(store.stagedRemoteExternalIdentities(hashKeyEpoch: epoch).isEmpty)
+    }
+
+    func testChangedRemoteBuildSourceAtSameEventAndCountRestartsSafely() throws {
+        let store = try makeStore()
+        let epoch = "epoch-source-reset"
+        XCTAssertNotNil(store.beginRemoteContentIndexBuild(
+            hashKeyEpoch: epoch, eventID: "event-1", sourceFingerprint: "source-a",
+            total: 10, updatedAt: Date()
+        ))
+        XCTAssertTrue(store.appendRemoteContentIndexBuild(
+            records: [.init(contentHash: "old", hashKeyEpoch: epoch, remoteLinkID: "old-link")],
+            unresolvedRemoteLinkIDs: [], externalIdentities: [], hashKeyEpoch: epoch,
+            nextCursor: 5, updatedAt: Date()
+        ))
+
+        let restarted = store.beginRemoteContentIndexBuild(
+            hashKeyEpoch: epoch, eventID: "event-1", sourceFingerprint: "source-b",
+            total: 10, updatedAt: Date()
+        )
+
+        XCTAssertEqual(restarted?.sourceFingerprint, "source-b")
+        XCTAssertEqual(restarted?.cursor, 0)
+    }
+
+    func testSchemaFiveBuildCheckpointUpgradesWithoutResettingManifest() throws {
+        let url = tempDir.appendingPathComponent(UploadIdentityManifestStore.databaseFileName)
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        defer { if db != nil { sqlite3_close(db) } }
+        let legacySchema = """
+        CREATE TABLE manifest_info(key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        INSERT INTO manifest_info(key,value) VALUES('schema',5);
+        CREATE TABLE remote_content_build_checkpoint(
+          key_epoch TEXT PRIMARY KEY,
+          event_id TEXT NOT NULL,
+          cursor INTEGER NOT NULL,
+          total INTEGER NOT NULL,
+          updated_at REAL NOT NULL
+        );
+        INSERT INTO remote_content_build_checkpoint VALUES('epoch','event',5,10,1);
+        """
+        XCTAssertEqual(sqlite3_exec(db, legacySchema, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(db)
+        db = nil
+
+        let store = try XCTUnwrap(UploadIdentityManifestStore(url: url))
+        let checkpoint = try XCTUnwrap(store.remoteContentIndexBuildCheckpoint(hashKeyEpoch: "epoch"))
+        XCTAssertEqual(checkpoint.sourceFingerprint, "")
+        XCTAssertEqual(checkpoint.cursor, 5)
+        XCTAssertEqual(
+            store.beginRemoteContentIndexBuild(
+                hashKeyEpoch: "epoch",
+                eventID: "event",
+                sourceFingerprint: "current-source",
+                total: 10,
+                updatedAt: Date()
+            )?.cursor,
+            0
+        )
+    }
+
     func testRemoteAssetProofSurvivesReopenAndRelatedEventInvalidatesWholeCompound() throws {
         let url = tempDir.appendingPathComponent(UploadIdentityManifestStore.databaseFileName)
         let identity = UploadBackupExternalIdentity(

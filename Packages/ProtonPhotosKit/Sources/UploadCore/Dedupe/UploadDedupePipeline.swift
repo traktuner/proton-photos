@@ -68,6 +68,12 @@ public actor UploadDedupePipeline: UploadIdentityResolving {
         try await checker.findRemoteAssetProofs(for: identities)
     }
 
+    public func prepareRemoteIndex(
+        progress: @escaping @Sendable (UploadRemoteIndexPreparationProgress) -> Void
+    ) async throws {
+        try await checker.prepareRemoteIndex(progress: progress)
+    }
+
     public func resolve(_ descriptor: UploadResourceDescriptor) async throws -> UploadPreflightResult {
         let corrected = ProtonPhotoNameCorrection.correctedName(for: descriptor.filename)
         let epoch = try await checker.hashKeyEpoch()

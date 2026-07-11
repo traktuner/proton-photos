@@ -186,7 +186,8 @@ final class AppModel {
         feedCore: ThumbnailFeedCore,
         assetUIDs: [PhotoUID]
     ) {
-        guard smartSearch == nil,
+        guard AppleSmartSearchBootstrap.featureAvailability() == .available,
+              smartSearch == nil,
               let session = authController.currentSession,
               let facade else { return }
         smartSearchAssets.replace(with: assetUIDs)

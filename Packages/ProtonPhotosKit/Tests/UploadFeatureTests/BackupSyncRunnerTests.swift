@@ -284,6 +284,12 @@ final class SpyIdentityResolver: UploadIdentityResolving, @unchecked Sendable {
         try await inner.resolve(descriptor)
     }
 
+    func prepareRemoteIndex(
+        progress: @escaping @Sendable (UploadRemoteIndexPreparationProgress) -> Void
+    ) async throws {
+        try await inner.prepareRemoteIndex(progress: progress)
+    }
+
     func prime(_ descriptors: [UploadResourceDescriptor]) async {
         await inner.prime(descriptors)
     }
@@ -307,6 +313,31 @@ final class SpyIdentityResolver: UploadIdentityResolving, @unchecked Sendable {
     func uploadDidFail(_ descriptor: UploadResourceDescriptor) async {
         log.append("manifest.uploadDidFail")
         await inner.uploadDidFail(descriptor)
+    }
+}
+
+final class PreparationFailingIdentityResolver: UploadIdentityResolving, @unchecked Sendable {
+    private let inner: any UploadIdentityResolving
+    init(inner: any UploadIdentityResolving) { self.inner = inner }
+
+    func prepareRemoteIndex(
+        progress: @escaping @Sendable (UploadRemoteIndexPreparationProgress) -> Void
+    ) async throws {
+        progress(.init(phase: .indexing, completed: 10, total: 100))
+        throw UploadError.backend("index unavailable")
+    }
+    func resolve(_ descriptor: UploadResourceDescriptor) async throws -> UploadPreflightResult {
+        try await inner.resolve(descriptor)
+    }
+    func recordUploaded(
+        _ descriptor: UploadResourceDescriptor,
+        identity: UploadIdentity,
+        remoteVolumeID: String,
+        remoteLinkID: String
+    ) async throws {
+        try await inner.recordUploaded(
+            descriptor, identity: identity, remoteVolumeID: remoteVolumeID, remoteLinkID: remoteLinkID
+        )
     }
 }
 
@@ -616,6 +647,18 @@ final class BackupSyncRunnerTests: XCTestCase {
     }
 
     // MARK: 1. Crash recovery runs first and stale rows are processed
+
+    func testRemoteIndexPreparationFailureLeavesQueueRunnableAndFailsClosed() async throws {
+        let entry = seedEntry("waiting.jpg")
+        let runner = makeRunner(identityResolver: PreparationFailingIdentityResolver(inner: makePipeline()))
+
+        let progress = await runner.runUntilDrained()
+
+        XCTAssertEqual(state(of: entry), .discovered)
+        XCTAssertTrue(progress.remoteIndexPreparationFailed)
+        XCTAssertEqual(progress.remoteIndexPreparation?.completed, 10)
+        XCTAssertTrue(uploader.requests.isEmpty)
+    }
 
     func testRunRequeuesStaleActiveRowsAndProcessesThem() async throws {
         let log = BackupEventLog()

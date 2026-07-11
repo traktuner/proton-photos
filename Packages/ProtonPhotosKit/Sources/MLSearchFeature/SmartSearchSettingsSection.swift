@@ -1,3 +1,4 @@
+import Foundation
 import MLSearchCore
 import PhotosCore
 import SwiftUI
@@ -8,6 +9,7 @@ public struct SmartSearchSettingsSection: View {
     @State private var pendingModelSwitch: MLModelCatalogEntry?
     @State private var confirmingDisable = false
     @State private var pickingDeveloperArtifact = false
+    @State private var developerInstallTarget: MLModelID?
 
     public init(controller: MLSmartSearchController) {
         self.controller = controller
@@ -20,15 +22,17 @@ public struct SmartSearchSettingsSection: View {
                 Text(L10n.string("mlsearch.settings_title"))
             }
             .accessibilityIdentifier("smartsearch.toggle")
-            .disabled(!hasSelectableModel)
 
-            if !hasSelectableModel {
+            if controller.snapshot.isEnabled {
+                if hasSelectableModel {
+                    modelPicker
+                    modelDetail
+                }
+                statusRows
+            } else if !hasSelectableModel {
                 Text(L10n.string("mlsearch.status_not_downloadable"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-            } else if controller.snapshot.isEnabled {
-                modelPicker
-                statusRows
             }
         } footer: {
             Text(MLSmartSearchPresentation.privacyStatement)
@@ -57,7 +61,12 @@ public struct SmartSearchSettingsSection: View {
         ) {
             Button(L10n.string("mlsearch.switch_confirm_action")) {
                 if let target = pendingModelSwitch {
-                    controller.select(target.id)
+                    if target.releaseTrack == .developerOnly, !target.isDownloadable {
+                        developerInstallTarget = target.id
+                        pickingDeveloperArtifact = true
+                    } else {
+                        controller.select(target.id)
+                    }
                 }
                 pendingModelSwitch = nil
             }
@@ -70,9 +79,10 @@ public struct SmartSearchSettingsSection: View {
             allowedContentTypes: [.folder]
         ) { result in
             // The controller keeps the security scope open until installation completes.
-            if case .success(let url) = result, let selected = controller.snapshot.selectedModelID {
-                controller.installDeveloperModel(from: url, for: selected)
+            if case .success(let url) = result, let target = developerInstallTarget {
+                controller.installDeveloperModel(from: url, for: target)
             }
+            developerInstallTarget = nil
         }
     }
 
@@ -102,8 +112,9 @@ public struct SmartSearchSettingsSection: View {
                 }
             )
         ) {
+            Text(L10n.string("mlsearch.model_picker_placeholder")).tag(Optional<MLModelID>.none)
             ForEach(snapshot.availableModels) { model in
-                Text(model.displayName).tag(Optional(model.id))
+                Text(modelPickerLabel(model)).tag(Optional(model.id))
             }
         }
         .disabled(controller.presentation.isBusy)
@@ -113,6 +124,31 @@ public struct SmartSearchSettingsSection: View {
             Text(MLSmartSearchPresentation.developerModelNote)
                 .font(.footnote)
                 .foregroundStyle(.orange)
+        }
+    }
+
+    @ViewBuilder
+    private var modelDetail: some View {
+        if let model = controller.snapshot.availableModels.first(where: {
+            $0.id == controller.snapshot.selectedModelID
+        }) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text(L10n.string(dynamicKey: model.localizedMetadata.summaryKey))
+                    .fixedSize(horizontal: false, vertical: true)
+                LabeledContent(L10n.string("mlsearch.model_strengths_label")) {
+                    Text(L10n.string(dynamicKey: model.localizedMetadata.strengthsKey))
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                LabeledContent(L10n.string("mlsearch.model_limitations_label")) {
+                    Text(L10n.string(dynamicKey: model.localizedMetadata.limitationsKey))
+                        .multilineTextAlignment(.trailing)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .font(.footnote)
         }
     }
 
@@ -163,18 +199,13 @@ public struct SmartSearchSettingsSection: View {
                 Label(L10n.string("action.retry"), systemImage: "arrow.clockwise")
             }
         }
-        if showsDeveloperInstall {
-            Button {
-                pickingDeveloperArtifact = true
-            } label: {
-                Label(L10n.string("mlsearch.install_dev_model"), systemImage: "folder.badge.plus")
-            }
-        }
     }
 
     private var statusSymbolName: String {
         switch controller.snapshot.phase {
         case .disabled: "minus.circle"
+        case .loadingCatalog: "arrow.triangle.2.circlepath"
+        case .selectingModel: "cpu"
         case .notInstalled: "arrow.down.circle"
         case .downloading: "arrow.down.circle.fill"
         case .verifying: "checkmark.shield"
@@ -197,10 +228,11 @@ public struct SmartSearchSettingsSection: View {
         }
     }
 
-    private var showsDeveloperInstall: Bool {
-        let snapshot = controller.snapshot
-        guard snapshot.availableModels.contains(where: { $0.releaseTrack == .developerOnly }) else { return false }
-        guard case .notInstalled = snapshot.phase else { return false }
-        return true
+    private func modelPickerLabel(_ model: MLModelCatalogEntry) -> String {
+        guard let bytes = model.downloadPlan?.totalByteCount, bytes > 0 else {
+            return model.displayName
+        }
+        let size = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        return "\(model.displayName) · \(size)"
     }
 }

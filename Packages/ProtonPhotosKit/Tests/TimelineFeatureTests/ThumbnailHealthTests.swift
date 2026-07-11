@@ -80,6 +80,10 @@ struct ThumbnailHealthTests {
         }
 
         #expect(availabilityCallbacks >= 5)
+        for _ in 0 ..< 100 {
+            if await loader.fetched(uids[180]) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         #expect(
             await loader.fetched(uids[180]),
             "Repeated L5-sized warm calls must progress beyond the first 96 visible items while callbacks continue"

@@ -4,14 +4,17 @@ import MLSearchCore
 public enum MLArtifactTransportError: Error, Equatable {
     case httpStatus(Int)
     case notHTTPS
+    case invalidContentRange
+    case rangeUnsupported
+    case responseTooLarge
 }
 
-/// URLSession byte transport for model artifact downloads.
+/// Resumable HTTPS transport for immutable model artifacts.
 ///
-/// Streams straight to the installer-owned destination file, reports byte progress, enforces
-/// HTTPS, and rejects non-200 responses. Integrity is not this layer's job — the installer
-/// verifies size and SHA-256 before anything becomes loadable.
+/// Transfers bounded ranges into an installer-owned partial file. A suspended app resumes at
+/// the exact byte boundary without retaining a model-sized `Data` value in memory.
 public struct URLSessionMLModelArtifactTransport: MLModelArtifactTransport {
+    private static let chunkByteCount: Int64 = 8 << 20
     private let session: URLSession
 
     public init(session: URLSession = .shared) {
@@ -26,51 +29,90 @@ public struct URLSessionMLModelArtifactTransport: MLModelArtifactTransport {
     ) async throws {
         guard url.scheme?.lowercased() == "https" else { throw MLArtifactTransportError.notHTTPS }
 
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 60
-
-        let (bytes, response) = try await session.bytes(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-        guard http.statusCode == 200 else {
-            throw MLArtifactTransportError.httpStatus(http.statusCode)
-        }
-        let expectedTotal = http.expectedContentLength > 0 ? http.expectedContentLength : expectedByteCount
-
         let fm = FileManager.default
-        try? fm.removeItem(at: destination)
-        fm.createFile(atPath: destination.path, contents: nil)
-        applyLocalFileProtection(to: destination)
-        let handle = try FileHandle(forWritingTo: destination)
-        defer { try? handle.close() }
+        try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var offset = Self.fileSize(at: destination)
+        if offset > expectedByteCount {
+            try? fm.removeItem(at: destination)
+            offset = 0
+        }
+        progress(offset, expectedByteCount)
 
-        var buffer = Data(capacity: 1 << 18)
-        var received: Int64 = 0
-        var lastReported: Int64 = 0
-        for try await byte in bytes {
-            buffer.append(byte)
-            if buffer.count >= 1 << 18 {
-                try handle.write(contentsOf: buffer)
-                received += Int64(buffer.count)
-                buffer.removeAll(keepingCapacity: true)
-                // At most one progress emission per 256 KiB — no UI storms on fast links.
-                if received - lastReported >= 1 << 18 {
-                    lastReported = received
-                    progress(received, expectedTotal > 0 ? expectedTotal : nil)
+        while offset < expectedByteCount {
+            try Task.checkCancellation()
+            let end = min(expectedByteCount - 1, offset + Self.chunkByteCount - 1)
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 120
+            request.setValue("bytes=\(offset)-\(end)", forHTTPHeaderField: "Range")
+            MLModelRequestIdentity.apply(to: &request)
+
+            let (temporaryURL, response) = try await session.download(for: request)
+            guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+
+            switch http.statusCode {
+            case 206:
+                guard Self.contentRangeStart(http.value(forHTTPHeaderField: "Content-Range")) == offset else {
+                    throw MLArtifactTransportError.invalidContentRange
                 }
-                try Task.checkCancellation()
+                let received = Self.fileSize(at: temporaryURL)
+                guard received > 0,
+                      received <= end - offset + 1,
+                      offset + received <= expectedByteCount else {
+                    throw MLArtifactTransportError.responseTooLarge
+                }
+                try Self.append(temporaryURL, to: destination)
+                offset += received
+            case 200 where offset == 0:
+                let received = Self.fileSize(at: temporaryURL)
+                guard received <= expectedByteCount else { throw MLArtifactTransportError.responseTooLarge }
+                try? fm.removeItem(at: destination)
+                try fm.moveItem(at: temporaryURL, to: destination)
+                applyLocalFileProtection(to: destination)
+                offset = received
+            case 200:
+                // Do not keep both a partial and a full fallback response. Discard the partial;
+                // the next retry starts cleanly against a server without Range support.
+                try? fm.removeItem(at: destination)
+                throw MLArtifactTransportError.rangeUnsupported
+            default:
+                throw MLArtifactTransportError.httpStatus(http.statusCode)
             }
+            applyLocalFileProtection(to: destination)
+            progress(offset, expectedByteCount)
         }
-        if !buffer.isEmpty {
-            try handle.write(contentsOf: buffer)
-            received += Int64(buffer.count)
-        }
-        progress(received, expectedTotal > 0 ? expectedTotal : nil)
     }
 
-    /// Model artifacts are not secrets, but they should not be readable before first unlock
-    /// on devices that support file protection classes.
+    private static func append(_ source: URL, to destination: URL) throws {
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: destination.path) {
+            fm.createFile(atPath: destination.path, contents: nil)
+        }
+        let input = try FileHandle(forReadingFrom: source)
+        let output = try FileHandle(forWritingTo: destination)
+        defer {
+            try? input.close()
+            try? output.close()
+        }
+        try output.seekToEnd()
+        while let data = try input.read(upToCount: 1 << 20), !data.isEmpty {
+            try output.write(contentsOf: data)
+        }
+    }
+
+    private static func fileSize(at url: URL) -> Int64 {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return 0 }
+        return (attributes[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    private static func contentRangeStart(_ value: String?) -> Int64? {
+        guard let value, value.hasPrefix("bytes "),
+              let range = value.dropFirst(6).split(separator: "/").first,
+              let start = range.split(separator: "-").first else { return nil }
+        return Int64(start)
+    }
+
+    /// Model weights are public, but user-selected downloads should remain unavailable before
+    /// first unlock on devices that support file protection classes.
     private func applyLocalFileProtection(to url: URL) {
         #if os(iOS)
         try? FileManager.default.setAttributes(

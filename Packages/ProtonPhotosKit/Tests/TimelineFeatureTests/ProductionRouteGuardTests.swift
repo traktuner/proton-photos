@@ -283,13 +283,15 @@ struct ProductionRouteGuardTests {
         #expect(frost.contains("blendingMode = .withinWindow"), "frost must sample the Metal grid inside the window")
         #expect(frost.contains("state = .followsWindowActiveState"), "active/inactive toolbar vividness must remain system-driven")
         #expect(mainView.contains(".smartSearchToolbar("), "search must use the shared native toolbar policy")
-        #expect(mainView.contains("snapshot.isEnabled == true"), "macOS search must follow the Settings toggle")
+        #expect(mainView.contains("snapshot.isSearchAvailable == true"),
+                "macOS search must appear only after the enabled index can answer queries")
         let mobileTimeline = try String(
             contentsOf: Self.repoRoot.appendingPathComponent("iOSApp/MobileTimelineScreen.swift"),
             encoding: .utf8
         )
         #expect(mobileTimeline.contains(".smartSearchToolbar("), "iOS and iPadOS must share the same search policy")
-        #expect(mobileTimeline.contains("snapshot.isEnabled == true"), "mobile search must follow the Settings toggle")
+        #expect(mobileTimeline.contains("snapshot.isSearchAvailable == true"),
+                "mobile search must appear only after the enabled index can answer queries")
         let smartSearchToolbar = try String(
             contentsOf: Self.repoRoot.appendingPathComponent(
                 "Packages/ProtonPhotosKit/Sources/MLSearchFeature/SmartSearchToolbar.swift"
@@ -401,7 +403,11 @@ struct ProductionRouteGuardTests {
         // The generation must be bumped SYNCHRONOUSLY, BEFORE the async `select(...)` load - this is the race fix
         // (the new data token must never arrive before the generation is pending). Pin the ordering inside the
         // route-change handler.
-        let onChangeBody = try Self.body(of: mainText, from: ".onChange(of: selection)", to: ".onChange(of: timelineModel.allItems.count)")
+        let onChangeBody = try Self.body(
+            of: mainText,
+            from: ".onChange(of: selection)",
+            to: ".onChange(of: timelineModel.wholeLibraryRevision)"
+        )
         #expect(onChangeBody.contains("routeScrollPositions[oldValue]"))
         #expect(onChangeBody.contains("routeInitialScrollAnchor = routeScrollPositions[newValue]"))
         let genBump = onChangeBody.range(of: "routeScrollGeneration += 1")

@@ -35,6 +35,10 @@ public struct BackupSyncProgress: Sendable, Equatable {
     /// True while the throttle policy holds the running pass at zero concurrency
     /// (e.g. critical thermal pressure) - "paused", not "working".
     public var isPausedByPolicy = false
+    /// Remote duplicate-index preparation runs before item work so a large encrypted metadata
+    /// refresh is visible and resumable instead of looking like a frozen backup counter.
+    public var remoteIndexPreparation: UploadRemoteIndexPreparationProgress?
+    public var remoteIndexPreparationFailed = false
 
     public init() {}
 

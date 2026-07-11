@@ -106,9 +106,6 @@ import Testing
             .appendingPathComponent("weights.bin")
         #expect(try Data(contentsOf: installedFile) == payload)
         #expect(installer.installedRecord(for: testEntry, revision: "rev1") != nil)
-        // Temp download is cleaned up after promotion.
-        #expect(!FileManager.default.fileExists(atPath: layout.downloadFileURL(sha256: sha256(payload)).path))
-
         // Second install: already installed, no new download.
         _ = try await installer.install(testEntry) { _ in }
         #expect(transport.downloadCount(url) == 1)
@@ -231,6 +228,56 @@ import Testing
         let record = try await installer.install(testEntry) { _ in }
         #expect(record.revision == "rev1")
         #expect(transport.downloadCount(url) == 2)
+    }
+
+    @Test func interruptedDownloadResumesFromStagingWithoutASecondModelCopy() async throws {
+        final class ResumingTransport: MLModelArtifactTransport, @unchecked Sendable {
+            let payload: Data
+            private(set) var starts: [Int] = []
+
+            init(payload: Data) { self.payload = payload }
+
+            func download(
+                from url: URL,
+                to destination: URL,
+                expectedByteCount: Int64,
+                progress: @escaping @Sendable (Int64, Int64?) -> Void
+            ) async throws {
+                let existing = (try? Data(contentsOf: destination)) ?? Data()
+                starts.append(existing.count)
+                let split = payload.count / 2
+                if existing.isEmpty {
+                    try payload.prefix(split).write(to: destination)
+                    progress(Int64(split), expectedByteCount)
+                    throw URLError(.networkConnectionLost)
+                }
+                var resumed = existing
+                resumed.append(payload.dropFirst(existing.count))
+                try resumed.write(to: destination)
+                progress(Int64(resumed.count), expectedByteCount)
+            }
+        }
+
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = MLModelInstallLayout(rootDirectory: root)
+        let payload = Data(repeating: 0xA5, count: 4 << 20)
+        let url = URL(string: "https://example.test/resume.bin")!
+        let testEntry = entry(id: "model-resume", plan: plan(files: [("Model.mlmodelc/weights.bin", payload, url)]))
+        let transport = ResumingTransport(payload: payload)
+        let installer = MLModelInstaller(layout: layout, transport: transport)
+
+        await #expect(throws: Error.self) {
+            _ = try await installer.install(testEntry) { _ in }
+        }
+        let partial = layout.stagingDirectory(for: testEntry.id, revision: "rev1")
+            .appendingPathComponent("Model.mlmodelc/weights.bin.partial")
+        #expect(FileManager.default.fileExists(atPath: partial.path))
+        #expect((try Data(contentsOf: partial)).count == payload.count / 2)
+
+        let record = try await installer.install(testEntry) { _ in }
+        #expect(record.installedByteCount == Int64(payload.count))
+        #expect(transport.starts == [0, payload.count / 2])
     }
 
     @Test func concurrentInstallsShareOneDownload() async throws {

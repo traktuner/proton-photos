@@ -50,6 +50,10 @@ public struct BackupStatus: Sendable, Equatable {
     public var currentItemName: String?
     /// Honest progress; `nil` = indeterminate (unknown total or nothing measurable).
     public var fractionCompleted: Double?
+    public var remoteIndexCompleted: Int?
+    public var remoteIndexTotal: Int?
+    public var isPreparingRemoteIndex = false
+    public var remoteIndexPreparationFailed = false
 
     public init() {}
 
@@ -74,6 +78,12 @@ public struct BackupStatus: Sendable, Equatable {
         sourceMissing = progress.sourceMissing
         waitingRetry = progress.blocked
         currentItemName = progress.currentItemName
+        if let preparation = progress.remoteIndexPreparation, preparation.phase != .ready {
+            isPreparingRemoteIndex = true
+            remoteIndexCompleted = preparation.completed
+            remoteIndexTotal = preparation.total
+        }
+        remoteIndexPreparationFailed = progress.remoteIndexPreparationFailed
         // An explicit user pause wins over everything: show "Pausiert", not "checking"/"waiting".
         if isUserPaused {
             phase = .paused
@@ -92,7 +102,9 @@ public struct BackupStatus: Sendable, Equatable {
         totalConsidered = progress.total
         fractionCompleted = progress.total > 0 ? progress.fraction : nil
 
-        if progress.isRunning {
+        if progress.remoteIndexPreparationFailed {
+            phase = .needsAttention
+        } else if progress.isRunning {
             // `waiting` lumps not-yet-examined `discovered` rows with confirmed `queuedForUpload`
             // ones; the unexamined part is `waiting - uploadQueued`. During a first pass over an
             // already-backed-up library almost everything is being CHECKED (and turns out already
@@ -181,6 +193,12 @@ public struct BackupStatus: Sendable, Equatable {
         case .idle, .scanning, .paused:
             return nil
         case .checking:
+            if isPreparingRemoteIndex {
+                if let completed = remoteIndexCompleted, let total = remoteIndexTotal, total > 0 {
+                    return L10n.string("backup.detail_preparing_index \(completed) \(total)")
+                }
+                return L10n.string("backup.detail_preparing_index_indeterminate")
+            }
             guard let total = totalConsidered, total > 0 else { return currentItemName }
             return L10n.string("backup.detail_checked \(checked) \(total)")
         case .uploading:
@@ -192,6 +210,9 @@ public struct BackupStatus: Sendable, Equatable {
             guard alreadyBackedUp > 0 else { return nil }
             return L10n.string("backup.detail_already_backed_up \(alreadyBackedUp)")
         case .needsAttention:
+            if remoteIndexPreparationFailed {
+                return L10n.string("backup.detail_preparing_index_failed")
+            }
             return L10n.string("backup.detail_attention \(needsAttentionCount)")
         }
     }

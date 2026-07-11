@@ -32,6 +32,28 @@
         "de": { "stringUnit": { "state": "translated", "value": "%lld von %lld geprüft" } }
       }
     },
+    "backup.detail_preparing_index %lld %lld": {
+      "extractionState": "manual",
+      "comment": "Progress while the encrypted remote duplicate index is prepared before item checks.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Preparing backup index: %lld of %lld" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Sicherungsindex wird vorbereitet: %lld von %lld" } }
+      }
+    },
+    "backup.detail_preparing_index_indeterminate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Preparing backup index…" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Sicherungsindex wird vorbereitet…" } }
+      }
+    },
+    "backup.detail_preparing_index_failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The backup index could not be prepared. Try again later." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Der Sicherungsindex konnte nicht vorbereitet werden. Versuche es später erneut." } }
+      }
+    },
     "backup.detail_waiting %lld": {
       "extractionState": "manual",
       "comment": "Waiting-state detail: outstanding items that continue on the next run.",
@@ -373,14 +395,6 @@
         "de": { "stringUnit": { "state": "translated", "value": "Wechseln" } }
       }
     },
-    "mlsearch.install_dev_model": {
-      "extractionState": "manual",
-      "comment": "Developer-only button that installs a local model artifact.",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Install local model folder" } },
-        "de": { "stringUnit": { "state": "translated", "value": "Lokalen Modellordner installieren" } }
-      }
-    },
     "mlsearch.status_disabled": {
       "extractionState": "manual",
       "comment": "Smart Search status: feature is off.",
@@ -563,6 +577,150 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "For development only. This model may not ship in the app." } },
         "de": { "stringUnit": { "state": "translated", "value": "Nur für die Entwicklung. Dieses Modell darf nicht in der App ausgeliefert werden." } }
+      }
+    },
+    "mlsearch.status_loading_catalog": {
+      "extractionState": "manual",
+      "comment": "Smart Search status while the signed model catalog is refreshed.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Loading available models" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Verfügbare Modelle werden geladen" } }
+      }
+    },
+    "mlsearch.status_select_model": {
+      "extractionState": "manual",
+      "comment": "Smart Search status when the signed catalog is ready and no model is selected.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose a search model" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Suchmodell auswählen" } }
+      }
+    },
+    "mlsearch.model_picker_placeholder": {
+      "extractionState": "manual",
+      "comment": "Placeholder in the Smart Search model picker.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose model" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modell auswählen" } }
+      }
+    },
+    "mlsearch.status_failed_catalog": {
+      "extractionState": "manual",
+      "comment": "Smart Search error when neither the remote nor cached signed catalog is available.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Models could not be loaded" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Modelle konnten nicht geladen werden" } }
+      }
+    },
+    "mlsearch.model_strengths_label": {
+      "extractionState": "manual",
+      "comment": "Label for a model's strengths.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Strengths" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Stärken" } }
+      }
+    },
+    "mlsearch.model_limitations_label": {
+      "extractionState": "manual",
+      "comment": "Label for a model's limitations.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Limitations" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Schwächen" } }
+      }
+    },
+    "mlsearch.model_tinyclip_summary": {
+      "extractionState": "manual",
+      "comment": "Short TinyCLIP model description.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "A compact visual search model optimized for low storage and fast indexing." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Ein kompaktes Bildsuchmodell für wenig Speicherbedarf und schnelle Indexierung." } }
+      }
+    },
+    "mlsearch.model_tinyclip_strengths": {
+      "extractionState": "manual",
+      "comment": "TinyCLIP strengths.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Fast, efficient and good for common English concepts" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Schnell, effizient und gut bei häufigen englischen Begriffen" } }
+      }
+    },
+    "mlsearch.model_tinyclip_limitations": {
+      "extractionState": "manual",
+      "comment": "TinyCLIP limitations.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Less accurate for German and nuanced searches" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Weniger genau bei deutschen und komplexen Suchbegriffen" } }
+      }
+    },
+    "mlsearch.model_siglip2_summary": {
+      "extractionState": "manual",
+      "comment": "Short SigLIP 2 model description.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "A larger multilingual model for more accurate and detailed visual search." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Ein größeres mehrsprachiges Modell für genauere und detailliertere Bildsuche." } }
+      }
+    },
+    "mlsearch.model_siglip2_strengths": {
+      "extractionState": "manual",
+      "comment": "SigLIP 2 strengths.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Best choice for German, international and nuanced searches" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Beste Wahl für deutsche, internationale und komplexe Suchbegriffe" } }
+      }
+    },
+    "mlsearch.model_siglip2_limitations": {
+      "extractionState": "manual",
+      "comment": "SigLIP 2 limitations.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Uses more storage and takes longer to index" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Benötigt mehr Speicher und mehr Zeit für die Indexierung" } }
+      }
+    },
+    "mlsearch.model_mobileclip_summary": {
+      "extractionState": "manual",
+      "comment": "Short MobileCLIP developer model description.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Apple's efficient mobile research model for local development tests." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Apples effizientes mobiles Forschungsmodell für lokale Entwicklungstests." } }
+      }
+    },
+    "mlsearch.model_mobileclip_strengths": {
+      "extractionState": "manual",
+      "comment": "MobileCLIP strengths.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Fast mobile inference" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Schnelle mobile Inferenz" } }
+      }
+    },
+    "mlsearch.model_mobileclip_limitations": {
+      "extractionState": "manual",
+      "comment": "MobileCLIP limitations.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Research license; cannot be distributed with the app" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Forschungslizenz; darf nicht mit der App verteilt werden" } }
+      }
+    },
+    "mlsearch.model_generic_summary": {
+      "extractionState": "manual",
+      "comment": "Fallback model description.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "An on-device model for visual search." } },
+        "de": { "stringUnit": { "state": "translated", "value": "Ein lokales Modell für die Bildsuche." } }
+      }
+    },
+    "mlsearch.model_generic_strengths": {
+      "extractionState": "manual",
+      "comment": "Fallback model strengths.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Private on-device search" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Private Suche auf dem Gerät" } }
+      }
+    },
+    "mlsearch.model_generic_limitations": {
+      "extractionState": "manual",
+      "comment": "Fallback model limitations.",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Results depend on the selected model" } },
+        "de": { "stringUnit": { "state": "translated", "value": "Ergebnisse hängen vom gewählten Modell ab" } }
       }
     },
     "albumsync.phase_idle": {

@@ -28,6 +28,10 @@ public struct MLSmartSearchPresentation: Sendable, Equatable {
         switch snapshot.phase {
         case .disabled:
             status = L10n.string("mlsearch.status_disabled")
+        case .loadingCatalog:
+            status = L10n.string("mlsearch.status_loading_catalog")
+        case .selectingModel:
+            status = L10n.string("mlsearch.status_select_model")
         case .notInstalled(let downloadable):
             status = downloadable
                 ? L10n.string("mlsearch.status_not_installed")
@@ -77,6 +81,7 @@ public struct MLSmartSearchPresentation: Sendable, Equatable {
             status = L10n.string("mlsearch.status_deleting")
         case .failed(let failure):
             switch failure.kind {
+            case .catalog: status = L10n.string("mlsearch.status_failed_catalog")
             case .download: status = L10n.string("mlsearch.status_failed_download")
             case .verification: status = L10n.string("mlsearch.status_failed_verification")
             case .installation: status = L10n.string("mlsearch.status_failed_installation")
@@ -94,7 +99,7 @@ public struct MLSmartSearchPresentation: Sendable, Equatable {
         let selectedModel = snapshot.availableModels.first { $0.id == snapshot.selectedModelID }
         let modelBytes = snapshot.installedModelBytes > 0
             ? snapshot.installedModelBytes
-            : selectedModel?.estimatedInstalledBytes ?? 0
+            : selectedModel?.downloadPlan?.totalByteCount ?? 0
         self.modelSizeText = modelBytes > 0
             ? ByteCountFormatter.string(fromByteCount: modelBytes, countStyle: .file)
             : nil

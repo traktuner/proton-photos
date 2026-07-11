@@ -1,4 +1,5 @@
 import Foundation
+import CoreML
 import MediaFeedCore
 import MLSearchCore
 import PhotosCore
@@ -12,6 +13,23 @@ public enum AppleSmartSearchBootstrap {
     /// Directory name of the Smart Search root inside an account's data directory. Everything
     /// Smart Search persists lives under it; purge deletes it recursively.
     public static let rootDirectoryName = "SmartSearch"
+
+    /// One native capability probe for every Apple host. Core owns the policy; this adapter only
+    /// translates public Core ML device discovery and physical memory into Core values.
+    public static func featureAvailability(
+        tier: AppProductTier = .free,
+        policy: AppFeaturePolicy = .production
+    ) -> AppFeatureAvailability {
+        let hasNeuralEngine = MLModel.availableComputeDevices.contains { device in
+            if case .neuralEngine = device { return true }
+            return false
+        }
+        let capabilities = AppDeviceCapabilities(
+            available: hasNeuralEngine ? [.neuralEngine] : [],
+            physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory
+        )
+        return policy.availability(of: .smartSearch, device: capabilities, tier: tier)
+    }
 
     public static func makeLifecycle(
         accountDirectory: URL,
@@ -33,8 +51,13 @@ public enum AppleSmartSearchBootstrap {
             key: MLSearchKeyDerivation.localIndexKey(accountUID: accountUID, keyPassword: keyPassword),
             accountUID: accountUID
         )
+        let catalogProvider = SignedRemoteMLModelCatalogProvider(
+            trustedCatalog: catalog,
+            cacheDirectory: layout.rootDirectory
+        )
         return MLSmartSearchLifecycle(dependencies: .init(
             catalog: catalog,
+            catalogProvider: catalogProvider,
             layout: layout,
             stateStore: FileMLSmartSearchStateStore(layout: layout),
             installer: MLModelInstaller(layout: layout, transport: URLSessionMLModelArtifactTransport()),
@@ -42,7 +65,8 @@ public enum AppleSmartSearchBootstrap {
             runtimeProvider: AppleSmartSearchRuntimeProvider(feed: feed, runnerConfiguration: runnerConfiguration),
             assetsProvider: assetsProvider,
             governor: MLClosureIndexingGovernor({ workGate.permitsIndexing() }),
-            allowsDeveloperModels: allowsDeveloperModels
+            allowsDeveloperModels: allowsDeveloperModels,
+            featureAvailability: featureAvailability()
         ))
     }
 }

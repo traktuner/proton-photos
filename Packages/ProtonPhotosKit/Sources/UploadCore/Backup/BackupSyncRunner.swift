@@ -205,6 +205,22 @@ public actor BackupSyncRunner {
         guard queue.isOperational() else { return progress }
         emitProgress()
 
+        do {
+            try await identityResolver.prepareRemoteIndex { [weak self] value in
+                Task { await self?.setRemoteIndexPreparation(value) }
+            }
+            progress.remoteIndexPreparation = .init(phase: .ready)
+            progress.remoteIndexPreparationFailed = false
+            emitProgress()
+        } catch is CancellationError {
+            return progress
+        } catch {
+            progress.remoteIndexPreparationFailed = true
+            progress.isRunning = false
+            emitProgress()
+            return progress
+        }
+
         // Warm the dedup pipeline's remote cache for the first batch so per-item resolves are cache
         // hits (see primeRunnableLookahead). Re-warmed periodically as the queue drains.
         await primeRunnableLookahead()
@@ -296,6 +312,12 @@ public actor BackupSyncRunner {
     }
 
     // MARK: - Scheduling
+
+    private func setRemoteIndexPreparation(_ value: UploadRemoteIndexPreparationProgress) {
+        progress.remoteIndexPreparation = value
+        progress.remoteIndexPreparationFailed = false
+        emitProgress()
+    }
 
     private func nextEligibleWave(limit: Int) -> [UploadBackupSyncQueueEntry] {
         let currentTime = now()

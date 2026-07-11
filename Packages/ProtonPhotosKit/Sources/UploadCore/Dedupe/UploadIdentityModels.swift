@@ -315,6 +315,61 @@ public struct UploadRemoteContentIndexCheckpoint: Sendable, Equatable {
     }
 }
 
+/// Durable cursor for an interrupted full remote-index build. The source list must be sorted
+/// deterministically; a matching event ID and source fingerprint allow the next process to resume.
+public struct UploadRemoteContentIndexBuildCheckpoint: Sendable, Equatable {
+    public var eventID: String
+    public var sourceFingerprint: String
+    public var cursor: Int
+    public var total: Int
+    public var updatedAt: Date
+
+    public init(
+        eventID: String,
+        sourceFingerprint: String,
+        cursor: Int,
+        total: Int,
+        updatedAt: Date
+    ) {
+        self.eventID = eventID
+        self.sourceFingerprint = sourceFingerprint
+        self.cursor = max(0, cursor)
+        self.total = max(0, total)
+        self.updatedAt = updatedAt
+    }
+}
+
+/// Remote source identity staged while a full content index is built.
+public struct UploadRemoteExternalIdentityRecord: Sendable, Equatable {
+    public var remoteLinkID: String
+    public var externalIdentity: UploadBackupExternalIdentity
+
+    public init(remoteLinkID: String, externalIdentity: UploadBackupExternalIdentity) {
+        self.remoteLinkID = remoteLinkID
+        self.externalIdentity = externalIdentity
+    }
+}
+
+/// Shared preparation state surfaced by every backend that maintains a remote duplicate index.
+public struct UploadRemoteIndexPreparationProgress: Sendable, Equatable {
+    public enum Phase: String, Sendable, Equatable {
+        case loading
+        case indexing
+        case applyingChanges
+        case ready
+    }
+
+    public var phase: Phase
+    public var completed: Int
+    public var total: Int?
+
+    public init(phase: Phase, completed: Int = 0, total: Int? = nil) {
+        self.phase = phase
+        self.completed = max(0, completed)
+        self.total = total.map { max(0, $0) }
+    }
+}
+
 /// One active remote compound proved by encrypted source metadata. `remoteLinkIDs` contains the
 /// primary and every related resource that contributed to `resourceCount`; any event touching one
 /// of those links invalidates the whole proof.
@@ -350,6 +405,30 @@ public protocol UploadRemoteContentIndexStore: Sendable {
     /// True when at least one active remote photo could not provide a SHA-1 identity. A content miss
     /// is not safe to interpret as unique while this is true.
     func hasUnresolvedRemoteContent(hashKeyEpoch: String) -> Bool
+    func remoteContentIndexBuildCheckpoint(hashKeyEpoch: String) -> UploadRemoteContentIndexBuildCheckpoint?
+    func beginRemoteContentIndexBuild(
+        hashKeyEpoch: String,
+        eventID: String,
+        sourceFingerprint: String,
+        total: Int,
+        updatedAt: Date
+    ) -> UploadRemoteContentIndexBuildCheckpoint?
+    @discardableResult
+    func appendRemoteContentIndexBuild(
+        records: [UploadRemoteContentIndexRecord],
+        unresolvedRemoteLinkIDs: [String],
+        externalIdentities: [UploadRemoteExternalIdentityRecord],
+        hashKeyEpoch: String,
+        nextCursor: Int,
+        updatedAt: Date
+    ) -> Bool
+    func stagedRemoteExternalIdentities(hashKeyEpoch: String) -> [String: UploadBackupExternalIdentity]
+    @discardableResult
+    func finishRemoteContentIndexBuild(
+        remoteAssetRecords: [UploadRemoteAssetIndexRecord],
+        hashKeyEpoch: String,
+        checkpoint: UploadRemoteContentIndexCheckpoint
+    ) -> Bool
     @discardableResult
     func replaceRemoteContentIndex(
         _ records: [UploadRemoteContentIndexRecord],
@@ -412,6 +491,11 @@ public protocol UploadDuplicateChecking: Sendable {
     /// Optional stronger lookup: an active remote photo with the same content hash, independent
     /// of filename/name hash. Backends that cannot provide a remote content index return nil.
     func findDuplicate(contentHash: String) async throws -> RemotePhotoDuplicate?
+    /// Brings the persistent remote identity index current before a queue starts resolving items.
+    /// Backends without such an index use the default no-op implementation.
+    func prepareRemoteIndex(
+        progress: @escaping @Sendable (UploadRemoteIndexPreparationProgress) -> Void
+    ) async throws
     /// Exact active-remote proofs for source identities stored in Proton's encrypted metadata.
     /// Missing entries are unknown, never negative proof.
     func findRemoteAssetProofs(
@@ -438,6 +522,11 @@ public extension UploadDuplicateChecking {
         return hashes
     }
     func findDuplicate(contentHash: String) async throws -> RemotePhotoDuplicate? { nil }
+    func prepareRemoteIndex(
+        progress: @escaping @Sendable (UploadRemoteIndexPreparationProgress) -> Void
+    ) async throws {
+        progress(.init(phase: .ready))
+    }
     func findRemoteAssetProofs(
         for identities: [UploadBackupExternalIdentity]
     ) async throws -> [UploadBackupExternalIdentity: UploadRemoteAssetIndexRecord] { [:] }
@@ -472,6 +561,9 @@ public protocol UploadIdentityResolving: Sendable {
     func remoteAssetProofs(
         for identities: [UploadBackupExternalIdentity]
     ) async throws -> [UploadBackupExternalIdentity: UploadRemoteAssetIndexRecord]
+    func prepareRemoteIndex(
+        progress: @escaping @Sendable (UploadRemoteIndexPreparationProgress) -> Void
+    ) async throws
     /// Batch-prefetch duplicate states for a fresh enqueue batch (Proton queries name hashes in
     /// chunks of 150). Best-effort: failures surface later through per-item `resolve`.
     func prime(_ descriptors: [UploadResourceDescriptor]) async
@@ -495,6 +587,11 @@ public extension UploadIdentityResolving {
     func remoteAssetProofs(
         for identities: [UploadBackupExternalIdentity]
     ) async throws -> [UploadBackupExternalIdentity: UploadRemoteAssetIndexRecord] { [:] }
+    func prepareRemoteIndex(
+        progress: @escaping @Sendable (UploadRemoteIndexPreparationProgress) -> Void
+    ) async throws {
+        progress(.init(phase: .ready))
+    }
     func prime(_ descriptors: [UploadResourceDescriptor]) async {}
     func invalidateCachedRemoteState() async {}
     func uploadDidFail(_ descriptor: UploadResourceDescriptor) async {}

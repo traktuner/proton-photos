@@ -60,6 +60,7 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
     private var material: Material?
     private var materialTask: Task<Material, any Error>?
     private var remoteContentIndexTask: Task<Void, any Error>?
+    private var remoteIndexProgressHandlers: [UUID: @Sendable (UploadRemoteIndexPreparationProgress) -> Void] = [:]
     private var remoteContentIndexGeneration = 0
     private var lastRemoteContentRefreshAt: Date?
     private static let remoteContentIndexLifetime: TimeInterval = 15
@@ -134,6 +135,21 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
             linkState: .active,
             linkID: record.remoteLinkID
         )
+    }
+
+    func prepareRemoteIndex(
+        progress: @escaping @Sendable (UploadRemoteIndexPreparationProgress) -> Void
+    ) async throws {
+        let token = UUID()
+        remoteIndexProgressHandlers[token] = progress
+        progress(.init(phase: .loading))
+        defer { remoteIndexProgressHandlers[token] = nil }
+        let material = try await resolveMaterial()
+        if let checkpoint = contentIndexStore.remoteContentIndexBuildCheckpoint(hashKeyEpoch: material.epoch) {
+            progress(.init(phase: .indexing, completed: checkpoint.cursor, total: checkpoint.total))
+        }
+        try await refreshRemoteContentIndex(material: material)
+        progress(.init(phase: .ready))
     }
 
     func findRemoteAssetProofs(
@@ -222,6 +238,9 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
         let crypto = self.crypto
         let store = self.contentIndexStore
         let generation = remoteContentIndexGeneration
+        let report: @Sendable (UploadRemoteIndexPreparationProgress) -> Void = { [weak self] value in
+            Task { await self?.emitRemoteIndexProgress(value) }
+        }
         let task = Task {
             if let checkpoint = store.remoteContentIndexCheckpoint(hashKeyEpoch: material.epoch),
                store.hasRemoteAssetIndexCheckpoint(hashKeyEpoch: material.epoch) {
@@ -230,14 +249,16 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
                     material: material,
                     session: session,
                     crypto: crypto,
-                    store: store
+                    store: store,
+                    progress: report
                 )
             } else {
                 try await Self.rebuildRemoteContentIndex(
                     material: material,
                     session: session,
                     crypto: crypto,
-                    store: store
+                    store: store,
+                    progress: report
                 )
             }
         }
@@ -253,51 +274,86 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
         }
     }
 
+    private func emitRemoteIndexProgress(_ value: UploadRemoteIndexPreparationProgress) {
+        for handler in remoteIndexProgressHandlers.values { handler(value) }
+    }
+
     private static func rebuildRemoteContentIndex(
         material: Material,
         session: DriveSession,
         crypto: DriveCrypto,
-        store: any UploadRemoteContentIndexStore
+        store: any UploadRemoteContentIndexStore,
+        progress: @escaping @Sendable (UploadRemoteIndexPreparationProgress) -> Void
     ) async throws {
+        progress(.init(phase: .loading))
         let eventID = try await session.latestVolumeEventID(volumeID: material.context.volumeID)
         let photos = try await session.fetchPhotosList(volumeID: material.context.volumeID)
         let ids = Array(Set(photos.flatMap { photo in
             [photo.linkID] + photo.relatedPhotos.map(\.linkID)
-        }))
-        var rows = RemoteContentIndexRows()
-        for start in stride(from: 0, to: ids.count, by: remoteMetadataWindow) {
+        })).sorted()
+        var sourceHasher = SHA256()
+        for id in ids {
+            sourceHasher.update(data: Data(id.utf8))
+            sourceHasher.update(data: Data([0]))
+        }
+        let sourceFingerprint = sourceHasher.finalize().map { String(format: "%02x", $0) }.joined()
+        guard let build = store.beginRemoteContentIndexBuild(
+            hashKeyEpoch: material.epoch,
+            eventID: eventID,
+            sourceFingerprint: sourceFingerprint,
+            total: ids.count,
+            updatedAt: Date()
+        ) else {
+            throw UploadError.backend("Remote duplicate index checkpoint could not be saved")
+        }
+        progress(.init(phase: .indexing, completed: build.cursor, total: ids.count))
+        for start in stride(from: build.cursor, to: ids.count, by: remoteMetadataWindow) {
             try Task.checkCancellation()
-            let window = Array(ids[start ..< min(start + remoteMetadataWindow, ids.count)])
+            let end = min(start + remoteMetadataWindow, ids.count)
+            let window = Array(ids[start ..< end])
             let links = try await fetchLinks(
                 ids: window,
                 shareID: material.context.shareID,
                 session: session
             )
-            rows.merge(try makeIndexRows(
+            let rows = try makeIndexRows(
                 links: links,
                 expectedActiveFileIDs: Set(window),
                 material: material,
                 crypto: crypto
-            ))
+            )
+            let external = rows.externalIdentitiesByLinkID.map {
+                UploadRemoteExternalIdentityRecord(remoteLinkID: $0.key, externalIdentity: $0.value)
+            }
+            guard store.appendRemoteContentIndexBuild(
+                records: rows.records,
+                unresolvedRemoteLinkIDs: rows.unresolvedLinkIDs,
+                externalIdentities: external,
+                hashKeyEpoch: material.epoch,
+                nextCursor: end,
+                updatedAt: Date()
+            ) else {
+                throw UploadError.backend("Remote duplicate index checkpoint could not be saved")
+            }
+            progress(.init(phase: .indexing, completed: end, total: ids.count))
         }
-        rows.remoteAssetRecords = RemotePhotoAssetProofBuilder.records(
+        progress(.init(phase: .applyingChanges, completed: ids.count, total: ids.count))
+        let externalIdentities = store.stagedRemoteExternalIdentities(hashKeyEpoch: material.epoch)
+        let remoteAssetRecords = RemotePhotoAssetProofBuilder.records(
             photos: photos,
-            externalIdentitiesByLinkID: rows.externalIdentitiesByLinkID,
+            externalIdentitiesByLinkID: externalIdentities,
             hashKeyEpoch: material.epoch
         )
         let checkpoint = UploadRemoteContentIndexCheckpoint(eventID: eventID, refreshedAt: Date())
-        guard store.replaceRemoteContentIndex(
-            rows.records,
-            remoteAssetRecords: rows.remoteAssetRecords,
-            unresolvedRemoteLinkIDs: rows.unresolvedLinkIDs,
+        guard store.finishRemoteContentIndexBuild(
+            remoteAssetRecords: remoteAssetRecords,
             hashKeyEpoch: material.epoch,
             checkpoint: checkpoint
         ) else {
             throw UploadError.backend("Remote duplicate index could not be saved")
         }
         DebugLog.log(
-            "[Dedupe] remote content index rebuilt records=\(rows.records.count) "
-                + "unresolved=\(rows.unresolvedLinkIDs.count)"
+            "[Dedupe] remote content index rebuilt links=\(ids.count)"
         )
     }
 
@@ -306,8 +362,10 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
         material: Material,
         session: DriveSession,
         crypto: DriveCrypto,
-        store: any UploadRemoteContentIndexStore
+        store: any UploadRemoteContentIndexStore,
+        progress: @escaping @Sendable (UploadRemoteIndexPreparationProgress) -> Void = { _ in }
     ) async throws {
+        progress(.init(phase: .applyingChanges))
         var eventID = checkpoint.eventID
         while true {
             try Task.checkCancellation()
@@ -320,7 +378,8 @@ actor ProtonUploadDedupeService: UploadDuplicateChecking {
                     material: material,
                     session: session,
                     crypto: crypto,
-                    store: store
+                    store: store,
+                    progress: progress
                 )
                 return
             }

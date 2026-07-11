@@ -144,7 +144,13 @@ final class ProjectHygieneTests: XCTestCase {
         let verifyScript = repoRoot.appendingPathComponent("scripts/verify-ios-app-shell.sh")
         XCTAssertTrue(FileManager.default.fileExists(atPath: verifyScript.path), "iOS app shell build gate script is required")
         let rebuild = (try? String(contentsOf: repoRoot.appendingPathComponent("scripts/rebuild.sh"), encoding: .utf8)) ?? ""
-        XCTAssertTrue(rebuild.contains("verify-ios-app-shell.sh"), "rebuild.sh must run the iOS app shell gate")
+        XCTAssertTrue(rebuild.contains("-scheme \"$MAC_SCHEME\""), "rebuild.sh must build the macOS app")
+        XCTAssertTrue(rebuild.contains("-scheme \"$IOS_SCHEME\""), "rebuild.sh must build the iOS app")
+        XCTAssertTrue(
+            rebuild.contains("devicectl list devices"),
+            "rebuild.sh must detect an available iOS device before installing"
+        )
+        XCTAssertFalse(rebuild.contains("swift test"), "rebuild.sh is a build/install command, not a test gate")
 
         let mobileShell = mobileAppSourceFiles()
             .compactMap { try? String(contentsOf: $0, encoding: .utf8) }

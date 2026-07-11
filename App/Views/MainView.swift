@@ -179,7 +179,7 @@ struct MainView: View {
                 .navigationTitle(viewerModel == nil ? title : "")
                 .smartSearchToolbar(
                     text: $searchText,
-                    isEnabled: model.smartSearch?.snapshot.isEnabled == true,
+                    isEnabled: model.smartSearch?.snapshot.isSearchAvailable == true,
                     placement: .toolbar,
                     prompt: Text("search.prompt \(title)")
                 )
